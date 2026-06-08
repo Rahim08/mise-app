@@ -1,5 +1,7 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
+
+let Chart: any = null
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -47,6 +49,10 @@ export default function AnalyticsApp() {
   const [isDark, setIsDark] = useState(false)
 
   useEffect(() => {
+    import('chart.js').then(m => {
+      Chart = m.Chart
+      m.Chart.register(...m.registerables)
+    })
     const dark = localStorage.getItem('so_ana_dark') === '1'
     setIsDark(dark)
     supabase.auth.getUser().then(async ({ data }) => {
