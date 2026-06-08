@@ -81,7 +81,7 @@ export default function AnalyticsApp() {
     const [shiftsRes, prevShiftsRes, settingsRes, empsRes, cardsRes, absRes] = await Promise.all([
       supabase.from('shifts').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd).order('date'),
       supabase.from('shifts').select('*').eq('restaurant_id', rid).gte('date', prevMonthStart).lte('date', prevMonthEnd).order('date'),
-      supabase.from('restaurant_settings').select('currency,gemini_api_key').eq('restaurant_id', rid).single(),
+      supabase.from('restaurant_settings').select('currency,gemini_api_key').eq('restaurant_id', rid).maybeSingle(),
       supabase.from('employees').select('id,name,salary,deduct_per_absence').eq('restaurant_id', rid).eq('is_active', true).order('name'),
       supabase.from('monthly_card_amounts').select('employee_id,card_amount').eq('restaurant_id', rid).eq('month', fmtDate(date).slice(0,7)),
       supabase.from('shift_absences').select('employee_id,date').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd)
