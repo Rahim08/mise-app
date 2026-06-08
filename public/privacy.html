@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Конфиденциальность — Mise</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;background:#fff;color:#1d1d1f;-webkit-font-smoothing:antialiased;}
+:root{--blue:#0071e3;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);}
+.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
+.nav-back{font-size:.82rem;color:var(--blue);text-decoration:none;}
+.nav-back::before{content:'‹ ';}
+.page{max-width:720px;margin:0 auto;padding:120px 24px 80px;}
+.page-tag{font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--blue);margin-bottom:16px;}
+.page-title{font-size:clamp(2rem,4vw,3rem);font-weight:700;letter-spacing:-.03em;margin-bottom:12px;}
+.page-date{font-size:.85rem;color:var(--gray);margin-bottom:48px;}
+h2{font-size:1.2rem;font-weight:600;margin:36px 0 12px;}
+p{font-size:.92rem;color:var(--gray);line-height:1.8;margin-bottom:14px;}
+ul{margin:12px 0 14px 20px;}
+li{font-size:.92rem;color:var(--gray);line-height:1.8;margin-bottom:6px;}
+.divider{height:0.5px;background:var(--border);margin:32px 0;}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="nav-back">Mise</a>
+</nav>
+<div class="page">
+  <p class="page-tag">Правовое</p>
+  <h1 class="page-title">Политика конфиденциальности</h1>
+  <p class="page-date">Последнее обновление: 8 июня 2025</p>
+
+  <h2>1. Какие данные мы собираем</h2>
+  <p>При использовании Mise мы собираем следующие данные:</p>
+  <ul>
+    <li>Email адрес и имя при регистрации</li>
+    <li>Данные о вашем ресторане (название, сотрудники)</li>
+    <li>Финансовые данные которые вы вводите в приложения (смены, транзакции, склад)</li>
+    <li>Технические данные (тип устройства, браузер, IP адрес)</li>
+  </ul>
+
+  <h2>2. Как мы используем данные</h2>
+  <p>Ваши данные используются исключительно для предоставления услуг Mise:</p>
+  <ul>
+    <li>Обеспечение работы приложений SO Manager, SO Analytics, SO Tobacco</li>
+    <li>Отправка уведомлений связанных с подпиской и оплатой</li>
+    <li>Техническая поддержка</li>
+    <li>Улучшение продукта (в анонимизированном виде)</li>
+  </ul>
+  <p>Мы никогда не продаём ваши данные третьим лицам.</p>
+
+  <h2>3. Хранение данных</h2>
+  <p>Все данные хранятся на серверах Supabase в дата-центре AWS в Ирландии (Европейский Союз). Данные зашифрованы при хранении и передаче. Каждый ресторан имеет доступ только к своим данным — это обеспечивается на уровне базы данных.</p>
+
+  <h2>4. Платёжные данные</h2>
+  <p>Все платежи обрабатываются через Stripe. Мы не храним данные вашей банковской карты. Stripe соответствует стандарту безопасности PCI DSS уровня 1.</p>
+
+  <h2>5. Ваши права (GDPR)</h2>
+  <p>Если вы находитесь в Европейском Союзе, вы имеете право:</p>
+  <ul>
+    <li>Получить копию своих данных</li>
+    <li>Исправить неточные данные</li>
+    <li>Удалить свои данные</li>
+    <li>Ограничить обработку данных</li>
+    <li>Перенести данные в другой сервис</li>
+  </ul>
+  <p>Для реализации прав напишите на hello@mise.app</p>
+
+  <h2>6. Cookies</h2>
+  <p>Мы используем только необходимые cookies для работы приложения (авторизация, сессии). Мы не используем рекламные или аналитические cookies третьих сторон.</p>
+
+  <h2>7. Удаление аккаунта</h2>
+  <p>Вы можете удалить аккаунт в любой момент из личного кабинета или написав на hello@mise.app. Все ваши данные будут удалены в течение 30 дней.</p>
+
+  <h2>8. Контакты</h2>
+  <p>По вопросам конфиденциальности: <a href="mailto:privacy@mise.app" style="color:#0071e3;">privacy@mise.app</a></p>
+</div>
+<script>
+window.addEventListener('scroll', () => {
+  document.querySelector('.nav').style.background = window.scrollY > 10 ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.92)';
+});
+</script>
+</body>
+</html>

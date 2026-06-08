@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SO Analytics — Mise</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;background:#fff;color:#1d1d1f;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+:root{--green:#30d158;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);}
+.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
+.nav-back{font-size:.82rem;color:var(--green);text-decoration:none;display:flex;align-items:center;gap:4px;}
+.nav-back::before{content:'‹';font-size:1.2rem;}
+.nav-cta{background:var(--green);color:#fff;border:none;padding:8px 20px;border-radius:980px;font-family:inherit;font-size:.78rem;font-weight:500;cursor:pointer;text-decoration:none;}
+.hero{min-height:90vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:100px 24px 80px;background:linear-gradient(180deg,#f0faf3 0%,#fff 100%);position:relative;overflow:hidden;}
+.hero-blob{position:absolute;top:0;left:50%;transform:translateX(-50%);width:800px;height:500px;background:radial-gradient(ellipse,rgba(48,209,88,0.08) 0%,transparent 70%);pointer-events:none;}
+.hero-tag{display:inline-flex;align-items:center;gap:8px;background:rgba(48,209,88,0.08);border:0.5px solid rgba(48,209,88,0.2);border-radius:980px;padding:6px 16px;font-size:.75rem;font-weight:600;color:var(--green);margin-bottom:24px;opacity:0;animation:fadeUp .7s .1s ease forwards;}
+.hero-title{font-size:clamp(2.8rem,7vw,6.5rem);font-weight:700;letter-spacing:-.04em;line-height:1.04;max-width:800px;opacity:0;animation:fadeUp .7s .2s ease forwards;}
+.hero-sub{margin-top:24px;font-size:1.1rem;color:var(--gray);max-width:520px;line-height:1.7;opacity:0;animation:fadeUp .7s .35s ease forwards;}
+.hero-btns{display:flex;gap:14px;margin-top:44px;justify-content:center;flex-wrap:wrap;opacity:0;animation:fadeUp .7s .5s ease forwards;}
+.btn-primary{background:var(--green);color:#fff;border:none;padding:14px 32px;border-radius:980px;font-family:inherit;font-size:.95rem;font-weight:500;cursor:pointer;transition:opacity .2s;}
+.btn-primary:hover{opacity:.9;}
+.btn-ghost{background:transparent;color:var(--green);border:0.5px solid rgba(48,209,88,.3);padding:14px 32px;border-radius:980px;font-family:inherit;font-size:.95rem;cursor:pointer;}
+.hero-phone{margin-top:64px;opacity:0;animation:fadeUp .8s .65s ease forwards;}
+.phone{width:240px;height:480px;background:#1d1d1f;border-radius:40px;padding:10px;box-shadow:0 50px 120px rgba(0,0,0,0.2),0 0 0 1px rgba(255,255,255,0.08) inset;position:relative;margin:0 auto;}
+.phone-screen{width:100%;height:100%;background:#f2f2f7;border-radius:31px;overflow:hidden;}
+.phone-notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:80px;height:24px;background:#1d1d1f;border-radius:0 0 14px 14px;z-index:10;}
+.screen{background:#f2f2f7;width:100%;height:100%;padding:30px 0 0;overflow:hidden;}
+.s-header{background:rgba(242,242,247,.97);padding:8px 12px;border-bottom:0.5px solid rgba(60,60,67,.13);display:flex;justify-content:space-between;align-items:center;}
+.s-ht{font-size:10px;font-weight:700;color:#1c1c1e;}
+.s-pill{font-size:7px;background:rgba(52,199,89,.1);color:#34c759;border-radius:10px;padding:3px 7px;font-weight:600;}
+.s-body{padding:9px;}
+.s-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px;}
+.s-grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:7px;}
+.s-stat{background:#fff;border-radius:9px;padding:7px 9px;box-shadow:0 1px 4px rgba(0,0,0,.07);}
+.s-sl{font-size:6.5px;color:#6d6d72;font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;}
+.s-sv{font-size:12px;font-weight:700;letter-spacing:-.3px;}
+.s-ss{font-size:6.5px;color:#aeaeb2;margin-top:2px;}
+.s-chart{background:#fff;border-radius:9px;padding:9px;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:7px;}
+.s-cl{font-size:6.5px;color:#6d6d72;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px;}
+.bars{display:flex;align-items:flex-end;gap:3px;height:44px;}
+.bar{flex:1;border-radius:3px 3px 0 0;background:#34c759;}
+.features-section{padding:100px 24px;background:#fff;max-width:1100px;margin:0 auto;}
+.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:56px;}
+.feature-card{background:var(--light);border-radius:20px;padding:32px 28px;transition:transform .3s;}
+.feature-card:hover{transform:translateY(-4px);}
+.feat-icon{font-size:2rem;margin-bottom:20px;}
+.feat-title{font-size:1.05rem;font-weight:600;margin-bottom:10px;}
+.feat-desc{font-size:.88rem;color:var(--gray);line-height:1.65;}
+.detail-section{display:grid;grid-template-columns:1fr 1fr;gap:0;min-height:520px;align-items:center;max-width:1200px;margin:0 auto;padding:80px 48px;}
+.detail-section.flip{direction:rtl;}
+.detail-section.flip>*{direction:ltr;}
+.ds-text{display:flex;flex-direction:column;justify-content:center;padding-right:60px;}
+.detail-section.flip .ds-text{padding-right:0;padding-left:60px;}
+.ds-num{font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--green);margin-bottom:12px;}
+.ds-title{font-size:clamp(1.8rem,3vw,2.8rem);font-weight:700;letter-spacing:-.03em;line-height:1.1;margin-bottom:16px;}
+.ds-desc{font-size:.95rem;color:var(--gray);line-height:1.75;}
+.ds-list{margin-top:24px;display:flex;flex-direction:column;gap:10px;}
+.ds-item{display:flex;align-items:flex-start;gap:10px;font-size:.85rem;color:var(--gray);}
+.ds-dot{width:18px;height:18px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:.55rem;color:#fff;flex-shrink:0;margin-top:1px;}
+.ds-visual{background:var(--light);border-radius:24px;display:flex;align-items:center;justify-content:center;padding:40px;min-height:380px;}
+.mock-card{background:#fff;border-radius:20px;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,.1);width:100%;max-width:320px;}
+.mc-title{font-size:.9rem;font-weight:600;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;}
+.mc-badge{font-size:.68rem;background:#e8f8ef;color:#30d158;padding:3px 10px;border-radius:980px;font-weight:600;}
+.mc-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--border);}
+.mc-row:last-child{border-bottom:none;}
+.mc-label{font-size:.8rem;color:var(--gray);}
+.mc-val{font-size:.88rem;font-weight:600;}
+.mc-val.green{color:#30d158;}.mc-val.red{color:#ff3b30;}.mc-val.blue{color:#0071e3;}.mc-val.orange{color:#ff9500;}.mc-val.purple{color:#bf5af2;}
+.mc-bars{display:flex;align-items:flex-end;gap:4px;height:56px;margin-top:16px;}
+.mc-bar{flex:1;border-radius:3px 3px 0 0;background:var(--green);}
+.cta-section{background:#1d1d1f;color:#fff;text-align:center;padding:100px 24px;position:relative;overflow:hidden;}
+.cta-section::before{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:600px;height:300px;background:radial-gradient(ellipse,rgba(48,209,88,.2) 0%,transparent 65%);pointer-events:none;}
+.cta-section h2{font-size:clamp(2.5rem,5vw,4.5rem);font-weight:700;letter-spacing:-.04em;position:relative;z-index:1;}
+.cta-section p{font-size:1rem;color:rgba(255,255,255,.6);margin:16px auto 36px;max-width:440px;position:relative;z-index:1;}
+.section-label{font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--green);margin-bottom:16px;display:block;}
+.section-title{font-size:clamp(2rem,4vw,3.2rem);font-weight:700;letter-spacing:-.03em;line-height:1.07;margin-bottom:16px;}
+.section-sub{font-size:1rem;color:var(--gray);line-height:1.7;max-width:520px;}
+.divider{height:0.5px;background:linear-gradient(90deg,transparent,var(--border) 20%,var(--border) 80%,transparent);}
+.bg-light{background:var(--light);}
+@keyframes fadeUp{from{opacity:0;transform:translateY(28px);}to{opacity:1;transform:translateY(0);}}
+@keyframes float{0%,100%{transform:translateY(0);}50%{transform:translateY(-10px);}}
+.float{animation:float 5s ease-in-out infinite;}
+.reveal{opacity:0;transform:translateY(32px);transition:opacity .8s cubic-bezier(.16,1,.3,1),transform .8s cubic-bezier(.16,1,.3,1);}
+.reveal.in{opacity:1;transform:translateY(0);}
+.reveal.d1{transition-delay:.05s;}.reveal.d2{transition-delay:.12s;}.reveal.d3{transition-delay:.2s;}
+@media(max-width:860px){
+  .detail-section{grid-template-columns:1fr;padding:60px 24px;}
+  .detail-section.flip{direction:ltr;}
+  .ds-text{padding:0!important;}
+  .ds-visual{order:-1;min-height:280px;}
+  .features-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="nav-back">Mise</a>
+  <a href="/auth/register" class="nav-cta">Начать бесплатно</a>
+</nav>
+<section class="hero">
+  <div class="hero-blob"></div>
+  <div class="hero-tag">📊 SO Analytics</div>
+  <h1 class="hero-title">Вся картина бизнеса в одном экране.</h1>
+  <p class="hero-sub">Финансы по дням, неделям и месяцам. Зарплаты, инкассации, динамика выручки — всё для владельца ресторана.</p>
+  <div class="hero-btns">
+    <button class="btn-primary" onclick="window.location.href='/auth/register'">Начать бесплатно</button>
+    <button class="btn-ghost" onclick="document.getElementById('features').scrollIntoView({behavior:'smooth'})">Посмотреть функции</button>
+  </div>
+  <div class="hero-phone">
+    <div class="float">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-screen">
+          <div class="screen">
+            <div class="s-header">
+              <div class="s-ht">SO Analytics</div>
+              <div class="s-pill">Июнь 2025</div>
+            </div>
+            <div class="s-body">
+              <div class="s-grid">
+                <div class="s-stat"><div class="s-sl">Выручка</div><div class="s-sv" style="color:#34c759;">€38 420</div><div class="s-ss">▲ +14.2%</div></div>
+                <div class="s-stat"><div class="s-sl">Расходы</div><div class="s-sv" style="color:#ff3b30;">€8 340</div><div class="s-ss">из €10 000</div></div>
+              </div>
+              <div class="s-grid3">
+                <div class="s-stat"><div class="s-sl">ФОТ</div><div class="s-sv" style="color:#007aff;font-size:10px;">€6 200</div></div>
+                <div class="s-stat"><div class="s-sl">Нал</div><div class="s-sv" style="color:#ff9500;font-size:10px;">€4 100</div></div>
+                <div class="s-stat"><div class="s-sl">Карта</div><div class="s-sv" style="color:#af52de;font-size:10px;">€2 100</div></div>
+              </div>
+              <div class="s-chart">
+                <div class="s-cl">Выручка по дням</div>
+                <div class="bars">
+                  <div class="bar" style="height:55%;opacity:.2;"></div>
+                  <div class="bar" style="height:72%;opacity:.3;"></div>
+                  <div class="bar" style="height:48%;opacity:.2;"></div>
+                  <div class="bar" style="height:88%;opacity:.4;"></div>
+                  <div class="bar" style="height:65%;opacity:.3;"></div>
+                  <div class="bar" style="height:79%;opacity:.4;"></div>
+                  <div class="bar" style="height:100%;opacity:1;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<div class="divider"></div>
+<section class="features-section" id="features">
+  <span class="section-label reveal">Возможности</span>
+  <h2 class="section-title reveal">Данные которые нужны владельцу.</h2>
+  <p class="section-sub reveal">Вся аналитика ресторана в одном месте — без Excel, без лишних таблиц.</p>
+  <div class="features-grid">
+    <div class="feature-card reveal d1"><div class="feat-icon">📈</div><h3 class="feat-title">Финансовая аналитика</h3><p class="feat-desc">Выручка, расходы и прибыль по дням, неделям и месяцам. Сравнение с предыдущими периодами.</p></div>
+    <div class="feature-card reveal d2"><div class="feat-icon">👥</div><h3 class="feat-title">Зарплатная ведомость</h3><p class="feat-desc">ФОТ, выплаты наличными и на карту, вычеты и прогулы — полная картина по каждому сотруднику.</p></div>
+    <div class="feature-card reveal d3"><div class="feat-icon">🔄</div><h3 class="feat-title">История смен</h3><p class="feat-desc">Статистика по каждой смене: выручка, расходы, менеджер. Ищите лучшие и худшие дни.</p></div>
+    <div class="feature-card reveal d1"><div class="feat-icon">🏦</div><h3 class="feat-title">Инкассации</h3><p class="feat-desc">Динамика инкассаций по месяцам. Баланс и история движения наличных в кассе.</p></div>
+    <div class="feature-card reveal d2"><div class="feat-icon">📅</div><h3 class="feat-title">Выбор периода</h3><p class="feat-desc">Смотрите данные за любой день, месяц или период. Удобный календарь прямо в приложении.</p></div>
+    <div class="feature-card reveal d3"><div class="feat-icon">🌙</div><h3 class="feat-title">Тёмная тема</h3><p class="feat-desc">Автоматическое переключение. Удобно смотреть аналитику в любое время дня и ночи.</p></div>
+  </div>
+</section>
+<div class="divider"></div>
+<div class="bg-light">
+<section class="detail-section">
+  <div class="ds-text reveal">
+    <span class="ds-num">01 — Финансы</span>
+    <h2 class="ds-title">Выручка и расходы по любому периоду.</h2>
+    <p class="ds-desc">Выберите день, неделю или месяц — и сразу видите полную финансовую картину. Сравнение с предыдущим периодом показывает динамику.</p>
+    <div class="ds-list">
+      <div class="ds-item"><div class="ds-dot">✓</div>Выручка по категориям (нал, карта, доставка)</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Расходы по категориям</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Чистая прибыль за период</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>График динамики по дням</div>
+    </div>
+  </div>
+  <div class="ds-visual">
+    <div class="mock-card">
+      <div class="mc-title">Июнь 2025 <span class="mc-badge">▲ +14.2%</span></div>
+      <div class="mc-row"><span class="mc-label">Выручка</span><span class="mc-val green">€38 420</span></div>
+      <div class="mc-row"><span class="mc-label">Расходы</span><span class="mc-val red">€8 340</span></div>
+      <div class="mc-row"><span class="mc-label">Прибыль</span><span class="mc-val blue">€30 080</span></div>
+      <div class="mc-row"><span class="mc-label">Лучший день</span><span class="mc-val green">€1 842</span></div>
+      <div class="mc-bars">
+        <div class="mc-bar" style="height:55%;opacity:.2;"></div>
+        <div class="mc-bar" style="height:72%;opacity:.3;"></div>
+        <div class="mc-bar" style="height:48%;opacity:.2;"></div>
+        <div class="mc-bar" style="height:90%;opacity:.5;"></div>
+        <div class="mc-bar" style="height:65%;opacity:.3;"></div>
+        <div class="mc-bar" style="height:100%;"></div>
+      </div>
+    </div>
+  </div>
+</section>
+</div>
+<section class="detail-section flip">
+  <div class="ds-text reveal">
+    <span class="ds-num">02 — Зарплаты</span>
+    <h2 class="ds-title">Зарплатная ведомость без Excel.</h2>
+    <p class="ds-desc">Полная картина по каждому сотруднику: ФОТ, вычеты за прогулы, выплаты наличными и на карту.</p>
+    <div class="ds-list">
+      <div class="ds-item"><div class="ds-dot">✓</div>Оклад и итоговая сумма к выплате</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Вычеты и прогулы</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Выплата наличными или на карту</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Общий ФОТ за месяц</div>
+    </div>
+  </div>
+  <div class="ds-visual">
+    <div class="mock-card">
+      <div class="mc-title">Зарплаты · Июнь <span class="mc-badge">5 чел</span></div>
+      <div class="mc-row"><span class="mc-label">Александр К.</span><span class="mc-val green">€1 450</span></div>
+      <div class="mc-row"><span class="mc-label">Мария С.</span><span class="mc-val green">€1 200</span></div>
+      <div class="mc-row"><span class="mc-label">Дмитрий Л.</span><span class="mc-val orange">€980</span></div>
+      <div class="mc-row"><span class="mc-label">Анна В.</span><span class="mc-val green">€1 100</span></div>
+      <div class="mc-row"><span class="mc-label">ФОТ итого</span><span class="mc-val blue">€6 200</span></div>
+    </div>
+  </div>
+</section>
+<section class="cta-section">
+  <h2>Попробуйте SO Analytics.</h2>
+  <p>Первые 7 дней бесплатно. Карта не нужна.</p>
+  <button class="btn-primary" onclick="window.location.href='/auth/register'">Начать бесплатно →</button>
+</section>
+<script>
+const io = new IntersectionObserver(e => e.forEach(x => { if(x.isIntersecting){x.target.classList.add('in');io.unobserve(x.target);} }), {threshold:.1,rootMargin:'0px 0px -40px 0px'});
+document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+window.addEventListener('scroll', () => {
+  document.querySelector('.nav').style.background = window.scrollY > 10 ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.92)';
+});
+</script>
+</body>
+</html>

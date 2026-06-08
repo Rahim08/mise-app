@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Контакты — Mise</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;background:#fff;color:#1d1d1f;-webkit-font-smoothing:antialiased;}
+:root{--blue:#0071e3;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);}
+.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
+.nav-back{font-size:.82rem;color:var(--blue);text-decoration:none;}
+.nav-back::before{content:'‹ ';}
+.page{max-width:720px;margin:0 auto;padding:120px 24px 80px;}
+.page-tag{font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--blue);margin-bottom:16px;}
+.page-title{font-size:clamp(2.5rem,5vw,4rem);font-weight:700;letter-spacing:-.04em;line-height:1.05;margin-bottom:24px;}
+.page-sub{font-size:1.05rem;color:var(--gray);line-height:1.75;margin-bottom:48px;}
+.contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:48px;}
+.contact-card{background:var(--light);border-radius:16px;padding:28px;text-decoration:none;color:#1d1d1f;transition:transform .2s;display:block;}
+.contact-card:hover{transform:translateY(-3px);}
+.contact-icon{font-size:1.8rem;margin-bottom:14px;}
+.contact-label{font-size:.75rem;color:var(--gray);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;font-weight:500;}
+.contact-val{font-size:1rem;font-weight:600;color:var(--blue);}
+.contact-desc{font-size:.82rem;color:var(--gray);margin-top:4px;}
+.form-section{background:var(--light);border-radius:20px;padding:40px;margin-top:48px;}
+.form-section h2{font-size:1.4rem;font-weight:700;margin-bottom:8px;}
+.form-section p{font-size:.9rem;color:var(--gray);margin-bottom:28px;}
+.form-group{margin-bottom:18px;}
+label{display:block;font-size:.82rem;font-weight:500;margin-bottom:6px;color:#1d1d1f;}
+input,textarea{width:100%;padding:12px 14px;border:0.5px solid rgba(0,0,0,0.15);border-radius:10px;font-family:inherit;font-size:.9rem;background:#fff;outline:none;transition:border-color .2s;}
+input:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,113,227,.08);}
+textarea{height:120px;resize:vertical;}
+.btn{background:var(--blue);color:#fff;border:none;padding:13px 28px;border-radius:980px;font-family:inherit;font-size:.9rem;font-weight:500;cursor:pointer;width:100%;transition:opacity .2s;}
+.btn:hover{opacity:.9;}
+@media(max-width:600px){.contact-grid{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="nav-back">Mise</a>
+  <a href="/auth/register" style="font-size:.78rem;color:var(--blue);text-decoration:none;">Начать →</a>
+</nav>
+<div class="page">
+  <p class="page-tag">Контакты</p>
+  <h1 class="page-title">Свяжитесь с нами.</h1>
+  <p class="page-sub">Ответим на вопросы о продукте, поможем с настройкой и выслушаем пожелания.</p>
+
+  <div class="contact-grid">
+    <a href="mailto:hello@mise.app" class="contact-card">
+      <div class="contact-icon">✉️</div>
+      <div class="contact-label">Email</div>
+      <div class="contact-val">hello@mise.app</div>
+      <div class="contact-desc">Общие вопросы и поддержка</div>
+    </a>
+    <a href="https://t.me/miseapp" class="contact-card">
+      <div class="contact-icon">💬</div>
+      <div class="contact-label">Telegram</div>
+      <div class="contact-val">@miseapp</div>
+      <div class="contact-desc">Быстрый ответ</div>
+    </a>
+    <a href="mailto:partners@mise.app" class="contact-card">
+      <div class="contact-icon">🤝</div>
+      <div class="contact-label">Партнёрство</div>
+      <div class="contact-val">partners@mise.app</div>
+      <div class="contact-desc">Интеграции и партнёрство</div>
+    </a>
+    <div class="contact-card">
+      <div class="contact-icon">📍</div>
+      <div class="contact-label">Локация</div>
+      <div class="contact-val">Милан, Италия</div>
+      <div class="contact-desc">Работаем по всему миру</div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <h2>Напишите нам</h2>
+    <p>Заполните форму и мы ответим в течение 24 часов.</p>
+    <div class="form-group">
+      <label>Имя</label>
+      <input type="text" placeholder="Ваше имя"/>
+    </div>
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" placeholder="you@example.com"/>
+    </div>
+    <div class="form-group">
+      <label>Сообщение</label>
+      <textarea placeholder="Чем можем помочь?"></textarea>
+    </div>
+    <button class="btn" onclick="alert('Спасибо! Мы ответим в течение 24 часов.')">Отправить сообщение</button>
+  </div>
+</div>
+<script>
+window.addEventListener('scroll', () => {
+  document.querySelector('.nav').style.background = window.scrollY > 10 ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.92)';
+});
+</script>
+</body>
+</html>

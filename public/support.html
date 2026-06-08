@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Поддержка — Mise</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;background:#fff;color:#1d1d1f;-webkit-font-smoothing:antialiased;}
+:root{--blue:#0071e3;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);}
+.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
+.nav-back{font-size:.82rem;color:var(--blue);text-decoration:none;}
+.nav-back::before{content:'‹ ';}
+.page{max-width:720px;margin:0 auto;padding:120px 24px 80px;}
+.page-tag{font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--blue);margin-bottom:16px;}
+.page-title{font-size:clamp(2.5rem,5vw,4rem);font-weight:700;letter-spacing:-.04em;line-height:1.05;margin-bottom:24px;}
+.page-sub{font-size:1.05rem;color:var(--gray);line-height:1.75;margin-bottom:48px;}
+.contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:56px;}
+.contact-card{background:var(--light);border-radius:16px;padding:28px;text-decoration:none;color:#1d1d1f;transition:transform .2s,box-shadow .2s;display:block;}
+.contact-card:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(0,0,0,.08);}
+.contact-icon{font-size:1.8rem;margin-bottom:14px;}
+.contact-label{font-size:.75rem;color:var(--gray);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;font-weight:500;}
+.contact-val{font-size:1rem;font-weight:600;color:var(--blue);}
+.contact-desc{font-size:.82rem;color:var(--gray);margin-top:4px;}
+.section-title{font-size:1.6rem;font-weight:700;letter-spacing:-.02em;margin-bottom:28px;}
+.faq-item{border-bottom:0.5px solid var(--border);padding:0;}
+.faq-btn{width:100%;display:flex;justify-content:space-between;align-items:center;padding:20px 0;background:none;border:none;font-family:inherit;font-size:1rem;font-weight:600;color:#1d1d1f;cursor:pointer;text-align:left;}
+.faq-icon{font-size:1.2rem;color:var(--blue);transition:transform .2s;flex-shrink:0;margin-left:16px;}
+.faq-icon.open{transform:rotate(45deg);}
+.faq-answer{font-size:.9rem;color:var(--gray);line-height:1.7;padding-bottom:20px;display:none;}
+.faq-answer.open{display:block;}
+.divider{height:0.5px;background:var(--border);margin:48px 0;}
+.cta-box{background:#1d1d1f;color:#fff;border-radius:24px;padding:48px;text-align:center;margin-top:60px;}
+.cta-box h2{font-size:1.8rem;font-weight:700;margin-bottom:12px;color:#fff;}
+.cta-box p{color:rgba(255,255,255,.6);margin-bottom:28px;font-size:.95rem;}
+.btn{background:var(--blue);color:#fff;border:none;padding:13px 28px;border-radius:980px;font-family:inherit;font-size:.9rem;font-weight:500;cursor:pointer;text-decoration:none;display:inline-block;}
+@media(max-width:600px){.contact-grid{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="nav-back">Mise</a>
+  <a href="/auth/register" style="font-size:.78rem;color:var(--blue);text-decoration:none;">Начать →</a>
+</nav>
+<div class="page">
+  <p class="page-tag">Поддержка</p>
+  <h1 class="page-title">Мы всегда готовы помочь.</h1>
+  <p class="page-sub">Напишите нам удобным способом — ответим в течение нескольких часов.</p>
+
+  <div class="contact-grid">
+    <a href="mailto:hello@mise.app" class="contact-card">
+      <div class="contact-icon">✉️</div>
+      <div class="contact-label">Email</div>
+      <div class="contact-val">hello@mise.app</div>
+      <div class="contact-desc">Ответ в течение 24 часов</div>
+    </a>
+    <a href="https://t.me/miseapp" class="contact-card">
+      <div class="contact-icon">💬</div>
+      <div class="contact-label">Telegram</div>
+      <div class="contact-val">@miseapp</div>
+      <div class="contact-desc">Быстрый ответ в рабочее время</div>
+    </a>
+  </div>
+
+  <div class="divider"></div>
+  <h2 class="section-title">Часто задаваемые вопросы</h2>
+
+  <div class="faq-item">
+    <button class="faq-btn" onclick="toggleFaq(this)">
+      Как начать пользоваться Mise?
+      <span class="faq-icon">+</span>
+    </button>
+    <div class="faq-answer">Зарегистрируйтесь на сайте, выберите тариф и оплатите подписку. После оплаты вы получите доступ к нужным приложениям. Добавьте сотрудников из личного кабинета — они получат email с инструкцией.</div>
+  </div>
+
+  <div class="faq-item">
+    <button class="faq-btn" onclick="toggleFaq(this)">
+      Работает ли Mise на iPhone?
+      <span class="faq-icon">+</span>
+    </button>
+    <div class="faq-answer">Да. Все приложения Mise работают как PWA — установите их на iPhone через Safari: откройте сайт → нажмите «Поделиться» → «На экран «Домой»». Приложение будет работать как нативное без App Store.</div>
+  </div>
+
+  <div class="faq-item">
+    <button class="faq-btn" onclick="toggleFaq(this)">
+      Можно ли отменить подписку?
+      <span class="faq-icon">+</span>
+    </button>
+    <div class="faq-answer">Да, в любой момент из личного кабинета. Доступ сохраняется до конца оплаченного периода. Никаких штрафов или скрытых платежей.</div>
+  </div>
+
+  <div class="faq-item">
+    <button class="faq-btn" onclick="toggleFaq(this)">
+      Как добавить сотрудников?
+      <span class="faq-icon">+</span>
+    </button>
+    <div class="faq-answer">В личном кабинете перейдите в раздел «Команда» и введите email сотрудника. Он получит письмо с приглашением и сможет создать аккаунт с доступом к нужным приложениям.</div>
+  </div>
+
+  <div class="faq-item">
+    <button class="faq-btn" onclick="toggleFaq(this)">
+      Мои данные в безопасности?
+      <span class="faq-icon">+</span>
+    </button>
+    <div class="faq-answer">Все данные хранятся в зашифрованном виде на серверах Supabase (ирландский дата-центр AWS). Каждый ресторан видит только свои данные — доступ разграничен на уровне базы данных.</div>
+  </div>
+
+  <div class="faq-item">
+    <button class="faq-btn" onclick="toggleFaq(this)">
+      Какие способы оплаты доступны?
+      <span class="faq-icon">+</span>
+    </button>
+    <div class="faq-answer">Apple Pay, Visa, Mastercard. Все платежи обрабатываются через Stripe — один из самых надёжных платёжных провайдеров в мире. Мы не храним данные вашей карты.</div>
+  </div>
+
+  <div class="faq-item">
+    <button class="faq-btn" onclick="toggleFaq(this)">
+      Есть ли бесплатный период?
+      <span class="faq-icon">+</span>
+    </button>
+    <div class="faq-answer">Да — первые 7 дней бесплатно на любом тарифе. Карта не нужна для начала. После окончания пробного периода вы можете выбрать подходящий тариф.</div>
+  </div>
+
+  <div class="cta-box">
+    <h2>Не нашли ответ?</h2>
+    <p>Напишите нам — ответим на любой вопрос.</p>
+    <a href="mailto:hello@mise.app" class="btn">Написать в поддержку</a>
+  </div>
+</div>
+
+<script>
+function toggleFaq(btn) {
+  const answer = btn.nextElementSibling;
+  const icon = btn.querySelector('.faq-icon');
+  const isOpen = answer.classList.contains('open');
+  document.querySelectorAll('.faq-answer').forEach(a => a.classList.remove('open'));
+  document.querySelectorAll('.faq-icon').forEach(i => i.classList.remove('open'));
+  if (!isOpen) { answer.classList.add('open'); icon.classList.add('open'); }
+}
+window.addEventListener('scroll', () => {
+  document.querySelector('.nav').style.background = window.scrollY > 10 ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.92)';
+});
+</script>
+</body>
+</html>

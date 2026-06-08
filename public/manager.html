@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SO Manager — Mise</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;background:#fff;color:#1d1d1f;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+:root{--blue:#0071e3;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);}
+
+/* NAV */
+.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
+.nav-logo{font-size:1.1rem;font-weight:700;letter-spacing:-.02em;color:#1d1d1f;text-decoration:none;}
+.nav-back{font-size:.82rem;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:4px;}
+.nav-back::before{content:'‹';font-size:1.2rem;}
+.nav-cta{background:var(--blue);color:#fff;border:none;padding:8px 20px;border-radius:980px;font-family:inherit;font-size:.78rem;font-weight:500;cursor:pointer;text-decoration:none;}
+
+/* HERO */
+.hero{min-height:90vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:100px 24px 80px;background:linear-gradient(180deg,#f5f5f7 0%,#fff 100%);position:relative;overflow:hidden;}
+.hero-blob{position:absolute;top:0;left:50%;transform:translateX(-50%);width:800px;height:500px;background:radial-gradient(ellipse,rgba(0,113,227,0.08) 0%,transparent 70%);pointer-events:none;}
+.hero-tag{display:inline-flex;align-items:center;gap:8px;background:rgba(0,113,227,0.08);border:0.5px solid rgba(0,113,227,0.2);border-radius:980px;padding:6px 16px;font-size:.75rem;font-weight:600;color:var(--blue);margin-bottom:24px;opacity:0;animation:fadeUp .7s .1s ease forwards;}
+.hero-title{font-size:clamp(2.8rem,7vw,6.5rem);font-weight:700;letter-spacing:-.04em;line-height:1.04;max-width:800px;opacity:0;animation:fadeUp .7s .2s ease forwards;}
+.hero-sub{margin-top:24px;font-size:1.1rem;color:var(--gray);max-width:520px;line-height:1.7;opacity:0;animation:fadeUp .7s .35s ease forwards;}
+.hero-btns{display:flex;gap:14px;margin-top:44px;justify-content:center;flex-wrap:wrap;opacity:0;animation:fadeUp .7s .5s ease forwards;}
+.btn-primary{background:var(--blue);color:#fff;border:none;padding:14px 32px;border-radius:980px;font-family:inherit;font-size:.95rem;font-weight:500;cursor:pointer;transition:opacity .2s,transform .15s;}
+.btn-primary:hover{opacity:.9;transform:scale(1.02);}
+.btn-ghost{background:transparent;color:var(--blue);border:0.5px solid rgba(0,113,227,.3);padding:14px 32px;border-radius:980px;font-family:inherit;font-size:.95rem;cursor:pointer;}
+
+/* PHONE HERO */
+.hero-phone{margin-top:64px;opacity:0;animation:fadeUp .8s .65s ease forwards;}
+.phone{width:240px;height:480px;background:#1d1d1f;border-radius:40px;padding:10px;box-shadow:0 50px 120px rgba(0,0,0,0.2),0 0 0 1px rgba(255,255,255,0.08) inset;position:relative;margin:0 auto;}
+.phone-screen{width:100%;height:100%;background:#f2f2f7;border-radius:31px;overflow:hidden;}
+.phone-notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:80px;height:24px;background:#1d1d1f;border-radius:0 0 14px 14px;z-index:10;}
+
+/* SCREEN */
+.screen{background:#f2f2f7;width:100%;height:100%;padding:30px 0 0;overflow:hidden;}
+.s-header{background:rgba(242,242,247,.97);padding:8px 12px;border-bottom:0.5px solid rgba(60,60,67,.13);display:flex;justify-content:space-between;align-items:center;}
+.s-ht{font-size:10px;font-weight:700;color:#1c1c1e;}
+.s-hd{font-size:8px;color:#6d6d72;}
+.s-badge{font-size:7px;background:#34c759;color:#fff;border-radius:5px;padding:2px 5px;font-weight:600;}
+.s-body{padding:9px;}
+.s-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px;}
+.s-stat{background:#fff;border-radius:9px;padding:7px 9px;box-shadow:0 1px 4px rgba(0,0,0,.07);}
+.s-sl{font-size:6.5px;color:#6d6d72;font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;}
+.s-sv{font-size:13px;font-weight:700;letter-spacing:-.3px;}
+.s-ss{font-size:6.5px;color:#aeaeb2;margin-top:2px;}
+.s-sec{font-size:7px;font-weight:600;color:#6d6d72;text-transform:uppercase;letter-spacing:.4px;margin:7px 0 4px;}
+.s-card{background:#fff;border-radius:9px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.07);}
+.s-row{display:flex;justify-content:space-between;align-items:center;padding:6px 9px;border-bottom:0.5px solid rgba(60,60,67,.07);}
+.s-row:last-child{border-bottom:none;}
+.s-rn{font-size:8px;color:#1c1c1e;}
+.s-rv{font-size:8px;font-weight:600;}
+.cg{color:#34c759;}.cr{color:#ff3b30;}.cb{color:#007aff;}.co{color:#ff9500;}
+.s-btn{margin:7px 0;background:#007aff;border-radius:9px;padding:8px;text-align:center;font-size:8px;font-weight:600;color:#fff;}
+
+/* FEATURES GRID */
+.features-section{padding:100px 24px;background:#fff;max-width:1100px;margin:0 auto;}
+.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:56px;}
+.feature-card{background:var(--light);border-radius:20px;padding:32px 28px;transition:transform .3s,box-shadow .3s;}
+.feature-card:hover{transform:translateY(-4px);box-shadow:0 12px 40px rgba(0,0,0,.08);}
+.feat-icon{font-size:2rem;margin-bottom:20px;}
+.feat-title{font-size:1.05rem;font-weight:600;margin-bottom:10px;letter-spacing:-.01em;}
+.feat-desc{font-size:.88rem;color:var(--gray);line-height:1.65;}
+
+/* DETAIL SECTIONS */
+.detail-section{display:grid;grid-template-columns:1fr 1fr;gap:0;min-height:560px;align-items:center;max-width:1200px;margin:0 auto;padding:80px 48px;}
+.detail-section.flip{direction:rtl;}
+.detail-section.flip>*{direction:ltr;}
+.ds-text{display:flex;flex-direction:column;justify-content:center;padding-right:60px;}
+.detail-section.flip .ds-text{padding-right:0;padding-left:60px;}
+.ds-num{font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--blue);margin-bottom:12px;}
+.ds-title{font-size:clamp(1.8rem,3vw,2.8rem);font-weight:700;letter-spacing:-.03em;line-height:1.1;margin-bottom:16px;}
+.ds-desc{font-size:.95rem;color:var(--gray);line-height:1.75;}
+.ds-list{margin-top:24px;display:flex;flex-direction:column;gap:10px;}
+.ds-item{display:flex;align-items:flex-start;gap:10px;font-size:.85rem;color:var(--gray);}
+.ds-dot{width:18px;height:18px;border-radius:50%;background:var(--blue);display:flex;align-items:center;justify-content:center;font-size:.55rem;color:#fff;flex-shrink:0;margin-top:1px;}
+.ds-visual{background:var(--light);border-radius:24px;display:flex;align-items:center;justify-content:center;padding:40px;min-height:400px;}
+
+/* MOCKUP CARD */
+.mock-card{background:#fff;border-radius:20px;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,.1);width:100%;max-width:320px;}
+.mc-title{font-size:.9rem;font-weight:600;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;}
+.mc-badge{font-size:.68rem;background:#e8f8ef;color:#30d158;padding:3px 10px;border-radius:980px;font-weight:600;}
+.mc-badge.open{background:#e8f3ff;color:#0071e3;}
+.mc-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--border);}
+.mc-row:last-child{border-bottom:none;}
+.mc-label{font-size:.8rem;color:var(--gray);}
+.mc-val{font-size:.88rem;font-weight:600;}
+.mc-val.green{color:#30d158;}.mc-val.red{color:#ff3b30;}.mc-val.blue{color:#0071e3;}.mc-val.orange{color:#ff9500;}
+.mc-bars{display:flex;align-items:flex-end;gap:4px;height:48px;margin-top:16px;}
+.mc-bar{flex:1;border-radius:3px 3px 0 0;background:var(--blue);}
+
+/* CTA SECTION */
+.cta-section{background:#1d1d1f;color:#fff;text-align:center;padding:100px 24px;position:relative;overflow:hidden;}
+.cta-section::before{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:600px;height:300px;background:radial-gradient(ellipse,rgba(0,113,227,.25) 0%,transparent 65%);pointer-events:none;}
+.cta-section h2{font-size:clamp(2.5rem,5vw,4.5rem);font-weight:700;letter-spacing:-.04em;position:relative;z-index:1;}
+.cta-section p{font-size:1rem;color:rgba(255,255,255,.6);margin:16px auto 36px;max-width:440px;position:relative;z-index:1;}
+
+/* SECTION HELPERS */
+.section-label{font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--blue);margin-bottom:16px;display:block;}
+.section-title{font-size:clamp(2rem,4vw,3.2rem);font-weight:700;letter-spacing:-.03em;line-height:1.07;margin-bottom:16px;}
+.section-sub{font-size:1rem;color:var(--gray);line-height:1.7;max-width:520px;}
+.divider{height:0.5px;background:linear-gradient(90deg,transparent,var(--border) 20%,var(--border) 80%,transparent);}
+.bg-light{background:var(--light);}
+
+/* ANIMATIONS */
+@keyframes fadeUp{from{opacity:0;transform:translateY(28px);}to{opacity:1;transform:translateY(0);}}
+@keyframes float{0%,100%{transform:translateY(0);}50%{transform:translateY(-10px);}}
+.float{animation:float 5s ease-in-out infinite;}
+.reveal{opacity:0;transform:translateY(32px);transition:opacity .8s cubic-bezier(.16,1,.3,1),transform .8s cubic-bezier(.16,1,.3,1);}
+.reveal.in{opacity:1;transform:translateY(0);}
+.reveal.d1{transition-delay:.05s;}.reveal.d2{transition-delay:.12s;}.reveal.d3{transition-delay:.2s;}
+
+/* MOBILE */
+@media(max-width:860px){
+  .detail-section{grid-template-columns:1fr;padding:60px 24px;}
+  .detail-section.flip{direction:ltr;}
+  .ds-text{padding:0!important;}
+  .ds-visual{order:-1;min-height:280px;}
+  .features-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <a href="/" class="nav-back">Mise</a>
+  <a href="/auth/register" class="nav-cta">Начать бесплатно</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-blob"></div>
+  <div class="hero-tag">📋 SO Manager</div>
+  <h1 class="hero-title">Каждая смена под полным контролем.</h1>
+  <p class="hero-sub">Открывайте смену, фиксируйте доходы и расходы, контролируйте инкассацию и получайте итоговый отчёт — всё прямо с iPhone.</p>
+  <div class="hero-btns">
+    <button class="btn-primary" onclick="window.location.href='/auth/register'">Начать бесплатно</button>
+    <button class="btn-ghost" onclick="document.getElementById('features').scrollIntoView({behavior:'smooth'})">Посмотреть функции</button>
+  </div>
+  <div class="hero-phone">
+    <div class="float">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-screen">
+          <div class="screen">
+            <div class="s-header">
+              <div><div class="s-ht">SO Manager</div><div class="s-hd">Пн, 8 июня 2025</div></div>
+              <div class="s-badge">● Смена открыта</div>
+            </div>
+            <div class="s-body">
+              <div class="s-grid">
+                <div class="s-stat"><div class="s-sl">Выручка</div><div class="s-sv cg">€2 847</div><div class="s-ss">+12% к вчера</div></div>
+                <div class="s-stat"><div class="s-sl">Расходы</div><div class="s-sv cr">€342</div><div class="s-ss">из €500 лимит</div></div>
+                <div class="s-stat"><div class="s-sl">Прибыль</div><div class="s-sv cb">€2 505</div><div class="s-ss">чистая</div></div>
+                <div class="s-stat"><div class="s-sl">Инкасс.</div><div class="s-sv co">€1 200</div><div class="s-ss">последняя</div></div>
+              </div>
+              <div class="s-sec">Последние операции</div>
+              <div class="s-card">
+                <div class="s-row"><span class="s-rn">Выручка · Наличные</span><span class="s-rv cg">+€480</span></div>
+                <div class="s-row"><span class="s-rn">Расход · Продукты</span><span class="s-rv cr">−€95</span></div>
+                <div class="s-row"><span class="s-rn">Выручка · Карта</span><span class="s-rv cg">+€220</span></div>
+                <div class="s-row"><span class="s-rn">Инкассация</span><span class="s-rv co">€1 200</span></div>
+              </div>
+              <div class="s-btn">+ Добавить операцию</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- FEATURES GRID -->
+<section class="features-section" id="features">
+  <span class="section-label reveal">Возможности</span>
+  <h2 class="section-title reveal">Всё что нужно менеджеру.</h2>
+  <p class="section-sub reveal">SO Manager создан специально для ресторанного менеджера — просто, быстро, без лишнего.</p>
+  <div class="features-grid">
+    <div class="feature-card reveal d1">
+      <div class="feat-icon">🔓</div>
+      <h3 class="feat-title">Открытие смены</h3>
+      <p class="feat-desc">Одним нажатием открываете смену. Система фиксирует время, менеджера и начальный баланс кассы.</p>
+    </div>
+    <div class="feature-card reveal d2">
+      <div class="feat-icon">💰</div>
+      <h3 class="feat-title">Учёт доходов</h3>
+      <p class="feat-desc">Фиксируйте выручку по категориям — наличные, карта, доставка. Каждая операция с комментарием.</p>
+    </div>
+    <div class="feature-card reveal d3">
+      <div class="feat-icon">📉</div>
+      <h3 class="feat-title">Учёт расходов</h3>
+      <p class="feat-desc">Расходы по категориям: продукты, хозтовары, ремонт. Лимиты и предупреждения о превышении.</p>
+    </div>
+    <div class="feature-card reveal d1">
+      <div class="feat-icon">🏦</div>
+      <h3 class="feat-title">Инкассации</h3>
+      <p class="feat-desc">Журнал всех инкассаций с суммами, датами и причинами. Текущий баланс кассы всегда виден.</p>
+    </div>
+    <div class="feature-card reveal d2">
+      <div class="feat-icon">📊</div>
+      <h3 class="feat-title">Итоговый отчёт</h3>
+      <p class="feat-desc">В конце смены — полный отчёт одним нажатием. Выручка, расходы, прибыль, инкассации.</p>
+    </div>
+    <div class="feature-card reveal d3">
+      <div class="feat-icon">🌙</div>
+      <h3 class="feat-title">Тёмная тема</h3>
+      <p class="feat-desc">Автоматическое переключение между светлой и тёмной темой. Удобно в любое время суток.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- DETAIL 1 -->
+<div class="bg-light">
+<section class="detail-section">
+  <div class="ds-text reveal">
+    <span class="ds-num">01 — Смены</span>
+    <h2 class="ds-title">Открыл — работай. Закрыл — готово.</h2>
+    <p class="ds-desc">Начало смены фиксируется одним нажатием. Система автоматически записывает время, имя менеджера и стартовый баланс.</p>
+    <div class="ds-list">
+      <div class="ds-item"><div class="ds-dot">✓</div>Время открытия и закрытия автоматически</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Имя менеджера привязывается к смене</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>История всех смен за любой период</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Статус смены виден в реальном времени</div>
+    </div>
+  </div>
+  <div class="ds-visual">
+    <div class="mock-card">
+      <div class="mc-title">Смена #142 <span class="mc-badge">● Открыта</span></div>
+      <div class="mc-row"><span class="mc-label">Менеджер</span><span class="mc-val">Александр К.</span></div>
+      <div class="mc-row"><span class="mc-label">Открыта</span><span class="mc-val">09:00</span></div>
+      <div class="mc-row"><span class="mc-label">Длительность</span><span class="mc-val blue">6ч 42м</span></div>
+      <div class="mc-row"><span class="mc-label">Операций</span><span class="mc-val">24</span></div>
+      <div class="mc-row"><span class="mc-label">Статус кассы</span><span class="mc-val green">€2 505</span></div>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- DETAIL 2 -->
+<section class="detail-section flip">
+  <div class="ds-text reveal">
+    <span class="ds-num">02 — Операции</span>
+    <h2 class="ds-title">Каждый рубль на своём месте.</h2>
+    <p class="ds-desc">Добавляйте доходы и расходы за секунды. Категории, сумма, комментарий — и операция сохранена в базе данных.</p>
+    <div class="ds-list">
+      <div class="ds-item"><div class="ds-dot">✓</div>Доходы: наличные, карта, доставка, другое</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Расходы: продукты, хозтовары, зарплата, другое</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Комментарий к каждой операции</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Мгновенное обновление баланса</div>
+    </div>
+  </div>
+  <div class="ds-visual">
+    <div class="mock-card">
+      <div class="mc-title">Операции сегодня <span class="mc-badge open">24 шт</span></div>
+      <div class="mc-row"><span class="mc-label">Наличные</span><span class="mc-val green">+€1 420</span></div>
+      <div class="mc-row"><span class="mc-label">Карта</span><span class="mc-val green">+€980</span></div>
+      <div class="mc-row"><span class="mc-label">Доставка</span><span class="mc-val green">+€447</span></div>
+      <div class="mc-row"><span class="mc-label">Продукты</span><span class="mc-val red">−€195</span></div>
+      <div class="mc-row"><span class="mc-label">Хозтовары</span><span class="mc-val red">−€87</span></div>
+      <div class="mc-row"><span class="mc-label">Итого</span><span class="mc-val green">+€2 565</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- DETAIL 3 -->
+<div class="bg-light">
+<section class="detail-section">
+  <div class="ds-text reveal">
+    <span class="ds-num">03 — Инкассации</span>
+    <h2 class="ds-title">Контроль наличных в кассе.</h2>
+    <p class="ds-desc">Каждая инкассация фиксируется с суммой, датой и причиной. Текущий баланс кассы всегда актуален и виден одним взглядом.</p>
+    <div class="ds-list">
+      <div class="ds-item"><div class="ds-dot">✓</div>История всех инкассаций</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Баланс кассы в реальном времени</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Причина каждой инкассации</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Сравнение с предыдущими сменами</div>
+    </div>
+  </div>
+  <div class="ds-visual">
+    <div class="mock-card">
+      <div class="mc-title">Инкассации <span class="mc-badge open">Июнь</span></div>
+      <div class="mc-row"><span class="mc-label">08 июня</span><span class="mc-val orange">€1 200</span></div>
+      <div class="mc-row"><span class="mc-label">07 июня</span><span class="mc-val orange">€980</span></div>
+      <div class="mc-row"><span class="mc-label">06 июня</span><span class="mc-val orange">€1 450</span></div>
+      <div class="mc-row"><span class="mc-label">05 июня</span><span class="mc-val orange">€820</span></div>
+      <div class="mc-row"><span class="mc-label">Итого за месяц</span><span class="mc-val blue">€18 640</span></div>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- CTA -->
+<section class="cta-section">
+  <h2>Попробуйте SO Manager.</h2>
+  <p>Первые 7 дней бесплатно. Карта не нужна.</p>
+  <button class="btn-primary" onclick="window.location.href='/auth/register'">Начать бесплатно →</button>
+</section>
+
+<script>
+const io = new IntersectionObserver(e => e.forEach(x => { if(x.isIntersecting){x.target.classList.add('in');io.unobserve(x.target);} }), {threshold:.1,rootMargin:'0px 0px -40px 0px'});
+document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+window.addEventListener('scroll', () => {
+  document.querySelector('.nav').style.background = window.scrollY > 10 ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.92)';
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>О нас — Mise</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;background:#fff;color:#1d1d1f;-webkit-font-smoothing:antialiased;}
+:root{--blue:#0071e3;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);}
+.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
+.nav-logo{font-size:1.1rem;font-weight:700;color:#1d1d1f;text-decoration:none;}
+.nav-back{font-size:.82rem;color:var(--blue);text-decoration:none;}
+.nav-back::before{content:'‹ ';}
+.page{max-width:720px;margin:0 auto;padding:120px 24px 80px;}
+.page-tag{font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--blue);margin-bottom:16px;}
+.page-title{font-size:clamp(2.5rem,5vw,4rem);font-weight:700;letter-spacing:-.04em;line-height:1.05;margin-bottom:24px;}
+.page-sub{font-size:1.05rem;color:var(--gray);line-height:1.75;margin-bottom:48px;}
+.divider{height:0.5px;background:var(--border);margin:40px 0;}
+h2{font-size:1.4rem;font-weight:600;letter-spacing:-.02em;margin-bottom:14px;}
+h3{font-size:1.05rem;font-weight:600;margin-bottom:10px;}
+p{font-size:.95rem;color:var(--gray);line-height:1.75;margin-bottom:16px;}
+.values-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:32px 0;}
+.value-card{background:var(--light);border-radius:16px;padding:24px;}
+.value-icon{font-size:1.5rem;margin-bottom:12px;}
+.value-title{font-size:.95rem;font-weight:600;margin-bottom:8px;}
+.value-desc{font-size:.85rem;color:var(--gray);line-height:1.6;}
+.contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:32px 0;}
+.contact-card{background:var(--light);border-radius:16px;padding:24px;text-decoration:none;color:#1d1d1f;transition:transform .2s;}
+.contact-card:hover{transform:translateY(-2px);}
+.contact-icon{font-size:1.5rem;margin-bottom:12px;}
+.contact-label{font-size:.75rem;color:var(--gray);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;}
+.contact-val{font-size:.95rem;font-weight:500;color:var(--blue);}
+.faq-item{border-bottom:0.5px solid var(--border);padding:20px 0;}
+.faq-q{font-size:1rem;font-weight:600;margin-bottom:10px;}
+.faq-a{font-size:.9rem;color:var(--gray);line-height:1.7;}
+.cta-box{background:#1d1d1f;color:#fff;border-radius:24px;padding:48px;text-align:center;margin-top:60px;}
+.cta-box h2{font-size:1.8rem;font-weight:700;letter-spacing:-.03em;margin-bottom:12px;color:#fff;}
+.cta-box p{color:rgba(255,255,255,.6);margin-bottom:28px;font-size:.95rem;}
+.btn{background:var(--blue);color:#fff;border:none;padding:13px 28px;border-radius:980px;font-family:inherit;font-size:.9rem;font-weight:500;cursor:pointer;text-decoration:none;display:inline-block;}
+@media(max-width:600px){.values-grid,.contact-grid{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="nav-back">Mise</a>
+  <a href="/auth/register" style="font-size:.78rem;color:var(--blue);text-decoration:none;">Начать →</a>
+</nav>
+<div class="page">
+  <p class="page-tag">О нас</p>
+  <h1 class="page-title">Мы строим будущее ресторанного бизнеса.</h1>
+  <p class="page-sub">Mise — платформа управления рестораном созданная людьми из ресторанного бизнеса. Мы знаем как работает смена изнутри и делаем инструменты которые реально помогают.</p>
+
+  <div class="divider"></div>
+  <h2>Наша миссия</h2>
+  <p>Дать владельцам и менеджерам ресторанов простые и красивые инструменты для управления бизнесом. Без сложных настроек, без лишних функций — только то что нужно каждый день.</p>
+  <p>Мы начинали с одного ресторана и одного приложения. Сегодня Mise — это три продукта для менеджеров, владельцев и кальянных залов, и мы только начинаем.</p>
+
+  <div class="divider"></div>
+  <h2>Наши ценности</h2>
+  <div class="values-grid">
+    <div class="value-card"><div class="value-icon">⚡</div><div class="value-title">Простота</div><div class="value-desc">Каждая функция должна работать интуитивно. Если нужна инструкция — мы делаем что-то не так.</div></div>
+    <div class="value-card"><div class="value-icon">🎯</div><div class="value-title">Точность</div><div class="value-desc">Данные должны быть точными. Мы строим системы которым можно доверять каждый день.</div></div>
+    <div class="value-card"><div class="value-icon">💎</div><div class="value-title">Дизайн</div><div class="value-desc">Красивый продукт — это не роскошь. Хороший дизайн делает работу приятной.</div></div>
+    <div class="value-card"><div class="value-icon">🤝</div><div class="value-title">Поддержка</div><div class="value-desc">Мы всегда рядом. Ответим на вопрос, поможем настроить, выслушаем пожелания.</div></div>
+  </div>
+
+  <div class="divider"></div>
+  <h2>Наши продукты</h2>
+  <p>📋 <strong>SO Manager</strong> — для менеджеров. Открытие смены, учёт операций, инкассации и итоговый отчёт.</p>
+  <p>📊 <strong>SO Analytics</strong> — для владельцев. Финансовая аналитика, зарплаты, статистика по сменам.</p>
+  <p>💨 <strong>SO Tobacco</strong> — для кальянных залов. Склад табака, приход, расход и инвентаризация.</p>
+
+  <div class="cta-box">
+    <h2>Присоединяйтесь к Mise</h2>
+    <p>Первые 7 дней бесплатно. Карта не нужна.</p>
+    <a href="/auth/register" class="btn">Начать бесплатно →</a>
+  </div>
+</div>
+<script>
+window.addEventListener('scroll', () => {
+  document.querySelector('.nav').style.background = window.scrollY > 10 ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.92)';
+});
+</script>
+</body>
+</html>

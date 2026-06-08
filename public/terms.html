@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Условия использования — Mise</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;background:#fff;color:#1d1d1f;-webkit-font-smoothing:antialiased;}
+:root{--blue:#0071e3;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);}
+.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
+.nav-back{font-size:.82rem;color:var(--blue);text-decoration:none;}
+.nav-back::before{content:'‹ ';}
+.page{max-width:720px;margin:0 auto;padding:120px 24px 80px;}
+.page-tag{font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--blue);margin-bottom:16px;}
+.page-title{font-size:clamp(2rem,4vw,3rem);font-weight:700;letter-spacing:-.03em;margin-bottom:12px;}
+.page-date{font-size:.85rem;color:var(--gray);margin-bottom:48px;}
+h2{font-size:1.2rem;font-weight:600;margin:36px 0 12px;}
+p{font-size:.92rem;color:var(--gray);line-height:1.8;margin-bottom:14px;}
+ul{margin:12px 0 14px 20px;}
+li{font-size:.92rem;color:var(--gray);line-height:1.8;margin-bottom:6px;}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="nav-back">Mise</a>
+</nav>
+<div class="page">
+  <p class="page-tag">Правовое</p>
+  <h1 class="page-title">Условия использования</h1>
+  <p class="page-date">Последнее обновление: 8 июня 2025</p>
+
+  <h2>1. Принятие условий</h2>
+  <p>Используя Mise, вы соглашаетесь с настоящими условиями использования. Если вы не согласны с условиями, пожалуйста, не используйте сервис.</p>
+
+  <h2>2. Описание сервиса</h2>
+  <p>Mise — это SaaS платформа для управления ресторанным бизнесом, включающая приложения SO Manager, SO Analytics и SO Tobacco. Сервис предоставляется по модели подписки.</p>
+
+  <h2>3. Подписка и оплата</h2>
+  <ul>
+    <li>Подписка оплачивается ежемесячно или ежегодно</li>
+    <li>Оплата списывается автоматически в дату продления</li>
+    <li>Все цены указаны с НДС (если применимо)</li>
+    <li>При отмене подписки доступ сохраняется до конца оплаченного периода</li>
+    <li>Возврат средств возможен в течение 7 дней с момента оплаты</li>
+  </ul>
+
+  <h2>4. Пробный период</h2>
+  <p>Новые пользователи получают 7 дней бесплатного доступа. Карта не требуется для начала пробного периода. По окончании пробного периода сервис переходит на платный тариф только если вы явно подтвердили оплату.</p>
+
+  <h2>5. Ответственность за данные</h2>
+  <p>Вы несёте ответственность за данные которые вводите в систему. Mise не несёт ответственности за точность финансовых данных введённых пользователями. Рекомендуем регулярно делать резервные копии важных данных.</p>
+
+  <h2>6. Доступность сервиса</h2>
+  <p>Мы стремимся обеспечить доступность сервиса 99.9% времени. Плановые технические работы проводятся с уведомлением за 24 часа. Мы не несём ответственности за убытки вызванные недоступностью сервиса.</p>
+
+  <h2>7. Интеллектуальная собственность</h2>
+  <p>Все права на платформу Mise, включая дизайн, код и торговые марки, принадлежат Mise. Пользователи сохраняют все права на данные которые они вводят в систему.</p>
+
+  <h2>8. Прекращение доступа</h2>
+  <p>Mise оставляет за собой право прекратить доступ к сервису при нарушении условий использования. Вы можете прекратить использование сервиса в любой момент, отменив подписку.</p>
+
+  <h2>9. Изменение условий</h2>
+  <p>Мы можем обновлять условия использования. Об изменениях уведомляем по email за 30 дней. Продолжение использования сервиса означает согласие с новыми условиями.</p>
+
+  <h2>10. Контакты</h2>
+  <p>По вопросам: <a href="mailto:hello@mise.app" style="color:#0071e3;">hello@mise.app</a></p>
+</div>
+<script>
+window.addEventListener('scroll', () => {
+  document.querySelector('.nav').style.background = window.scrollY > 10 ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.92)';
+});
+</script>
+</body>
+</html>

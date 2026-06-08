@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SO Tobacco — Mise</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;background:#fff;color:#1d1d1f;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+:root{--orange:#ff9f0a;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);}
+.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
+.nav-back{font-size:.82rem;color:var(--orange);text-decoration:none;display:flex;align-items:center;gap:4px;}
+.nav-back::before{content:'‹';font-size:1.2rem;}
+.nav-cta{background:var(--orange);color:#fff;border:none;padding:8px 20px;border-radius:980px;font-family:inherit;font-size:.78rem;font-weight:500;cursor:pointer;text-decoration:none;}
+.hero{min-height:90vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:100px 24px 80px;background:linear-gradient(180deg,#fff8ee 0%,#fff 100%);position:relative;overflow:hidden;}
+.hero-blob{position:absolute;top:0;left:50%;transform:translateX(-50%);width:800px;height:500px;background:radial-gradient(ellipse,rgba(255,159,10,0.08) 0%,transparent 70%);pointer-events:none;}
+.hero-tag{display:inline-flex;align-items:center;gap:8px;background:rgba(255,159,10,0.08);border:0.5px solid rgba(255,159,10,0.2);border-radius:980px;padding:6px 16px;font-size:.75rem;font-weight:600;color:var(--orange);margin-bottom:24px;opacity:0;animation:fadeUp .7s .1s ease forwards;}
+.hero-title{font-size:clamp(2.8rem,7vw,6.5rem);font-weight:700;letter-spacing:-.04em;line-height:1.04;max-width:800px;opacity:0;animation:fadeUp .7s .2s ease forwards;}
+.hero-sub{margin-top:24px;font-size:1.1rem;color:var(--gray);max-width:520px;line-height:1.7;opacity:0;animation:fadeUp .7s .35s ease forwards;}
+.hero-btns{display:flex;gap:14px;margin-top:44px;justify-content:center;flex-wrap:wrap;opacity:0;animation:fadeUp .7s .5s ease forwards;}
+.btn-primary{background:var(--orange);color:#fff;border:none;padding:14px 32px;border-radius:980px;font-family:inherit;font-size:.95rem;font-weight:500;cursor:pointer;transition:opacity .2s;}
+.btn-primary:hover{opacity:.9;}
+.btn-ghost{background:transparent;color:var(--orange);border:0.5px solid rgba(255,159,10,.3);padding:14px 32px;border-radius:980px;font-family:inherit;font-size:.95rem;cursor:pointer;}
+.hero-phone{margin-top:64px;opacity:0;animation:fadeUp .8s .65s ease forwards;}
+.phone{width:240px;height:480px;background:#1d1d1f;border-radius:40px;padding:10px;box-shadow:0 50px 120px rgba(0,0,0,0.2);position:relative;margin:0 auto;}
+.phone-screen{width:100%;height:100%;background:linear-gradient(160deg,#E8EEFB 0%,#F2F2F7 60%,#EAF0FC 100%);border-radius:31px;overflow:hidden;}
+.phone-notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:80px;height:24px;background:#1d1d1f;border-radius:0 0 14px 14px;z-index:10;}
+.screen{width:100%;height:100%;padding:30px 0 0;overflow:hidden;}
+.s-header{background:rgba(255,255,255,.9);padding:8px 12px;border-bottom:0.5px solid rgba(60,60,67,.1);display:flex;justify-content:space-between;align-items:center;}
+.s-ht{font-size:10px;font-weight:700;color:#1c1c1e;}
+.s-badge{font-size:6.5px;background:rgba(52,199,89,.12);color:#34c759;border-radius:7px;padding:2px 6px;font-weight:600;}
+.s-body{padding:9px;}
+.s-card{background:#fff;border-radius:11px;padding:9px;box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:7px;}
+.s-item{margin-bottom:7px;}
+.s-item:last-child{margin-bottom:0;}
+.s-top{display:flex;justify-content:space-between;margin-bottom:4px;}
+.s-brand{font-size:7.5px;font-weight:700;color:#1c1c1e;}
+.s-flavor{font-size:6.5px;color:#6d6d72;}
+.s-stock{font-size:7.5px;font-weight:600;}
+.s-bar-bg{height:3px;background:rgba(0,0,0,.08);border-radius:2px;overflow:hidden;}
+.s-bar-f{height:100%;border-radius:2px;}
+.s-cats{display:grid;grid-template-columns:1fr 1fr;gap:5px;}
+.s-cat{background:#fff;border-radius:9px;padding:7px;box-shadow:0 1px 4px rgba(0,0,0,.07);text-align:center;}
+.s-cat-dot{width:7px;height:7px;border-radius:50%;margin:0 auto 3px;}
+.s-cat-l{font-size:6.5px;color:#6d6d72;margin-bottom:2px;}
+.s-cat-v{font-size:10px;font-weight:700;}
+.features-section{padding:100px 24px;background:#fff;max-width:1100px;margin:0 auto;}
+.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:56px;}
+.feature-card{background:var(--light);border-radius:20px;padding:32px 28px;transition:transform .3s;}
+.feature-card:hover{transform:translateY(-4px);}
+.feat-icon{font-size:2rem;margin-bottom:20px;}
+.feat-title{font-size:1.05rem;font-weight:600;margin-bottom:10px;}
+.feat-desc{font-size:.88rem;color:var(--gray);line-height:1.65;}
+.detail-section{display:grid;grid-template-columns:1fr 1fr;gap:0;min-height:520px;align-items:center;max-width:1200px;margin:0 auto;padding:80px 48px;}
+.detail-section.flip{direction:rtl;}
+.detail-section.flip>*{direction:ltr;}
+.ds-text{display:flex;flex-direction:column;justify-content:center;padding-right:60px;}
+.detail-section.flip .ds-text{padding-right:0;padding-left:60px;}
+.ds-num{font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--orange);margin-bottom:12px;}
+.ds-title{font-size:clamp(1.8rem,3vw,2.8rem);font-weight:700;letter-spacing:-.03em;line-height:1.1;margin-bottom:16px;}
+.ds-desc{font-size:.95rem;color:var(--gray);line-height:1.75;}
+.ds-list{margin-top:24px;display:flex;flex-direction:column;gap:10px;}
+.ds-item{display:flex;align-items:flex-start;gap:10px;font-size:.85rem;color:var(--gray);}
+.ds-dot{width:18px;height:18px;border-radius:50%;background:var(--orange);display:flex;align-items:center;justify-content:center;font-size:.55rem;color:#fff;flex-shrink:0;margin-top:1px;}
+.ds-visual{background:var(--light);border-radius:24px;display:flex;align-items:center;justify-content:center;padding:40px;min-height:380px;}
+.mock-card{background:#fff;border-radius:20px;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,.1);width:100%;max-width:320px;}
+.mc-title{font-size:.9rem;font-weight:600;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;}
+.mc-badge{font-size:.68rem;background:#fff8ee;color:var(--orange);padding:3px 10px;border-radius:980px;font-weight:600;}
+.mc-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--border);}
+.mc-row:last-child{border-bottom:none;}
+.mc-label{font-size:.8rem;color:var(--gray);}
+.mc-val{font-size:.88rem;font-weight:600;}
+.mc-val.green{color:#30d158;}.mc-val.red{color:#ff3b30;}.mc-val.blue{color:#0071e3;}.mc-val.orange{color:#ff9500;}
+.mc-bar-item{margin-bottom:10px;}
+.mc-bar-top{display:flex;justify-content:space-between;margin-bottom:5px;font-size:.78rem;}
+.mc-bar-label{color:var(--gray);}
+.mc-bar-val{font-weight:600;}
+.mc-bar-bg{height:5px;background:#f0f0f0;border-radius:3px;overflow:hidden;}
+.mc-bar-f{height:100%;border-radius:3px;}
+.cta-section{background:#1d1d1f;color:#fff;text-align:center;padding:100px 24px;position:relative;overflow:hidden;}
+.cta-section::before{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:600px;height:300px;background:radial-gradient(ellipse,rgba(255,159,10,.2) 0%,transparent 65%);pointer-events:none;}
+.cta-section h2{font-size:clamp(2.5rem,5vw,4.5rem);font-weight:700;letter-spacing:-.04em;position:relative;z-index:1;}
+.cta-section p{font-size:1rem;color:rgba(255,255,255,.6);margin:16px auto 36px;max-width:440px;position:relative;z-index:1;}
+.section-label{font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--orange);margin-bottom:16px;display:block;}
+.section-title{font-size:clamp(2rem,4vw,3.2rem);font-weight:700;letter-spacing:-.03em;line-height:1.07;margin-bottom:16px;}
+.section-sub{font-size:1rem;color:var(--gray);line-height:1.7;max-width:520px;}
+.divider{height:0.5px;background:linear-gradient(90deg,transparent,var(--border) 20%,var(--border) 80%,transparent);}
+.bg-light{background:var(--light);}
+@keyframes fadeUp{from{opacity:0;transform:translateY(28px);}to{opacity:1;transform:translateY(0);}}
+@keyframes float{0%,100%{transform:translateY(0);}50%{transform:translateY(-10px);}}
+.float{animation:float 5s ease-in-out infinite;}
+.reveal{opacity:0;transform:translateY(32px);transition:opacity .8s cubic-bezier(.16,1,.3,1),transform .8s cubic-bezier(.16,1,.3,1);}
+.reveal.in{opacity:1;transform:translateY(0);}
+.reveal.d1{transition-delay:.05s;}.reveal.d2{transition-delay:.12s;}.reveal.d3{transition-delay:.2s;}
+@media(max-width:860px){
+  .detail-section{grid-template-columns:1fr;padding:60px 24px;}
+  .detail-section.flip{direction:ltr;}
+  .ds-text{padding:0!important;}
+  .ds-visual{order:-1;min-height:280px;}
+  .features-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="nav-back">Mise</a>
+  <a href="/auth/register" class="nav-cta">Начать бесплатно</a>
+</nav>
+<section class="hero">
+  <div class="hero-blob"></div>
+  <div class="hero-tag">💨 SO Tobacco</div>
+  <h1 class="hero-title">Склад кальяна под полным контролем.</h1>
+  <p class="hero-sub">Полный учёт табачного склада: приход, расход, остатки по вкусам и брендам, продажи кальянов и инвентаризация в один клик.</p>
+  <div class="hero-btns">
+    <button class="btn-primary" onclick="window.location.href='/auth/register'">Начать бесплатно</button>
+    <button class="btn-ghost" onclick="document.getElementById('features').scrollIntoView({behavior:'smooth'})">Посмотреть функции</button>
+  </div>
+  <div class="hero-phone">
+    <div class="float">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-screen">
+          <div class="screen">
+            <div class="s-header">
+              <div class="s-ht">SO Tobacco</div>
+              <div class="s-badge">● 12 вкусов</div>
+            </div>
+            <div class="s-body">
+              <div class="s-card">
+                <div class="s-item"><div class="s-top"><div><div class="s-brand">Adalya · Love 66</div><div class="s-flavor">Classic</div></div><div class="s-stock" style="color:#34c759;">500г</div></div><div class="s-bar-bg"><div class="s-bar-f" style="width:83%;background:#34c759;"></div></div></div>
+                <div class="s-item"><div class="s-top"><div><div class="s-brand">Darkside · Twix Core</div><div class="s-flavor">Cigar</div></div><div class="s-stock" style="color:#ff9500;">250г</div></div><div class="s-bar-bg"><div class="s-bar-f" style="width:42%;background:#ff9500;"></div></div></div>
+                <div class="s-item"><div class="s-top"><div><div class="s-brand">Al Fakher · Two Apples</div><div class="s-flavor">Exclusive</div></div><div class="s-stock" style="color:#34c759;">600г</div></div><div class="s-bar-bg"><div class="s-bar-f" style="width:100%;background:#007aff;"></div></div></div>
+                <div class="s-item" style="margin-bottom:0;"><div class="s-top"><div><div class="s-brand">WTO · Blue</div><div class="s-flavor">Cigar Leaf</div></div><div class="s-stock" style="color:#ff3b30;">80г</div></div><div class="s-bar-bg"><div class="s-bar-f" style="width:13%;background:#ff3b30;"></div></div></div>
+              </div>
+              <div class="s-cats">
+                <div class="s-cat"><div class="s-cat-dot" style="background:#34c759;"></div><div class="s-cat-l">Classic</div><div class="s-cat-v" style="color:#34c759;">850г</div></div>
+                <div class="s-cat"><div class="s-cat-dot" style="background:#007aff;"></div><div class="s-cat-l">Exclusive</div><div class="s-cat-v" style="color:#007aff;">950г</div></div>
+                <div class="s-cat"><div class="s-cat-dot" style="background:#ff9500;"></div><div class="s-cat-l">Cigar</div><div class="s-cat-v" style="color:#ff9500;">250г</div></div>
+                <div class="s-cat"><div class="s-cat-dot" style="background:#ff3b30;"></div><div class="s-cat-l">Cigar Leaf</div><div class="s-cat-v" style="color:#ff3b30;">180г</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<div class="divider"></div>
+<section class="features-section" id="features">
+  <span class="section-label reveal">Возможности</span>
+  <h2 class="section-title reveal">Всё для кальянного склада.</h2>
+  <p class="section-sub reveal">SO Tobacco — единственное приложение созданное специально для кальянных залов.</p>
+  <div class="features-grid">
+    <div class="feature-card reveal d1"><div class="feat-icon">📦</div><h3 class="feat-title">Склад по вкусам</h3><p class="feat-desc">Остатки по каждому бренду и вкусу. Цветные индикаторы показывают что заканчивается.</p></div>
+    <div class="feature-card reveal d2"><div class="feat-icon">📥</div><h3 class="feat-title">Приход товара</h3><p class="feat-desc">Фиксируйте каждый приход табака с брендом, вкусом, количеством и датой.</p></div>
+    <div class="feature-card reveal d3"><div class="feat-icon">📤</div><h3 class="feat-title">Расход и списание</h3><p class="feat-desc">Учёт расхода при продаже кальяна. Списание испорченного товара с причиной.</p></div>
+    <div class="feature-card reveal d1"><div class="feat-icon">🏷️</div><h3 class="feat-title">Категории</h3><p class="feat-desc">Classic, Exclusive, Cigar, Cigar Leaf — автоматическое распределение по категориям и ценам.</p></div>
+    <div class="feature-card reveal d2"><div class="feat-icon">📋</div><h3 class="feat-title">Инвентаризация</h3><p class="feat-desc">Полная инвентаризация склада в один клик. История всех инвентаризаций доступна в любое время.</p></div>
+    <div class="feature-card reveal d3"><div class="feat-icon">⚠️</div><h3 class="feat-title">Уведомления</h3><p class="feat-desc">Автоматическое предупреждение когда вкус заканчивается. Не пропустите момент для заказа.</p></div>
+  </div>
+</section>
+<div class="divider"></div>
+<div class="bg-light">
+<section class="detail-section">
+  <div class="ds-text reveal">
+    <span class="ds-num">01 — Склад</span>
+    <h2 class="ds-title">Все вкусы и остатки в одном месте.</h2>
+    <p class="ds-desc">Видите остатки по каждому бренду и вкусу. Цветные индикаторы сразу показывают что в норме, что заканчивается, а что нужно заказать срочно.</p>
+    <div class="ds-list">
+      <div class="ds-item"><div class="ds-dot">✓</div>Остатки в граммах по каждому вкусу</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Визуальный индикатор уровня остатка</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Красный цвет когда товар заканчивается</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Фильтрация по бренду и категории</div>
+    </div>
+  </div>
+  <div class="ds-visual">
+    <div class="mock-card">
+      <div class="mc-title">Склад <span class="mc-badge">12 вкусов</span></div>
+      <div class="mc-bar-item"><div class="mc-bar-top"><span class="mc-bar-label">Adalya · Love 66</span><span class="mc-bar-val" style="color:#34c759;">500г</span></div><div class="mc-bar-bg"><div class="mc-bar-f" style="width:83%;background:#34c759;"></div></div></div>
+      <div class="mc-bar-item"><div class="mc-bar-top"><span class="mc-bar-label">Al Fakher · Two Apples</span><span class="mc-bar-val" style="color:#007aff;">600г</span></div><div class="mc-bar-bg"><div class="mc-bar-f" style="width:100%;background:#007aff;"></div></div></div>
+      <div class="mc-bar-item"><div class="mc-bar-top"><span class="mc-bar-label">Darkside · Twix Core</span><span class="mc-bar-val" style="color:#ff9500;">250г</span></div><div class="mc-bar-bg"><div class="mc-bar-f" style="width:42%;background:#ff9500;"></div></div></div>
+      <div class="mc-bar-item" style="margin:0"><div class="mc-bar-top"><span class="mc-bar-label">WTO · Blue</span><span class="mc-bar-val" style="color:#ff3b30;">80г ⚠️</span></div><div class="mc-bar-bg"><div class="mc-bar-f" style="width:13%;background:#ff3b30;"></div></div></div>
+    </div>
+  </div>
+</section>
+</div>
+<section class="detail-section flip">
+  <div class="ds-text reveal">
+    <span class="ds-num">02 — Движения</span>
+    <h2 class="ds-title">Полная история каждого вкуса.</h2>
+    <p class="ds-desc">Каждый приход и расход фиксируется автоматически. Видите кто, когда и сколько взял или принял — полная прозрачность склада.</p>
+    <div class="ds-list">
+      <div class="ds-item"><div class="ds-dot">✓</div>Приход с датой и поставщиком</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Расход при продаже кальяна</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>Списание с указанием причины</div>
+      <div class="ds-item"><div class="ds-dot">✓</div>История за любой период</div>
+    </div>
+  </div>
+  <div class="ds-visual">
+    <div class="mock-card">
+      <div class="mc-title">История · Adalya Love 66</div>
+      <div class="mc-row"><span class="mc-label">08.06 Приход</span><span class="mc-val green">+500г</span></div>
+      <div class="mc-row"><span class="mc-label">08.06 Продажа</span><span class="mc-val red">−25г</span></div>
+      <div class="mc-row"><span class="mc-label">07.06 Продажа</span><span class="mc-val red">−50г</span></div>
+      <div class="mc-row"><span class="mc-label">06.06 Приход</span><span class="mc-val green">+250г</span></div>
+      <div class="mc-row"><span class="mc-label">Остаток</span><span class="mc-val orange">500г</span></div>
+    </div>
+  </div>
+</section>
+<section class="cta-section">
+  <h2>Попробуйте SO Tobacco.</h2>
+  <p>Первые 7 дней бесплатно. Карта не нужна.</p>
+  <button class="btn-primary" onclick="window.location.href='/auth/register'">Начать бесплатно →</button>
+</section>
+<script>
+const io = new IntersectionObserver(e => e.forEach(x => { if(x.isIntersecting){x.target.classList.add('in');io.unobserve(x.target);} }), {threshold:.1,rootMargin:'0px 0px -40px 0px'});
+document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+window.addEventListener('scroll', () => {
+  document.querySelector('.nav').style.background = window.scrollY > 10 ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.92)';
+});
+</script>
+</body>
+</html>
