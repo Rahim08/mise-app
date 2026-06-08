@@ -47,6 +47,12 @@ export default function AnalyticsApp() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [isDark, setIsDark] = useState(false)
+  const kassaChartRef = useRef<any>(null)
+  const kassaChartInst = useRef<any>(null)
+  const inkChartRef = useRef<any>(null)
+  const inkChartInst = useRef<any>(null)
+  const donutRef = useRef<any>(null)
+  const donutInst = useRef<any>(null)
 
   useEffect(() => {
     import('chart.js').then(m => {
@@ -359,6 +365,21 @@ export default function AnalyticsApp() {
             <Stat label="Касса" val={`${currency}${fv(lastShift?.closing_balance||0)}`} color="#007aff" sm />
           </div>
           {sorted.length > 0 && (<>
+            <SecLabel>Структура</SecLabel>
+            <Card>
+              <div style={{ display:'flex', alignItems:'center', gap:16, padding:16 }}>
+                <canvas ref={donutRef} width={120} height={120} />
+                <div style={{ flex:1, display:'flex', flexDirection:'column' as const, gap:7 }}>
+                  {top5.map(([name,amt],i) => (
+                    <div key={name} style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <div style={{ width:9, height:9, borderRadius:'50%', background:COLORS[i], flexShrink:0 }} />
+                      <div style={{ fontSize:12, color:text, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' as const }}>{name}</div>
+                      <div style={{ fontSize:12, fontWeight:600, color:text }}>{currency}{fv(amt)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
             <SecLabel>Топ расходов</SecLabel>
             <Card>
               {top5.map(([name,amt],i) => (
@@ -392,6 +413,12 @@ export default function AnalyticsApp() {
             <Stat label="Доход посл." val={`${currency}${fv(lastInc?.income||0)}`} color="#34c759"
               sub={lastInc?dd(lastInc.date):undefined} />
           </div>
+          <SecLabel>Баланс кассы</SecLabel>
+          <Card>
+            <div style={{ padding:'12px 14px 14px' }}>
+              <canvas ref={kassaChartRef} style={{ maxHeight:140 }} />
+            </div>
+          </Card>
           <SecLabel>По дням</SecLabel>
           <Card>
             <div style={{ display:'grid', gridTemplateColumns:'50px 1fr 1fr 1fr 1fr', background:isDark?'rgba(255,255,255,.06)':'rgba(0,0,0,.04)', padding:'7px 14px', gap:4 }}>
@@ -428,6 +455,12 @@ export default function AnalyticsApp() {
           <Stat label="ЗП на сегодня" val={`${currency}${fv(salToday)}`} color={diff>=0?'#34c759':'#ff3b30'}
             sub={`${diff>=0?'Опережаем':'Отстаём'} ${currency}${fv(Math.abs(diff))}`} />
         </div>
+        <SecLabel>Динамика</SecLabel>
+        <Card>
+          <div style={{ padding:'12px 14px 14px' }}>
+            <canvas ref={inkChartRef} style={{ maxHeight:140 }} />
+          </div>
+        </Card>
         <SecLabel>История</SecLabel>
         <Card>
           {inkassations.length===0
@@ -494,12 +527,88 @@ export default function AnalyticsApp() {
     )
   }
 
+  // Draw kassa chart
+  useEffect(() => {
+    if (tab !== 'kassa' || kassaMode !== 'kassa') return
+    const filled = shifts.filter(s => s.income > 0 || s.total_expense > 0)
+    if (!filled.length || !kassaChartRef.current || !Chart) return
+    setTimeout(() => {
+      if (kassaChartInst.current) kassaChartInst.current.destroy()
+      kassaChartInst.current = new Chart(kassaChartRef.current, {
+        type: 'line',
+        data: {
+          labels: filled.map(s => dd(s.date)),
+          datasets: [{
+            data: filled.map(s => s.closing_balance),
+            borderColor: '#007aff', backgroundColor: 'rgba(0,122,255,.07)',
+            borderWidth: 2, pointRadius: 2, fill: true, tension: .4
+          }]
+        },
+        options: { responsive: true, plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: '#aeaeb2', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: 'rgba(60,60,67,.05)' } },
+            y: { ticks: { color: '#aeaeb2', font: { size: 9 }, callback: (v: any) => currency + Math.round(v) }, grid: { color: 'rgba(60,60,67,.05)' } }
+          }
+        }
+      })
+    }, 100)
+  }, [tab, kassaMode, shifts])
+
+  // Draw inkass chart
+  useEffect(() => {
+    if (tab !== 'kassa' || kassaMode !== 'inkass') return
+    if (!inkassations.length || !inkChartRef.current || !Chart) return
+    setTimeout(() => {
+      if (inkChartInst.current) inkChartInst.current.destroy()
+      const filled = inkassations.filter(i => i.amount > 0 || i.balance > 0)
+      const maxT = Math.max(...filled.map(i => i.balance).filter(v => v > 0), 1)
+      inkChartInst.current = new Chart(inkChartRef.current, {
+        type: 'line',
+        data: {
+          labels: filled.map(i => dd(i.date)),
+          datasets: [{
+            data: filled.map(i => i.balance),
+            borderColor: '#ff9500', backgroundColor: 'rgba(255,149,0,.08)',
+            borderWidth: 2, pointRadius: 3, fill: true, tension: .4
+          }]
+        },
+        options: { responsive: true, plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: '#aeaeb2', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: 'rgba(60,60,67,.05)' } },
+            y: { min: 0, suggestedMax: maxT * 1.15, ticks: { color: '#aeaeb2', font: { size: 9 }, callback: (v: any) => currency + Math.round(v) }, grid: { color: 'rgba(60,60,67,.05)' } }
+          }
+        }
+      })
+    }, 100)
+  }, [tab, kassaMode, inkassations])
+
+  // Draw donut chart for month
+  useEffect(() => {
+    if (tab !== 'period' || periodMode !== 'month') return
+    if (!donutRef.current || !Chart) return
+    const catMap: Record<string,number> = {}
+    expenses.filter(e => !e.employee_id).forEach(e => { catMap[e.category_name] = (catMap[e.category_name]||0) + e.amount })
+    const top5 = Object.entries(catMap).sort((a,b) => b[1]-a[1]).slice(0,5)
+    if (!top5.length) return
+    setTimeout(() => {
+      if (donutInst.current) donutInst.current.destroy()
+      donutInst.current = new Chart(donutRef.current, {
+        type: 'doughnut',
+        data: {
+          labels: top5.map(i => i[0]),
+          datasets: [{ data: top5.map(i => i[1]), backgroundColor: COLORS.slice(0,5), borderWidth: 0, hoverOffset: 4 }]
+        },
+        options: { responsive: false, cutout: '68%', plugins: { legend: { display: false } } }
+      })
+    }, 100)
+  }, [tab, periodMode, expenses])
+
   const TABS = [
     { id:'period', label:'Период', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> },
     { id:'kassa', label:'Касса', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3H8L2 7h20z"/></svg> },
     { id:'sales', label:'Продажи', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg> },
     { id:'salary', label:'Смены', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg> },
-    { id:'hookah', label:'Кальян', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><path d="M12 3c0 0-3 3-3 7h6c0-4-3-7-3-7z"/><path d="M9 10h6l1 4H8l1-4z"/><path d="M8 14c-2 1-3 3-3 5h14c0-2-1-4-3-5"/><line x1="12" y1="19" x2="12" y2="21"/></svg> },
+    { id:'hookah', label:'Кальян', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><path d="M12 2c-1 0-2 1-2 3 0 1 1 2 2 2s2-1 2-2c0-2-1-3-2-3z"/><path d="M10 7c-2 0-3 2-3 4h10c0-2-1-4-3-4h-4z"/><path d="M7 11l-2 4h14l-2-4"/><path d="M5 15c-2 2-2 4 0 5h14c2-1 2-3 0-5"/><line x1="9" y1="15" x2="9" y2="20"/><line x1="15" y1="15" x2="15" y2="20"/></svg> },
   ] as const
 
   return (
