@@ -1,6 +1,6 @@
 'use client'
 export const dynamic = 'force-dynamic'
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -14,6 +14,55 @@ function dd(s: string) { return s.slice(8,10)+'.'+s.slice(5,7) }
 const MRU = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь']
 const DOW = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб']
 const COLORS = ['#007aff','#ff3b30','#34c759','#ff9500','#af52de','#00c7be','#ff6b35','#5856d6']
+
+interface StatProps { label: string; val: string; color?: string; sub?: string; sm?: boolean; surface: string; text: string; t3: string; t4: string; sh: string }
+function Stat({ label, val, color, sub, sm, surface, text, t3, t4, sh }: StatProps) {
+  return (
+    <div style={{ background:surface, borderRadius:14, padding:sm?'12px':'14px 12px', boxShadow:sh }}>
+      <div style={{ fontSize:10, color:t3, fontWeight:600, textTransform:'uppercase' as const, letterSpacing:.4, marginBottom:5 }}>{label}</div>
+      <div style={{ fontSize:sm?15:22, fontWeight:700, color:color||text }}>{val}</div>
+      {sub && <div style={{ fontSize:11, color:t4, marginTop:4 }}>{sub}</div>}
+    </div>
+  )
+}
+
+interface CardProps { children: React.ReactNode; style?: React.CSSProperties; surface: string; sh: string }
+function Card({ children, style={}, surface, sh }: CardProps) {
+  return (
+    <div style={{ background:surface, borderRadius:16, overflow:'hidden', marginBottom:12, boxShadow:sh, ...style }}>{children}</div>
+  )
+}
+
+interface SecProps { children: React.ReactNode; t3: string }
+function Sec({ children, t3 }: SecProps) {
+  return (
+    <div style={{ fontSize:12, fontWeight:600, color:t3, textTransform:'uppercase' as const, letterSpacing:.5, padding:'16px 4px 8px' }}>{children}</div>
+  )
+}
+
+interface ProgProps { name: string; val: number; max: number; color: string; currency: string; text: string; b2: string; s2: string }
+function Prog({ name, val, max, color, currency, text, b2, s2 }: ProgProps) {
+  return (
+    <div style={{ padding:'10px 16px', borderBottom:`1px solid ${b2}` }}>
+      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+        <span style={{ fontSize:15, color:text, maxWidth:'65%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' as const }}>{name}</span>
+        <span style={{ fontSize:15, fontWeight:600, color:text }}>{currency}{fv(val)}</span>
+      </div>
+      <div style={{ height:4, background:s2, borderRadius:2, overflow:'hidden' }}>
+        <div style={{ height:'100%', width:`${Math.min(val/max*100,100).toFixed(1)}%`, background:color, borderRadius:2 }} />
+      </div>
+    </div>
+  )
+}
+
+interface TableHeaderProps { cols: string[]; isDark: boolean; t4: string }
+function TableHeader({ cols, isDark, t4 }: TableHeaderProps) {
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:`${cols.map(()=>'1fr').join(' ')}`, background:isDark?'rgba(255,255,255,.06)':'rgba(0,0,0,.04)', padding:'7px 14px', gap:4 }}>
+      {cols.map(h => <div key={h} style={{ fontSize:10, color:t4, fontWeight:600, textTransform:'uppercase' as const }}>{h}</div>)}
+    </div>
+  )
+}
 
 export default function AnalyticsApp() {
   const [user, setUser] = useState<any>(null)
@@ -114,40 +163,6 @@ export default function AnalyticsApp() {
   const hbg = mounted && isDark ? 'rgba(28,28,30,.96)' : 'rgba(242,242,247,.95)'
   const nbg = mounted && isDark ? 'rgba(28,28,30,.97)' : 'rgba(248,248,252,.97)'
 
-  const Stat = ({ label, val, color, sub, sm }: any) => (
-    <div style={{ background:surface, borderRadius:14, padding:sm?'12px':'14px 12px', boxShadow:sh }}>
-      <div style={{ fontSize:10, color:t3, fontWeight:600, textTransform:'uppercase' as const, letterSpacing:.4, marginBottom:5 }}>{label}</div>
-      <div style={{ fontSize:sm?15:22, fontWeight:700, color:color||text }}>{val}</div>
-      {sub && <div style={{ fontSize:11, color:t4, marginTop:4 }}>{sub}</div>}
-    </div>
-  )
-
-  const Card = ({ children, style={} }: any) => (
-    <div style={{ background:surface, borderRadius:16, overflow:'hidden', marginBottom:12, boxShadow:sh, ...style }}>{children}</div>
-  )
-
-  const Sec = ({ children }: any) => (
-    <div style={{ fontSize:12, fontWeight:600, color:t3, textTransform:'uppercase' as const, letterSpacing:.5, padding:'16px 4px 8px' }}>{children}</div>
-  )
-
-  const Prog = ({ name, val, max, color }: any) => (
-    <div style={{ padding:'10px 16px', borderBottom:`1px solid ${b2}` }}>
-      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-        <span style={{ fontSize:15, color:text, maxWidth:'65%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' as const }}>{name}</span>
-        <span style={{ fontSize:15, fontWeight:600, color:text }}>{currency}{fv(val)}</span>
-      </div>
-      <div style={{ height:4, background:s2, borderRadius:2, overflow:'hidden' }}>
-        <div style={{ height:'100%', width:`${Math.min(val/max*100,100).toFixed(1)}%`, background:color, borderRadius:2 }} />
-      </div>
-    </div>
-  )
-
-  const TableHeader = ({ cols }: { cols: string[] }) => (
-    <div style={{ display:'grid', gridTemplateColumns:`${cols.map(()=>'1fr').join(' ')}`, background:isDark?'rgba(255,255,255,.06)':'rgba(0,0,0,.04)', padding:'7px 14px', gap:4 }}>
-      {cols.map(h => <div key={h} style={{ fontSize:10, color:t4, fontWeight:600, textTransform:'uppercase' as const }}>{h}</div>)}
-    </div>
-  )
-
   const sendAI = async () => {
     if (!chatInput.trim() || !geminiKey) return
     const msg = chatInput.trim(); setChatInput('')
@@ -190,22 +205,22 @@ export default function AnalyticsApp() {
       return (
         <div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
-            <Stat label="Расход дня" val={`${currency}${fv(dayShift.total_expense)}`} color="#ff3b30" />
-            <Stat label="Доход" val={`${currency}${fv(dayShift.income)}`} color="#34c759" />
+            <Stat label="Расход дня" val={`${currency}${fv(dayShift.total_expense)}`} color="#ff3b30" surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+            <Stat label="Доход" val={`${currency}${fv(dayShift.income)}`} color="#34c759" surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10, marginBottom:12 }}>
-            <Stat label="Вход" val={`${currency}${fv(dayShift.opening_balance)}`} color="#007aff" sm />
-            <Stat label="Доход" val={`${currency}${fv(dayShift.income)}`} color="#34c759" sm />
-            <Stat label="Расход" val={`${currency}${fv(dayShift.total_expense)}`} color="#ff3b30" sm />
-            <Stat label="Касса" val={`${currency}${fv(dayShift.closing_balance)}`} color="#007aff" sm />
+            <Stat label="Вход" val={`${currency}${fv(dayShift.opening_balance)}`} color="#007aff" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+            <Stat label="Доход" val={`${currency}${fv(dayShift.income)}`} color="#34c759" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+            <Stat label="Расход" val={`${currency}${fv(dayShift.total_expense)}`} color="#ff3b30" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+            <Stat label="Касса" val={`${currency}${fv(dayShift.closing_balance)}`} color="#007aff" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
           </div>
-          {dayExps.length > 0 && <><Sec>Расходы</Sec><Card>{dayExps.map((e:any,i:number)=>(
+          {dayExps.length > 0 && <><Sec t3={t3}>Расходы</Sec><Card surface={surface} sh={sh}>{dayExps.map((e:any,i:number)=>(
             <div key={e.id} style={{ display:'flex', justifyContent:'space-between', padding:'12px 16px', borderBottom:i<dayExps.length-1?`1px solid ${b2}`:'none' }}>
               <span style={{ color:text }}>{e.category_name}{e.note?` · ${e.note}`:''}</span>
               <span style={{ color:'#ff3b30', fontWeight:600 }}>−{currency}{fv(e.amount)}</span>
             </div>
           ))}</Card></>}
-          {dayInk && <><Sec>Инкассация</Sec><Card>
+          {dayInk && <><Sec t3={t3}>Инкассация</Sec><Card surface={surface} sh={sh}>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'1px', background:b2 }}>
               {[{l:'Приход',v:dayInk.amount>0?`${currency}${fv(dayInk.amount)}`:'—',c:'#34c759'},{l:'Расход',v:dayInk.expense>0?`${currency}${fv(dayInk.expense)}`:'—',c:'#ff3b30'},{l:'Причина',v:dayInk.reason||'—',c:t3},{l:'Итог',v:`${currency}${fv(dayInk.balance)}`,c:'#ff9500'}].map(cell=>(
                 <div key={cell.l} style={{ background:surface, padding:'10px 8px' }}>
@@ -230,13 +245,13 @@ export default function AnalyticsApp() {
       return (
         <div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
-            <Stat label="Итог за неделю" val={`${currency}${fv(wi)}`} color="#34c759" sub={ip!==null?`${ip>=0?'↑':'↓'} ${Math.abs(ip).toFixed(1)}% vs пред.`:undefined} />
-            <Stat label="Расходы" val={`${currency}${fv(we)}`} color="#ff3b30" sub={ep!==null?`${ep>=0?'↑':'↓'} ${Math.abs(ep).toFixed(1)}% vs пред.`:undefined} />
+            <Stat label="Итог за неделю" val={`${currency}${fv(wi)}`} color="#34c759" sub={ip!==null?`${ip>=0?'↑':'↓'} ${Math.abs(ip).toFixed(1)}% vs пред.`:undefined} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+            <Stat label="Расходы" val={`${currency}${fv(we)}`} color="#ff3b30" sub={ep!==null?`${ep>=0?'↑':'↓'} ${Math.abs(ep).toFixed(1)}% vs пред.`:undefined} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
           </div>
-          {cats.length>0&&<><Sec>Структура расходов</Sec><Card>{cats.map(([n,v],i)=><Prog key={n} name={n} val={v} max={maxV} color={COLORS[i%COLORS.length]}/>)}</Card></>}
-          <Sec>По дням</Sec>
-          <Card>
-            <TableHeader cols={['Дата','Вход','Доход','Расход','Касса']} />
+          {cats.length>0&&<><Sec t3={t3}>Структура расходов</Sec><Card surface={surface} sh={sh}>{cats.map(([n,v],i)=><Prog key={n} name={n} val={v} max={maxV} color={COLORS[i%COLORS.length]} currency={currency} text={text} b2={b2} s2={s2} />)}</Card></>}
+          <Sec t3={t3}>По дням</Sec>
+          <Card surface={surface} sh={sh}>
+            <TableHeader cols={['Дата','Вход','Доход','Расход','Касса']} isDark={isDark} t4={t4} />
             {ws.map((s:any)=>(
               <div key={s.id} style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', padding:'10px 14px', gap:4, borderBottom:`1px solid ${b2}`, fontSize:13, color:text }}>
                 <span style={{ color:t3 }}>{dd(s.date)}</span>
@@ -258,16 +273,16 @@ export default function AnalyticsApp() {
     return (
       <div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
-          <Stat label="Итого за месяц" val={`${currency}${fv(totalIncome)}`} color="#34c759" sub={ip!==null?`${ip>=0?'↑':'↓'} ${Math.abs(ip).toFixed(1)}% vs пред.`:undefined} />
-          <Stat label="Расходы" val={`${currency}${fv(totalExpense)}`} color="#ff3b30" sub={ep!==null?`${ep>=0?'↑':'↓'} ${Math.abs(ep).toFixed(1)}% vs пред.`:undefined} />
+          <Stat label="Итого за месяц" val={`${currency}${fv(totalIncome)}`} color="#34c759" sub={ip!==null?`${ip>=0?'↑':'↓'} ${Math.abs(ip).toFixed(1)}% vs пред.`:undefined} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+          <Stat label="Расходы" val={`${currency}${fv(totalExpense)}`} color="#ff3b30" sub={ep!==null?`${ep>=0?'↑':'↓'} ${Math.abs(ep).toFixed(1)}% vs пред.`:undefined} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:12 }}>
-          <Stat label="Смен" val={String(shifts.length)} sm />
-          <Stat label="Инкасс" val={`${currency}${fv(totalInkass)}`} color="#ff9500" sm />
-          <Stat label="Касса" val={`${currency}${fv(lastShift?.closing_balance||0)}`} color="#007aff" sm />
+          <Stat label="Смен" val={String(shifts.length)} sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+          <Stat label="Инкасс" val={`${currency}${fv(totalInkass)}`} color="#ff9500" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+          <Stat label="Касса" val={`${currency}${fv(lastShift?.closing_balance||0)}`} color="#007aff" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
         </div>
-        {top5.length>0&&<><Sec>Топ расходов</Sec><Card>{top5.map(([n,v],i)=><Prog key={n} name={n} val={v} max={maxV} color={COLORS[i%COLORS.length]}/>)}</Card></>}
-        {cats.length>0&&<><Sec>Все категории</Sec><Card>{cats.map(([n,v],i)=>(
+        {top5.length>0&&<><Sec t3={t3}>Топ расходов</Sec><Card surface={surface} sh={sh}>{top5.map(([n,v],i)=><Prog key={n} name={n} val={v} max={maxV} color={COLORS[i%COLORS.length]} currency={currency} text={text} b2={b2} s2={s2} />)}</Card></>}
+        {cats.length>0&&<><Sec t3={t3}>Все категории</Sec><Card surface={surface} sh={sh}>{cats.map(([n,v],i)=>(
           <div key={n} style={{ display:'flex', justifyContent:'space-between', padding:'12px 16px', borderBottom:i<cats.length-1?`1px solid ${b2}`:'none' }}>
             <span style={{ color:text }}>{n}</span><span style={{ color:'#ff3b30', fontWeight:600 }}>{currency}{fv(v)}</span>
           </div>
@@ -282,12 +297,12 @@ export default function AnalyticsApp() {
       return (
         <div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
-            <Stat label="Остаток" val={`${currency}${fv(lastShift?.closing_balance||0)}`} color="#007aff" />
-            <Stat label="Доход посл." val={`${currency}${fv(lastShift?.income||0)}`} color="#34c759" sub={lastShift?dd(lastShift.date):undefined} />
+            <Stat label="Остаток" val={`${currency}${fv(lastShift?.closing_balance||0)}`} color="#007aff" surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+            <Stat label="Доход посл." val={`${currency}${fv(lastShift?.income||0)}`} color="#34c759" sub={lastShift?dd(lastShift.date):undefined} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
           </div>
-          <Sec>По дням</Sec>
-          <Card>
-            <TableHeader cols={['Дата','Вход','Доход','Расход','Касса']} />
+          <Sec t3={t3}>По дням</Sec>
+          <Card surface={surface} sh={sh}>
+            <TableHeader cols={['Дата','Вход','Доход','Расход','Касса']} isDark={isDark} t4={t4} />
             {filled.map((s:any)=>(
               <div key={s.id} style={{ display:'grid', gridTemplateColumns:'50px 1fr 1fr 1fr 1fr', padding:'11px 14px', gap:4, borderBottom:`1px solid ${b2}`, fontSize:13, color:text }}>
                 <span style={{ color:t3 }}>{dd(s.date)}</span>
@@ -311,14 +326,14 @@ export default function AnalyticsApp() {
     return (
       <div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
-          <Stat label="Баланс" val={`${currency}${fv(inkBal)}`} color="#ff9500" />
-          <Stat label="ЗП на сегодня" val={`${currency}${fv(salToday)}`} color={diff>=0?'#34c759':'#ff3b30'} sub={`${diff>=0?'Опережаем':'Отстаём'} ${currency}${fv(Math.abs(diff))}`} />
+          <Stat label="Баланс" val={`${currency}${fv(inkBal)}`} color="#ff9500" surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+          <Stat label="ЗП на сегодня" val={`${currency}${fv(salToday)}`} color={diff>=0?'#34c759':'#ff3b30'} sub={`${diff>=0?'Опережаем':'Отстаём'} ${currency}${fv(Math.abs(diff))}`} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
         </div>
-        <Sec>История</Sec>
-        <Card>
+        <Sec t3={t3}>История</Sec>
+        <Card surface={surface} sh={sh}>
           {inkassations.length===0
             ? <div style={{ padding:'32px', textAlign:'center' as const, color:t4 }}>Нет инкассаций</div>
-            : <><TableHeader cols={['Дата','Сумма','Расход','Причина','Итог']} />
+            : <><TableHeader cols={['Дата','Сумма','Расход','Причина','Итог']} isDark={isDark} t4={t4} />
               {inkassations.map((ink:any)=>(
                 <div key={ink.id} style={{ display:'grid', gridTemplateColumns:'44px 1fr 1fr 1fr 1fr', padding:'11px 14px', gap:4, borderBottom:`1px solid ${b2}`, fontSize:13, color:text }}>
                   <span style={{ color:t3 }}>{dd(ink.date)}</span>
@@ -344,12 +359,12 @@ export default function AnalyticsApp() {
     return (
       <div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:12 }}>
-          <Stat label="ФОТ" val={`${currency}${fv(totFOT)}`} color="#007aff" sm />
-          <Stat label="Нал" val={`${currency}${fv(totCash)}`} color="#ff9500" sm />
-          <Stat label="Карта" val={`${currency}${fv(totCard)}`} color="#af52de" sm />
+          <Stat label="ФОТ" val={`${currency}${fv(totFOT)}`} color="#007aff" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+          <Stat label="Нал" val={`${currency}${fv(totCash)}`} color="#ff9500" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+          <Stat label="Карта" val={`${currency}${fv(totCard)}`} color="#af52de" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
         </div>
-        <Sec>Сотрудники</Sec>
-        <Card>
+        <Sec t3={t3}>Сотрудники</Sec>
+        <Card surface={surface} sh={sh}>
           {employees.map((emp:any,i:number)=>{
             const abs = absences.filter((a:any)=>a.employee_id===emp.id).length
             const deduct = abs*emp.deduct_per_absence
