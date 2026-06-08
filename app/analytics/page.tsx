@@ -102,17 +102,17 @@ export default function AnalyticsApp() {
   const prevExpense = prevShifts.reduce((s:number, sh:any) => s + (sh.total_expense||0), 0)
   const pct = (cur:number, prev:number) => prev ? ((cur-prev)/prev*100) : null
 
-  const bg = isDark ? '#1c1c1e' : '#f2f2f7'
-  const surface = isDark ? '#2c2c2e' : '#fff'
-  const text = isDark ? '#f2f2f7' : '#1c1c1e'
-  const t3 = isDark ? '#aeaeb2' : '#6d6d72'
-  const t4 = isDark ? '#636366' : '#aeaeb2'
-  const border = isDark ? 'rgba(255,255,255,.15)' : 'rgba(60,60,67,.13)'
-  const b2 = isDark ? 'rgba(255,255,255,.08)' : 'rgba(60,60,67,.07)'
-  const s2 = isDark ? 'rgba(255,255,255,.1)' : 'rgba(118,118,128,.12)'
-  const sh = isDark ? '0 1px 3px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.2)' : '0 1px 3px rgba(0,0,0,.08),0 4px 16px rgba(0,0,0,.05)'
-  const hbg = isDark ? 'rgba(28,28,30,.96)' : 'rgba(242,242,247,.95)'
-  const nbg = isDark ? 'rgba(28,28,30,.97)' : 'rgba(248,248,252,.97)'
+  const bg = mounted && isDark ? '#1c1c1e' : '#f2f2f7'
+  const surface = mounted && isDark ? '#2c2c2e' : '#fff'
+  const text = mounted && isDark ? '#f2f2f7' : '#1c1c1e'
+  const t3 = mounted && isDark ? '#aeaeb2' : '#6d6d72'
+  const t4 = mounted && isDark ? '#636366' : '#aeaeb2'
+  const border = mounted && isDark ? 'rgba(255,255,255,.15)' : 'rgba(60,60,67,.13)'
+  const b2 = mounted && isDark ? 'rgba(255,255,255,.08)' : 'rgba(60,60,67,.07)'
+  const s2 = mounted && isDark ? 'rgba(255,255,255,.1)' : 'rgba(118,118,128,.12)'
+  const sh = mounted && isDark ? '0 1px 3px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.2)' : '0 1px 3px rgba(0,0,0,.08),0 4px 16px rgba(0,0,0,.05)'
+  const hbg = mounted && isDark ? 'rgba(28,28,30,.96)' : 'rgba(242,242,247,.95)'
+  const nbg = mounted && isDark ? 'rgba(28,28,30,.97)' : 'rgba(248,248,252,.97)'
 
   const Stat = ({ label, val, color, sub, sm }: any) => (
     <div style={{ background:surface, borderRadius:14, padding:sm?'12px':'14px 12px', boxShadow:sh }}>
