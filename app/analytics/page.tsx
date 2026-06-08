@@ -31,7 +31,8 @@ export default function AnalyticsApp() {
   const [cardAmounts, setCardAmounts] = useState<any[]>([])
   const [absences, setAbsences] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [isDark, setIsDark] = useState(false)
+  const [isDark, setIsDark] = useState<boolean>(false)
+  const [mounted, setMounted] = useState(false)
   const [showMonthPicker, setShowMonthPicker] = useState(false)
   const [showAI, setShowAI] = useState(false)
   const [geminiKey, setGeminiKey] = useState('')
@@ -40,9 +41,8 @@ export default function AnalyticsApp() {
   const [chatLoading, setChatLoading] = useState(false)
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setIsDark(localStorage.getItem('so_ana_dark') === '1')
-    }
+    setMounted(true)
+    setIsDark(localStorage.getItem('so_ana_dark') === '1')
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) { window.location.href = '/auth/login'; return }
       setUser(data.user)
@@ -374,8 +374,8 @@ export default function AnalyticsApp() {
     )
   }
 
-  if (loading) return (
-    <div style={{ minHeight:'100vh', background:bg, display:'flex', alignItems:'center', justifyContent:'center' }}>
+  if (!mounted || loading) return (
+    <div style={{ minHeight:'100vh', background:'#f2f2f7', display:'flex', alignItems:'center', justifyContent:'center' }}>
       <div style={{ width:28, height:28, border:`2.5px solid ${s2}`, borderTopColor:'#007aff', borderRadius:'50%', animation:'spin .7s linear infinite' }} />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
