@@ -99,7 +99,7 @@ export default function AnalyticsApp() {
       const shiftIds = shiftList.map((s:any) => s.id)
       const [expsRes, inkRes] = await Promise.all([
         supabase.from('shift_expenses').select('*').in('shift_id', shiftIds),
-        supabase.from('inkassations').select('*').in('shift_id', shiftIds).order('date')
+        supabase.from('inkassations').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd).order('date')
       ])
       setExpenses(expsRes.data || [])
       setInkassations(inkRes.data || [])
