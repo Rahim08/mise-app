@@ -187,22 +187,35 @@ export default function AnalyticsApp() {
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    setMounted(true)
-    const dark = localStorage.getItem('mise_ana_dark') === '1'
-    setIsDark(dark)
     const saved = localStorage.getItem('mise_chat')
     if (saved) { try { setChatMsgs(JSON.parse(saved)) } catch {} }
+
+    const storedRestaurantId = localStorage.getItem('mise_restaurant_id')
+
     supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) { window.location.href = '/auth/login'; return }
-      setUser(data.user)
-      const { data: profile } = await supabase.from('profiles').select('restaurant_id').eq('id', data.user.id).single()
-      if (!profile) return
-      setRestaurantId(profile.restaurant_id)
-      // Load restaurant info
-      const { data: rest } = await supabase.from('restaurants').select('name,logo_url,currency').eq('id', profile.restaurant_id).single()
-      if (rest) { setRestaurantName(rest.name||''); setLogoUrl(rest.logo_url||''); if (rest.currency) setCurrency(rest.currency) }
-      await loadAll(profile.restaurant_id, new Date())
-      await loadAllHistory(profile.restaurant_id)
+      let rid = ''
+
+      if (data.user) {
+        setUser(data.user)
+        const { data: profile } = await supabase.from('profiles').select('restaurant_id').eq('id', data.user.id).single()
+        if (!profile) return
+        rid = profile.restaurant_id
+      } else if (storedRestaurantId) {
+        setUser({ id: 'staff', email: 'staff' })
+        rid = storedRestaurantId
+      } else {
+        window.location.href = '/join?error=no_session'
+        return
+      }
+
+      if (!rid) { window.location.href = '/join?error=no_session'; return }
+      setRestaurantId(rid)
+
+      const { data: rest } = await supabase.from('restaurants').select('name,logo_url,currency').eq('id', rid).single()
+      if (rest) { setRestaurantName(rest.name||''); setLogoUrl(rest.logo_url||'') }
+      if (rest?.currency) setCurrency(rest.currency)
+      await loadAll(rid, new Date())
+      await loadAllHistory(rid)
     })
   }, [])
 
