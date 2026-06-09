@@ -41,19 +41,35 @@ export default function ManagerApp() {
   const toast = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 2500) }
 
   useEffect(() => {
+    const storedRestaurantId = localStorage.getItem('mise_restaurant_id')
+
     supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) { window.location.href = '/auth/login'; return }
-      setUser(data.user)
-      const { data: profile } = await supabase.from('profiles').select('restaurant_id').eq('id', data.user.id).single()
-      if (!profile) return
-      setRestaurantId(profile.restaurant_id)
+      let rid = ''
+
+      if (data.user) {
+        // Владелец — Supabase auth
+        setUser(data.user)
+        const { data: profile } = await supabase.from('profiles').select('restaurant_id').eq('id', data.user.id).single()
+        rid = profile?.restaurant_id || storedRestaurantId || ''
+      } else if (storedRestaurantId) {
+        // Сотрудник — PIN сессия
+        setUser({ id: 'staff', email: 'staff' })
+        rid = storedRestaurantId
+      } else {
+        window.location.href = '/join?error=no_session'
+        return
+      }
+
+      if (!rid) { window.location.href = '/join?error=no_session'; return }
+      setRestaurantId(rid)
+
       const [empsRes, catsRes] = await Promise.all([
-        supabase.from('employees').select('id,name,deduct_per_absence').eq('restaurant_id', profile.restaurant_id).eq('is_active', true).order('name'),
-        supabase.from('expense_categories').select('id,name').eq('restaurant_id', profile.restaurant_id).order('name')
+        supabase.from('employees').select('id,name,deduct_per_absence').eq('restaurant_id', rid).eq('is_active', true).order('name'),
+        supabase.from('expense_categories').select('id,name').eq('restaurant_id', rid).order('name')
       ])
       setEmployees(empsRes.data || [])
       setCategories(catsRes.data || [])
-      await loadDay(profile.restaurant_id, new Date(), empsRes.data || [], catsRes.data || [])
+      await loadDay(rid, new Date(), empsRes.data || [], catsRes.data || [])
     })
   }, [])
 
