@@ -2,6 +2,7 @@
 // @ts-nocheck
 import { useEffect, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import QRCode from 'qrcode.react'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,7 +26,6 @@ function LogoMark({ size = 32 }: { size?: number }) {
   )
 }
 
-// Генерируем device fingerprint
 function getDeviceId(): string {
   const key = 'mise_device_id'
   let id = localStorage.getItem(key)
@@ -53,22 +53,34 @@ export default function JoinPage() {
     const restaurantId = params.get('restaurant')
     if (!restaurantId) { setErrorMsg('Неверная ссылка'); setPhase('error'); return }
 
-    // Check if already logged in on this device
     const deviceId = getDeviceId()
     const savedStaff = localStorage.getItem('mise_staff_' + restaurantId)
-    
-    supabase.from('restaurants').select('id,name,logo_url,subscription_status,subscription_plan').eq('id', restaurantId).single()
+
+    supabase.from('restaurants')
+      .select('id,name,logo_url,subscription_status,subscription_plan,owner_pin')
+      .eq('id', restaurantId).single()
       .then(({ data, error }) => {
         if (error || !data) { setErrorMsg('Заведение не найдено'); setPhase('error'); return }
         setRestaurant(data)
+        localStorage.setItem('mise_restaurant_id', restaurantId)
 
-        // If saved staff — verify still active
         if (savedStaff) {
           const parsed = JSON.parse(savedStaff)
+          // Owner saved
+          if (parsed.is_owner) {
+            setStaffMember(parsed)
+            goToApp(parsed.apps)
+            return
+          }
           supabase.from('staff').select('*').eq('id', parsed.id).eq('is_active', true).single()
             .then(({ data: s }) => {
-              if (s) { setStaffMember(s); setPhase('app_select') }
-              else { localStorage.removeItem('mise_staff_' + restaurantId); setPhase('pin') }
+              if (s) {
+                setStaffMember(s)
+                goToApp(s.apps)
+              } else {
+                localStorage.removeItem('mise_staff_' + restaurantId)
+                setPhase('pin')
+              }
             })
         } else {
           setPhase('pin')
@@ -76,8 +88,17 @@ export default function JoinPage() {
       })
   }, [])
 
+  const goToApp = (apps: string[]) => {
+    if (!apps || apps.length === 0) { setPhase('error'); setErrorMsg('Нет доступных приложений'); return }
+    if (apps.length === 1) {
+      const app = APPS.find(a => a.id === apps[0])
+      if (app) { window.location.href = app.path; return }
+    }
+    setPhase('app_select')
+  }
+
   const handlePinDigit = (digit: string) => {
-    if (pin.length >= 4) return
+    if (pin.length >= 4 || checking) return
     const newPin = pin + digit
     setPin(newPin)
     setPinError(false)
@@ -85,6 +106,7 @@ export default function JoinPage() {
   }
 
   const handlePinDelete = () => {
+    if (checking) return
     setPin(p => p.slice(0, -1))
     setPinError(false)
   }
@@ -92,37 +114,33 @@ export default function JoinPage() {
   const checkPin = async (enteredPin: string) => {
     if (!restaurant) return
     setChecking(true)
-    const deviceId = getDeviceId()
 
-    // Check owner PIN first
+    // Owner PIN
     if (restaurant.owner_pin && enteredPin === restaurant.owner_pin) {
-      // Owner — access to all apps
-      const ownerStaff = { id: 'owner', name: 'Владелец', apps: ['manager', 'analytics', 'stash'], is_owner: true }
-      setStaffMember(ownerStaff)
+      const ownerData = { id: 'owner', name: 'Владелец', apps: ['manager', 'analytics', 'stash'], is_owner: true }
+      localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify(ownerData))
+      setStaffMember(ownerData)
       setChecking(false)
-      setPhase('app_select')
+      goToApp(ownerData.apps)
       return
     }
 
-    // Check staff PIN
+    // Staff PIN
     const { data: staffList } = await supabase
-      .from('staff')
-      .select('*')
-      .eq('restaurant_id', restaurant.id)
-      .eq('is_active', true)
+      .from('staff').select('*')
+      .eq('restaurant_id', restaurant.id).eq('is_active', true)
 
     const matched = (staffList || []).find((s: any) => s.pin_hash === enteredPin)
 
     if (matched) {
-      // Bind device if not bound
+      const deviceId = getDeviceId()
       if (!matched.device_id) {
         await supabase.from('staff').update({ device_id: deviceId }).eq('id', matched.id)
       }
-      localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify({ id: matched.id, name: matched.name }))
-      localStorage.setItem('mise_restaurant_id', restaurant.id)
+      localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify({ id: matched.id, name: matched.name, apps: matched.apps }))
       setStaffMember(matched)
       setChecking(false)
-      setPhase('app_select')
+      goToApp(matched.apps)
     } else {
       setChecking(false)
       setPinError(true)
@@ -132,7 +150,6 @@ export default function JoinPage() {
   }
 
   const openApp = (path: string) => {
-    localStorage.setItem('mise_restaurant_id', restaurant?.id || '')
     window.location.href = path
   }
 
@@ -164,89 +181,95 @@ export default function JoinPage() {
   // ── PIN ENTRY ──
   if (phase === 'pin') return (
     <div style={S.screen}>
-      {/* Restaurant branding */}
-      <div style={{ marginBottom: 32, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+      <div style={{ marginBottom: 36, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
         {restaurant?.logo_url ? (
           <img src={restaurant.logo_url} alt="logo" style={{ width: 72, height: 72, borderRadius: 18, objectFit: 'cover', boxShadow: '0 4px 16px rgba(0,0,0,.12)' }} />
         ) : (
-          <div style={{ width: 72, height: 72, borderRadius: 18, background: '#f2f2f7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem' }}>🍽️</div>
+          <div style={{ width: 72, height: 72, borderRadius: 18, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem', boxShadow: '0 2px 12px rgba(0,0,0,.08)' }}>🍽️</div>
         )}
-        <div style={{ fontWeight: 700, fontSize: '1.15rem', color: '#1c1c1e' }}>{restaurant?.name}</div>
-        <div style={{ fontSize: '.8rem', color: '#aeaeb2' }}>Введите PIN для входа</div>
+        <div style={{ fontWeight: 700, fontSize: '1.2rem', color: '#1c1c1e' }}>{restaurant?.name}</div>
+        <div style={{ fontSize: '.82rem', color: '#aeaeb2' }}>Введите PIN для входа</div>
       </div>
 
       {/* PIN dots */}
       <div style={{
-        display: 'flex', gap: 16, marginBottom: 40,
+        display: 'flex', gap: 18, marginBottom: 44,
         animation: shaking ? 'shake .5s ease' : 'none',
       }}>
         {[0,1,2,3].map(i => (
           <div key={i} style={{
-            width: 16, height: 16, borderRadius: '50%',
-            background: pin.length > i ? (pinError ? '#ff3b30' : '#007aff') : 'rgba(60,60,67,.2)',
-            transition: 'background .15s',
-            transform: pin.length > i ? 'scale(1.1)' : 'scale(1)',
+            width: 14, height: 14, borderRadius: '50%',
+            background: pin.length > i
+              ? (pinError ? '#ff3b30' : '#007aff')
+              : 'rgba(60,60,67,.2)',
+            transition: 'background .15s, transform .15s',
+            transform: pin.length > i ? 'scale(1.15)' : 'scale(1)',
           }} />
         ))}
       </div>
 
       {pinError && (
-        <div style={{ color: '#ff3b30', fontSize: '.82rem', fontWeight: 500, marginBottom: 20, marginTop: -28 }}>
+        <div style={{ color: '#ff3b30', fontSize: '.82rem', fontWeight: 500, marginBottom: -28, marginTop: -36 }}>
           Неверный PIN
         </div>
       )}
 
       {/* Keypad */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, width: 240 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 76px)', gap: 14 }}>
         {['1','2','3','4','5','6','7','8','9','','0','⌫'].map((k, i) => (
-          <button key={i} onClick={() => k === '⌫' ? handlePinDelete() : k ? handlePinDigit(k) : null}
+          <button key={i}
+            onClick={() => k === '⌫' ? handlePinDelete() : k ? handlePinDigit(k) : null}
             disabled={checking || k === ''}
             style={{
-              width: 72, height: 72, borderRadius: '50%',
-              background: k === '' ? 'transparent' : k === '⌫' ? 'transparent' : 'rgba(255,255,255,.9)',
+              width: 76, height: 76, borderRadius: '50%',
+              background: k === '' ? 'transparent' : k === '⌫' ? 'rgba(0,0,0,.04)' : '#fff',
               border: 'none',
-              boxShadow: k === '' || k === '⌫' ? 'none' : '0 2px 8px rgba(0,0,0,.08)',
-              fontSize: k === '⌫' ? '1.3rem' : '1.4rem',
-              fontWeight: 500,
+              boxShadow: k === '' ? 'none' : k === '⌫' ? 'none' : '0 2px 8px rgba(0,0,0,.07)',
+              fontSize: k === '⌫' ? '1.4rem' : '1.5rem',
+              fontWeight: 400,
               color: k === '⌫' ? '#6d6d72' : '#1c1c1e',
               cursor: k === '' ? 'default' : 'pointer',
               fontFamily: '-apple-system,sans-serif',
-              transition: 'transform .1s, background .1s',
               opacity: checking ? .5 : 1,
+              transition: 'transform .1s',
+              WebkitTapHighlightColor: 'transparent',
             }}
-            onMouseDown={e => { if (k && k !== '') (e.target as any).style.transform = 'scale(.92)' }}
-            onMouseUp={e => { (e.target as any).style.transform = 'scale(1)' }}
-            onTouchStart={e => { if (k && k !== '') (e.target as any).style.transform = 'scale(.92)' }}
-            onTouchEnd={e => { (e.target as any).style.transform = 'scale(1)' }}
+            onPointerDown={e => { if (k) (e.currentTarget.style.transform = 'scale(.9)') }}
+            onPointerUp={e => { (e.currentTarget.style.transform = 'scale(1)') }}
+            onPointerLeave={e => { (e.currentTarget.style.transform = 'scale(1)') }}
           >
             {k}
           </button>
         ))}
       </div>
 
+      <div style={{ position: 'absolute', bottom: 32, display: 'flex', alignItems: 'center', gap: 8, opacity: .35 }}>
+        <LogoMark size={18} />
+        <span style={{ fontSize: '.75rem', fontWeight: 700, color: '#1c1c1e', letterSpacing: '-.01em' }}>mise</span>
+      </div>
+
       <style>{`
         @keyframes shake {
-          0%, 100% { transform: translateX(0) }
-          20% { transform: translateX(-8px) }
-          40% { transform: translateX(8px) }
-          60% { transform: translateX(-6px) }
-          80% { transform: translateX(6px) }
+          0%,100% { transform: translateX(0) }
+          20% { transform: translateX(-10px) }
+          40% { transform: translateX(10px) }
+          60% { transform: translateX(-7px) }
+          80% { transform: translateX(7px) }
         }
       `}</style>
     </div>
   )
 
-  // ── APP SELECT ──
+  // ── APP SELECT (только если несколько приложений) ──
   if (phase === 'app_select') {
     const apps = APPS.filter(a => (staffMember?.apps || []).includes(a.id))
     return (
-      <div style={{ ...S.screen, justifyContent: 'flex-start', paddingTop: 60 }}>
-        {/* Header */}
+      <div style={{ ...S.screen, justifyContent: 'flex-start', paddingTop: 72 }}>
         <div style={{ marginBottom: 40, textAlign: 'center' }}>
           {restaurant?.logo_url ? (
-            <img src={restaurant.logo_url} alt="logo" style={{ width: 56, height: 56, borderRadius: 14, objectFit: 'cover', marginBottom: 12 }} />
+            <img src={restaurant.logo_url} alt="logo" style={{ width: 60, height: 60, borderRadius: 15, objectFit: 'cover', marginBottom: 14, boxShadow: '0 4px 14px rgba(0,0,0,.1)' }} />
           ) : (
-            <div style={{ width: 56, height: 56, borderRadius: 14, background: '#f2f2f7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem', margin: '0 auto 12px' }}>🍽️</div>
+            <div style={{ width: 60, height: 60, borderRadius: 15, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.8rem', margin: '0 auto 14px', boxShadow: '0 2px 10px rgba(0,0,0,.07)' }}>🍽️</div>
           )}
           <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 4 }}>{restaurant?.name}</div>
           <div style={{ fontSize: '.82rem', color: '#6d6d72' }}>
@@ -254,8 +277,7 @@ export default function JoinPage() {
           </div>
         </div>
 
-        {/* App tiles */}
-        <div style={{ width: '100%', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 12, padding: '0 20px' }}>
+        <div style={{ width: '100%', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 12, padding: '0 24px' }}>
           {apps.map(app => (
             <button key={app.id} onClick={() => openApp(app.path)} style={{
               width: '100%', padding: '18px 20px',
@@ -264,31 +286,28 @@ export default function JoinPage() {
               boxShadow: '0 2px 12px rgba(0,0,0,.07)',
               display: 'flex', alignItems: 'center', gap: 14,
               cursor: 'pointer', fontFamily: 'inherit',
-              transition: 'transform .15s, box-shadow .15s',
+              WebkitTapHighlightColor: 'transparent',
             }}
-            onMouseDown={e => { (e.currentTarget as any).style.transform = 'scale(.97)'; (e.currentTarget as any).style.boxShadow = '0 1px 6px rgba(0,0,0,.06)' }}
-            onMouseUp={e => { (e.currentTarget as any).style.transform = 'scale(1)'; (e.currentTarget as any).style.boxShadow = '0 2px 12px rgba(0,0,0,.07)' }}
-            onTouchStart={e => { (e.currentTarget as any).style.transform = 'scale(.97)' }}
-            onTouchEnd={e => { (e.currentTarget as any).style.transform = 'scale(1)' }}
+            onPointerDown={e => { e.currentTarget.style.transform = 'scale(.97)' }}
+            onPointerUp={e => { e.currentTarget.style.transform = 'scale(1)' }}
+            onPointerLeave={e => { e.currentTarget.style.transform = 'scale(1)' }}
             >
-              <div style={{ width: 44, height: 44, borderRadius: 12, background: app.color + '15', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <div style={{ width: 20, height: 20, borderRadius: 4, background: app.color }} />
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: app.color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <div style={{ width: 22, height: 22, borderRadius: 6, background: app.color }} />
               </div>
               <div style={{ textAlign: 'left', flex: 1 }}>
                 <div style={{ fontWeight: 700, fontSize: '.95rem', color: '#1c1c1e' }}>{app.name}</div>
               </div>
-              <div style={{ color: '#aeaeb2', fontSize: '1.1rem' }}>›</div>
+              <div style={{ color: '#c7c7cc', fontSize: '1.2rem', fontWeight: 300 }}>›</div>
             </button>
           ))}
         </div>
 
-        {/* Logout */}
-        <button onClick={logout} style={{ marginTop: 32, background: 'none', border: 'none', color: '#aeaeb2', fontSize: '.8rem', cursor: 'pointer', fontFamily: 'inherit', padding: '8px 16px' }}>
+        <button onClick={logout} style={{ marginTop: 36, background: 'none', border: 'none', color: '#aeaeb2', fontSize: '.8rem', cursor: 'pointer', fontFamily: 'inherit', padding: '8px 20px', WebkitTapHighlightColor: 'transparent' }}>
           Сменить пользователя
         </button>
 
-        {/* Mise branding */}
-        <div style={{ position: 'absolute', bottom: 32, display: 'flex', alignItems: 'center', gap: 8, opacity: .4 }}>
+        <div style={{ position: 'absolute', bottom: 32, display: 'flex', alignItems: 'center', gap: 8, opacity: .35 }}>
           <LogoMark size={18} />
           <span style={{ fontSize: '.75rem', fontWeight: 700, color: '#1c1c1e', letterSpacing: '-.01em' }}>mise</span>
         </div>
@@ -310,5 +329,6 @@ const S: Record<string, any> = {
     fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif',
     WebkitFontSmoothing: 'antialiased',
     position: 'relative',
+    userSelect: 'none',
   }
 }

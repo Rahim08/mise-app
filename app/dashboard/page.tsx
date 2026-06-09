@@ -2,6 +2,7 @@
 // @ts-nocheck
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import { QRCodeSVG as QRCode } from 'qrcode.react'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -151,64 +152,6 @@ function SectionTitle({ title, sub }: { title: string; sub?: string }) {
       <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1c1c1e', marginBottom: 2 }}>{title}</div>
       {sub && <div style={{ color: '#6d6d72', fontSize: '.83rem' }}>{sub}</div>}
     </div>
-  )
-}
-
-// ── QR CODE (pure SVG, no library) ────────────────────────────────────────────
-
-function QRCodeSVG({ value, size = 160 }: { value: string; size?: number }) {
-  // Simple visual placeholder QR — real implementation uses qrcode.react
-  // We render a deterministic pattern based on the value
-  const cells = 21
-  const cell = size / cells
-  
-  // Hash the value to get a seed
-  let hash = 0
-  for (let i = 0; i < value.length; i++) {
-    hash = ((hash << 5) - hash) + value.charCodeAt(i)
-    hash |= 0
-  }
-  
-  const rects: any[] = []
-  
-  // Finder patterns (top-left, top-right, bottom-left)
-  const drawFinder = (ox: number, oy: number) => {
-    // Outer
-    for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++) {
-      if (r === 0 || r === 6 || c === 0 || c === 6)
-        rects.push(<rect key={`f${ox}${oy}${r}${c}`} x={(ox+c)*cell} y={(oy+r)*cell} width={cell} height={cell} fill="#1c1c1e"/>)
-    }
-    // Inner
-    for (let r = 2; r <= 4; r++) for (let c = 2; c <= 4; c++)
-      rects.push(<rect key={`fi${ox}${oy}${r}${c}`} x={(ox+c)*cell} y={(oy+r)*cell} width={cell} height={cell} fill="#1c1c1e"/>)
-    // White ring
-    for (let r = 1; r <= 5; r++) for (let c = 1; c <= 5; c++) {
-      if (r === 1 || r === 5 || c === 1 || c === 5)
-        rects.push(<rect key={`fw${ox}${oy}${r}${c}`} x={(ox+c)*cell} y={(oy+r)*cell} width={cell} height={cell} fill="white"/>)
-    }
-  }
-  
-  drawFinder(0, 0)
-  drawFinder(14, 0)
-  drawFinder(0, 14)
-  
-  // Data area (pseudo-random based on hash)
-  let seed = Math.abs(hash)
-  const lcg = () => { seed = (seed * 1664525 + 1013904223) & 0xffffffff; return (seed >>> 0) / 0xffffffff }
-  
-  for (let r = 0; r < cells; r++) {
-    for (let c = 0; c < cells; c++) {
-      // Skip finder areas
-      if ((r < 8 && c < 8) || (r < 8 && c > 12) || (r > 12 && c < 8)) continue
-      if (lcg() > 0.5) rects.push(<rect key={`d${r}${c}`} x={c*cell} y={r*cell} width={cell} height={cell} fill="#1c1c1e"/>)
-    }
-  }
-  
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: 'block' }}>
-      <rect width={size} height={size} fill="white"/>
-      {rects}
-    </svg>
   )
 }
 
@@ -555,12 +498,23 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
         {showQR && (
           <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(0,122,255,.1)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
             <div style={{ background: '#fff', borderRadius: 16, padding: 16, boxShadow: '0 2px 12px rgba(0,0,0,.08)' }}>
-              <QRCodeSVG value={qrUrl} size={160} />
+              <QRCode value={qrUrl} size={160} />
             </div>
             <div style={{ fontSize: '.75rem', color: '#aeaeb2', textAlign: 'center', maxWidth: 260, lineHeight: 1.5 }}>
               {qrUrl}
             </div>
-            <button onClick={() => navigator.clipboard?.writeText(qrUrl)} style={{ background: '#f2f2f7', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#007aff', cursor: 'pointer', fontFamily: 'inherit' }}>
+            <button onClick={() => {
+              if (navigator.clipboard) {
+                navigator.clipboard.writeText(qrUrl)
+              } else {
+                const el = document.createElement('textarea')
+                el.value = qrUrl
+                document.body.appendChild(el)
+                el.select()
+                document.execCommand('copy')
+                document.body.removeChild(el)
+              }
+            }} style={{ background: '#f2f2f7', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#007aff', cursor: 'pointer', fontFamily: 'inherit' }}>
               Скопировать ссылку
             </button>
           </div>
@@ -922,7 +876,11 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [showSplash, setShowSplash] = useState(true)
+  const [showSplash, setShowSplash] = useState(() => {
+    if (typeof window === 'undefined') return false
+    const shown = sessionStorage.getItem('mise_splash_shown')
+    return !shown
+  })
   const [user, setUser] = useState<any>(null)
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null)
   const [tab, setTab] = useState('apps')
@@ -954,7 +912,7 @@ export default function Dashboard() {
 
   return (
     <>
-      {showSplash && <SplashScreen onDone={() => setShowSplash(false)} />}
+      {showSplash && <SplashScreen onDone={() => { sessionStorage.setItem('mise_splash_shown', '1'); setShowSplash(false) }} />}
 
       <div style={{ minHeight: '100vh', background: '#f2f2f7', fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif', WebkitFontSmoothing: 'antialiased' }}>
         {/* NAV */}
