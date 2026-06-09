@@ -44,8 +44,8 @@ export async function POST(req: NextRequest) {
         trial_period_days: 7,
         metadata: { restaurantId, plan },
       },
-      success_url: "https://mise-app-omega.vercel.app/dashboard?tab=billing&success=1",
-      cancel_url: "https://mise-app-omega.vercel.app/dashboard?tab=billing",
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?tab=billing&success=1`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?tab=billing`,
     })
 
     return NextResponse.json({ url: session.url })
