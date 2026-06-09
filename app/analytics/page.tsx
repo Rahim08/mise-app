@@ -2,6 +2,8 @@
 export const dynamic = 'force-dynamic'
 import React, { useEffect, useState, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import { Chart, registerables } from 'chart.js'
+Chart.register(...registerables)
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,6 +16,13 @@ function dd(s: string) { return s.slice(8,10)+'.'+s.slice(5,7) }
 const MRU = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь']
 const DOW = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб']
 const COLORS = ['#007aff','#ff3b30','#34c759','#ff9500','#af52de','#00c7be','#ff6b35','#5856d6']
+
+const SUGGESTED = [
+  'Как идёт этот месяц?',
+  'Где больше всего трат?',
+  'Сравни с прошлым месяцем',
+  'Хватит ли на зарплаты?',
+]
 
 interface StatProps { label: string; val: string; color?: string; sub?: string; sm?: boolean; pct?: number|null; surface: string; text: string; t3: string; t4: string; sh: string }
 function Stat({ label, val, color, sub, sm, pct, surface, text, t3, t4, sh }: StatProps) {
@@ -52,7 +61,7 @@ function Prog({ name, val, max, color, currency, text, b2, s2 }: ProgProps) {
         <span style={{ fontSize:15, fontWeight:600, color:text }}>{currency}{fv(val)}</span>
       </div>
       <div style={{ height:4, background:s2, borderRadius:2, overflow:'hidden' }}>
-        <div style={{ height:'100%', width:`${Math.min(val/max*100,100).toFixed(1)}%`, background:color, borderRadius:2 }} />
+        <div style={{ height:'100%', width:`${Math.min(val/max*100,100).toFixed(1)}%`, background:color, borderRadius:2, transition:'width .8s cubic-bezier(.16,1,.3,1)' }} />
       </div>
     </div>
   )
@@ -67,131 +76,92 @@ function TableHeader({ cols, isDark, t4 }: TableHeaderProps) {
   )
 }
 
-// Chart component using Canvas
-function DonutChart({ data, colors, size=120 }: { data: number[]; colors: string[]; size?: number }) {
+// Chart.js Donut
+function DonutChart({ data, colors, labels, isDark }: { data: number[]; colors: string[]; labels: string[]; isDark: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null)
+  const chartRef = useRef<Chart|null>(null)
   useEffect(() => {
-    const canvas = ref.current; if (!canvas) return
-    const ctx = canvas.getContext('2d'); if (!ctx) return
-    const total = data.reduce((a,b)=>a+b,0); if (!total) return
-    const cx = size/2, cy = size/2, r = size/2 - 8, ir = r * 0.68
-    ctx.clearRect(0,0,size,size)
-    let start = -Math.PI/2
-    data.forEach((v,i) => {
-      const angle = (v/total) * Math.PI * 2
-      ctx.beginPath(); ctx.moveTo(cx,cy)
-      ctx.arc(cx,cy,r,start,start+angle)
-      ctx.closePath(); ctx.fillStyle = colors[i]; ctx.fill()
-      start += angle
-    })
-    ctx.beginPath(); ctx.arc(cx,cy,ir,0,Math.PI*2)
-    ctx.fillStyle = 'transparent'; ctx.globalCompositeOperation = 'destination-out'
-    ctx.fill(); ctx.globalCompositeOperation = 'source-over'
-  }, [data, colors, size])
-  return <canvas ref={ref} width={size} height={size} />
-}
-
-function LineChart({ labels, values, color, isDark }: { labels: string[]; values: number[]; color: string; isDark: boolean }) {
-  const ref = useRef<HTMLCanvasElement>(null)
-  useEffect(() => {
-    const canvas = ref.current; if (!canvas) return
-    const ctx = canvas.getContext('2d'); if (!ctx) return
-    const W = canvas.width, H = canvas.height
-    const pad = { t:10, r:12, b:28, l:44 }
-    const cW = W - pad.l - pad.r, cH = H - pad.t - pad.b
-    ctx.clearRect(0,0,W,H)
-    if (!values.length) return
-    const minV = 0, maxV = Math.max(...values) * 1.15 || 1
-    const x = (i: number) => pad.l + (i / (values.length-1||1)) * cW
-    const y = (v: number) => pad.t + cH - ((v - minV)/(maxV - minV)) * cH
-    const gridColor = isDark ? 'rgba(255,255,255,.06)' : 'rgba(60,60,67,.05)'
-    const tickColor = '#aeaeb2'
-    // Grid lines
-    for (let i=0; i<=4; i++) {
-      const yy = pad.t + (i/4)*cH
-      ctx.beginPath(); ctx.strokeStyle = gridColor; ctx.lineWidth = 1
-      ctx.moveTo(pad.l, yy); ctx.lineTo(pad.l+cW, yy); ctx.stroke()
-      const val = maxV - (i/4)*(maxV-minV)
-      ctx.fillStyle = tickColor; ctx.font = '9px -apple-system,sans-serif'
-      ctx.textAlign = 'right'; ctx.fillText('€'+Math.round(val), pad.l-4, yy+3)
-    }
-    // X labels
-    const step = Math.ceil(labels.length/8)
-    labels.forEach((l,i) => {
-      if (i%step!==0) return
-      ctx.fillStyle = tickColor; ctx.font = '9px -apple-system,sans-serif'
-      ctx.textAlign = 'center'; ctx.fillText(l, x(i), H-8)
-    })
-    // Fill gradient
-    const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t+cH)
-    grad.addColorStop(0, color.replace(')', ',.12)').replace('rgb','rgba').replace('#007aff','rgba(0,122,255,.12)').replace('#ff9500','rgba(255,149,0,.1)'))
-    grad.addColorStop(1, 'transparent')
-    ctx.beginPath()
-    values.forEach((v,i) => { i===0 ? ctx.moveTo(x(i),y(v)) : ctx.lineTo(x(i),y(v)) })
-    ctx.lineTo(x(values.length-1), pad.t+cH); ctx.lineTo(x(0), pad.t+cH); ctx.closePath()
-    ctx.fillStyle = grad; ctx.fill()
-    // Line
-    ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round'
-    values.forEach((v,i) => { i===0 ? ctx.moveTo(x(i),y(v)) : ctx.lineTo(x(i),y(v)) })
-    ctx.stroke()
-    // Dots
-    values.forEach((v,i) => {
-      ctx.beginPath(); ctx.arc(x(i),y(v),3,0,Math.PI*2)
-      ctx.fillStyle = color; ctx.fill()
-    })
-  }, [labels, values, color, isDark])
-  return <canvas ref={ref} width={340} height={140} style={{ width:'100%', maxHeight:140 }} />
-}
-
-function BarChart({ labels, income, expense, isDark }: { labels: string[]; income: number[]; expense: number[]; isDark: boolean }) {
-  const ref = useRef<HTMLCanvasElement>(null)
-  useEffect(() => {
-    const canvas = ref.current; if (!canvas) return
-    const ctx = canvas.getContext('2d'); if (!ctx) return
-    const W = canvas.width, H = canvas.height
-    const pad = { t:10, r:12, b:28, l:44 }
-    const cW = W - pad.l - pad.r, cH = H - pad.t - pad.b
-    ctx.clearRect(0,0,W,H)
-    if (!income.length) return
-    const maxV = Math.max(...income, ...expense) * 1.15 || 1
-    const gridColor = isDark ? 'rgba(255,255,255,.06)' : 'rgba(60,60,67,.05)'
-    const tickColor = '#aeaeb2'
-    // Grid
-    for (let i=0; i<=4; i++) {
-      const yy = pad.t + (i/4)*cH
-      ctx.beginPath(); ctx.strokeStyle = gridColor; ctx.lineWidth = 1
-      ctx.moveTo(pad.l,yy); ctx.lineTo(pad.l+cW,yy); ctx.stroke()
-      const val = maxV*(1-i/4)
-      ctx.fillStyle = tickColor; ctx.font = '9px -apple-system,sans-serif'
-      ctx.textAlign = 'right'; ctx.fillText('€'+Math.round(val), pad.l-4, yy+3)
-    }
-    const n = income.length, bW = (cW/n)*0.35, gap = (cW/n)
-    const step = Math.ceil(labels.length/8)
-    income.forEach((v,i) => {
-      const cx = pad.l + i*gap + gap/2
-      const h1 = (v/maxV)*cH, h2 = (expense[i]/maxV)*cH
-      ctx.beginPath(); ctx.roundRect(cx-bW-1, pad.t+cH-h1, bW, h1, 3)
-      ctx.fillStyle = 'rgba(52,199,89,.75)'; ctx.fill()
-      ctx.beginPath(); ctx.roundRect(cx+1, pad.t+cH-h2, bW, h2, 3)
-      ctx.fillStyle = 'rgba(255,59,48,.65)'; ctx.fill()
-      if (i%step===0) {
-        ctx.fillStyle = tickColor; ctx.font = '9px -apple-system,sans-serif'
-        ctx.textAlign = 'center'; ctx.fillText(labels[i], cx, H-8)
+    if (!ref.current || !data.length) return
+    if (chartRef.current) chartRef.current.destroy()
+    chartRef.current = new Chart(ref.current, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0, hoverOffset: 6 }] },
+      options: {
+        responsive: false, cutout: '68%', animation: { animateRotate: true, duration: 800 },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${c.label}: ${fv(c.raw as number)}` } } }
       }
     })
-    // Legend
-    ctx.fillStyle = 'rgba(52,199,89,.75)'; ctx.fillRect(pad.l, 2, 10, 7)
-    ctx.fillStyle = tickColor; ctx.font = '10px -apple-system,sans-serif'; ctx.textAlign = 'left'
-    ctx.fillText('Доход', pad.l+13, 9)
-    ctx.fillStyle = 'rgba(255,59,48,.65)'; ctx.fillRect(pad.l+65, 2, 10, 7)
-    ctx.fillText('Расход', pad.l+78, 9)
+    return () => { chartRef.current?.destroy() }
+  }, [data, colors])
+  return <canvas ref={ref} width={110} height={110} />
+}
+
+// Chart.js Line
+function LineChart({ labels, values, color, isDark, currency }: { labels: string[]; values: number[]; color: string; isDark: boolean; currency: string }) {
+  const ref = useRef<HTMLCanvasElement>(null)
+  const chartRef = useRef<Chart|null>(null)
+  const gridColor = isDark ? 'rgba(255,255,255,.06)' : 'rgba(60,60,67,.06)'
+  const tickColor = '#aeaeb2'
+  useEffect(() => {
+    if (!ref.current || !values.length) return
+    if (chartRef.current) chartRef.current.destroy()
+    const gradient = ref.current.getContext('2d')?.createLinearGradient(0,0,0,140)
+    gradient?.addColorStop(0, color + '30')
+    gradient?.addColorStop(1, color + '00')
+    chartRef.current = new Chart(ref.current, {
+      type: 'line',
+      data: { labels, datasets: [{ data: values, borderColor: color, backgroundColor: gradient, borderWidth: 2, pointRadius: 3, pointBackgroundColor: color, fill: true, tension: 0.4 }] },
+      options: {
+        responsive: true, animation: { duration: 800 },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${currency}${fv(c.raw as number)}` } } },
+        scales: {
+          x: { ticks: { color: tickColor, font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: gridColor } },
+          y: { min: 0, ticks: { color: tickColor, font: { size: 9 }, callback: (v) => currency + Math.round(v as number) }, grid: { color: gridColor } }
+        }
+      }
+    })
+    return () => { chartRef.current?.destroy() }
+  }, [labels, values, color, isDark])
+  return <canvas ref={ref} style={{ width:'100%', maxHeight:140 }} />
+}
+
+// Chart.js Bar
+function BarChart({ labels, income, expense, isDark, currency }: { labels: string[]; income: number[]; expense: number[]; isDark: boolean; currency: string }) {
+  const ref = useRef<HTMLCanvasElement>(null)
+  const chartRef = useRef<Chart|null>(null)
+  const gridColor = isDark ? 'rgba(255,255,255,.06)' : 'rgba(60,60,67,.06)'
+  const tickColor = '#aeaeb2'
+  useEffect(() => {
+    if (!ref.current || !income.length) return
+    if (chartRef.current) chartRef.current.destroy()
+    chartRef.current = new Chart(ref.current, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Доход', data: income, backgroundColor: 'rgba(52,199,89,.75)', borderRadius: 4 },
+          { label: 'Расход', data: expense, backgroundColor: 'rgba(255,59,48,.65)', borderRadius: 4 }
+        ]
+      },
+      options: {
+        responsive: true, animation: { duration: 800 },
+        plugins: { legend: { labels: { color: tickColor, font: { size: 11 }, boxWidth: 10 } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${currency}${fv(c.raw as number)}` } } },
+        scales: {
+          x: { ticks: { color: tickColor, font: { size: 9 }, maxTicksLimit: 8 }, grid: { display: false } },
+          y: { ticks: { color: tickColor, font: { size: 9 }, callback: (v) => currency + Math.round(v as number) }, grid: { color: gridColor } }
+        }
+      }
+    })
+    return () => { chartRef.current?.destroy() }
   }, [labels, income, expense, isDark])
-  return <canvas ref={ref} width={340} height={130} style={{ width:'100%', maxHeight:130 }} />
+  return <canvas ref={ref} style={{ width:'100%', maxHeight:130 }} />
 }
 
 export default function AnalyticsApp() {
   const [user, setUser] = useState<any>(null)
   const [restaurantId, setRestaurantId] = useState('')
+  const [restaurantName, setRestaurantName] = useState('')
+  const [logoUrl, setLogoUrl] = useState('')
   const [currency, setCurrency] = useState('€')
   const [tab, setTab] = useState<'period'|'kassa'|'sales'|'salary'|'hookah'>('period')
   const [periodMode, setPeriodMode] = useState<'day'|'week'|'month'>('day')
@@ -199,7 +169,9 @@ export default function AnalyticsApp() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [shifts, setShifts] = useState<any[]>([])
   const [prevShifts, setPrevShifts] = useState<any[]>([])
+  const [allShifts, setAllShifts] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
+  const [allExpenses, setAllExpenses] = useState<any[]>([])
   const [inkassations, setInkassations] = useState<any[]>([])
   const [employees, setEmployees] = useState<any[]>([])
   const [cardAmounts, setCardAmounts] = useState<any[]>([])
@@ -209,23 +181,35 @@ export default function AnalyticsApp() {
   const [mounted, setMounted] = useState(false)
   const [showMonthPicker, setShowMonthPicker] = useState(false)
   const [showAI, setShowAI] = useState(false)
-  const [geminiKey, setGeminiKey] = useState('')
   const [chatMsgs, setChatMsgs] = useState<{role:string;text:string}[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
+  const chatEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setMounted(true)
-    setIsDark(localStorage.getItem('so_ana_dark') === '1')
+    const dark = localStorage.getItem('mise_ana_dark') === '1'
+    setIsDark(dark)
+    const saved = localStorage.getItem('mise_chat')
+    if (saved) { try { setChatMsgs(JSON.parse(saved)) } catch {} }
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) { window.location.href = '/auth/login'; return }
       setUser(data.user)
       const { data: profile } = await supabase.from('profiles').select('restaurant_id').eq('id', data.user.id).single()
       if (!profile) return
       setRestaurantId(profile.restaurant_id)
+      // Load restaurant info
+      const { data: rest } = await supabase.from('restaurants').select('name,logo_url,currency').eq('id', profile.restaurant_id).single()
+      if (rest) { setRestaurantName(rest.name||''); setLogoUrl(rest.logo_url||''); if (rest.currency) setCurrency(rest.currency) }
       await loadAll(profile.restaurant_id, new Date())
+      await loadAllHistory(profile.restaurant_id)
     })
   }, [])
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (chatMsgs.length) localStorage.setItem('mise_chat', JSON.stringify(chatMsgs.slice(-30)))
+  }, [chatMsgs])
 
   const loadAll = async (rid: string, date: Date) => {
     setLoading(true)
@@ -233,18 +217,16 @@ export default function AnalyticsApp() {
     const monthEnd = fmtDate(new Date(date.getFullYear(), date.getMonth()+1, 0))
     const prevStart = fmtDate(new Date(date.getFullYear(), date.getMonth()-1, 1))
     const prevEnd = fmtDate(new Date(date.getFullYear(), date.getMonth(), 0))
-    const [s1, s2, s3, s4, s5, s6] = await Promise.all([
+    const [s1, s2, s3, s4, s5] = await Promise.all([
       supabase.from('shifts').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd).order('date'),
       supabase.from('shifts').select('*').eq('restaurant_id', rid).gte('date', prevStart).lte('date', prevEnd).order('date'),
-      supabase.from('restaurant_settings').select('currency,gemini_api_key').eq('restaurant_id', rid).maybeSingle(),
       supabase.from('employees').select('*').eq('restaurant_id', rid).eq('is_active', true).order('name'),
       supabase.from('monthly_card_amounts').select('*').eq('restaurant_id', rid).eq('month', fmtDate(date).slice(0,7)),
       supabase.from('shift_absences').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd)
     ])
     const shiftList = s1.data || []
     setShifts(shiftList); setPrevShifts(s2.data || [])
-    if (s3.data) { setCurrency(s3.data.currency || '€'); setGeminiKey(s3.data.gemini_api_key || '') }
-    setEmployees(s4.data || []); setCardAmounts(s5.data || []); setAbsences(s6.data || [])
+    setEmployees(s3.data || []); setCardAmounts(s4.data || []); setAbsences(s5.data || [])
     if (shiftList.length > 0) {
       const ids = shiftList.map((s:any) => s.id)
       const [e1, e2] = await Promise.all([
@@ -256,9 +238,20 @@ export default function AnalyticsApp() {
     setLoading(false)
   }
 
+  const loadAllHistory = async (rid: string) => {
+    const yearStart = fmtDate(new Date(new Date().getFullYear()-1, 0, 1))
+    const { data: sh } = await supabase.from('shifts').select('*').eq('restaurant_id', rid).gte('date', yearStart).order('date')
+    setAllShifts(sh || [])
+    if (sh && sh.length > 0) {
+      const ids = sh.map((s:any) => s.id)
+      const { data: ex } = await supabase.from('shift_expenses').select('*').in('shift_id', ids)
+      setAllExpenses(ex || [])
+    }
+  }
+
   const toggleDark = () => {
     const d = !isDark; setIsDark(d)
-    if (typeof window !== 'undefined') localStorage.setItem('so_ana_dark', d ? '1' : '0')
+    localStorage.setItem('mise_ana_dark', d ? '1' : '0')
   }
 
   const totalIncome = shifts.reduce((s:number,sh:any)=>s+(sh.income||0),0)
@@ -281,16 +274,40 @@ export default function AnalyticsApp() {
   const hbg = mounted && isDark ? 'rgba(28,28,30,.96)' : 'rgba(242,242,247,.95)'
   const nbg = mounted && isDark ? 'rgba(28,28,30,.97)' : 'rgba(248,248,252,.97)'
 
-  const sendAI = async () => {
-    if (!chatInput.trim() || !geminiKey) return
-    const msg = chatInput.trim(); setChatInput('')
-    setChatMsgs(p=>[...p,{role:'user',text:msg}]); setChatLoading(true)
-    const ctx = `Ты AI-ассистент ресторана. ${MRU[currentDate.getMonth()]} ${currentDate.getFullYear()}: доход ${currency}${fv(totalIncome)}, расходы ${currency}${fv(totalExpense)}, касса ${currency}${fv(lastShift?.closing_balance||0)}. Отвечай кратко на русском.`
+  // Build AI context from all history
+  const buildContext = () => {
+    const catMap: Record<string,number> = {}
+    allExpenses.filter((e:any)=>!e.employee_id).forEach((e:any)=>{catMap[e.category_name]=(catMap[e.category_name]||0)+e.amount})
+    const topCats = Object.entries(catMap).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([n,v])=>`${n}: ${currency}${fv(v)}`).join(', ')
+    const totalAllIncome = allShifts.reduce((s:number,sh:any)=>s+(sh.income||0),0)
+    const totalAllExpense = allShifts.reduce((s:number,sh:any)=>s+(sh.total_expense||0),0)
+    return `Ты AI-ассистент ресторана "${restaurantName}". 
+Текущий месяц (${MRU[currentDate.getMonth()]} ${currentDate.getFullYear()}): доход ${currency}${fv(totalIncome)}, расходы ${currency}${fv(totalExpense)}, касса ${currency}${fv(lastShift?.closing_balance||0)}, инкассация ${currency}${fv(totalInkass)}, смен ${shifts.length}.
+Прошлый месяц: доход ${currency}${fv(prevIncome)}, расходы ${currency}${fv(prevExpense)}.
+За последний год: общий доход ${currency}${fv(totalAllIncome)}, общие расходы ${currency}${fv(totalAllExpense)}, смен ${allShifts.length}.
+Топ расходов за всё время: ${topCats}.
+Сотрудников: ${employees.length}, ФОТ: ${currency}${fv(employees.reduce((s:number,e:any)=>s+e.salary,0))}.
+Отвечай кратко и по делу на русском.`
+  }
+
+  const sendAI = async (msg?: string) => {
+    const input = msg || chatInput.trim()
+    if (!input) return
+    setChatInput('')
+    const userMsg = { role:'user', text:input }
+    setChatMsgs(p=>[...p, userMsg])
+    setChatLoading(true)
     try {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:ctx+'\nВопрос: '+msg}]}]})})
+      const r = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [...chatMsgs, userMsg], context: buildContext() })
+      })
       const d = await r.json()
-      setChatMsgs(p=>[...p,{role:'ai',text:d.candidates?.[0]?.content?.parts?.[0]?.text||'Нет ответа'}])
-    } catch { setChatMsgs(p=>[...p,{role:'ai',text:'Ошибка'}]) }
+      setChatMsgs(p=>[...p, { role:'ai', text: d.text || 'Нет ответа' }])
+    } catch {
+      setChatMsgs(p=>[...p, { role:'ai', text:'Ошибка соединения' }])
+    }
     setChatLoading(false)
   }
 
@@ -364,7 +381,7 @@ export default function AnalyticsApp() {
             <Stat label="Итог за неделю" val={`${currency}${fv(wi)}`} color="#34c759" pct={ip} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
             <Stat label="Расходы" val={`${currency}${fv(we)}`} color="#ff3b30" pct={ep} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
           </div>
-          {ws.length>1&&<><Sec t3={t3}>Доходы и расходы</Sec><Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><BarChart labels={chartLabels} income={incArr} expense={expArr} isDark={isDark} /></div></Card></>}
+          {ws.length>1&&<><Sec t3={t3}>Доходы и расходы</Sec><Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><BarChart labels={chartLabels} income={incArr} expense={expArr} isDark={isDark} currency={currency} /></div></Card></>}
           {cats.length>0&&<><Sec t3={t3}>Структура расходов</Sec><Card surface={surface} sh={sh}>{cats.map(([n,v],i)=><Prog key={n} name={n} val={v} max={maxV} color={COLORS[i%COLORS.length]} currency={currency} text={text} b2={b2} s2={s2} />)}</Card></>}
           <Sec t3={t3}>По дням</Sec>
           <Card surface={surface} sh={sh}>
@@ -383,13 +400,16 @@ export default function AnalyticsApp() {
       )
     }
 
-    // Month view
     const cats = getCatMap(expenses)
     const top5 = cats.slice(0,5)
     const maxV = cats[0]?.[1]||1
     const ip = pct(totalIncome, prevIncome); const ep = pct(totalExpense, prevExpense)
     const donutData = top5.map(([,v])=>v)
     const donutColors = COLORS.slice(0,top5.length)
+    const donutLabels = top5.map(([n])=>n)
+    const chartLabels = shifts.map((s:any)=>dd(s.date))
+    const incArr = shifts.map((s:any)=>s.income||0)
+    const expArr = shifts.map((s:any)=>s.total_expense||0)
     return (
       <div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
@@ -401,11 +421,12 @@ export default function AnalyticsApp() {
           <Stat label="Инкасс" val={`${currency}${fv(totalInkass)}`} color="#ff9500" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
           <Stat label="Касса" val={`${currency}${fv(lastShift?.closing_balance||0)}`} color="#007aff" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
         </div>
+        {shifts.length>1&&<><Sec t3={t3}>Динамика доходов и расходов</Sec><Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><BarChart labels={chartLabels} income={incArr} expense={expArr} isDark={isDark} currency={currency} /></div></Card></>}
         {top5.length>0&&<>
           <Sec t3={t3}>Структура расходов</Sec>
           <Card surface={surface} sh={sh}>
             <div style={{display:'flex',alignItems:'center',gap:16,padding:16}}>
-              <DonutChart data={donutData} colors={donutColors} size={110} />
+              <DonutChart data={donutData} colors={donutColors} labels={donutLabels} isDark={isDark} />
               <div style={{flex:1,display:'flex',flexDirection:'column' as const,gap:7}}>
                 {top5.map(([n,v],i)=>(
                   <div key={n} style={{display:'flex',alignItems:'center',gap:8}}>
@@ -445,9 +466,9 @@ export default function AnalyticsApp() {
           </div>
           {filled.length>1&&<>
             <Sec t3={t3}>Баланс кассы</Sec>
-            <Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><LineChart labels={chartLabels} values={balArr} color="#007aff" isDark={isDark} /></div></Card>
+            <Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><LineChart labels={chartLabels} values={balArr} color="#007aff" isDark={isDark} currency={currency} /></div></Card>
             <Sec t3={t3}>Доходы и расходы</Sec>
-            <Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><BarChart labels={chartLabels} income={incArr} expense={expArr} isDark={isDark} /></div></Card>
+            <Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><BarChart labels={chartLabels} income={incArr} expense={expArr} isDark={isDark} currency={currency} /></div></Card>
           </>}
           <Sec t3={t3}>По дням</Sec>
           <Card surface={surface} sh={sh}>
@@ -483,7 +504,7 @@ export default function AnalyticsApp() {
         </div>
         {inkassations.length>1&&<>
           <Sec t3={t3}>Динамика</Sec>
-          <Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><LineChart labels={inkLabels} values={inkTotals} color="#ff9500" isDark={isDark} /></div></Card>
+          <Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><LineChart labels={inkLabels} values={inkTotals} color="#ff9500" isDark={isDark} currency={currency} /></div></Card>
         </>}
         <Sec t3={t3}>История</Sec>
         <Card surface={surface} sh={sh}>
@@ -557,39 +578,30 @@ export default function AnalyticsApp() {
     { id:'kassa', label:'Касса', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3H8L2 7h20z"/></svg> },
     { id:'sales', label:'Продажи', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg> },
     { id:'salary', label:'Смены', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg> },
-    { id:'hookah', label:'Кальян', icon:(
-      <svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26">
-        <path d="M12 3c-1.1 0-2 .9-2 2h4c0-1.1-.9-2-2-2z"/>
-        <path d="M8 8c0-1.7 1.3-3 3-3h2c1.7 0 3 1.3 3 3v1H8V8z"/>
-        <rect x="7" y="9" width="10" height="2" rx="1"/>
-        <path d="M12 11v3"/>
-        <path d="M9 14c0 0-3 1-3 4h12c0-3-3-4-3-4"/>
-        <path d="M6 18c-.5.5-.5 1 0 1.5"/>
-        <path d="M18 18c.5.5.5 1 0 1.5"/>
-        <path d="M4 16c-1 2 0 4 2 4"/>
-        <path d="M20 16c1 2 0 4-2 4"/>
-      </svg>
-    )},
+    { id:'hookah', label:'Кальян', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><path d="M12 3c-1.1 0-2 .9-2 2h4c0-1.1-.9-2-2-2z"/><path d="M8 8c0-1.7 1.3-3 3-3h2c1.7 0 3 1.3 3 3v1H8V8z"/><rect x="7" y="9" width="10" height="2" rx="1"/><path d="M12 11v3"/><path d="M9 14c0 0-3 1-3 4h12c0-3-3-4-3-4"/><path d="M6 18c-.5.5-.5 1 0 1.5"/><path d="M18 18c.5.5.5 1 0 1.5"/><path d="M4 16c-1 2 0 4 2 4"/><path d="M20 16c1 2 0 4-2 4"/></svg>},
   ] as const
 
   return (
     <div style={{height:'100vh',overflow:'hidden',background:bg,fontFamily:"-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif",WebkitFontSmoothing:'antialiased'}}>
-      <style>{`
-        @keyframes spin{to{transform:rotate(360deg)}}
-        @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-        @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.15);opacity:.7}}
-        @keyframes orbit{from{transform:rotate(0deg) translateX(7px) rotate(0deg)}to{transform:rotate(360deg) translateX(7px) rotate(-360deg)}}
-      `}</style>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}} @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.15);opacity:.7}} @keyframes orbit{from{transform:rotate(0deg) translateX(7px) rotate(0deg)}to{transform:rotate(360deg) translateX(7px) rotate(-360deg)}}`}</style>
 
+      {/* Header */}
       <div style={{position:'fixed',top:0,left:0,right:0,zIndex:300,height:56,background:hbg,backdropFilter:'saturate(180%) blur(20px)',borderBottom:`1px solid ${border}`,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 16px'}}>
-        <div style={{fontWeight:700,fontSize:'1rem',color:text}}>SO Analytics</div>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          {logoUrl && <img src={logoUrl} alt="logo" style={{width:28,height:28,borderRadius:6,objectFit:'cover'}} />}
+          <div style={{fontWeight:700,fontSize:'1rem',color:text}}>{restaurantName||'Mise Analytics'}</div>
+        </div>
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
-          <button onClick={toggleDark} style={{width:36,height:36,borderRadius:'50%',background:s2,border:'none',fontSize:18,cursor:'pointer'}}>{isDark?'☀️':'🌙'}</button>
+          <button onClick={toggleDark} style={{width:36,height:36,borderRadius:'50%',background:s2,border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:text}}>
+            {isDark
+              ? <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+              : <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+            }
+          </button>
           <button onClick={()=>setShowMonthPicker(true)} style={{display:'flex',alignItems:'center',gap:5,background:'rgba(0,122,255,.1)',borderRadius:20,padding:'7px 14px',cursor:'pointer',fontSize:15,fontWeight:600,color:'#007aff',border:'none',fontFamily:'inherit'}}>
             {MRU[currentDate.getMonth()].slice(0,3)} {currentDate.getFullYear()}
             <span style={{display:'inline-block',width:8,height:8,borderRight:'2px solid #007aff',borderBottom:'2px solid #007aff',transform:'rotate(45deg)',marginTop:-3}}/>
           </button>
-          {/* AI button — animated rings */}
           <button onClick={()=>setShowAI(true)} style={{width:36,height:36,borderRadius:'50%',background:'rgba(0,122,255,.1)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',position:'relative' as const}}>
             <div style={{position:'relative' as const,width:20,height:20}}>
               <div style={{position:'absolute' as const,inset:0,borderRadius:'50%',border:'1.5px solid rgba(0,122,255,.5)',animation:'pulse 2s ease-in-out infinite'}}/>
@@ -600,6 +612,7 @@ export default function AnalyticsApp() {
         </div>
       </div>
 
+      {/* Content */}
       <div style={{position:'fixed',top:56,left:0,right:0,bottom:80,overflowY:'auto',background:bg}}>
         <div style={{padding:'16px 16px 28px',maxWidth:860,margin:'0 auto',animation:'fadeUp .22s ease'}}>
           {tab==='period'&&(
@@ -636,12 +649,13 @@ export default function AnalyticsApp() {
               {renderKassa()}
             </>
           )}
-          {tab==='sales'&&<div style={{padding:'60px 20px',textAlign:'center' as const,color:t4}}><div style={{fontSize:'3rem',marginBottom:16}}>🛒</div><div style={{fontWeight:700,fontSize:17,color:text,marginBottom:8}}>Продажи</div><div style={{fontSize:14}}>Скоро — статистика из Syrve</div></div>}
+          {tab==='sales'&&<div style={{padding:'60px 20px',textAlign:'center' as const,color:t4}}><svg style={{marginBottom:16,opacity:.3}} fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" width="48" height="48"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg><div style={{fontWeight:700,fontSize:17,color:text,marginBottom:8}}>Продажи</div><div style={{fontSize:14}}>Скоро — статистика из Syrve</div></div>}
           {tab==='salary'&&renderSalary()}
-          {tab==='hookah'&&<div style={{padding:'60px 20px',textAlign:'center' as const,color:t4}}><div style={{fontSize:'3rem',marginBottom:16}}>💨</div><div style={{fontWeight:700,fontSize:17,color:text,marginBottom:8}}>Кальян</div><div style={{fontSize:14}}>Скоро — аналитика из Syrve</div></div>}
+          {tab==='hookah'&&<div style={{padding:'60px 20px',textAlign:'center' as const,color:t4}}><svg style={{marginBottom:16,opacity:.3}} fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" width="48" height="48"><path d="M12 3c-1.1 0-2 .9-2 2h4c0-1.1-.9-2-2-2z"/><path d="M8 8c0-1.7 1.3-3 3-3h2c1.7 0 3 1.3 3 3v1H8V8z"/><rect x="7" y="9" width="10" height="2" rx="1"/><path d="M12 11v3"/><path d="M9 14c0 0-3 1-3 4h12c0-3-3-4-3-4"/></svg><div style={{fontWeight:700,fontSize:17,color:text,marginBottom:8}}>Кальян</div><div style={{fontSize:14}}>Скоро — аналитика из Syrve</div></div>}
         </div>
       </div>
 
+      {/* Bottom Nav */}
       <div style={{position:'fixed',bottom:0,left:0,right:0,zIndex:300,height:80,background:nbg,backdropFilter:'saturate(180%) blur(20px)',borderTop:`1px solid ${border}`,display:'flex',alignItems:'flex-start',paddingTop:10}}>
         {TABS.map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id as any)} style={{flex:1,display:'flex',flexDirection:'column' as const,alignItems:'center',gap:3,cursor:'pointer',color:tab===t.id?'#007aff':t4,border:'none',background:'none',fontFamily:'inherit',padding:0,fontSize:10,fontWeight:600,transition:'color .18s'}}>
@@ -651,6 +665,7 @@ export default function AnalyticsApp() {
         ))}
       </div>
 
+      {/* Month Picker */}
       {showMonthPicker&&(
         <div style={{position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,.4)',backdropFilter:'blur(4px)',display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={()=>setShowMonthPicker(false)}>
           <div style={{background:surface,borderRadius:'22px 22px 0 0',width:'100%',maxWidth:480,paddingBottom:32}} onClick={(e:any)=>e.stopPropagation()}>
@@ -668,28 +683,42 @@ export default function AnalyticsApp() {
         </div>
       )}
 
+      {/* AI Chat */}
       {showAI&&(
         <div style={{position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,.4)',backdropFilter:'blur(4px)',display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={()=>setShowAI(false)}>
-          <div style={{background:surface,borderRadius:'22px 22px 0 0',width:'100%',maxWidth:480,height:'80vh',display:'flex',flexDirection:'column' as const}} onClick={(e:any)=>e.stopPropagation()}>
+          <div style={{background:surface,borderRadius:'22px 22px 0 0',width:'100%',maxWidth:480,height:'82vh',display:'flex',flexDirection:'column' as const}} onClick={(e:any)=>e.stopPropagation()}>
             <div style={{width:36,height:4,background:s2,borderRadius:2,margin:'12px auto 0'}}/>
-            <div style={{fontSize:17,fontWeight:700,textAlign:'center' as const,padding:'13px 20px 0',color:text}}>AI Ассистент</div>
-            {!geminiKey?<div style={{flex:1,display:'flex',flexDirection:'column' as const,alignItems:'center',justifyContent:'center',padding:24,color:t3,textAlign:'center' as const}}><div style={{fontSize:'2.5rem',marginBottom:12}}>🔑</div><div style={{color:text,marginBottom:8}}>Добавьте Gemini API ключ</div><div style={{fontSize:13}}>Dashboard → Настройки → Gemini API Key</div></div>:(
-              <>
-                <div style={{flex:1,overflowY:'auto' as const,padding:'12px 16px',display:'flex',flexDirection:'column' as const,gap:10}}>
-                  {chatMsgs.length===0&&<div style={{textAlign:'center' as const,color:t4,padding:'20px 0'}}><div style={{fontSize:'1.5rem',marginBottom:8}}>💬</div><div style={{fontSize:14}}>Спросите о вашем бизнесе</div></div>}
-                  {chatMsgs.map((m,i)=>(
-                    <div key={i} style={{display:'flex',justifyContent:m.role==='user'?'flex-end':'flex-start'}}>
-                      <div style={{maxWidth:'80%',padding:'10px 14px',borderRadius:m.role==='user'?'16px 16px 4px 16px':'16px 16px 16px 4px',background:m.role==='user'?'#007aff':s2,color:m.role==='user'?'#fff':text,fontSize:14,lineHeight:1.5}}>{m.text}</div>
-                    </div>
-                  ))}
-                  {chatLoading&&<div style={{display:'flex',justifyContent:'flex-start'}}><div style={{padding:'10px 14px',borderRadius:'16px 16px 16px 4px',background:s2,color:t3,fontSize:14}}>Думаю...</div></div>}
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 20px 0'}}>
+              <div style={{fontSize:17,fontWeight:700,color:text}}>Mise AI</div>
+              <button onClick={()=>{setChatMsgs([]);localStorage.removeItem('mise_chat')}} style={{background:'none',border:'none',color:t4,fontSize:12,cursor:'pointer',fontFamily:'inherit'}}>Очистить</button>
+            </div>
+            <div style={{flex:1,overflowY:'auto' as const,padding:'12px 16px',display:'flex',flexDirection:'column' as const,gap:10}}>
+              {chatMsgs.length===0&&(
+                <div>
+                  <div style={{textAlign:'center' as const,color:t4,padding:'16px 0 20px'}}>
+                    <div style={{fontSize:13,marginBottom:14}}>Спросите о вашем бизнесе</div>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+                    {SUGGESTED.map(q=>(
+                      <button key={q} onClick={()=>sendAI(q)} style={{padding:'10px 12px',borderRadius:12,background:s2,border:'none',fontFamily:'inherit',fontSize:13,color:text,cursor:'pointer',textAlign:'left' as const,lineHeight:1.4}}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div style={{padding:'10px 16px 20px',display:'flex',gap:8}}>
-                  <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendAI()} placeholder="Спросите о бизнесе..." style={{flex:1,padding:'11px 14px',borderRadius:12,border:`1px solid ${border}`,fontSize:14,color:text,background:surface,fontFamily:'inherit',outline:'none'}}/>
-                  <button onClick={sendAI} disabled={chatLoading} style={{padding:'11px 18px',borderRadius:12,background:'#007aff',color:'#fff',border:'none',fontFamily:'inherit',fontSize:14,fontWeight:600,cursor:'pointer'}}>→</button>
+              )}
+              {chatMsgs.map((m,i)=>(
+                <div key={i} style={{display:'flex',justifyContent:m.role==='user'?'flex-end':'flex-start'}}>
+                  <div style={{maxWidth:'82%',padding:'10px 14px',borderRadius:m.role==='user'?'16px 16px 4px 16px':'16px 16px 16px 4px',background:m.role==='user'?'#007aff':s2,color:m.role==='user'?'#fff':text,fontSize:14,lineHeight:1.5}}>{m.text}</div>
                 </div>
-              </>
-            )}
+              ))}
+              {chatLoading&&<div style={{display:'flex',justifyContent:'flex-start'}}><div style={{padding:'10px 14px',borderRadius:'16px 16px 16px 4px',background:s2,color:t3,fontSize:14}}>Думаю...</div></div>}
+              <div ref={chatEndRef}/>
+            </div>
+            <div style={{padding:'10px 16px 20px',display:'flex',gap:8}}>
+              <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendAI()} placeholder="Спросите о бизнесе..." style={{flex:1,padding:'11px 14px',borderRadius:12,border:`1px solid ${border}`,fontSize:14,color:text,background:surface,fontFamily:'inherit',outline:'none'}}/>
+              <button onClick={()=>sendAI()} disabled={chatLoading||!chatInput.trim()} style={{padding:'11px 18px',borderRadius:12,background:'#007aff',color:'#fff',border:'none',fontFamily:'inherit',fontSize:14,fontWeight:600,cursor:'pointer',opacity:chatLoading||!chatInput.trim()?.5:1}}>→</button>
+            </div>
           </div>
         </div>
       )}
