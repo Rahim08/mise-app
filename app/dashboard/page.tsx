@@ -574,7 +574,7 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
       })
       const { url, error } = await res.json()
       if (error) { alert(error); return }
-      window.open(url, "_self")
+      window.location.assign(url)
     } finally {
       setLoading(false)
     }
