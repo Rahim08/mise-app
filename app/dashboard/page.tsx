@@ -162,7 +162,7 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
 // ── EMPLOYEES TAB ─────────────────────────────────────
 
 function EmployeesTab({ restaurantId }: { restaurantId: string }) {
-  const [employees, setEmployees] = useState<Employee[]>([])
+  const [employees, setEmployees] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -330,7 +330,7 @@ function CategoriesTab({ restaurantId }: { restaurantId: string }) {
 
 function TeamTab({ restaurantId }: { restaurantId: string }) {
   const [staff, setStaff] = useState<StaffMember[]>([])
-  const [employees, setEmployees] = useState<Employee[]>([])
+  const [employees, setEmployees] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: '', pin: '', apps: [] as string[] })
