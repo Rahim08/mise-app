@@ -190,7 +190,7 @@ function EmployeesTab({ restaurantId }: { restaurantId: string }) {
     await supabase.from('employees').update({ is_active: false }).eq('id', id); load()
   }
 
-  const startEdit = (emp: Employee) => {
+  const startEdit = (emp: any) => {
     setForm({ name: emp.name, salary: String(emp.salary), deduct_per_absence: String(emp.deduct_per_absence), card_amount: String(emp.card_amount) })
     setEditingId(emp.id); setShowForm(true)
   }
@@ -270,7 +270,7 @@ function EmployeesTab({ restaurantId }: { restaurantId: string }) {
 // ── CATEGORIES TAB ────────────────────────────────────
 
 function CategoriesTab({ restaurantId }: { restaurantId: string }) {
-  const [cats, setCats] = useState<Category[]>([])
+  const [cats, setCats] = useState<any[]>([])
   const [newName, setNewName] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -329,7 +329,7 @@ function CategoriesTab({ restaurantId }: { restaurantId: string }) {
 // ── TEAM TAB ──────────────────────────────────────────
 
 function TeamTab({ restaurantId }: { restaurantId: string }) {
-  const [staff, setStaff] = useState<StaffMember[]>([])
+  const [staff, setStaff] = useState<any[]>([])
   const [employees, setEmployees] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -375,7 +375,7 @@ function TeamTab({ restaurantId }: { restaurantId: string }) {
     await supabase.from('staff').update({ device_id: null }).eq('id', id); load()
   }
 
-  const startEdit = (s: StaffMember) => {
+  const startEdit = (s: any) => {
     setForm({ name: s.name, pin: '', apps: s.apps || [] })
     setEditingId(s.id); setShowForm(true)
   }
