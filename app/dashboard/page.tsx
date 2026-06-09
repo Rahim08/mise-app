@@ -574,7 +574,7 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
       })
       const { url, error } = await res.json()
       if (error) { alert(error); return }
-      window.location.assign(url)
+      if (url) { window.top.location.href = url } else { alert("Ошибка: нет URL") }
     } finally {
       setLoading(false)
     }
