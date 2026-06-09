@@ -1,89 +1,81 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!
-
-const PLAN_BY_PRICE: Record<string, string> = {
-  'price_1TgTbgQ50dEzENhL18edUbx7': 'starter',
-  'price_1TgTbyQ50dEzENhLp5BWqzIr': 'business',
-  'price_1TgTcJQ50dEzENhLsmEHWwvL': 'pro',
-}
-
 export async function POST(req: NextRequest) {
-  const body = await req.text()
-  const sig = req.headers.get('stripe-signature')!
-
-  let event: Stripe.Event
   try {
-    event = stripe.webhooks.constructEvent(body, sig, webhookSecret)
-  } catch (err: any) {
-    return NextResponse.json({ error: `Webhook error: ${err.message}` }, { status: 400 })
-  }
+    const body = await req.text()
+    const sig = req.headers.get('stripe-signature')!
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
+    const Stripe = (await import('stripe')).default
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
 
-  switch (event.type) {
-    case 'checkout.session.completed': {
-      const session = event.data.object as Stripe.Checkout.Session
-      const sub = await stripe.subscriptions.retrieve(session.subscription as string)
-      const restaurantId = sub.metadata?.restaurantId
-      const plan = sub.metadata?.plan
-      if (!restaurantId) break
+    let event: any
+    try {
+      event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET!)
+    } catch (err: any) {
+      return NextResponse.json({ error: `Webhook error: ${err.message}` }, { status: 400 })
+    }
 
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+
+    const obj = event.data.object as any
+
+    if (event.type === 'checkout.session.completed') {
+      const sub = await stripe.subscriptions.retrieve(obj.subscription)
+      const restaurantId = (sub as any).metadata?.restaurantId
+      const plan = (sub as any).metadata?.plan
+      if (!restaurantId) return NextResponse.json({ received: true })
+
+      const endsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
       await supabase.from('restaurants').update({
-        subscription_status: sub.status,
+        subscription_status: (sub as any).status,
         subscription_plan: plan,
         subscription_id: sub.id,
-        subscription_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        subscription_ends_at: endsAt,
       }).eq('id', restaurantId)
-      break
     }
 
-    case 'invoice.payment_succeeded': {
-      const invoice = event.data.object as Stripe.Invoice
-      const subId = invoice.subscription as string
-      if (!subId) break
-      const sub = await stripe.subscriptions.retrieve(subId)
+    if (event.type === 'invoice.payment_succeeded') {
+      const subId = obj.subscription
+      if (!subId) return NextResponse.json({ received: true })
+      const sub = await stripe.subscriptions.retrieve(subId) as any
       const restaurantId = sub.metadata?.restaurantId
-      if (!restaurantId) break
+      if (!restaurantId) return NextResponse.json({ received: true })
 
+      const endsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
       await supabase.from('restaurants').update({
         subscription_status: 'active',
-        subscription_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        subscription_ends_at: endsAt,
       }).eq('id', restaurantId)
-      break
     }
 
-    case 'invoice.payment_failed': {
-      const invoice = event.data.object as Stripe.Invoice
-      const subId = invoice.subscription as string
-      if (!subId) break
-      const sub = await stripe.subscriptions.retrieve(subId)
+    if (event.type === 'invoice.payment_failed') {
+      const subId = obj.subscription
+      if (!subId) return NextResponse.json({ received: true })
+      const sub = await stripe.subscriptions.retrieve(subId) as any
       const restaurantId = sub.metadata?.restaurantId
-      if (!restaurantId) break
+      if (!restaurantId) return NextResponse.json({ received: true })
 
       await supabase.from('restaurants').update({
         subscription_status: 'past_due',
       }).eq('id', restaurantId)
-      break
     }
 
-    case 'customer.subscription.deleted': {
-      const sub = event.data.object as Stripe.Subscription
-      const restaurantId = sub.metadata?.restaurantId
-      if (!restaurantId) break
+    if (event.type === 'customer.subscription.deleted') {
+      const restaurantId = obj.metadata?.restaurantId
+      if (!restaurantId) return NextResponse.json({ received: true })
 
       await supabase.from('restaurants').update({
         subscription_status: 'canceled',
       }).eq('id', restaurantId)
-      break
     }
-  }
 
-  return NextResponse.json({ received: true })
+    return NextResponse.json({ received: true })
+  } catch (err: any) {
+    console.error(err)
+    return NextResponse.json({ error: err.message }, { status: 500 })
+  }
 }
