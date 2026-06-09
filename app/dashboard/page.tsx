@@ -341,7 +341,7 @@ function TeamTab({ restaurantId }: { restaurantId: string }) {
     setLoading(true)
     const [{ data: staffData }, { data: empData }] = await Promise.all([
       supabase.from('staff').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name'),
-      supabase.from('employees').select('id,name').eq('restaurant_id', restaurantId).eq('is_active', true).order('name'),
+      supabase.from('employees').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name'),
     ])
     setStaff(staffData || [])
     setEmployees(empData || [])
