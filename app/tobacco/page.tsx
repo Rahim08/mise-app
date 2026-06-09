@@ -77,12 +77,21 @@ export default function StashApp() {
 
   useEffect(() => {
     setMounted(true)
+    const storedRestaurantId = localStorage.getItem('mise_restaurant_id')
     supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) { window.location.href = '/auth/login'; return }
-      const { data: profile } = await supabase.from('profiles').select('restaurant_id').eq('id', data.user.id).single()
-      if (!profile) return
-      setRestaurantId(profile.restaurant_id)
-      await loadAll(profile.restaurant_id)
+      let rid = ''
+      if (data.user) {
+        const { data: profile } = await supabase.from('profiles').select('restaurant_id').eq('id', data.user.id).single()
+        rid = profile?.restaurant_id || storedRestaurantId || ''
+      } else if (storedRestaurantId) {
+        rid = storedRestaurantId
+      } else {
+        window.location.href = '/join?error=no_session'
+        return
+      }
+      if (!rid) { window.location.href = '/join?error=no_session'; return }
+      setRestaurantId(rid)
+      await loadAll(rid)
     })
   }, [])
 
