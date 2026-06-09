@@ -1,6 +1,6 @@
 'use client'
 // @ts-nocheck
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -8,48 +8,93 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-type Employee = { id: string; name: string; salary: number; deduct_per_absence: number; card_amount: number; is_active: boolean }
-type Category = { id: string; name: string }
-type Restaurant = { id: string; name: string; currency: string; subscription_status: string; subscription_plan: string; subscription_ends_at: string; stripe_customer_id?: string; subscription_id?: string }
-type StaffMember = { id: string; name: string; pin_hash: string; apps: string[]; device_id: string | null; is_active: boolean }
+type Restaurant = {
+  id: string; name: string; currency: string
+  subscription_status: string; subscription_plan: string
+  subscription_ends_at: string; stripe_customer_id?: string
+  logo_url?: string; owner_pin?: string
+}
 
 const APPS = [
-  { id: 'manager',   name: 'Mise Manager',   desc: 'Смены · Расходы · Инкассации · Явка', color: '#007aff', hint: 'Для менеджеров',  path: '/manager',   plans: ['starter','business','pro'] },
-  { id: 'analytics', name: 'Mise Analytics', desc: 'Финансы · Зарплаты · Инкассации · AI', color: '#34c759', hint: 'Для владельца',   path: '/analytics', plans: ['starter','business','pro'] },
-  { id: 'stash',     name: 'Mise Stash',     desc: 'Склад · Приход · Расход · Инвентаризация', color: '#ff9500', hint: 'Для кальянщика', path: '/tobacco',   plans: ['business','pro'] },
+  { id: 'manager',   name: 'Mise Manager',   desc: 'Смены · Расходы · Инкассации · Явка',         color: '#007aff', hint: 'Для менеджеров',  path: '/manager',   plans: ['starter','business','pro'] },
+  { id: 'analytics', name: 'Mise Analytics', desc: 'Финансы · Зарплаты · Инкассации · AI',         color: '#34c759', hint: 'Для владельца',   path: '/analytics', plans: ['starter','business','pro'] },
+  { id: 'stash',     name: 'Mise Stash',     desc: 'Склад · Приход · Расход · Инвентаризация',     color: '#ff9500', hint: 'Для кальянщика',  path: '/tobacco',   plans: ['business','pro'] },
 ]
 
 const PLANS = [
-  {
-    id: 'starter', name: 'Starter', price: 14,
-    features: ['Mise Manager', 'Mise Analytics', 'До 2 сотрудников'],
-    color: '#007aff',
-  },
-  {
-    id: 'business', name: 'Business', price: 24,
-    features: ['Все 3 приложения', 'До 5 сотрудников', 'История 12 мес.'],
-    color: '#34c759',
-    popular: true,
-  },
-  {
-    id: 'pro', name: 'Pro', price: 39,
-    features: ['Все приложения', 'До 10 сотрудников', 'AI-аналитика', 'Интеграция Syrve', 'QR-меню'],
-    color: '#af52de',
-  },
+  { id: 'starter',  name: 'Starter',  price: 14, maxStaff: 2,  color: '#007aff', features: ['Mise Manager', 'Mise Analytics', 'До 2 пользователей'] },
+  { id: 'business', name: 'Business', price: 24, maxStaff: 5,  color: '#34c759', popular: true, features: ['Все 3 приложения', 'До 5 пользователей', 'История 12 мес.'] },
+  { id: 'pro',      name: 'Pro',      price: 39, maxStaff: 10, color: '#af52de', features: ['Все приложения', 'До 10 пользователей', 'AI-аналитика', 'Интеграция Syrve'] },
 ]
 
 const TABS = [
-  { id: 'apps',       label: 'Приложения' },
-  { id: 'employees',  label: 'Сотрудники' },
-  { id: 'categories', label: 'Категории' },
-  { id: 'team',       label: 'Доступы' },
-  { id: 'settings',   label: 'Настройки' },
-  { id: 'billing',    label: 'Подписка' },
+  { id: 'apps',       label: 'Приложения', icon: '⊞' },
+  { id: 'employees',  label: 'Сотрудники', icon: '👥' },
+  { id: 'categories', label: 'Категории',  icon: '📂' },
+  { id: 'team',       label: 'Доступы',    icon: '🔑' },
+  { id: 'settings',   label: 'Настройки',  icon: '⚙️' },
+  { id: 'billing',    label: 'Подписка',   icon: '💳' },
 ]
 
-// ── UI PRIMITIVES ──────────────────────────────────────
+// ── SPLASH SCREEN ─────────────────────────────────────────────────────────────
 
-function Card({ children, style = {} }: { children: any; style?: any }) {
+function SplashScreen({ onDone }: { onDone: () => void }) {
+  const [phase, setPhase] = useState<'fill' | 'hold' | 'out'>('fill')
+  const [bar1, setBar1] = useState(0)
+  const [bar2, setBar2] = useState(0)
+  const [bar3, setBar3] = useState(0)
+
+  useEffect(() => {
+    // Staggered bar fill
+    const t1 = setTimeout(() => setBar1(1), 100)
+    const t2 = setTimeout(() => setBar2(1), 300)
+    const t3 = setTimeout(() => setBar3(1), 500)
+    const t4 = setTimeout(() => setPhase('hold'), 1200)
+    const t5 = setTimeout(() => setPhase('out'), 1700)
+    const t6 = setTimeout(() => onDone(), 2200)
+    return () => [t1,t2,t3,t4,t5,t6].forEach(clearTimeout)
+  }, [])
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: '#f2f2f7',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      flexDirection: 'column', gap: 24,
+      transition: phase === 'out' ? 'opacity .45s ease, transform .45s ease' : 'none',
+      opacity: phase === 'out' ? 0 : 1,
+      transform: phase === 'out' ? 'scale(1.04)' : 'scale(1)',
+      pointerEvents: phase === 'out' ? 'none' : 'auto',
+    }}>
+      {/* Logo mark */}
+      <div style={{ position: 'relative' }}>
+        <svg width="80" height="80" viewBox="0 0 64 64" fill="none">
+          <rect width="64" height="64" rx="18" fill="#007aff"/>
+          {/* Bar 1 */}
+          <rect x="14" y="20" width="0" height="5" rx="2.5" fill="white"
+            style={{ width: bar1 ? 36 : 0, transition: 'width .4s cubic-bezier(.34,1.56,.64,1)' }}/>
+          {/* Bar 2 */}
+          <rect x="14" y="30" width="0" height="5" rx="2.5" fill="white" opacity=".7"
+            style={{ width: bar2 ? 26 : 0, transition: 'width .4s cubic-bezier(.34,1.56,.64,1)' }}/>
+          {/* Bar 3 */}
+          <rect x="14" y="40" width="0" height="5" rx="2.5" fill="white" opacity=".4"
+            style={{ width: bar3 ? 18 : 0, transition: 'width .4s cubic-bezier(.34,1.56,.64,1)' }}/>
+        </svg>
+      </div>
+      <div style={{
+        fontSize: '1.8rem', fontWeight: 800, color: '#1c1c1e',
+        letterSpacing: '-.04em', fontFamily: '-apple-system,sans-serif',
+        opacity: bar3 ? 1 : 0,
+        transform: bar3 ? 'translateY(0)' : 'translateY(6px)',
+        transition: 'opacity .35s ease, transform .35s ease',
+      }}>mise</div>
+    </div>
+  )
+}
+
+// ── UI PRIMITIVES ─────────────────────────────────────────────────────────────
+
+function Card({ children, style = {} }: any) {
   return (
     <div style={{ background: '#fff', borderRadius: 16, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.04)', ...style }}>
       {children}
@@ -66,8 +111,7 @@ function Btn({ children, onClick, variant = 'primary', small = false, disabled =
   }
   return (
     <button onClick={onClick} disabled={disabled} style={{
-      ...s[variant],
-      padding: small ? '6px 14px' : '10px 20px',
+      ...s[variant], padding: small ? '6px 14px' : '10px 20px',
       borderRadius: 980, fontFamily: 'inherit',
       fontSize: small ? '.78rem' : '.88rem', fontWeight: 600,
       cursor: disabled ? 'not-allowed' : 'pointer',
@@ -82,7 +126,7 @@ function Btn({ children, onClick, variant = 'primary', small = false, disabled =
 function Field({ label, value, onChange, placeholder, type = 'text', select, options }: any) {
   return (
     <div style={{ marginBottom: 12 }}>
-      {label && <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: '#6d6d72', marginBottom: 4, textTransform: 'uppercase' as const, letterSpacing: '.04em' }}>{label}</label>}
+      {label && <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: '#6d6d72', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</label>}
       {select ? (
         <select value={value} onChange={e => onChange(e.target.value)} style={inputStyle}>
           {options.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -94,7 +138,12 @@ function Field({ label, value, onChange, placeholder, type = 'text', select, opt
   )
 }
 
-const inputStyle = { width: '100%', padding: '9px 12px', borderRadius: 10, border: '1px solid rgba(60,60,67,.2)', fontSize: '.88rem', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' as const, color: '#1c1c1e', background: '#fff' }
+const inputStyle: any = {
+  width: '100%', padding: '9px 12px', borderRadius: 10,
+  border: '1px solid rgba(60,60,67,.2)', fontSize: '.88rem',
+  fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
+  color: '#1c1c1e', background: '#fff',
+}
 
 function SectionTitle({ title, sub }: { title: string; sub?: string }) {
   return (
@@ -105,7 +154,78 @@ function SectionTitle({ title, sub }: { title: string; sub?: string }) {
   )
 }
 
-// ── APPS TAB ──────────────────────────────────────────
+// ── QR CODE (pure SVG, no library) ────────────────────────────────────────────
+
+function QRCodeSVG({ value, size = 160 }: { value: string; size?: number }) {
+  // Simple visual placeholder QR — real implementation uses qrcode.react
+  // We render a deterministic pattern based on the value
+  const cells = 21
+  const cell = size / cells
+  
+  // Hash the value to get a seed
+  let hash = 0
+  for (let i = 0; i < value.length; i++) {
+    hash = ((hash << 5) - hash) + value.charCodeAt(i)
+    hash |= 0
+  }
+  
+  const rects: any[] = []
+  
+  // Finder patterns (top-left, top-right, bottom-left)
+  const drawFinder = (ox: number, oy: number) => {
+    // Outer
+    for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++) {
+      if (r === 0 || r === 6 || c === 0 || c === 6)
+        rects.push(<rect key={`f${ox}${oy}${r}${c}`} x={(ox+c)*cell} y={(oy+r)*cell} width={cell} height={cell} fill="#1c1c1e"/>)
+    }
+    // Inner
+    for (let r = 2; r <= 4; r++) for (let c = 2; c <= 4; c++)
+      rects.push(<rect key={`fi${ox}${oy}${r}${c}`} x={(ox+c)*cell} y={(oy+r)*cell} width={cell} height={cell} fill="#1c1c1e"/>)
+    // White ring
+    for (let r = 1; r <= 5; r++) for (let c = 1; c <= 5; c++) {
+      if (r === 1 || r === 5 || c === 1 || c === 5)
+        rects.push(<rect key={`fw${ox}${oy}${r}${c}`} x={(ox+c)*cell} y={(oy+r)*cell} width={cell} height={cell} fill="white"/>)
+    }
+  }
+  
+  drawFinder(0, 0)
+  drawFinder(14, 0)
+  drawFinder(0, 14)
+  
+  // Data area (pseudo-random based on hash)
+  let seed = Math.abs(hash)
+  const lcg = () => { seed = (seed * 1664525 + 1013904223) & 0xffffffff; return (seed >>> 0) / 0xffffffff }
+  
+  for (let r = 0; r < cells; r++) {
+    for (let c = 0; c < cells; c++) {
+      // Skip finder areas
+      if ((r < 8 && c < 8) || (r < 8 && c > 12) || (r > 12 && c < 8)) continue
+      if (lcg() > 0.5) rects.push(<rect key={`d${r}${c}`} x={c*cell} y={r*cell} width={cell} height={cell} fill="#1c1c1e"/>)
+    }
+  }
+  
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: 'block' }}>
+      <rect width={size} height={size} fill="white"/>
+      {rects}
+    </svg>
+  )
+}
+
+// ── LOGO MARK ─────────────────────────────────────────────────────────────────
+
+function LogoMark({ size = 28, color = '#007aff' }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" fill="none">
+      <rect width="64" height="64" rx="14" fill={color}/>
+      <rect x="14" y="20" width="36" height="5" rx="2.5" fill="white"/>
+      <rect x="14" y="30" width="26" height="5" rx="2.5" fill="white" opacity=".7"/>
+      <rect x="14" y="40" width="18" height="5" rx="2.5" fill="white" opacity=".4"/>
+    </svg>
+  )
+}
+
+// ── APPS TAB ──────────────────────────────────────────────────────────────────
 
 function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
   const plan = restaurant?.subscription_plan || ''
@@ -114,17 +234,16 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
 
   return (
     <div>
-      <SectionTitle title="Приложения" sub={`Заведение: ${restaurant?.name || '—'}`} />
+      <SectionTitle title="Приложения" sub={restaurant?.name || '—'} />
 
       {status === 'trialing' && (
         <div style={{ background: 'rgba(0,122,255,.08)', border: '1px solid rgba(0,122,255,.2)', borderRadius: 12, padding: '12px 16px', marginBottom: 16, fontSize: '.85rem', color: '#007aff', fontWeight: 500 }}>
           Пробный период активен — 7 дней бесплатно
         </div>
       )}
-
       {!isActive && (
         <div style={{ background: 'rgba(255,59,48,.08)', border: '1px solid rgba(255,59,48,.2)', borderRadius: 12, padding: '12px 16px', marginBottom: 16, fontSize: '.85rem', color: '#ff3b30', fontWeight: 500 }}>
-          Подписка неактивна. Перейдите во вкладку «Подписка» для оплаты.
+          Подписка неактивна — перейдите во вкладку «Подписка»
         </div>
       )}
 
@@ -132,15 +251,14 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
         {APPS.map(app => {
           const locked = isActive && !app.plans.includes(plan)
           return (
-            <Card key={app.id} style={{ borderTop: `3px solid ${locked ? '#c7c7cc' : app.color}`, display: 'flex', flexDirection: 'column' as const, opacity: locked ? .6 : 1 }}>
+            <Card key={app.id} style={{ borderTop: `3px solid ${locked ? '#c7c7cc' : app.color}`, display: 'flex', flexDirection: 'column', opacity: locked ? .55 : 1 }}>
               <div style={{ flex: 1 }}>
-                <div style={{ display: 'inline-block', background: (locked ? '#c7c7cc' : app.color) + '18', color: locked ? '#c7c7cc' : app.color, fontSize: '.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 12, letterSpacing: '.02em' }}>{app.hint}</div>
+                <div style={{ display: 'inline-block', background: (locked ? '#c7c7cc' : app.color) + '18', color: locked ? '#aeaeb2' : app.color, fontSize: '.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 12, letterSpacing: '.02em' }}>{app.hint}</div>
                 <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 3, color: '#1c1c1e' }}>{app.name}</div>
                 <div style={{ color: '#6d6d72', fontSize: '.8rem', marginBottom: 14, lineHeight: 1.5 }}>{app.desc}</div>
               </div>
-              <button onClick={() => !locked && isActive && (window.location.href = app.path)}
-                style={{ background: locked || !isActive ? '#f2f2f7' : app.color, color: locked || !isActive ? '#aeaeb2' : '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: locked || !isActive ? 'not-allowed' : 'pointer', width: '100%' }}>
-                {locked ? 'Недоступно в тарифе' : !isActive ? 'Нет подписки' : 'Открыть'}
+              <button onClick={() => !locked && isActive && (window.location.href = app.path)} style={{ background: locked || !isActive ? '#f2f2f7' : app.color, color: locked || !isActive ? '#aeaeb2' : '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: locked || !isActive ? 'not-allowed' : 'pointer', width: '100%' }}>
+                {locked ? 'Недоступно в тарифе' : !isActive ? 'Нет подписки' : 'Открыть →'}
               </button>
             </Card>
           )
@@ -148,7 +266,7 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
       </div>
 
       <Card style={{ background: '#f9f9f9', boxShadow: 'none', border: '1px solid rgba(0,0,0,.06)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' as const, gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
           <div>
             <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 2, color: '#1c1c1e' }}>Установить на iPhone</div>
             <div style={{ color: '#6d6d72', fontSize: '.8rem' }}>Safari → «Поделиться» → «На экран Домой»</div>
@@ -160,7 +278,7 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
   )
 }
 
-// ── EMPLOYEES TAB ─────────────────────────────────────
+// ── EMPLOYEES TAB ─────────────────────────────────────────────────────────────
 
 function EmployeesTab({ restaurantId }: { restaurantId: string }) {
   const [employees, setEmployees] = useState<any[]>([])
@@ -208,15 +326,14 @@ function EmployeesTab({ restaurantId }: { restaurantId: string }) {
         </Btn>
       </div>
 
-      {/* Статистика НАВЕРХУ */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 16 }}>
         {[
           { l: 'Сотрудников', v: String(employees.length), c: '#1c1c1e' },
-          { l: 'ФОТ в месяц', v: `€${total.toLocaleString()}`, c: '#007aff' },
+          { l: 'ФОТ/мес', v: `€${total.toLocaleString()}`, c: '#007aff' },
           { l: 'На карту', v: `€${totalCard.toLocaleString()}`, c: '#af52de' },
         ].map(item => (
-          <Card key={item.l} style={{ padding: '14px 16px', textAlign: 'center' as const }}>
-            <div style={{ fontSize: '.68rem', color: '#6d6d72', fontWeight: 600, textTransform: 'uppercase' as const, marginBottom: 4, letterSpacing: '.04em' }}>{item.l}</div>
+          <Card key={item.l} style={{ padding: '14px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: '.68rem', color: '#6d6d72', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4, letterSpacing: '.04em' }}>{item.l}</div>
             <div style={{ fontSize: '1.3rem', fontWeight: 700, color: item.c }}>{item.v}</div>
           </Card>
         ))}
@@ -244,14 +361,14 @@ function EmployeesTab({ restaurantId }: { restaurantId: string }) {
 
       <Card>
         {loading ? (
-          <div style={{ color: '#6d6d72', textAlign: 'center' as const, padding: 32 }}>Загрузка...</div>
+          <div style={{ color: '#6d6d72', textAlign: 'center', padding: 32 }}>Загрузка...</div>
         ) : employees.length === 0 ? (
-          <div style={{ textAlign: 'center' as const, padding: '28px 0', color: '#6d6d72', fontSize: '.88rem' }}>Добавьте первого сотрудника</div>
+          <div style={{ textAlign: 'center', padding: '28px 0', color: '#6d6d72', fontSize: '.88rem' }}>Добавьте первого сотрудника</div>
         ) : employees.map((emp, i) => (
           <div key={emp.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: i < employees.length - 1 ? '1px solid rgba(60,60,67,.08)' : 'none', gap: 12 }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 600, fontSize: '.92rem', marginBottom: 2, color: '#1c1c1e' }}>{emp.name}</div>
-              <div style={{ fontSize: '.75rem', color: '#6d6d72', display: 'flex', gap: 10, flexWrap: 'wrap' as const }}>
+              <div style={{ fontSize: '.75rem', color: '#6d6d72', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 <span>Оклад: <strong style={{ color: '#1c1c1e' }}>€{emp.salary}</strong></span>
                 <span>Вычет: <strong style={{ color: '#1c1c1e' }}>€{emp.deduct_per_absence}</strong></span>
                 {emp.card_amount > 0 && <span>Карта: <strong style={{ color: '#af52de' }}>€{emp.card_amount}</strong></span>}
@@ -268,7 +385,7 @@ function EmployeesTab({ restaurantId }: { restaurantId: string }) {
   )
 }
 
-// ── CATEGORIES TAB ────────────────────────────────────
+// ── CATEGORIES TAB ────────────────────────────────────────────────────────────
 
 function CategoriesTab({ restaurantId }: { restaurantId: string }) {
   const [cats, setCats] = useState<any[]>([])
@@ -296,7 +413,6 @@ function CategoriesTab({ restaurantId }: { restaurantId: string }) {
   return (
     <div>
       <SectionTitle title="Категории расходов" sub="Менеджер выбирает из этого списка при добавлении расхода" />
-
       <Card style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', gap: 10 }}>
           <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
@@ -305,15 +421,12 @@ function CategoriesTab({ restaurantId }: { restaurantId: string }) {
           <Btn onClick={add}>Добавить</Btn>
         </div>
       </Card>
-
       <Card>
-        <div style={{ fontWeight: 600, fontSize: '.88rem', color: '#6d6d72', marginBottom: 12 }}>
-          Категорий: {cats.length}
-        </div>
+        <div style={{ fontWeight: 600, fontSize: '.88rem', color: '#6d6d72', marginBottom: 12 }}>Категорий: {cats.length}</div>
         {loading ? <div style={{ color: '#6d6d72', fontSize: '.88rem' }}>Загрузка...</div>
           : cats.length === 0
-            ? <div style={{ textAlign: 'center' as const, padding: '20px 0', color: '#6d6d72', fontSize: '.88rem' }}>Нет категорий</div>
-            : <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 8 }}>
+            ? <div style={{ textAlign: 'center', padding: '20px 0', color: '#6d6d72', fontSize: '.88rem' }}>Нет категорий</div>
+            : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {cats.map(cat => (
                   <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f2f2f7', borderRadius: 980, padding: '6px 12px' }}>
                     <span style={{ fontSize: '.85rem', fontWeight: 500, color: '#1c1c1e' }}>{cat.name}</span>
@@ -327,9 +440,13 @@ function CategoriesTab({ restaurantId }: { restaurantId: string }) {
   )
 }
 
-// ── TEAM TAB ──────────────────────────────────────────
+// ── TEAM TAB ──────────────────────────────────────────────────────────────────
 
-function TeamTab({ restaurantId }: { restaurantId: string }) {
+function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
+  const restaurantId = restaurant?.id || ''
+  const plan = restaurant?.subscription_plan || 'starter'
+  const maxStaff = PLANS.find(p => p.id === plan)?.maxStaff || 2
+
   const [staff, setStaff] = useState<any[]>([])
   const [employees, setEmployees] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -337,6 +454,16 @@ function TeamTab({ restaurantId }: { restaurantId: string }) {
   const [form, setForm] = useState({ name: '', pin: '', apps: [] as string[] })
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [ownerPin, setOwnerPin] = useState(restaurant?.owner_pin || '')
+  const [ownerPinEdit, setOwnerPinEdit] = useState(false)
+  const [ownerPinVal, setOwnerPinVal] = useState('')
+  const [ownerSaving, setOwnerSaving] = useState(false)
+  const [ownerSaved, setOwnerSaved] = useState(false)
+  const [showQR, setShowQR] = useState(false)
+
+  const qrUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/join?restaurant=${restaurantId}`
+    : `https://mise-app-omega.vercel.app/join?restaurant=${restaurantId}`
 
   const load = async () => {
     setLoading(true)
@@ -350,6 +477,14 @@ function TeamTab({ restaurantId }: { restaurantId: string }) {
   }
 
   useEffect(() => { if (restaurantId) load() }, [restaurantId])
+
+  const saveOwnerPin = async () => {
+    if (ownerPinVal.length !== 4 || !/^\d+$/.test(ownerPinVal)) { alert('PIN должен быть 4 цифры'); return }
+    setOwnerSaving(true)
+    await supabase.from('restaurants').update({ owner_pin: ownerPinVal }).eq('id', restaurantId)
+    setOwnerPin(ownerPinVal); setOwnerPinEdit(false); setOwnerPinVal('')
+    setOwnerSaving(false); setOwnerSaved(true); setTimeout(() => setOwnerSaved(false), 2000)
+  }
 
   const toggleApp = (appId: string) => {
     setForm(f => ({ ...f, apps: f.apps.includes(appId) ? f.apps.filter(a => a !== appId) : [...f.apps, appId] }))
@@ -383,27 +518,96 @@ function TeamTab({ restaurantId }: { restaurantId: string }) {
 
   const appColor = (id: string) => APPS.find(a => a.id === id)?.color || '#007aff'
   const appName = (id: string) => APPS.find(a => a.id === id)?.name || id
-
-  // Имена из employees которых нет в staff
   const usedNames = staff.map(s => s.name)
   const availableEmployees = employees.filter(e => !usedNames.includes(e.name))
+  const atLimit = staff.length >= maxStaff
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-        <SectionTitle title="Доступы команды" sub="Сотрудники входят по PIN-коду" />
-        <Btn onClick={() => { setShowForm(!showForm); setEditingId(null); setForm({ name: '', pin: '', apps: [] }) }}>
+        <SectionTitle title="Доступы" sub={`Сотрудников: ${staff.length} / ${maxStaff}`} />
+        <Btn onClick={() => { setShowForm(!showForm); setEditingId(null); setForm({ name: '', pin: '', apps: [] }) }}
+          disabled={!showForm && atLimit}>
           {showForm ? 'Отмена' : '+ Добавить'}
         </Btn>
       </div>
 
+      {atLimit && !showForm && (
+        <div style={{ background: 'rgba(255,149,0,.08)', border: '1px solid rgba(255,149,0,.25)', borderRadius: 12, padding: '10px 14px', marginBottom: 14, fontSize: '.83rem', color: '#ff9500', fontWeight: 500 }}>
+          Достигнут лимит тарифа ({maxStaff} пользователей). Обновите подписку.
+        </div>
+      )}
+
+      {/* ─ QR БЛОК ─ */}
+      <Card style={{ marginBottom: 14, background: 'linear-gradient(135deg, #007aff08 0%, #5856d608 100%)', border: '1px solid rgba(0,122,255,.15)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: '.95rem', color: '#1c1c1e', marginBottom: 4 }}>QR-код заведения</div>
+            <div style={{ fontSize: '.8rem', color: '#6d6d72', lineHeight: 1.5 }}>
+              Сотрудник сканирует при первом входе чтобы привязать устройство к заведению
+            </div>
+          </div>
+          <button onClick={() => setShowQR(!showQR)} style={{ flexShrink: 0, background: '#007aff', border: 'none', borderRadius: 12, padding: '10px 18px', color: '#fff', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: 'pointer' }}>
+            {showQR ? 'Скрыть' : 'Показать QR'}
+          </button>
+        </div>
+
+        {showQR && (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(0,122,255,.1)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+            <div style={{ background: '#fff', borderRadius: 16, padding: 16, boxShadow: '0 2px 12px rgba(0,0,0,.08)' }}>
+              <QRCodeSVG value={qrUrl} size={160} />
+            </div>
+            <div style={{ fontSize: '.75rem', color: '#aeaeb2', textAlign: 'center', maxWidth: 260, lineHeight: 1.5 }}>
+              {qrUrl}
+            </div>
+            <button onClick={() => navigator.clipboard?.writeText(qrUrl)} style={{ background: '#f2f2f7', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#007aff', cursor: 'pointer', fontFamily: 'inherit' }}>
+              Скопировать ссылку
+            </button>
+          </div>
+        )}
+      </Card>
+
+      {/* ─ ВЛАДЕЛЕЦ PIN ─ */}
+      <Card style={{ marginBottom: 14, border: '1px solid rgba(175,82,222,.2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <div style={{ fontWeight: 700, fontSize: '.95rem', color: '#1c1c1e' }}>Владелец</div>
+              <div style={{ fontSize: '.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: 980, background: '#af52de15', color: '#af52de' }}>Полный доступ</div>
+            </div>
+            <div style={{ fontSize: '.8rem', color: '#6d6d72' }}>
+              {ownerPin ? 'PIN установлен · Доступ ко всем приложениям' : 'PIN не установлен'}
+            </div>
+          </div>
+          <button onClick={() => { setOwnerPinEdit(!ownerPinEdit); setOwnerPinVal('') }} style={{ background: 'none', border: '1px solid rgba(175,82,222,.3)', borderRadius: 980, padding: '7px 14px', fontSize: '.78rem', fontWeight: 600, color: '#af52de', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
+            {ownerPinEdit ? 'Отмена' : ownerPin ? 'Изменить PIN' : 'Задать PIN'}
+          </button>
+        </div>
+
+        {ownerPinEdit && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(175,82,222,.1)', display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: '#6d6d72', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>Новый PIN (4 цифры)</label>
+              <input
+                type="password" inputMode="numeric" maxLength={4}
+                value={ownerPinVal} onChange={e => setOwnerPinVal(e.target.value.replace(/\D/g,'').slice(0,4))}
+                placeholder="••••"
+                style={{ ...inputStyle, letterSpacing: '.2em', fontSize: '1.2rem', textAlign: 'center' }}
+              />
+            </div>
+            <Btn onClick={saveOwnerPin} disabled={ownerSaving}>
+              {ownerSaving ? '...' : ownerSaved ? '✓' : 'Сохранить'}
+            </Btn>
+          </div>
+        )}
+      </Card>
+
+      {/* ─ ФОРМА ДОБАВЛЕНИЯ ─ */}
       {showForm && (
         <Card style={{ marginBottom: 14, border: '1px solid #007aff' }}>
           <div style={{ fontWeight: 700, fontSize: '.95rem', marginBottom: 14 }}>{editingId ? 'Редактировать доступ' : 'Новый доступ'}</div>
-
-          {/* Имя из списка сотрудников */}
           <div style={{ marginBottom: 12 }}>
-            <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: '#6d6d72', marginBottom: 4, textTransform: 'uppercase' as const, letterSpacing: '.04em' }}>Сотрудник</label>
+            <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: '#6d6d72', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>Сотрудник</label>
             {editingId ? (
               <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} style={inputStyle} />
             ) : (
@@ -416,18 +620,16 @@ function TeamTab({ restaurantId }: { restaurantId: string }) {
               </select>
             )}
           </div>
-
           <Field
             label={editingId ? 'Новый PIN (необязательно)' : 'PIN-код (4 цифры)'}
             value={form.pin}
-            onChange={(v: string) => setForm({ ...form, pin: v.slice(0, 4) })}
+            onChange={(v: string) => setForm({ ...form, pin: v.replace(/\D/g,'').slice(0,4) })}
             placeholder="1234"
-            type="number"
+            type="password"
           />
-
           <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: '.72rem', fontWeight: 600, color: '#6d6d72', marginBottom: 8, textTransform: 'uppercase' as const, letterSpacing: '.04em' }}>Доступ к приложениям</div>
-            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 6 }}>
+            <div style={{ fontSize: '.72rem', fontWeight: 600, color: '#6d6d72', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>Доступ к приложениям</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {APPS.map(app => (
                 <label key={app.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '9px 12px', borderRadius: 10, background: form.apps.includes(app.id) ? app.color + '10' : '#f9f9f9', border: `1px solid ${form.apps.includes(app.id) ? app.color : 'transparent'}`, transition: 'all .15s' }}>
                   <input type="checkbox" checked={form.apps.includes(app.id)} onChange={() => toggleApp(app.id)} style={{ width: 16, height: 16, accentColor: app.color }} />
@@ -439,7 +641,6 @@ function TeamTab({ restaurantId }: { restaurantId: string }) {
               ))}
             </div>
           </div>
-
           <div style={{ display: 'flex', gap: 8 }}>
             <Btn onClick={save} disabled={saving}>{saving ? 'Сохранение...' : editingId ? 'Сохранить' : 'Создать доступ'}</Btn>
             <Btn variant="gray" onClick={() => { setShowForm(false); setEditingId(null) }}>Отмена</Btn>
@@ -447,12 +648,13 @@ function TeamTab({ restaurantId }: { restaurantId: string }) {
         </Card>
       )}
 
+      {/* ─ СПИСОК ─ */}
       {loading ? (
-        <div style={{ color: '#6d6d72', textAlign: 'center' as const, padding: 32 }}>Загрузка...</div>
+        <div style={{ color: '#6d6d72', textAlign: 'center', padding: 32 }}>Загрузка...</div>
       ) : staff.length === 0 ? (
-        <Card><div style={{ textAlign: 'center' as const, padding: '28px 0', color: '#6d6d72', fontSize: '.88rem' }}>Нет сотрудников с доступом</div></Card>
+        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: '#6d6d72', fontSize: '.88rem' }}>Нет сотрудников с доступом</div></Card>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {staff.map(s => (
             <Card key={s.id} style={{ padding: 16 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
@@ -460,11 +662,11 @@ function TeamTab({ restaurantId }: { restaurantId: string }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                     <div style={{ fontWeight: 700, fontSize: '.95rem', color: '#1c1c1e' }}>{s.name}</div>
                     <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: s.device_id ? '#34c75915' : '#f2f2f7', color: s.device_id ? '#34c759' : '#aeaeb2' }}>
-                      {s.device_id ? 'Привязано' : 'Не привязано'}
+                      {s.device_id ? '● Привязано' : 'Не привязано'}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 6, marginBottom: s.device_id ? 8 : 0 }}>
-                    {(s.apps || []).map(appId => (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: s.device_id ? 8 : 0 }}>
+                    {(s.apps || []).map((appId: string) => (
                       <span key={appId} style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: appColor(appId) + '15', color: appColor(appId) }}>{appName(appId)}</span>
                     ))}
                   </div>
@@ -483,36 +685,84 @@ function TeamTab({ restaurantId }: { restaurantId: string }) {
           ))}
         </div>
       )}
-
-      <div style={{ marginTop: 14, padding: '12px 14px', background: 'rgba(0,122,255,.06)', borderRadius: 12, fontSize: '.82rem', color: '#6d6d72', lineHeight: 1.6 }}>
-        Сотрудник при первом входе сканирует QR заведения → вводит PIN → устройство привязывается → следующие входы через Face ID или PIN.
-      </div>
     </div>
   )
 }
 
-// ── SETTINGS TAB ──────────────────────────────────────
+// ── SETTINGS TAB ──────────────────────────────────────────────────────────────
 
 function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; onUpdate: () => void }) {
   const [name, setName] = useState(restaurant?.name || '')
   const [currency, setCurrency] = useState(restaurant?.currency || '€')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [logoFile, setLogoFile] = useState<File | null>(null)
+  const [logoPreview, setLogoPreview] = useState(restaurant?.logo_url || '')
+  const [logoUploading, setLogoUploading] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (restaurant) { setName(restaurant.name); setCurrency(restaurant.currency || '€') }
+    if (restaurant) { setName(restaurant.name); setCurrency(restaurant.currency || '€'); setLogoPreview(restaurant.logo_url || '') }
   }, [restaurant])
+
+  const pickLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLogoFile(file)
+    setLogoPreview(URL.createObjectURL(file))
+  }
+
+  const uploadLogo = async () => {
+    if (!logoFile || !restaurant) return
+    setLogoUploading(true)
+    const ext = logoFile.name.split('.').pop()
+    const path = `logos/${restaurant.id}.${ext}`
+    const { error } = await supabase.storage.from('restaurant-assets').upload(path, logoFile, { upsert: true })
+    if (!error) {
+      const { data: { publicUrl } } = supabase.storage.from('restaurant-assets').getPublicUrl(path)
+      await supabase.from('restaurants').update({ logo_url: publicUrl }).eq('id', restaurant.id)
+      onUpdate()
+    }
+    setLogoUploading(false)
+  }
 
   const save = async () => {
     if (!restaurant) return
     setSaving(true)
     await supabase.from('restaurants').update({ name, currency }).eq('id', restaurant.id)
+    if (logoFile) await uploadLogo()
     setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000); onUpdate()
   }
 
   return (
     <div>
       <SectionTitle title="Настройки" sub="Основные параметры заведения" />
+
+      {/* Логотип */}
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 14, color: '#1c1c1e' }}>Логотип заведения</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ width: 72, height: 72, borderRadius: 16, background: '#f2f2f7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(60,60,67,.12)', flexShrink: 0 }}>
+            {logoPreview ? (
+              <img src={logoPreview} alt="logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <span style={{ fontSize: '1.8rem' }}>🍽️</span>
+            )}
+          </div>
+          <div>
+            <div style={{ fontSize: '.85rem', color: '#1c1c1e', fontWeight: 500, marginBottom: 6 }}>
+              {logoPreview ? 'Логотип загружен' : 'Логотип не загружен'}
+            </div>
+            <div style={{ fontSize: '.78rem', color: '#6d6d72', marginBottom: 10 }}>
+              Отображается на экране входа для сотрудников
+            </div>
+            <button onClick={() => fileRef.current?.click()} style={{ background: '#f2f2f7', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#007aff', cursor: 'pointer', fontFamily: 'inherit' }}>
+              {logoPreview ? 'Заменить' : 'Загрузить фото'}
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" onChange={pickLogo} style={{ display: 'none' }} />
+          </div>
+        </div>
+      </Card>
 
       <Card style={{ marginBottom: 14 }}>
         <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 14, color: '#1c1c1e' }}>Заведение</div>
@@ -529,9 +779,7 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
             { value: '$', label: '$ — Доллар' },
           ]}
         />
-        <div style={{ marginTop: 4 }}>
-          <Btn onClick={save}>{saving ? 'Сохранение...' : saved ? '✓ Сохранено' : 'Сохранить'}</Btn>
-        </div>
+        <Btn onClick={save}>{saving ? 'Сохранение...' : saved ? '✓ Сохранено' : 'Сохранить'}</Btn>
       </Card>
 
       <Card style={{ border: '1px solid rgba(255,59,48,.15)' }}>
@@ -543,7 +791,7 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
   )
 }
 
-// ── BILLING TAB ──────────────────────────────────────
+// ── BILLING TAB ───────────────────────────────────────────────────────────────
 
 function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user: any }) {
   const [loading, setLoading] = useState(false)
@@ -552,15 +800,15 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
   const currentPlan = PLANS.find(p => p.id === restaurant?.subscription_plan)
   const status = restaurant?.subscription_status
   const endsAt = restaurant?.subscription_ends_at ? new Date(restaurant.subscription_ends_at) : null
+  const isActive = status === 'active' || status === 'trialing'
 
   const statusLabel: Record<string, { label: string; color: string; bg: string }> = {
-    trialing:  { label: 'Пробный период', color: '#007aff', bg: 'rgba(0,122,255,.1)' },
-    active:    { label: 'Активна',        color: '#34c759', bg: 'rgba(52,199,89,.1)' },
-    past_due:  { label: 'Просрочена',     color: '#ff9500', bg: 'rgba(255,149,0,.1)' },
-    canceled:  { label: 'Отменена',       color: '#ff3b30', bg: 'rgba(255,59,48,.1)' },
-    inactive:  { label: 'Неактивна',      color: '#aeaeb2', bg: '#f2f2f7' },
+    trialing: { label: 'Пробный период', color: '#007aff', bg: 'rgba(0,122,255,.1)' },
+    active:   { label: 'Активна',        color: '#34c759', bg: 'rgba(52,199,89,.1)' },
+    past_due: { label: 'Просрочена',     color: '#ff9500', bg: 'rgba(255,149,0,.1)' },
+    canceled: { label: 'Отменена',       color: '#ff3b30', bg: 'rgba(255,59,48,.1)' },
+    inactive: { label: 'Неактивна',      color: '#aeaeb2', bg: '#f2f2f7' },
   }
-
   const badge = statusLabel[status || 'inactive'] || statusLabel['inactive']
 
   const subscribe = async (planId: string) => {
@@ -574,10 +822,8 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
       })
       const { url, error } = await res.json()
       if (error) { alert(error); return }
-      if (url) { window.top.location.href = url } else { alert("Ошибка: нет URL") }
-    } finally {
-      setLoading(false)
-    }
+      if (url) window.top.location.href = url
+    } finally { setLoading(false) }
   }
 
   const cancel = async () => {
@@ -588,21 +834,17 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ restaurantId: restaurant.id }),
     })
-    setCancelConfirm(false)
-    setLoading(false)
+    setCancelConfirm(false); setLoading(false)
     alert('Подписка будет отменена в конце периода')
   }
-
-  const isActive = status === 'active' || status === 'trialing'
 
   return (
     <div>
       <SectionTitle title="Подписка" sub="Управление тарифом и оплатой" />
 
-      {/* Текущий статус */}
       {currentPlan && (
         <Card style={{ marginBottom: 16, border: `1px solid ${currentPlan.color}25` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' as const, gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
             <div>
               <div style={{ display: 'inline-block', background: badge.bg, color: badge.color, fontSize: '.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 10 }}>{badge.label}</div>
               <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#1c1c1e', marginBottom: 2 }}>{currentPlan.name}</div>
@@ -612,12 +854,11 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
                 </div>
               )}
             </div>
-            <div style={{ textAlign: 'right' as const }}>
+            <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: '1.8rem', fontWeight: 700, color: '#1c1c1e' }}>€{currentPlan.price}</div>
               <div style={{ color: '#6d6d72', fontSize: '.78rem' }}>в месяц</div>
             </div>
           </div>
-
           {isActive && (
             <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(60,60,67,.08)' }}>
               {!cancelConfirm ? (
@@ -625,7 +866,7 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
                   Отменить подписку
                 </button>
               ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: '.82rem', color: '#6d6d72' }}>Подтвердить отмену?</span>
                   <Btn small variant="danger" onClick={cancel} disabled={loading}>Да, отменить</Btn>
                   <Btn small variant="gray" onClick={() => setCancelConfirm(false)}>Нет</Btn>
@@ -636,8 +877,7 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
         </Card>
       )}
 
-      {/* Тарифы */}
-      <div style={{ fontWeight: 600, fontSize: '.88rem', color: '#6d6d72', marginBottom: 12, textTransform: 'uppercase' as const, letterSpacing: '.04em' }}>
+      <div style={{ fontWeight: 600, fontSize: '.78rem', color: '#6d6d72', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '.06em' }}>
         {currentPlan ? 'Сменить тариф' : 'Выберите тариф'}
       </div>
 
@@ -645,16 +885,12 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
         {PLANS.map(plan => {
           const isCurrent = restaurant?.subscription_plan === plan.id
           return (
-            <Card key={plan.id} style={{ border: `2px solid ${isCurrent ? plan.color : plan.popular ? plan.color + '40' : 'rgba(60,60,67,.1)'}`, position: 'relative' as const, padding: 16 }}>
+            <Card key={plan.id} style={{ border: `2px solid ${isCurrent ? plan.color : plan.popular ? plan.color + '40' : 'rgba(60,60,67,.1)'}`, position: 'relative', padding: 16 }}>
               {plan.popular && !isCurrent && (
-                <div style={{ position: 'absolute' as const, top: -10, left: '50%', transform: 'translateX(-50%)', background: plan.color, color: '#fff', fontSize: '.65rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, whiteSpace: 'nowrap' as const }}>
-                  ПОПУЛЯРНЫЙ
-                </div>
+                <div style={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', background: plan.color, color: '#fff', fontSize: '.65rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, whiteSpace: 'nowrap' }}>ПОПУЛЯРНЫЙ</div>
               )}
               {isCurrent && (
-                <div style={{ position: 'absolute' as const, top: -10, left: '50%', transform: 'translateX(-50%)', background: plan.color, color: '#fff', fontSize: '.65rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, whiteSpace: 'nowrap' as const }}>
-                  ТЕКУЩИЙ
-                </div>
+                <div style={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', background: plan.color, color: '#fff', fontSize: '.65rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, whiteSpace: 'nowrap' }}>ТЕКУЩИЙ</div>
               )}
               <div style={{ marginBottom: 10 }}>
                 <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#1c1c1e', marginBottom: 2 }}>{plan.name}</div>
@@ -663,15 +899,12 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
               <div style={{ marginBottom: 14 }}>
                 {plan.features.map(f => (
                   <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '.8rem', color: '#3c3c43', marginBottom: 4 }}>
-                    <span style={{ color: plan.color, fontWeight: 700, fontSize: '.85rem' }}>✓</span> {f}
+                    <span style={{ color: plan.color, fontWeight: 700 }}>✓</span> {f}
                   </div>
                 ))}
               </div>
-              <button
-                onClick={() => !isCurrent && subscribe(plan.id)}
-                disabled={isCurrent || loading}
-                style={{ width: '100%', padding: '9px 0', borderRadius: 10, border: 'none', background: isCurrent ? '#f2f2f7' : plan.color, color: isCurrent ? '#aeaeb2' : '#fff', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: isCurrent ? 'default' : 'pointer', transition: 'opacity .15s' }}
-              >
+              <button onClick={() => !isCurrent && subscribe(plan.id)} disabled={isCurrent || loading}
+                style={{ width: '100%', padding: '9px 0', borderRadius: 10, border: 'none', background: isCurrent ? '#f2f2f7' : plan.color, color: isCurrent ? '#aeaeb2' : '#fff', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: isCurrent ? 'default' : 'pointer' }}>
                 {isCurrent ? 'Активен' : loading ? '...' : 'Выбрать'}
               </button>
             </Card>
@@ -679,16 +912,17 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
         })}
       </div>
 
-      <div style={{ textAlign: 'center' as const, fontSize: '.75rem', color: '#aeaeb2' }}>
+      <div style={{ textAlign: 'center', fontSize: '.75rem', color: '#aeaeb2' }}>
         Платежи защищены через Stripe · 7 дней бесплатно при первой оплате
       </div>
     </div>
   )
 }
 
-// ── MAIN ─────────────────────────────────────────────
+// ── MAIN ──────────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
+  const [showSplash, setShowSplash] = useState(true)
   const [user, setUser] = useState<any>(null)
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null)
   const [tab, setTab] = useState('apps')
@@ -699,11 +933,9 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    // Читаем tab из URL
     const params = new URLSearchParams(window.location.search)
     const t = params.get('tab')
     if (t) setTab(t)
-
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) { window.location.href = '/auth/login'; return }
       setUser(data.user)
@@ -712,54 +944,66 @@ export default function Dashboard() {
   }, [])
 
   if (!user) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system,sans-serif', color: '#6d6d72', fontSize: '.9rem' }}>
-      Загрузка...
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system,sans-serif', color: '#6d6d72', fontSize: '.9rem', background: '#f2f2f7' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+        <LogoMark size={48} />
+        <div style={{ fontSize: '.85rem', color: '#aeaeb2' }}>Загрузка...</div>
+      </div>
     </div>
   )
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f2f2f7', fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif', WebkitFontSmoothing: 'antialiased' as const }}>
-      <nav style={{ background: 'rgba(255,255,255,.92)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(60,60,67,.12)', padding: '0 20px', height: 50, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky' as const, top: 0, zIndex: 100 }}>
-        <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#1c1c1e', letterSpacing: '-.01em' }}>Mise</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <span style={{ fontSize: '.78rem', color: '#6d6d72' }}>{user.email}</span>
-          <button onClick={async () => { await supabase.auth.signOut(); window.location.href = '/auth/login' }}
-            style={{ background: 'none', border: 'none', color: '#ff3b30', cursor: 'pointer', fontSize: '.78rem', fontFamily: 'inherit', fontWeight: 600 }}>
-            Выйти
-          </button>
-        </div>
-      </nav>
+    <>
+      {showSplash && <SplashScreen onDone={() => setShowSplash(false)} />}
 
-      <div style={{ maxWidth: 920, margin: '0 auto', padding: '24px 16px' }}>
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#1c1c1e', marginBottom: 2 }}>{restaurant?.name || 'Мой ресторан'}</div>
-          <div style={{ color: '#6d6d72', fontSize: '.8rem' }}>Личный кабинет · {user.email}</div>
-        </div>
-
-        {/* Табы */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 20, overflowX: 'auto' as const, paddingBottom: 2 }}>
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{
-              padding: '7px 15px', borderRadius: 10, border: 'none', fontFamily: 'inherit',
-              fontSize: '.8rem', fontWeight: tab === t.id ? 700 : 500,
-              cursor: 'pointer', whiteSpace: 'nowrap' as const,
-              background: tab === t.id ? '#1c1c1e' : '#fff',
-              color: tab === t.id ? '#fff' : '#3c3c43',
-              boxShadow: tab === t.id ? 'none' : '0 1px 3px rgba(0,0,0,.06)',
-              transition: 'all .15s',
-            }}>
-              {t.label}
+      <div style={{ minHeight: '100vh', background: '#f2f2f7', fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif', WebkitFontSmoothing: 'antialiased' }}>
+        {/* NAV */}
+        <nav style={{ background: 'rgba(255,255,255,.92)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(60,60,67,.1)', padding: '0 20px', height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <LogoMark size={28} />
+            <span style={{ fontWeight: 800, fontSize: '1.05rem', color: '#1c1c1e', letterSpacing: '-.02em' }}>mise</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: '.75rem', color: '#aeaeb2', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</span>
+            <button onClick={async () => { await supabase.auth.signOut(); window.location.href = '/auth/login' }}
+              style={{ background: 'none', border: 'none', color: '#ff3b30', cursor: 'pointer', fontSize: '.78rem', fontFamily: 'inherit', fontWeight: 600 }}>
+              Выйти
             </button>
-          ))}
-        </div>
+          </div>
+        </nav>
 
-        {tab === 'apps'       && <AppsTab restaurant={restaurant} />}
-        {tab === 'employees'  && restaurant && <EmployeesTab restaurantId={restaurant.id} />}
-        {tab === 'categories' && restaurant && <CategoriesTab restaurantId={restaurant.id} />}
-        {tab === 'team'       && restaurant && <TeamTab restaurantId={restaurant.id} />}
-        {tab === 'settings'   && <SettingsTab restaurant={restaurant} onUpdate={() => user && loadRestaurant(user.id)} />}
-        {tab === 'billing'    && <BillingTab restaurant={restaurant} user={user} />}
+        <div style={{ maxWidth: 920, margin: '0 auto', padding: '20px 16px' }}>
+          {/* Page header */}
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#1c1c1e', marginBottom: 2 }}>{restaurant?.name || 'Мой ресторан'}</div>
+            <div style={{ color: '#aeaeb2', fontSize: '.78rem' }}>Личный кабинет</div>
+          </div>
+
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: 4, marginBottom: 20, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'none' }}>
+            {TABS.map(t => (
+              <button key={t.id} onClick={() => setTab(t.id)} style={{
+                padding: '7px 15px', borderRadius: 10, border: 'none', fontFamily: 'inherit',
+                fontSize: '.8rem', fontWeight: tab === t.id ? 700 : 500,
+                cursor: 'pointer', whiteSpace: 'nowrap',
+                background: tab === t.id ? '#1c1c1e' : '#fff',
+                color: tab === t.id ? '#fff' : '#3c3c43',
+                boxShadow: tab === t.id ? 'none' : '0 1px 3px rgba(0,0,0,.06)',
+                transition: 'all .15s',
+              }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'apps'       && <AppsTab restaurant={restaurant} />}
+          {tab === 'employees'  && restaurant && <EmployeesTab restaurantId={restaurant.id} />}
+          {tab === 'categories' && restaurant && <CategoriesTab restaurantId={restaurant.id} />}
+          {tab === 'team'       && <TeamTab restaurant={restaurant} />}
+          {tab === 'settings'   && <SettingsTab restaurant={restaurant} onUpdate={() => user && loadRestaurant(user.id)} />}
+          {tab === 'billing'    && <BillingTab restaurant={restaurant} user={user} />}
+        </div>
       </div>
-    </div>
+    </>
   )
 }
