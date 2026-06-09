@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
         subscription_status: sub.status,
         subscription_plan: plan,
         subscription_id: sub.id,
-        subscription_ends_at: new Date((sub.current_period_end) * 1000).toISOString(),
+        subscription_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       }).eq('id', restaurantId)
       break
     }
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
 
       await supabase.from('restaurants').update({
         subscription_status: 'active',
-        subscription_ends_at: new Date(sub.current_period_end * 1000).toISOString(),
+        subscription_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       }).eq('id', restaurantId)
       break
     }
