@@ -241,9 +241,9 @@ export default function StashApp() {
       }
       if (!rid) { window.location.href = '/join?error=no_session'; return }
       setRestaurantId(rid)
-      const { data: restData } = await supabase.from('restaurants').select('subscription_status').eq('id', rid).single()
-      if (restData?.subscription_status !== 'active' && restData?.subscription_status !== 'trialing') {
-        window.location.href = '/dashboard?tab=billing'; return
+      //const { data: restData } = await supabase.from('restaurants').select('subscription_status').eq('id', rid).single()
+      
+        
       }
       await loadAll(rid)
     })
