@@ -224,7 +224,7 @@ export default function ManagerApp() {
 
       {/* HEADER */}
       <div style={S.header}>
-        <div style={{ fontWeight: 700, fontSize: '1rem', color: '#1d1d1f' }}>SO Manager</div>
+        <div style={{ fontWeight: 700, fontSize: '1rem', color: '#1d1d1f' }}>Mise Manager</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {shift && <span style={{ fontSize: '.7rem', padding: '3px 9px', borderRadius: 980, background: shift.status === 'open' ? 'rgba(52,199,89,.15)' : 'rgba(142,142,147,.15)', color: shift.status === 'open' ? '#34c759' : '#8e8e93', fontWeight: 600 }}>● {shift.status === 'open' ? 'Открыта' : 'Закрыта'}</span>}
           <button onClick={() => supabase.auth.signOut().then(() => window.location.href = '/auth/login')} style={S.logoutBtn}>Выйти</button>
