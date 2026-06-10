@@ -208,7 +208,10 @@ export default function AnalyticsApp() {
       if (!rid) { window.location.href = '/join?error=no_session'; return }
       setRestaurantId(rid)
 
-      const { data: rest } = await supabase.from('restaurants').select('name,logo_url,currency').eq('id', rid).single()
+      const { data: rest } = await supabase.from('restaurants').select('name,logo_url,currency,subscription_status').eq('id', rid).single()
+      if (rest?.subscription_status !== 'active' && rest?.subscription_status !== 'trialing') {
+        window.location.href = '/dashboard?tab=billing'; return
+      }
       if (rest) { setRestaurantName(rest.name||''); setLogoUrl(rest.logo_url||'') }
       if (rest?.currency) setCurrency(rest.currency)
       await loadAll(rid, new Date())

@@ -60,6 +60,13 @@ export default function ManagerApp() {
       if (!rid) { window.location.href = '/join?error=no_session'; return }
       setRestaurantId(rid)
 
+      // Subscription gate
+      const { data: restData } = await supabase
+        .from('restaurants').select('subscription_status').eq('id', rid).single()
+      if (restData?.subscription_status !== 'active' && restData?.subscription_status !== 'trialing') {
+        window.location.href = '/dashboard?tab=billing'; return
+      }
+
       const [empsRes, catsRes] = await Promise.all([
         supabase.from('employees').select('id,name,deduct_per_absence').eq('restaurant_id', rid).eq('is_active', true).order('name'),
         supabase.from('expense_categories').select('id,name').eq('restaurant_id', rid).order('name')
