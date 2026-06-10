@@ -7,457 +7,583 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 :root{
-  --blue:#007aff;--blue2:#0077ed;
-  --green:#34c759;--orange:#ff9500;--purple:#af52de;
-  --black:#1c1c1e;--gray:#6d6d72;--light:#f2f2f7;
-  --border:rgba(60,60,67,.12);
+  --blue:#007aff;--green:#34c759;--orange:#ff9500;--purple:#af52de;
+  --black:#000;--white:#fff;--gray:#6d6d72;--near-black:#0a0a0a;
+  --text-primary:#fff;--text-secondary:rgba(255,255,255,.5);--text-tertiary:rgba(255,255,255,.25);
+  --border:rgba(255,255,255,.08);
 }
 html{scroll-behavior:smooth;}
-body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text',sans-serif;background:#fff;color:var(--black);-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text',sans-serif;
+  background:#000;color:#fff;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden;
+}
+::-webkit-scrollbar{width:3px;}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px;}
 
-/* ── SCROLLBAR ── */
-::-webkit-scrollbar{width:4px;}
-::-webkit-scrollbar-thumb{background:rgba(0,0,0,.1);border-radius:2px;}
-
-/* ── NAV ── */
+/* ── NAV ────────────────────────────────────────── */
 .nav{
-  position:fixed;top:0;left:0;right:0;z-index:900;
+  position:fixed;top:0;left:0;right:0;z-index:999;
   height:48px;display:flex;align-items:center;justify-content:space-between;
-  padding:0 22px;
-  background:rgba(255,255,255,.82);
-  backdrop-filter:saturate(180%) blur(24px);
-  -webkit-backdrop-filter:saturate(180%) blur(24px);
-  border-bottom:.5px solid rgba(0,0,0,.08);
-  transition:background .3s;
+  padding:0 28px;
+  background:rgba(0,0,0,.7);
+  backdrop-filter:blur(28px) saturate(160%);
+  border-bottom:.5px solid var(--border);
+  transition:background .4s,border-color .4s;
 }
 .nav-logo{
-  display:flex;align-items:center;gap:8px;text-decoration:none;
-  font-size:1.1rem;font-weight:800;color:var(--black);letter-spacing:-.03em;
+  display:flex;align-items:center;gap:9px;text-decoration:none;
+  font-size:1.05rem;font-weight:800;color:#fff;letter-spacing:-.03em;
 }
-.nav-links{display:flex;list-style:none;gap:0;}
+.nav-links{display:flex;list-style:none;}
 .nav-links a{
-  font-size:.76rem;color:var(--gray);text-decoration:none;
-  padding:0 12px;transition:color .18s;white-space:nowrap;
+  font-size:.75rem;color:rgba(255,255,255,.45);text-decoration:none;
+  padding:0 12px;transition:color .2s;letter-spacing:-.01em;
 }
-.nav-links a:hover{color:var(--black);}
-.nav-right{display:flex;align-items:center;gap:8px;}
-.lang-toggle{display:flex;gap:2px;background:rgba(118,118,128,.12);border-radius:7px;padding:2px;}
-.lang-btn{
-  font-size:.7rem;padding:4px 9px;border-radius:5px;border:none;
-  background:transparent;cursor:pointer;color:var(--gray);font-family:inherit;
-  transition:all .18s;font-weight:500;
-}
-.lang-btn.active{background:#fff;color:var(--black);box-shadow:0 1px 3px rgba(0,0,0,.1);}
+.nav-links a:hover{color:#fff;}
+.nav-right{display:flex;align-items:center;gap:10px;}
+.lang-tog{display:flex;gap:2px;background:rgba(255,255,255,.08);border-radius:7px;padding:2px;}
+.lang-btn{font-size:.68rem;padding:3px 9px;border-radius:5px;border:none;background:transparent;cursor:pointer;color:rgba(255,255,255,.4);font-family:inherit;transition:all .2s;font-weight:600;letter-spacing:.02em;}
+.lang-btn.active{background:rgba(255,255,255,.12);color:#fff;}
 .nav-cta{
-  font-size:.76rem;color:var(--blue);text-decoration:none;font-weight:500;
-  padding:7px 14px;border-radius:980px;border:1px solid rgba(0,122,255,.25);
-  transition:all .18s;
+  font-size:.75rem;color:var(--blue);text-decoration:none;font-weight:500;
+  padding:6px 14px;border-radius:980px;
+  border:.5px solid rgba(0,122,255,.3);
+  transition:all .2s;letter-spacing:-.01em;
 }
-.nav-cta:hover{background:rgba(0,122,255,.06);}
+.nav-cta:hover{background:rgba(0,122,255,.1);border-color:rgba(0,122,255,.5);}
+.nav-accent{position:absolute;bottom:0;left:0;right:0;height:.5px;background:linear-gradient(90deg,transparent,var(--blue) 50%,transparent);opacity:0;transition:opacity .4s;}
+.nav-accent.show{opacity:1;}
 
-/* ── HERO ── */
+/* ── HERO ────────────────────────────────────────── */
 .hero{
   min-height:100svh;
   display:flex;flex-direction:column;
   align-items:center;justify-content:center;
-  text-align:center;
-  padding:80px 24px 60px;
-  position:relative;overflow:hidden;
-  background:#fff;
+  text-align:center;padding:80px 24px 60px;
+  position:relative;overflow:hidden;background:#000;
 }
-.hero-bg{
+.hero-noise{
+  position:absolute;inset:0;pointer-events:none;opacity:.03;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size:200px;
+}
+.hero-glow{
   position:absolute;inset:0;pointer-events:none;
   background:
-    radial-gradient(ellipse 70% 50% at 20% 80%,rgba(0,122,255,.06) 0%,transparent 60%),
-    radial-gradient(ellipse 60% 40% at 80% 20%,rgba(52,199,89,.05) 0%,transparent 60%),
-    radial-gradient(ellipse 80% 60% at 50% 0%,rgba(0,122,255,.04) 0%,transparent 70%);
+    radial-gradient(ellipse 70% 40% at 50% -5%,rgba(0,122,255,.2) 0%,transparent 65%),
+    radial-gradient(ellipse 40% 25% at 20% 80%,rgba(88,86,214,.08) 0%,transparent 60%),
+    radial-gradient(ellipse 35% 20% at 80% 70%,rgba(52,199,89,.05) 0%,transparent 60%);
 }
-.hero-eyebrow{
-  display:inline-flex;align-items:center;gap:7px;
-  background:rgba(0,122,255,.07);border:.5px solid rgba(0,122,255,.2);
-  border-radius:980px;padding:5px 14px;
-  font-size:.72rem;font-weight:600;color:var(--blue);
-  letter-spacing:.04em;text-transform:uppercase;
-  margin-bottom:28px;
-  opacity:0;transform:translateY(20px);
-  animation:up .7s .1s cubic-bezier(.16,1,.3,1) forwards;
+.hero-label{
+  font-size:.72rem;font-weight:500;letter-spacing:.12em;
+  text-transform:uppercase;color:rgba(255,255,255,.3);
+  margin-bottom:32px;
+  opacity:0;animation:fadeUp .6s .1s ease forwards;
 }
 .hero-title{
-  font-size:clamp(3.2rem,9vw,8rem);
-  font-weight:700;letter-spacing:-.05em;line-height:1.01;
-  max-width:1000px;
-  opacity:0;transform:translateY(24px);
-  animation:up .8s .2s cubic-bezier(.16,1,.3,1) forwards;
+  font-size:clamp(4rem,11vw,11rem);
+  font-weight:700;letter-spacing:-.055em;line-height:.95;
+  opacity:0;animation:fadeUp .8s .2s cubic-bezier(.16,1,.3,1) forwards;
 }
-.hero-title .accent{color:var(--blue);}
-.hero-sub{
-  margin-top:24px;font-size:clamp(.95rem,2vw,1.2rem);
-  color:var(--gray);max-width:560px;line-height:1.65;
-  opacity:0;transform:translateY(20px);
-  animation:up .7s .38s cubic-bezier(.16,1,.3,1) forwards;
+.hero-title .line2{
+  background:linear-gradient(135deg,#fff 0%,rgba(255,255,255,.4) 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.hero-title .line3{
+  background:linear-gradient(135deg,var(--blue) 0%,#5856d6 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
 }
 .hero-btns{
-  display:flex;gap:12px;margin-top:44px;flex-wrap:wrap;justify-content:center;
-  opacity:0;transform:translateY(16px);
-  animation:up .7s .52s cubic-bezier(.16,1,.3,1) forwards;
+  display:flex;gap:12px;margin-top:52px;flex-wrap:wrap;justify-content:center;
+  opacity:0;animation:fadeUp .7s .42s cubic-bezier(.16,1,.3,1) forwards;
 }
 .btn-primary{
   background:var(--blue);color:#fff;border:none;
-  padding:14px 30px;border-radius:980px;
+  padding:15px 32px;border-radius:980px;
   font-family:inherit;font-size:.9rem;font-weight:600;cursor:pointer;
-  transition:background .2s,transform .15s,box-shadow .2s;
-  box-shadow:0 4px 16px rgba(0,122,255,.3);
+  box-shadow:0 0 0 0 rgba(0,122,255,.4);
+  transition:background .2s,transform .15s,box-shadow .3s;
+  letter-spacing:-.01em;
 }
-.btn-primary:hover{background:var(--blue2);transform:translateY(-1px);box-shadow:0 8px 24px rgba(0,122,255,.4);}
+.btn-primary:hover{background:#0077ed;transform:translateY(-1px);box-shadow:0 8px 32px rgba(0,122,255,.4);}
 .btn-ghost{
-  background:transparent;color:var(--blue);border:none;
-  padding:14px 28px;border-radius:980px;
+  background:transparent;color:rgba(255,255,255,.7);
+  border:.5px solid rgba(255,255,255,.18);
+  padding:15px 28px;border-radius:980px;
   font-family:inherit;font-size:.9rem;cursor:pointer;
-  transition:background .18s;
+  transition:all .2s;letter-spacing:-.01em;
 }
-.btn-ghost:hover{background:rgba(0,122,255,.06);}
-
-/* App chips */
-.hero-chips{
-  display:flex;gap:10px;margin-top:52px;flex-wrap:wrap;justify-content:center;
-  opacity:0;transform:translateY(14px);
-  animation:up .7s .66s cubic-bezier(.16,1,.3,1) forwards;
+.btn-ghost:hover{background:rgba(255,255,255,.05);color:#fff;border-color:rgba(255,255,255,.3);}
+.hero-apps{
+  display:flex;gap:10px;margin-top:56px;flex-wrap:wrap;justify-content:center;
+  opacity:0;animation:fadeUp .7s .58s cubic-bezier(.16,1,.3,1) forwards;
 }
-.chip{
+.app-pill{
   display:flex;align-items:center;gap:9px;
-  background:#fff;border:.5px solid var(--border);border-radius:14px;
-  padding:9px 16px;font-size:.78rem;font-weight:500;color:var(--black);
-  box-shadow:0 2px 8px rgba(0,0,0,.06);
-  transition:transform .2s,box-shadow .2s;
+  background:rgba(255,255,255,.05);
+  border:.5px solid rgba(255,255,255,.1);
+  border-radius:12px;padding:8px 15px;
+  font-size:.76rem;font-weight:500;color:rgba(255,255,255,.6);
+  transition:all .25s;
 }
-.chip:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.1);}
-.chip-icon{width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.app-pill:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.18);color:#fff;}
+.pill-ico{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 
-/* ── DIVIDER ── */
-.divider{height:.5px;background:linear-gradient(90deg,transparent,var(--border) 20%,var(--border) 80%,transparent);}
+/* MANAGER ICON — Checklist + checkmark (Variant A) */
+.ico-manager{background:#007aff;}
+/* ANALYTICS ICON — Bar chart (Variant B) */
+.ico-analytics{background:#34c759;}
+/* STASH ICON — Stacked layers flipped (Variant C flipped) */
+.ico-stash{background:#ff9500;}
 
-/* ── MARQUEE STRIP ── */
-.strip{padding:18px 0;background:var(--light);overflow:hidden;border-top:.5px solid var(--border);border-bottom:.5px solid var(--border);}
-.strip-track{display:flex;gap:0;width:max-content;animation:marquee 24s linear infinite;}
-.strip-item{display:flex;align-items:center;gap:8px;padding:0 36px;font-size:.78rem;color:var(--gray);white-space:nowrap;}
-.strip-dot{width:5px;height:5px;border-radius:50%;background:var(--blue);flex-shrink:0;}
+/* ── MARQUEE ─────────────────────────────────────── */
+.marquee-wrap{
+  padding:16px 0;overflow:hidden;
+  background:rgba(255,255,255,.02);
+  border-top:.5px solid var(--border);
+  border-bottom:.5px solid var(--border);
+}
+.marquee-track{display:flex;width:max-content;animation:marquee 22s linear infinite;}
+.marquee-item{
+  display:flex;align-items:center;gap:8px;
+  padding:0 28px;font-size:.73rem;
+  color:rgba(255,255,255,.28);white-space:nowrap;
+  letter-spacing:.02em;
+}
+.marquee-sep{width:3px;height:3px;border-radius:50%;background:rgba(255,255,255,.2);}
 
-/* ── PRODUCT BLOCKS ── */
-.products{background:var(--light);}
-.product-block{
-  display:grid;grid-template-columns:1fr 1fr;
-  min-height:680px;align-items:center;
-  max-width:1200px;margin:0 auto;padding:90px 56px;
-  gap:24px;
+/* ── SCALE TEXT SECTION ─────────────────────────── */
+.scale-section{
+  height:300vh;position:relative;
+  display:flex;align-items:flex-start;
 }
-.product-block.flip{direction:rtl;}
-.product-block.flip>*{direction:ltr;}
-.pb-text{display:flex;flex-direction:column;justify-content:center;}
-.product-block:not(.flip) .pb-text{padding-right:24px;}
-.product-block.flip .pb-text{padding-left:24px;}
-.pb-eyebrow{
-  display:inline-flex;align-items:center;gap:7px;
-  font-size:.7rem;font-weight:700;letter-spacing:.08em;
-  text-transform:uppercase;margin-bottom:16px;
-}
-.pb-title{font-size:clamp(2rem,3.5vw,3.2rem);font-weight:700;letter-spacing:-.04em;line-height:1.06;margin-bottom:18px;}
-.pb-desc{font-size:.95rem;color:var(--gray);line-height:1.75;margin-bottom:28px;max-width:440px;}
-.pb-list{display:flex;flex-direction:column;gap:10px;margin-bottom:32px;}
-.pb-item{display:flex;align-items:center;gap:10px;font-size:.85rem;color:var(--gray);}
-.pb-check{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:.55rem;color:#fff;}
-.pb-link{
-  display:inline-flex;align-items:center;gap:6px;
-  font-size:.88rem;font-weight:600;text-decoration:none;
-  transition:gap .18s;
-}
-.pb-link:hover{gap:10px;}
-.pb-link::after{content:'›';font-size:1.1rem;line-height:1;}
-.pb-visual{display:flex;align-items:center;justify-content:center;}
-
-/* ── PHONE ── */
-.phone-wrap{position:relative;}
-.phone-glow{
-  position:absolute;top:50%;left:50%;
-  transform:translate(-50%,-50%);
-  width:260px;height:260px;border-radius:50%;
-  filter:blur(70px);opacity:.22;pointer-events:none;
-}
-.phone{
-  width:256px;height:520px;
-  background:#1c1c1e;border-radius:46px;
-  padding:12px;
-  box-shadow:
-    0 50px 120px rgba(0,0,0,.25),
-    0 0 0 .5px rgba(255,255,255,.08) inset,
-    0 2px 0 rgba(255,255,255,.04) inset;
-  position:relative;flex-shrink:0;
-}
-.phone-screen{width:100%;height:100%;border-radius:35px;overflow:hidden;}
-.phone-notch{
-  position:absolute;top:0;left:50%;transform:translateX(-50%);
-  width:88px;height:28px;background:#1c1c1e;
-  border-radius:0 0 18px 18px;z-index:10;
-}
-@keyframes float{0%,100%{transform:translateY(0);}50%{transform:translateY(-14px);}}
-@keyframes float2{0%,100%{transform:translateY(0);}50%{transform:translateY(-11px);}}
-.float{animation:float 5.5s ease-in-out infinite;}
-.float2{animation:float2 6.5s .8s ease-in-out infinite;}
-
-/* Screen: Manager */
-.scr-m{background:#f2f2f7;width:100%;height:100%;padding:32px 0 0;overflow:hidden;}
-.scr-m .sh{background:rgba(242,242,247,.97);padding:8px 12px;border-bottom:.5px solid rgba(60,60,67,.12);display:flex;justify-content:space-between;align-items:center;}
-.scr-m .sh-t{font-size:10px;font-weight:700;color:#1c1c1e;}
-.scr-m .sh-d{font-size:7.5px;color:#6d6d72;}
-.scr-m .sh-b{font-size:6.5px;background:#34c759;color:#fff;border-radius:5px;padding:2px 5px;font-weight:600;}
-.scr-m .sb{padding:8px;}
-.scr-m .sg{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:6px;}
-.scr-m .sc{background:#fff;border-radius:9px;padding:7px 9px;box-shadow:0 1px 4px rgba(0,0,0,.07);}
-.scr-m .sl{font-size:6px;color:#6d6d72;font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;}
-.scr-m .sv{font-size:13px;font-weight:700;letter-spacing:-.3px;}
-.scr-m .ss{font-size:6px;color:#aeaeb2;margin-top:2px;}
-.scr-m .sec{font-size:6.5px;font-weight:600;color:#6d6d72;text-transform:uppercase;letter-spacing:.4px;margin:6px 0 4px;}
-.scr-m .scard{background:#fff;border-radius:9px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.07);}
-.scr-m .srow{display:flex;justify-content:space-between;align-items:center;padding:5.5px 9px;border-bottom:.5px solid rgba(60,60,67,.07);}
-.scr-m .srow:last-child{border-bottom:none;}
-.scr-m .srn{font-size:7.5px;color:#1c1c1e;}
-.scr-m .srv{font-size:7.5px;font-weight:600;}
-.scr-m .sbtn{margin:6px 0;background:#007aff;border-radius:8px;padding:7px;text-align:center;font-size:7.5px;font-weight:600;color:#fff;}
-.cg{color:#34c759;}.cr{color:#ff3b30;}.cb{color:#007aff;}.co{color:#ff9500;}
-
-/* Screen: Analytics */
-.scr-a{background:#f2f2f7;width:100%;height:100%;padding:32px 0 0;overflow:hidden;}
-.scr-a .sh{background:rgba(242,242,247,.97);padding:8px 12px;border-bottom:.5px solid rgba(60,60,67,.12);display:flex;justify-content:space-between;align-items:center;}
-.scr-a .sh-t{font-size:10px;font-weight:700;color:#1c1c1e;}
-.scr-a .sh-p{font-size:6.5px;background:rgba(52,199,89,.12);color:#34c759;border-radius:8px;padding:2px 7px;font-weight:600;}
-.scr-a .sb{padding:8px;}
-.scr-a .sg2{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:6px;}
-.scr-a .sg3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:6px;}
-.scr-a .sc{background:#fff;border-radius:9px;padding:7px 9px;box-shadow:0 1px 4px rgba(0,0,0,.07);}
-.scr-a .sl{font-size:6px;color:#6d6d72;font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;}
-.scr-a .sv{font-size:12px;font-weight:700;letter-spacing:-.3px;}
-.scr-a .ss{font-size:6px;color:#aeaeb2;margin-top:2px;}
-.scr-a .chart{background:#fff;border-radius:9px;padding:8px;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:6px;}
-.scr-a .cl{font-size:6px;color:#6d6d72;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;}
-.bars{display:flex;align-items:flex-end;gap:3px;height:40px;}
-.bar{flex:1;border-radius:3px 3px 0 0;}
-
-/* Screen: Stash */
-.scr-s{background:linear-gradient(155deg,#e8eefb 0%,#f2f2f7 55%,#eaf0fc 100%);width:100%;height:100%;padding:32px 0 0;overflow:hidden;}
-.scr-s .sh{background:rgba(255,255,255,.88);padding:8px 12px;border-bottom:.5px solid rgba(60,60,67,.1);display:flex;justify-content:space-between;align-items:center;}
-.scr-s .sh-t{font-size:10px;font-weight:700;color:#1c1c1e;}
-.scr-s .sh-b{font-size:6.5px;background:rgba(52,199,89,.12);color:#34c759;border-radius:7px;padding:2px 6px;font-weight:600;}
-.scr-s .sb{padding:8px;}
-.scr-s .scard{background:#fff;border-radius:11px;padding:9px;box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:6px;}
-.scr-s .item{margin-bottom:6px;}
-.scr-s .item:last-child{margin-bottom:0;}
-.scr-s .itop{display:flex;justify-content:space-between;margin-bottom:4px;}
-.scr-s .ibrand{font-size:7.5px;font-weight:700;color:#1c1c1e;}
-.scr-s .iflavor{font-size:6.5px;color:#6d6d72;}
-.scr-s .istock{font-size:7.5px;font-weight:600;}
-.scr-s .ibar{height:3px;background:rgba(0,0,0,.08);border-radius:2px;overflow:hidden;}
-.scr-s .ibarf{height:100%;border-radius:2px;}
-.scr-s .cats{display:grid;grid-template-columns:1fr 1fr;gap:5px;}
-.scr-s .cat{background:#fff;border-radius:9px;padding:7px;box-shadow:0 1px 4px rgba(0,0,0,.07);text-align:center;}
-.scr-s .cdot{width:7px;height:7px;border-radius:50%;margin:0 auto 3px;}
-.scr-s .cl{font-size:6.5px;color:#6d6d72;margin-bottom:2px;}
-.scr-s .cv{font-size:10px;font-weight:700;}
-
-/* ── STEPS ── */
-.steps{padding:110px 24px;text-align:center;background:#fff;}
-.steps h2{font-size:clamp(2rem,4.5vw,3.8rem);font-weight:700;letter-spacing:-.04em;margin-bottom:14px;}
-.steps-sub{color:var(--gray);font-size:1rem;margin-bottom:72px;}
-.steps-grid{
-  display:grid;grid-template-columns:repeat(4,1fr);
-  gap:0;max-width:960px;margin:0 auto;position:relative;
-}
-.steps-line{
-  position:absolute;top:27px;
-  left:calc(12.5% + 22px);right:calc(12.5% + 22px);
-  height:.5px;
-  background:linear-gradient(90deg,var(--blue),rgba(0,122,255,.08));
-}
-.step-item{display:flex;flex-direction:column;align-items:center;padding:0 14px;}
-.step-num{
-  width:54px;height:54px;border-radius:50%;
-  background:var(--blue);color:#fff;
+.scale-sticky{
+  position:sticky;top:0;height:100vh;width:100%;
   display:flex;align-items:center;justify-content:center;
-  font-size:1.1rem;font-weight:700;
-  margin-bottom:20px;
-  box-shadow:0 4px 20px rgba(0,122,255,.3);
-  position:relative;z-index:1;
-  transition:transform .3s,box-shadow .3s;
+  overflow:hidden;
 }
-.step-item:hover .step-num{transform:scale(1.08);box-shadow:0 8px 32px rgba(0,122,255,.4);}
-.step-title{font-size:.9rem;font-weight:600;margin-bottom:7px;}
-.step-desc{font-size:.78rem;color:var(--gray);line-height:1.6;}
+.scale-text{
+  font-size:clamp(5rem,15vw,18rem);
+  font-weight:700;letter-spacing:-.06em;line-height:1;
+  text-align:center;
+  background:linear-gradient(135deg,#fff 0%,rgba(255,255,255,.15) 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  will-change:transform,opacity;
+  transform:scale(.4);opacity:0;
+}
 
-/* ── PRICING ── */
-.pricing{padding:110px 24px;background:var(--light);}
-.pricing-head{text-align:center;margin-bottom:64px;}
-.pricing-head h2{font-size:clamp(2rem,4.5vw,3.8rem);font-weight:700;letter-spacing:-.04em;margin-bottom:12px;}
-.pricing-head p{color:var(--gray);font-size:1rem;}
-.pricing-grid{
-  display:grid;grid-template-columns:repeat(3,1fr);
-  gap:14px;max-width:980px;margin:0 auto;
-}
-.plan{
-  background:#fff;border-radius:24px;
-  padding:36px 28px;
-  border:.5px solid rgba(60,60,67,.1);
-  box-shadow:0 2px 16px rgba(0,0,0,.04);
-  transition:transform .25s,box-shadow .25s;
-  position:relative;
-}
-.plan:hover{transform:translateY(-6px);box-shadow:0 20px 60px rgba(0,0,0,.1);}
-.plan.featured{background:var(--blue);color:#fff;border-color:transparent;}
-.plan.featured .plan-period,.plan.featured .feat-label,.plan.featured .plan-name{color:rgba(255,255,255,.72);}
-.plan.featured .feat-icon{background:rgba(255,255,255,.15);color:#fff;}
-.plan.featured .plan-btn{background:#fff;color:var(--blue);}
-.plan.featured .plan-btn:hover{background:rgba(255,255,255,.92);}
-.pop-badge{
-  position:absolute;top:-12px;left:50%;transform:translateX(-50%);
-  background:#ff9500;color:#fff;
-  font-size:.65rem;font-weight:700;letter-spacing:.05em;
-  padding:3px 14px;border-radius:980px;white-space:nowrap;
-}
-.plan-name{font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--gray);margin-bottom:14px;}
-.plan-price{font-size:3.4rem;font-weight:700;letter-spacing:-.05em;line-height:1;margin-bottom:4px;}
-.plan-price sup{font-size:1.3rem;font-weight:400;vertical-align:super;letter-spacing:0;}
-.plan-period{font-size:.8rem;color:var(--gray);margin-bottom:28px;}
-.feat-list{display:flex;flex-direction:column;gap:10px;margin-bottom:28px;}
-.feat-item{display:flex;align-items:flex-start;gap:9px;font-size:.83rem;}
-.feat-icon{width:18px;height:18px;border-radius:50%;background:rgba(0,122,255,.08);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:.55rem;flex-shrink:0;margin-top:1px;}
-.feat-label{color:var(--gray);}
-.feat-off{opacity:.3;text-decoration:line-through;}
-.plan-btn{
-  width:100%;padding:13px;border-radius:14px;border:none;
-  background:var(--blue);color:#fff;
-  font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;
-  transition:all .2s;
-}
-.plan-btn:hover{opacity:.9;transform:translateY(-1px);}
-.plan-btn.outline{background:transparent;color:var(--blue);border:.5px solid rgba(0,122,255,.3);}
-.plan-btn.outline:hover{background:rgba(0,122,255,.06);}
-.pay-badges{display:flex;justify-content:center;gap:10px;margin-top:28px;flex-wrap:wrap;}
-.pay-b{background:#fff;border:.5px solid var(--border);border-radius:8px;padding:6px 14px;font-size:.72rem;color:var(--gray);}
-
-/* ── TRUST ── */
-.trust{
-  display:flex;justify-content:center;align-items:center;
-  gap:0;flex-wrap:wrap;
-  border-top:.5px solid var(--border);border-bottom:.5px solid var(--border);
-  background:#fff;
-}
-.trust-item{
-  display:flex;align-items:center;gap:9px;
-  padding:20px 32px;
-  font-size:.78rem;color:var(--gray);
-  border-right:.5px solid var(--border);
-}
-.trust-item:last-child{border-right:none;}
-.trust-icon{font-size:1rem;}
-
-/* ── CTA BANNER ── */
-.cta-banner{
-  background:#1c1c1e;color:#fff;
-  text-align:center;padding:110px 24px;
+/* ── STATEMENT SECTION ──────────────────────────── */
+.statement{
+  background:#000;
+  padding:160px 24px;
+  text-align:center;
   position:relative;overflow:hidden;
 }
-.cta-banner::before{
-  content:'';position:absolute;
-  top:50%;left:50%;transform:translate(-50%,-50%);
-  width:900px;height:450px;
-  background:radial-gradient(ellipse,rgba(0,122,255,.18) 0%,transparent 65%);
+.statement::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 60% 50% at 50% 50%,rgba(0,122,255,.07) 0%,transparent 70%);
   pointer-events:none;
 }
-.cta-banner::after{
-  content:'';position:absolute;
-  top:30%;right:10%;
-  width:300px;height:300px;
-  background:radial-gradient(ellipse,rgba(52,199,89,.08) 0%,transparent 70%);
-  pointer-events:none;
+.statement-line{
+  display:block;
+  font-size:clamp(2.8rem,6vw,7rem);
+  font-weight:700;letter-spacing:-.045em;line-height:1.02;
+  opacity:0;transform:translateY(40px);
+  transition:opacity .9s cubic-bezier(.16,1,.3,1),transform .9s cubic-bezier(.16,1,.3,1);
 }
-.cta-banner h2{
-  font-size:clamp(2.8rem,6vw,6rem);
-  font-weight:700;letter-spacing:-.05em;line-height:1.02;
-  position:relative;z-index:1;margin-bottom:18px;
+.statement-line.in{opacity:1;transform:translateY(0);}
+.statement-line.in.d1{transition-delay:.05s;}
+.statement-line.in.d2{transition-delay:.18s;}
+.statement-line.in.d3{transition-delay:.32s;}
+.statement-line .dim{color:rgba(255,255,255,.18);}
+
+/* ── STATS ───────────────────────────────────────── */
+.stats{
+  background:#000;
+  border-top:.5px solid var(--border);
+  border-bottom:.5px solid var(--border);
 }
-.cta-banner p{
-  font-size:1.05rem;color:rgba(255,255,255,.55);
-  margin:0 auto 44px;max-width:480px;line-height:1.65;
+.stats-inner{
+  max-width:960px;margin:0 auto;
+  display:grid;grid-template-columns:repeat(3,1fr);
+}
+.stat-item{
+  padding:60px 40px;
+  border-right:.5px solid var(--border);
+  text-align:center;
+}
+.stat-item:last-child{border-right:none;}
+.stat-num{
+  font-size:clamp(2.8rem,5vw,5rem);
+  font-weight:700;letter-spacing:-.05em;
+  line-height:1;margin-bottom:10px;
+  background:linear-gradient(135deg,#fff,rgba(255,255,255,.5));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  opacity:0;transform:translateY(20px);
+  transition:opacity .8s cubic-bezier(.16,1,.3,1),transform .8s cubic-bezier(.16,1,.3,1);
+}
+.stat-num.in{opacity:1;transform:translateY(0);}
+.stat-num.in.d1{transition-delay:.0s;}
+.stat-num.in.d2{transition-delay:.12s;}
+.stat-num.in.d3{transition-delay:.24s;}
+.stat-label{font-size:.78rem;color:rgba(255,255,255,.3);line-height:1.5;letter-spacing:.01em;}
+
+/* ── STICKY PRODUCT ──────────────────────────────── */
+.product-scroll{position:relative;}
+.p-grid{
+  display:grid;grid-template-columns:1fr 1fr;
+  max-width:1160px;margin:0 auto;
+}
+
+/* Phone side */
+.phone-side{
+  position:sticky;top:0;height:100vh;
+  display:flex;align-items:center;justify-content:center;
+}
+.phone-wrap{position:relative;}
+.phone-aura{
+  position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  width:300px;height:300px;border-radius:50%;
+  filter:blur(90px);opacity:.18;
+  pointer-events:none;transition:background 1s ease;
+}
+.phone{
+  width:258px;height:528px;
+  background:#0d0d0d;border-radius:50px;
+  padding:11px;
+  box-shadow:
+    0 80px 160px rgba(0,0,0,.7),
+    0 0 0 .5px rgba(255,255,255,.14) inset,
+    0 1px 0 rgba(255,255,255,.06) inset;
+  position:relative;
+  transition:transform .6s cubic-bezier(.16,1,.3,1);
+}
+.phone-screen-wrap{width:100%;height:100%;border-radius:40px;overflow:hidden;position:relative;}
+.phone-notch{
+  position:absolute;top:0;left:50%;transform:translateX(-50%);
+  width:88px;height:28px;background:#0d0d0d;
+  border-radius:0 0 18px 18px;z-index:10;
+}
+.pscreen{
+  position:absolute;inset:0;
+  opacity:0;transition:opacity .55s cubic-bezier(.16,1,.3,1);
+}
+.pscreen.active{opacity:1;}
+
+/* Text side */
+.text-side{padding:0 24px 0 52px;}
+.text-side.flip{padding:0 52px 0 24px;}
+.feat-block{
+  min-height:100vh;display:flex;
+  align-items:center;
+}
+.feat-eyebrow{
+  display:flex;align-items:center;gap:8px;
+  font-size:.68rem;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;margin-bottom:18px;
+  color:rgba(255,255,255,.35);
+}
+.feat-eyebrow-dot{width:5px;height:5px;border-radius:50%;}
+.feat-h{
+  font-size:clamp(2.4rem,3.8vw,3.6rem);
+  font-weight:700;letter-spacing:-.045em;line-height:1.03;
+  margin-bottom:20px;
+}
+.feat-p{
+  font-size:.98rem;color:rgba(255,255,255,.42);
+  line-height:1.75;max-width:400px;margin-bottom:32px;
+  letter-spacing:-.01em;
+}
+.feat-list{display:flex;flex-direction:column;gap:11px;margin-bottom:36px;}
+.feat-row{display:flex;align-items:center;gap:11px;font-size:.84rem;color:rgba(255,255,255,.45);letter-spacing:-.01em;}
+.feat-row-dot{width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.5rem;color:#fff;flex-shrink:0;}
+.feat-link{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:.85rem;font-weight:600;text-decoration:none;
+  letter-spacing:-.01em;
+  transition:gap .2s;
+}
+.feat-link:hover{gap:10px;}
+.feat-link-arrow{font-size:1rem;transition:transform .2s;}
+.feat-link:hover .feat-link-arrow{transform:translateX(3px);}
+
+/* Progress indicator */
+.progress-bar{
+  position:fixed;top:48px;left:0;right:0;z-index:998;
+  height:1px;background:transparent;
+}
+.progress-fill{
+  height:100%;background:linear-gradient(90deg,var(--blue),#5856d6);
+  width:0%;transition:width .1s linear;
+}
+
+/* ── FEATURE CALLOUT CARDS ───────────────────────── */
+.callout-section{
+  background:#000;padding:0 24px 120px;
+}
+.callout-inner{max-width:1000px;margin:0 auto;}
+.callout-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border-radius:24px;overflow:hidden;}
+.callout-card{
+  background:#0a0a0a;padding:36px 28px;
+  transition:background .2s;
+}
+.callout-card:hover{background:#111;}
+.cc-icon{
+  width:40px;height:40px;border-radius:12px;
+  background:rgba(0,122,255,.1);
+  display:flex;align-items:center;justify-content:center;
+  margin-bottom:18px;
+}
+.cc-title{font-size:1rem;font-weight:700;margin-bottom:8px;letter-spacing:-.02em;}
+.cc-desc{font-size:.82rem;color:rgba(255,255,255,.35);line-height:1.6;letter-spacing:-.01em;}
+
+/* ── VIDEO PLACEHOLDER ───────────────────────────── */
+.video-section{
+  background:#000;padding:0 24px 120px;
+}
+.video-inner{max-width:960px;margin:0 auto;}
+.video-frame{
+  border-radius:24px;overflow:hidden;
+  background:#0a0a0a;
+  border:.5px solid var(--border);
+  aspect-ratio:16/9;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  position:relative;cursor:pointer;
+  transition:border-color .3s;
+}
+.video-frame:hover{border-color:rgba(255,255,255,.15);}
+.video-frame::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 60% 40% at 50% 60%,rgba(0,122,255,.06) 0%,transparent 70%);
+}
+.video-play{
+  width:64px;height:64px;border-radius:50%;
+  background:rgba(255,255,255,.08);border:.5px solid rgba(255,255,255,.15);
+  display:flex;align-items:center;justify-content:center;
+  margin-bottom:20px;position:relative;z-index:1;
+  transition:all .2s;
+}
+.video-frame:hover .video-play{background:rgba(255,255,255,.12);transform:scale(1.06);}
+.video-play svg{margin-left:3px;}
+.video-label{font-size:.88rem;color:rgba(255,255,255,.35);position:relative;z-index:1;letter-spacing:.02em;}
+.video-title{font-size:1.1rem;font-weight:600;position:relative;z-index:1;margin-bottom:6px;letter-spacing:-.02em;}
+
+/* ── HOW IT WORKS ────────────────────────────────── */
+.how-section{background:#000;padding:140px 24px;}
+.how-inner{max-width:960px;margin:0 auto;text-align:center;}
+.how-inner h2{font-size:clamp(2.4rem,5vw,5rem);font-weight:700;letter-spacing:-.045em;margin-bottom:12px;line-height:1.02;}
+.how-inner > p{font-size:1rem;color:rgba(255,255,255,.35);margin-bottom:80px;letter-spacing:-.01em;}
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:0;position:relative;}
+.steps-line{position:absolute;top:26px;left:calc(12.5% + 20px);right:calc(12.5% + 20px);height:.5px;background:linear-gradient(90deg,var(--blue),rgba(0,122,255,.05));}
+.step{display:flex;flex-direction:column;align-items:center;text-align:center;padding:0 12px;}
+.step-n{
+  width:52px;height:52px;border-radius:50%;
+  background:var(--blue);color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  font-size:1rem;font-weight:700;margin-bottom:20px;
+  box-shadow:0 0 0 6px rgba(0,122,255,.1),0 4px 20px rgba(0,122,255,.35);
   position:relative;z-index:1;
+  transition:transform .25s,box-shadow .25s;
 }
-.cta-banner .btn-primary{position:relative;z-index:1;}
+.step:hover .step-n{transform:scale(1.1);box-shadow:0 0 0 8px rgba(0,122,255,.12),0 8px 32px rgba(0,122,255,.45);}
+.step-t{font-size:.88rem;font-weight:600;margin-bottom:7px;letter-spacing:-.01em;}
+.step-d{font-size:.76rem;color:rgba(255,255,255,.3);line-height:1.6;letter-spacing:-.01em;}
 
-/* ── FOOTER ── */
-footer{padding:56px 48px 40px;}
-.footer-inner{max-width:1100px;margin:0 auto;}
-.footer-top{
-  display:flex;justify-content:space-between;align-items:flex-start;
-  padding-bottom:36px;border-bottom:.5px solid var(--border);
-  flex-wrap:wrap;gap:32px;
+/* ── PRICING ─────────────────────────────────────── */
+.pricing{background:#000;padding:0 24px 140px;}
+.pricing-head{text-align:center;padding:140px 0 72px;}
+.pricing-head h2{font-size:clamp(2.4rem,5vw,5rem);font-weight:700;letter-spacing:-.045em;margin-bottom:12px;line-height:1.02;}
+.pricing-head p{font-size:1rem;color:rgba(255,255,255,.3);letter-spacing:-.01em;}
+.pricing-grid{
+  max-width:980px;margin:0 auto;
+  display:grid;grid-template-columns:1fr 2fr 1fr;
+  gap:1px;background:var(--border);
+  border-radius:28px;overflow:hidden;
 }
-.footer-brand{font-size:1.1rem;font-weight:800;letter-spacing:-.03em;margin-bottom:5px;}
-.footer-tag{font-size:.78rem;color:var(--gray);}
-.footer-cols{display:flex;gap:60px;flex-wrap:wrap;}
-.footer-col h4{font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:14px;color:var(--black);}
-.footer-col a{display:block;font-size:.8rem;color:var(--gray);text-decoration:none;margin-bottom:9px;transition:color .18s;}
-.footer-col a:hover{color:var(--black);}
-.footer-bottom{
-  display:flex;justify-content:space-between;align-items:center;
-  padding-top:22px;flex-wrap:wrap;gap:10px;
+.plan{background:#0a0a0a;padding:40px 32px;position:relative;transition:background .2s;}
+.plan.featured{background:#070707;}
+.plan:first-child{border-radius:28px 0 0 28px;}
+.plan:last-child{border-radius:0 28px 28px 0;}
+.plan:hover{background:#111;}
+.plan.featured:hover{background:#0d0d0d;}
+.pop-tag{
+  display:inline-block;
+  background:var(--orange);color:#fff;
+  font-size:.62rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  padding:3px 12px;border-radius:980px;margin-bottom:18px;
 }
-.footer-copy{font-size:.72rem;color:#aeaeb2;}
-.footer-links{display:flex;gap:18px;}
-.footer-links a{font-size:.72rem;color:#aeaeb2;text-decoration:none;transition:color .18s;}
-.footer-links a:hover{color:var(--gray);}
+.plan-tier{font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:14px;}
+.plan-price{font-size:clamp(2.8rem,4vw,4rem);font-weight:700;letter-spacing:-.05em;line-height:1;margin-bottom:3px;}
+.plan-price sup{font-size:1.1rem;font-weight:400;vertical-align:super;letter-spacing:0;}
+.plan-day{font-size:.72rem;color:rgba(255,255,255,.25);margin-bottom:28px;letter-spacing:-.01em;}
+.feat-list-p{display:flex;flex-direction:column;gap:9px;margin-bottom:28px;}
+.feat-p-item{display:flex;align-items:flex-start;gap:9px;font-size:.8rem;color:rgba(255,255,255,.45);letter-spacing:-.01em;}
+.feat-p-check{width:15px;height:15px;border-radius:50%;background:rgba(0,122,255,.12);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:.48rem;flex-shrink:0;margin-top:1px;}
+.feat-p-off{opacity:.2;text-decoration:line-through;}
+.plan-btn{
+  width:100%;padding:12px;border-radius:14px;
+  border:.5px solid rgba(255,255,255,.1);
+  background:rgba(255,255,255,.05);
+  color:rgba(255,255,255,.7);
+  font-family:inherit;font-size:.84rem;font-weight:600;cursor:pointer;
+  transition:all .2s;letter-spacing:-.01em;
+}
+.plan-btn:hover{background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.2);}
+.plan-btn.main{background:var(--blue);color:#fff;border-color:var(--blue);}
+.plan-btn.main:hover{background:#0077ed;}
+.pay-row{display:flex;justify-content:center;gap:10px;margin-top:28px;flex-wrap:wrap;}
+.pay-b{background:rgba(255,255,255,.03);border:.5px solid var(--border);border-radius:8px;padding:6px 14px;font-size:.7rem;color:rgba(255,255,255,.25);letter-spacing:.01em;}
 
-/* ── SECTION HELPERS ── */
+/* ── BIG CTA ─────────────────────────────────────── */
+.big-cta{
+  background:#000;
+  min-height:100vh;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  text-align:center;padding:80px 24px;
+  position:relative;overflow:hidden;
+}
+.big-cta::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 70% 50% at 50% 50%,rgba(0,122,255,.1) 0%,transparent 65%);
+  pointer-events:none;
+}
+.big-cta-word{
+  font-size:clamp(6rem,18vw,18rem);
+  font-weight:700;letter-spacing:-.06em;line-height:.92;
+  background:linear-gradient(170deg,#fff 0%,rgba(255,255,255,.12) 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  position:relative;z-index:1;
+  opacity:0;transform:translateY(32px);
+  transition:opacity 1s cubic-bezier(.16,1,.3,1),transform 1s cubic-bezier(.16,1,.3,1);
+}
+.big-cta-word.in{opacity:1;transform:translateY(0);}
+.big-cta-sub{
+  font-size:.98rem;color:rgba(255,255,255,.3);
+  margin:28px 0 44px;position:relative;z-index:1;
+  letter-spacing:-.01em;
+  opacity:0;transition:opacity .8s .2s ease;
+}
+.big-cta-sub.in{opacity:1;}
+.big-cta .btn-primary{position:relative;z-index:1;}
+
+/* ── FOOTER ──────────────────────────────────────── */
+footer{
+  background:#000;
+  border-top:.5px solid var(--border);
+  padding:64px 56px 44px;
+}
+.ft-inner{max-width:1100px;margin:0 auto;}
+.ft-body{
+  display:grid;grid-template-columns:1fr 3fr;
+  gap:48px;padding-bottom:44px;
+  border-bottom:.5px solid var(--border);
+}
+.ft-brand-col{}
+.ft-brand{
+  font-size:3rem;font-weight:800;letter-spacing:-.06em;
+  color:rgba(255,255,255,.08);
+  line-height:1;margin-bottom:10px;
+  user-select:none;
+}
+.ft-tagline{font-size:.76rem;color:rgba(255,255,255,.2);letter-spacing:-.01em;}
+.ft-nav{display:grid;grid-template-columns:repeat(3,1fr);gap:0;}
+.ft-col h4{font-size:.66rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.25);margin-bottom:16px;}
+.ft-col a{display:block;font-size:.78rem;color:rgba(255,255,255,.25);text-decoration:none;margin-bottom:9px;transition:color .18s;letter-spacing:-.01em;}
+.ft-col a:hover{color:rgba(255,255,255,.65);}
+.ft-bottom{display:flex;justify-content:space-between;align-items:center;padding-top:22px;flex-wrap:wrap;gap:10px;}
+.ft-copy{font-size:.7rem;color:rgba(255,255,255,.15);}
+.ft-links{display:flex;gap:16px;}
+.ft-links a{font-size:.7rem;color:rgba(255,255,255,.15);text-decoration:none;transition:color .18s;}
+.ft-links a:hover{color:rgba(255,255,255,.35);}
+
+/* ── SECTION LABEL ───────────────────────────────── */
 .sec-label{
-  font-size:.7rem;font-weight:700;letter-spacing:.1em;
-  text-transform:uppercase;display:block;margin-bottom:14px;
+  font-size:.68rem;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;display:block;margin-bottom:16px;
+  color:rgba(255,255,255,.3);
 }
 
-/* ── ANIMATIONS ── */
-@keyframes up{from{opacity:0;transform:translateY(24px);}to{opacity:1;transform:translateY(0);}}
+/* ── REVEAL ──────────────────────────────────────── */
+.reveal{opacity:0;transform:translateY(28px);transition:opacity .9s cubic-bezier(.16,1,.3,1),transform .9s cubic-bezier(.16,1,.3,1);}
+.reveal.in{opacity:1;transform:translateY(0);}
+.reveal.d1{transition-delay:.06s;}.reveal.d2{transition-delay:.14s;}.reveal.d3{transition-delay:.23s;}.reveal.d4{transition-delay:.32s;}
+
+/* ── KEYFRAMES ───────────────────────────────────── */
+@keyframes fadeUp{from{opacity:0;transform:translateY(20px);}to{opacity:1;transform:translateY(0);}}
 @keyframes marquee{from{transform:translateX(0);}to{transform:translateX(-50%)}}
 
-.reveal{
-  opacity:0;transform:translateY(32px);
-  transition:opacity .85s cubic-bezier(.16,1,.3,1),transform .85s cubic-bezier(.16,1,.3,1);
-}
-.reveal.in{opacity:1;transform:translateY(0);}
-.reveal.d1{transition-delay:.05s;}.reveal.d2{transition-delay:.13s;}.reveal.d3{transition-delay:.22s;}.reveal.d4{transition-delay:.3s;}
+/* ── PHONE SCREENS ───────────────────────────────── */
+.ps-base{width:100%;height:100%;overflow:hidden;}
+.m-bg{background:#f2f2f7;padding:30px 0 0;}
+.a-bg{background:#f2f2f7;padding:30px 0 0;}
+.s-bg{background:linear-gradient(155deg,#e8eefb,#f2f2f7 55%,#eaf0fc);padding:30px 0 0;}
+.ph{background:rgba(242,242,247,.97);padding:7px 11px;border-bottom:.5px solid rgba(60,60,67,.12);display:flex;justify-content:space-between;align-items:center;}
+.ph-t{font-size:9.5px;font-weight:700;color:#1c1c1e;}
+.ph-s{font-size:6px;border-radius:5px;padding:2px 5px;font-weight:600;}
+.ph-open{background:#34c759;color:#fff;}
+.ph-month{background:rgba(52,199,89,.12);color:#34c759;}
+.ph-cnt{background:rgba(52,199,89,.12);color:#34c759;}
+.pb{padding:7px;}
+.pg{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:5px;}
+.pg3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:5px;}
+.pc{background:#fff;border-radius:9px;padding:6px 8px;box-shadow:0 1px 4px rgba(0,0,0,.07);}
+.pl{font-size:5.5px;color:#6d6d72;font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;}
+.pv{font-size:12px;font-weight:700;letter-spacing:-.3px;}
+.ps{font-size:5.5px;color:#aeaeb2;margin-top:2px;}
+.psec{font-size:6px;font-weight:600;color:#6d6d72;text-transform:uppercase;letter-spacing:.4px;margin:5px 0 3px;}
+.pcard{background:#fff;border-radius:9px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.07);}
+.prow{display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border-bottom:.5px solid rgba(60,60,67,.07);}
+.prow:last-child{border-bottom:none;}
+.prn{font-size:7px;color:#1c1c1e;}
+.prv{font-size:7px;font-weight:600;}
+.pbtn{margin:5px 0;border-radius:8px;padding:7px;text-align:center;font-size:7px;font-weight:600;color:#fff;}
+.bars{display:flex;align-items:flex-end;gap:3px;height:36px;}
+.bar{flex:1;border-radius:3px 3px 0 0;}
+.pchart{background:#fff;border-radius:9px;padding:7px;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:5px;}
+.pcl{font-size:5.5px;color:#6d6d72;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px;}
+.ibar-bg{height:3px;background:rgba(0,0,0,.08);border-radius:2px;overflow:hidden;}
+.ibar-f{height:100%;border-radius:2px;}
+.s-cats{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
+.s-cat{background:#fff;border-radius:8px;padding:6px;box-shadow:0 1px 4px rgba(0,0,0,.07);text-align:center;}
+.s-cdot{width:6px;height:6px;border-radius:50%;margin:0 auto 2px;}
+.s-cl{font-size:5.5px;color:#6d6d72;margin-bottom:1px;}
+.s-cv{font-size:9px;font-weight:700;}
+.cg{color:#34c759;}.cr{color:#ff3b30;}.cb{color:#007aff;}.co{color:#ff9500;}.cp{color:#af52de;}
 
-/* ── ICON SVGs ── */
-/* Variant A — stacked bars (Manager) */
-/* Variant B — M monogram (Analytics) */
-/* Variant C — diamond (Stash) */
-
-/* ── MOBILE ── */
-@media(max-width:900px){
+/* ── MOBILE ───────────────────────────────────────── */
+@media(max-width:960px){
   .nav-links{display:none;}
-  .product-block{grid-template-columns:1fr;padding:64px 24px;min-height:auto;}
-  .product-block.flip{direction:ltr;}
-  .pb-visual{order:-1;}
-  .pb-text{padding:0!important;}
-  .pb-desc{max-width:100%;}
-  .pricing-grid{grid-template-columns:1fr;max-width:420px;margin:0 auto;}
-  .steps-grid{grid-template-columns:1fr 1fr;gap:36px;}
+  .p-grid{grid-template-columns:1fr;}
+  .phone-side{position:relative;height:auto;padding:60px 24px 0;}
+  .text-side{padding:32px 24px!important;}
+  .feat-block{min-height:auto;padding:48px 0;}
+  .pricing-grid{grid-template-columns:1fr;background:transparent;gap:12px;}
+  .plan{border-radius:20px!important;}
+  .callout-grid{grid-template-columns:1fr;}
+  .steps{grid-template-columns:1fr 1fr;gap:32px;}
   .steps-line{display:none;}
-  .footer-cols{gap:28px;}
+  .ft-body{grid-template-columns:1fr;}
+  .ft-brand{font-size:2rem;}
   footer{padding:40px 24px 28px;}
-  .trust{flex-direction:column;}
-  .trust-item{border-right:none;border-bottom:.5px solid var(--border);width:100%;justify-content:center;}
-  .trust-item:last-child{border-bottom:none;}
+  .stats-inner{grid-template-columns:1fr;}
+  .stat-item{border-right:none;border-bottom:.5px solid var(--border);}
+  .stat-item:last-child{border-bottom:none;}
+  .scale-text{font-size:clamp(3rem,12vw,12rem);}
 }
 @media(max-width:520px){
-  .steps-grid{grid-template-columns:1fr;}
-  .hero-title{letter-spacing:-.04em;}
+  .steps{grid-template-columns:1fr;}
+  .ft-nav{grid-template-columns:1fr 1fr;}
 }
 </style>
 </head>
 <body>
+
+<!-- PROGRESS BAR -->
+<div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
 
 <!-- NAV -->
 <nav class="nav" id="nav">
@@ -471,139 +597,263 @@ footer{padding:56px 48px 40px;}
     mise
   </a>
   <ul class="nav-links">
-    <li><a href="#manager" data-i18n="nav.manager">Mise Manager</a></li>
-    <li><a href="#analytics" data-i18n="nav.analytics">Mise Analytics</a></li>
-    <li><a href="#stash" data-i18n="nav.stash">Mise Stash</a></li>
-    <li><a href="#pricing" data-i18n="nav.pricing">Цены</a></li>
+    <li><a href="#manager" data-i18n="n.m">Mise Manager</a></li>
+    <li><a href="#analytics" data-i18n="n.a">Mise Analytics</a></li>
+    <li><a href="#stash" data-i18n="n.s">Mise Stash</a></li>
+    <li><a href="#pricing" data-i18n="n.p">Цены</a></li>
   </ul>
   <div class="nav-right">
-    <div class="lang-toggle">
+    <div class="lang-tog">
       <button class="lang-btn active" onclick="setLang('ru')">RU</button>
       <button class="lang-btn" onclick="setLang('en')">EN</button>
     </div>
-    <a href="/auth/login" class="nav-cta" data-i18n="nav.cta">Войти →</a>
+    <a href="/auth/login" class="nav-cta" data-i18n="n.cta">Войти</a>
   </div>
+  <div class="nav-accent" id="nav-accent"></div>
 </nav>
 
 <!-- HERO -->
 <section class="hero">
-  <div class="hero-bg"></div>
-  <div class="hero-eyebrow" data-i18n="hero.eyebrow">Система управления рестораном</div>
+  <div class="hero-noise"></div>
+  <div class="hero-glow"></div>
+  <p class="hero-label" data-i18n="h.label">Система управления рестораном</p>
   <h1 class="hero-title">
-    <span data-i18n="hero.t1">Управляй рестораном.</span><br>
-    <span class="accent" data-i18n="hero.t2">Умно.</span>
+    <span class="line1" data-i18n="h.l1">Ресторан</span><br>
+    <span class="line2" data-i18n="h.l2">под контролем.</span><br>
+    <span class="line3" data-i18n="h.l3">Mise.</span>
   </h1>
-  <p class="hero-sub" data-i18n="hero.sub">Три профессиональных инструмента для владельцев, менеджеров и кальянных залов. Один аккаунт — полный контроль.</p>
   <div class="hero-btns">
-    <button class="btn-primary" onclick="document.getElementById('pricing').scrollIntoView({behavior:'smooth'})" data-i18n="hero.cta1">Попробовать бесплатно</button>
-    <button class="btn-ghost" onclick="document.getElementById('manager').scrollIntoView({behavior:'smooth'})" data-i18n="hero.cta2">Узнать больше</button>
+    <button class="btn-primary" onclick="document.getElementById('pricing').scrollIntoView({behavior:'smooth'})" data-i18n="h.b1">Начать бесплатно</button>
+    <button class="btn-ghost" onclick="document.getElementById('manager').scrollIntoView({behavior:'smooth'})" data-i18n="h.b2">Смотреть продукт</button>
   </div>
-  <div class="hero-chips">
-    <div class="chip">
-      <div class="chip-icon" style="background:#007aff;">
-        <svg width="16" height="16" viewBox="0 0 64 64" fill="none">
-          <rect x="10" y="18" width="44" height="6" rx="3" fill="white"/>
-          <rect x="10" y="29" width="32" height="6" rx="3" fill="white" opacity=".7"/>
-          <rect x="10" y="40" width="22" height="6" rx="3" fill="white" opacity=".4"/>
+  <div class="hero-apps">
+    <div class="app-pill">
+      <div class="pill-ico ico-manager">
+        <!-- Manager: checklist + checkmark (Variant A) -->
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <rect x="3" y="4" width="13" height="2" rx="1" fill="white"/>
+          <rect x="3" y="8" width="9" height="2" rx="1" fill="white" opacity=".7"/>
+          <rect x="3" y="12" width="7" height="2" rx="1" fill="white" opacity=".4"/>
+          <path d="M15 10l2.5 2.5L21 9" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </div>
-      <span data-i18n="chip.manager">Mise Manager</span>
+      Mise Manager
     </div>
-    <div class="chip">
-      <div class="chip-icon" style="background:linear-gradient(135deg,#007aff,#5856d6);">
-        <svg width="16" height="16" viewBox="0 0 64 64" fill="none">
-          <path d="M12 46L12 18L32 36L52 18L52 46" stroke="white" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <div class="app-pill">
+      <div class="pill-ico ico-analytics">
+        <!-- Analytics: bar chart (Variant B) -->
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <rect x="3" y="12" width="4" height="8" rx="1" fill="white" opacity=".5"/>
+          <rect x="10" y="7" width="4" height="13" rx="1" fill="white" opacity=".75"/>
+          <rect x="17" y="3" width="4" height="17" rx="1" fill="white"/>
         </svg>
       </div>
-      <span data-i18n="chip.analytics">Mise Analytics</span>
+      Mise Analytics
     </div>
-    <div class="chip">
-      <div class="chip-icon" style="background:#ff9500;">
-        <svg width="16" height="16" viewBox="0 0 64 64" fill="none">
-          <path d="M32 10L54 32L32 54L10 32Z" fill="white"/>
-          <rect x="26" y="26" width="12" height="12" rx="3" fill="#ff9500"/>
+    <div class="app-pill">
+      <div class="pill-ico ico-stash">
+        <!-- Stash: stacked layers flipped (Variant C flipped) -->
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <ellipse cx="12" cy="16" rx="8" ry="2.5" fill="white"/>
+          <ellipse cx="12" cy="11.5" rx="8" ry="2.5" fill="white" opacity=".7"/>
+          <ellipse cx="12" cy="7" rx="8" ry="2.5" fill="white" opacity=".4"/>
         </svg>
       </div>
-      <span data-i18n="chip.stash">Mise Stash</span>
+      Mise Stash
     </div>
   </div>
 </section>
 
-<div class="divider"></div>
-
-<!-- STRIP -->
-<div class="strip">
-  <div class="strip-track">
-    <div class="strip-item"><span class="strip-dot"></span><span>7 дней бесплатно</span></div>
-    <div class="strip-item"><span class="strip-dot"></span><span>Без установки · PWA</span></div>
-    <div class="strip-item"><span class="strip-dot"></span><span>Данные зашифрованы</span></div>
-    <div class="strip-item"><span class="strip-dot"></span><span>iPhone и Android</span></div>
-    <div class="strip-item"><span class="strip-dot"></span><span>Оплата через Stripe</span></div>
-    <div class="strip-item"><span class="strip-dot"></span><span>Поддержка 24/7</span></div>
-    <div class="strip-item"><span class="strip-dot"></span><span>QR вход для команды</span></div>
-    <div class="strip-item"><span class="strip-dot"></span><span>7 дней бесплатно</span></div>
-    <div class="strip-item"><span class="strip-dot"></span><span>Без установки · PWA</span></div>
-    <div class="strip-item"><span class="strip-dot"></span><span>Данные зашифрованы</span></div>
-    <div class="strip-item"><span class="strip-dot"></span><span>iPhone и Android</span></div>
-    <div class="strip-item"><span class="strip-dot"></span><span>Оплата через Stripe</span></div>
-    <div class="strip-item"><span class="strip-dot"></span><span>Поддержка 24/7</span></div>
-    <div class="strip-item"><span class="strip-dot"></span><span>QR вход для команды</span></div>
+<!-- MARQUEE -->
+<div class="marquee-wrap">
+  <div class="marquee-track">
+    <div class="marquee-item"><span class="marquee-sep"></span>7 дней бесплатно</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>PWA · Без App Store</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>Данные зашифрованы</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>iPhone и Android</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>QR вход для команды</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>Оплата через Stripe</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>Европа и СНГ</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>Face ID поддержка</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>7 дней бесплатно</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>PWA · Без App Store</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>Данные зашифрованы</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>iPhone и Android</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>QR вход для команды</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>Оплата через Stripe</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>Европа и СНГ</div>
+    <div class="marquee-item"><span class="marquee-sep"></span>Face ID поддержка</div>
   </div>
 </div>
 
-<!-- PRODUCTS -->
-<div class="products">
+<!-- SCALE TEXT -->
+<div class="scale-section" id="scale-wrap">
+  <div class="scale-sticky">
+    <div class="scale-text" id="scale-text">mise</div>
+  </div>
+</div>
+
+<!-- STATEMENT -->
+<section class="statement">
+  <span class="statement-line d1" data-i18n="st.l1">Три приложения.</span>
+  <span class="statement-line d2" data-i18n="st.l2">Один аккаунт.</span>
+  <span class="statement-line d3"><span class="dim" data-i18n="st.l3a">Полный</span> <span data-i18n="st.l3b">контроль.</span></span>
+</section>
+
+<!-- STATS -->
+<div class="stats">
+  <div class="stats-inner">
+    <div class="stat-item">
+      <div class="stat-num" data-i18n="st1.n">12 сек</div>
+      <div class="stat-label" data-i18n="st1.l">Среднее время<br>открытия смены</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num" data-i18n="st2.n">€0</div>
+      <div class="stat-label" data-i18n="st2.l">Потерянных смен<br>в базе данных</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num" data-i18n="st3.n">3-в-1</div>
+      <div class="stat-label" data-i18n="st3.l">Приложения в<br>одном аккаунте</div>
+    </div>
+  </div>
+</div>
 
 <!-- MANAGER -->
-<div class="product-block" id="manager" style="background:#f2f2f7;">
-  <div class="pb-text reveal">
-    <p class="pb-eyebrow" style="color:#007aff;" data-i18n="m.eyebrow">
-      <svg width="16" height="16" viewBox="0 0 64 64" fill="none" style="flex-shrink:0">
-        <rect width="64" height="64" rx="14" fill="#007aff"/>
-        <rect x="14" y="20" width="36" height="5" rx="2.5" fill="white"/>
-        <rect x="14" y="30" width="26" height="5" rx="2.5" fill="white" opacity=".7"/>
-        <rect x="14" y="40" width="18" height="5" rx="2.5" fill="white" opacity=".4"/>
-      </svg>
-      Mise Manager · Для менеджеров
-    </p>
-    <h2 class="pb-title" data-i18n="m.title">Каждая смена<br>под контролем.</h2>
-    <p class="pb-desc" data-i18n="m.desc">Открывайте смену, фиксируйте расходы и доходы по категориям, контролируйте инкассацию и получайте полный отчёт — прямо с iPhone.</p>
-    <div class="pb-list">
-      <div class="pb-item"><div class="pb-check" style="background:#007aff;">✓</div><span data-i18n="m.f1">Открытие и закрытие смены</span></div>
-      <div class="pb-item"><div class="pb-check" style="background:#007aff;">✓</div><span data-i18n="m.f2">Учёт доходов и расходов по категориям</span></div>
-      <div class="pb-item"><div class="pb-check" style="background:#007aff;">✓</div><span data-i18n="m.f3">Инкассации и баланс кассы</span></div>
-      <div class="pb-item"><div class="pb-check" style="background:#007aff;">✓</div><span data-i18n="m.f4">Итоговый отчёт одним нажатием</span></div>
-    </div>
-    <a href="/manager.html" class="pb-link" style="color:#007aff;" data-i18n="m.link">Узнать больше</a>
-  </div>
-  <div class="pb-visual">
-    <div class="phone-wrap float">
-      <div class="phone-glow" style="background:#007aff;"></div>
-      <div class="phone">
-        <div class="phone-notch"></div>
-        <div class="phone-screen">
-          <div class="scr-m">
-            <div class="sh">
-              <div><div class="sh-t">Mise Manager</div><div class="sh-d">Пн, 9 июня 2025</div></div>
-              <div class="sh-b">● Смена открыта</div>
-            </div>
-            <div class="sb">
-              <div class="sg">
-                <div class="sc"><div class="sl">Выручка</div><div class="sv cg">€2 847</div><div class="ss">+12% к вчера</div></div>
-                <div class="sc"><div class="sl">Расходы</div><div class="sv cr">€342</div><div class="ss">из €500</div></div>
-                <div class="sc"><div class="sl">Прибыль</div><div class="sv cb">€2 505</div><div class="ss">чистая</div></div>
-                <div class="sc"><div class="sl">Инкасс.</div><div class="sv co">€1 200</div><div class="ss">последняя</div></div>
+<div class="product-scroll" id="manager" style="background:#000;">
+  <div class="p-grid">
+    <div class="phone-side">
+      <div class="phone-wrap">
+        <div class="phone-aura" id="m-aura" style="background:#007aff;"></div>
+        <div class="phone">
+          <div class="phone-notch"></div>
+          <div class="phone-screen-wrap">
+
+            <div class="pscreen ps-base m-bg active" id="m0">
+              <div class="ph"><div><div class="ph-t">Mise Manager</div></div><div class="ph-s ph-open">● Открыта</div></div>
+              <div class="pb">
+                <div class="pg">
+                  <div class="pc"><div class="pl">Выручка</div><div class="pv cg">€2 847</div><div class="ps">+12%</div></div>
+                  <div class="pc"><div class="pl">Расходы</div><div class="pv cr">€342</div><div class="ps">из €500</div></div>
+                  <div class="pc"><div class="pl">Прибыль</div><div class="pv cb">€2 505</div><div class="ps">чистая</div></div>
+                  <div class="pc"><div class="pl">Касса</div><div class="pv co">€1 200</div><div class="ps">инкасс.</div></div>
+                </div>
+                <div class="psec">Последние операции</div>
+                <div class="pcard">
+                  <div class="prow"><span class="prn">Выручка · Наличные</span><span class="prv cg">+€480</span></div>
+                  <div class="prow"><span class="prn">Расход · Продукты</span><span class="prv cr">−€95</span></div>
+                  <div class="prow"><span class="prn">Выручка · Карта</span><span class="prv cg">+€220</span></div>
+                  <div class="prow"><span class="prn">Инкассация</span><span class="prv co">€1 200</span></div>
+                </div>
+                <div class="pbtn" style="background:#007aff;">+ Добавить операцию</div>
               </div>
-              <div class="sec">Последние операции</div>
-              <div class="scard">
-                <div class="srow"><span class="srn">Выручка · Наличные</span><span class="srv cg">+€480</span></div>
-                <div class="srow"><span class="srn">Расход · Продукты</span><span class="srv cr">−€95</span></div>
-                <div class="srow"><span class="srn">Выручка · Карта</span><span class="srv cg">+€220</span></div>
-                <div class="srow"><span class="srn">Инкассация</span><span class="srv co">€1 200</span></div>
-              </div>
-              <div class="sbtn">+ Добавить операцию</div>
             </div>
+
+            <div class="pscreen ps-base m-bg" id="m1">
+              <div class="ph"><div class="ph-t">Расходы дня</div><div class="ph-s" style="background:rgba(255,59,48,.1);color:#ff3b30;">€342</div></div>
+              <div class="pb">
+                <div class="pcard" style="margin-bottom:5px;">
+                  <div class="prow"><span class="prn">Продукты</span><span class="prv cr">€95</span></div>
+                  <div class="prow"><span class="prn">Хозтовары</span><span class="prv cr">€47</span></div>
+                  <div class="prow"><span class="prn">DJ</span><span class="prv cr">€120</span></div>
+                  <div class="prow"><span class="prn">Мойка</span><span class="prv cr">€80</span></div>
+                </div>
+                <div class="pg">
+                  <div class="pc"><div class="pl">Потрачено</div><div class="pv cr">€342</div></div>
+                  <div class="pc"><div class="pl">Осталось</div><div class="pv cg">€158</div></div>
+                </div>
+                <div class="pc">
+                  <div class="pl" style="margin-bottom:4px;">Бюджет</div>
+                  <div style="height:4px;background:#f0f0f0;border-radius:2px;overflow:hidden;">
+                    <div style="width:68%;height:100%;background:#ff9500;border-radius:2px;"></div>
+                  </div>
+                  <div style="font-size:6px;color:#ff9500;margin-top:2px;font-weight:600;">68% использовано</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="pscreen ps-base m-bg" id="m2">
+              <div class="ph"><div class="ph-t">Инкассации</div><div class="ph-s" style="background:rgba(255,149,0,.1);color:#ff9500;">июнь</div></div>
+              <div class="pb">
+                <div class="pcard" style="margin-bottom:5px;">
+                  <div class="prow"><span class="prn">09 июня</span><span class="prv co">€1 200</span></div>
+                  <div class="prow"><span class="prn">08 июня</span><span class="prv co">€980</span></div>
+                  <div class="prow"><span class="prn">07 июня</span><span class="prv co">€1 450</span></div>
+                  <div class="prow"><span class="prn">06 июня</span><span class="prv co">€820</span></div>
+                </div>
+                <div class="pg">
+                  <div class="pc"><div class="pl">За неделю</div><div class="pv co">€5 550</div></div>
+                  <div class="pc"><div class="pl">В кассе</div><div class="pv cb">€2 505</div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="pscreen ps-base m-bg" id="m3">
+              <div class="ph"><div class="ph-t">Отчёт смены</div><div class="ph-s" style="background:rgba(52,199,89,.1);color:#34c759;">закрыта</div></div>
+              <div class="pb">
+                <div class="pcard" style="margin-bottom:5px;">
+                  <div class="prow"><span class="prn">Доход</span><span class="prv cg">€2 847</span></div>
+                  <div class="prow"><span class="prn">Расходы</span><span class="prv cr">−€342</span></div>
+                  <div class="prow"><span class="prn">Инкассация</span><span class="prv co">−€1 200</span></div>
+                  <div class="prow"><span class="prn" style="font-weight:700;color:#1c1c1e;">В кассе</span><span class="prv cb" style="font-size:9px;font-weight:700;">€1 305</span></div>
+                </div>
+                <div style="background:#34c759;border-radius:8px;padding:8px;text-align:center;">
+                  <div style="font-size:7px;color:#fff;font-weight:700;">Отчёт отправлен владельцу</div>
+                </div>
+              </div>
+            </div>
+
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-side">
+      <div class="feat-block" data-app="manager" data-idx="0">
+        <div>
+          <div class="feat-eyebrow"><div class="feat-eyebrow-dot" style="background:#007aff;"></div><span data-i18n="m0.ey">Mise Manager</span></div>
+          <h2 class="feat-h" data-i18n="m0.h">Открыл.<br>Работай.<br>Закрыл.</h2>
+          <p class="feat-p" data-i18n="m0.p">Смена открывается одним нажатием. Выручка, расходы и баланс — всё в реальном времени. Прямо с iPhone.</p>
+          <div class="feat-list">
+            <div class="feat-row"><div class="feat-row-dot" style="background:#007aff;">✓</div><span data-i18n="m0.f1">Открытие и закрытие смены</span></div>
+            <div class="feat-row"><div class="feat-row-dot" style="background:#007aff;">✓</div><span data-i18n="m0.f2">Выручка и баланс в реальном времени</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feat-block" data-app="manager" data-idx="1">
+        <div>
+          <div class="feat-eyebrow"><div class="feat-eyebrow-dot" style="background:#ff3b30;"></div><span data-i18n="m1.ey">Расходы</span></div>
+          <h2 class="feat-h" data-i18n="m1.h">Каждый евро<br>на своём месте.</h2>
+          <p class="feat-p" data-i18n="m1.p">Категории задаёт владелец. Менеджер выбирает, вводит сумму — и идёт дальше работать.</p>
+          <div class="feat-list">
+            <div class="feat-row"><div class="feat-row-dot" style="background:#ff3b30;">✓</div><span data-i18n="m1.f1">Расходы по категориям</span></div>
+            <div class="feat-row"><div class="feat-row-dot" style="background:#ff3b30;">✓</div><span data-i18n="m1.f2">Лимиты и предупреждения</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feat-block" data-app="manager" data-idx="2">
+        <div>
+          <div class="feat-eyebrow"><div class="feat-eyebrow-dot" style="background:#ff9500;"></div><span data-i18n="m2.ey">Инкассации</span></div>
+          <h2 class="feat-h" data-i18n="m2.h">Наличные<br>не теряются.</h2>
+          <p class="feat-p" data-i18n="m2.p">Каждая инкассация зафиксирована с суммой и датой. Баланс кассы всегда точный.</p>
+          <div class="feat-list">
+            <div class="feat-row"><div class="feat-row-dot" style="background:#ff9500;">✓</div><span data-i18n="m2.f1">История всех инкассаций</span></div>
+            <div class="feat-row"><div class="feat-row-dot" style="background:#ff9500;">✓</div><span data-i18n="m2.f2">Баланс кассы в реальном времени</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feat-block" data-app="manager" data-idx="3">
+        <div>
+          <div class="feat-eyebrow"><div class="feat-eyebrow-dot" style="background:#34c759;"></div><span data-i18n="m3.ey">Отчёт</span></div>
+          <h2 class="feat-h" data-i18n="m3.h">Итог дня —<br>одним нажатием.</h2>
+          <p class="feat-p" data-i18n="m3.p">В конце смены — полный отчёт. Доходы, расходы, баланс. Владелец получает его автоматически.</p>
+          <div class="feat-list">
+            <div class="feat-row"><div class="feat-row-dot" style="background:#34c759;">✓</div><span data-i18n="m3.f1">Полный отчёт за смену</span></div>
+            <div class="feat-row"><div class="feat-row-dot" style="background:#34c759;">✓</div><span data-i18n="m3.f2">Автоматически владельцу</span></div>
+          </div>
+          <a href="#analytics" class="feat-link" style="color:var(--blue);" data-i18n="m3.next">Далее: Mise Analytics <span class="feat-link-arrow">›</span></a>
         </div>
       </div>
     </div>
@@ -611,66 +861,114 @@ footer{padding:56px 48px 40px;}
 </div>
 
 <!-- ANALYTICS -->
-<div class="product-block flip" id="analytics" style="background:#fff;">
-  <div class="pb-text reveal">
-    <p class="pb-eyebrow" style="color:#34c759;" data-i18n="a.eyebrow">
-      <svg width="16" height="16" viewBox="0 0 64 64" fill="none" style="flex-shrink:0">
-        <rect width="64" height="64" rx="14" fill="url(#ag)"/>
-        <defs><linearGradient id="ag" x1="0" y1="0" x2="64" y2="64"><stop offset="0%" stop-color="#007aff"/><stop offset="100%" stop-color="#5856d6"/></linearGradient></defs>
-        <path d="M12 46L12 18L32 36L52 18L52 46" stroke="white" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-      </svg>
-      Mise Analytics · Для владельца
-    </p>
-    <h2 class="pb-title" data-i18n="a.title">Вся картина<br>бизнеса.</h2>
-    <p class="pb-desc" data-i18n="a.desc">Финансы по дням, неделям и месяцам. Зарплаты, инкассации, динамика выручки — всё в одном экране для владельца.</p>
-    <div class="pb-list">
-      <div class="pb-item"><div class="pb-check" style="background:#34c759;">✓</div><span data-i18n="a.f1">Финансовая аналитика по периодам</span></div>
-      <div class="pb-item"><div class="pb-check" style="background:#34c759;">✓</div><span data-i18n="a.f2">Зарплатная ведомость сотрудников</span></div>
-      <div class="pb-item"><div class="pb-check" style="background:#34c759;">✓</div><span data-i18n="a.f3">История и статистика по сменам</span></div>
-      <div class="pb-item"><div class="pb-check" style="background:#34c759;">✓</div><span data-i18n="a.f4">AI-аналитика в Pro тарифе</span></div>
+<div class="product-scroll" id="analytics" style="background:#050505;">
+  <div class="p-grid">
+    <div class="text-side flip">
+      <div class="feat-block" data-app="analytics" data-idx="0">
+        <div>
+          <div class="feat-eyebrow"><div class="feat-eyebrow-dot" style="background:#34c759;"></div><span data-i18n="a0.ey">Mise Analytics</span></div>
+          <h2 class="feat-h" data-i18n="a0.h">Цифры которые<br>не врут.</h2>
+          <p class="feat-p" data-i18n="a0.p">Финансы по дням, неделям и месяцам. Сравнение периодов, динамика выручки — для тех кто принимает решения.</p>
+          <div class="feat-list">
+            <div class="feat-row"><div class="feat-row-dot" style="background:#34c759;">✓</div><span data-i18n="a0.f1">Аналитика по периодам</span></div>
+            <div class="feat-row"><div class="feat-row-dot" style="background:#34c759;">✓</div><span data-i18n="a0.f2">Сравнение с прошлым периодом</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feat-block" data-app="analytics" data-idx="1">
+        <div>
+          <div class="feat-eyebrow"><div class="feat-eyebrow-dot" style="background:#af52de;"></div><span data-i18n="a1.ey">Зарплаты</span></div>
+          <h2 class="feat-h" data-i18n="a1.h">Ведомость<br>без Excel.</h2>
+          <p class="feat-p" data-i18n="a1.p">ФОТ, вычеты, выплаты наличными и на карту. Полная картина по каждому сотруднику без таблиц.</p>
+          <div class="feat-list">
+            <div class="feat-row"><div class="feat-row-dot" style="background:#af52de;">✓</div><span data-i18n="a1.f1">Оклады и вычеты за прогулы</span></div>
+            <div class="feat-row"><div class="feat-row-dot" style="background:#af52de;">✓</div><span data-i18n="a1.f2">Наличными и на карту</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feat-block" data-app="analytics" data-idx="2">
+        <div>
+          <div class="feat-eyebrow"><div class="feat-eyebrow-dot" style="background:#007aff;"></div><span data-i18n="a2.ey">AI-аналитика · Pro</span></div>
+          <h2 class="feat-h" data-i18n="a2.h">Спроси<br>свои цифры.</h2>
+          <p class="feat-p" data-i18n="a2.p">«Какой день был лучшим в мае?» — и получишь ответ. AI-ассистент говорит на языке бизнеса, не технологий.</p>
+          <div class="feat-list">
+            <div class="feat-row"><div class="feat-row-dot" style="background:#007aff;">✓</div><span data-i18n="a2.f1">Вопросы на естественном языке</span></div>
+            <div class="feat-row"><div class="feat-row-dot" style="background:rgba(255,255,255,.15);"></div><span style="color:rgba(255,255,255,.25);" data-i18n="a2.f2">Доступно в тарифе Pro</span></div>
+          </div>
+          <a href="#stash" class="feat-link" style="color:var(--green);" data-i18n="a2.next">Далее: Mise Stash <span class="feat-link-arrow">›</span></a>
+        </div>
+      </div>
     </div>
-    <a href="/analytics.html" class="pb-link" style="color:#34c759;" data-i18n="a.link">Узнать больше</a>
-  </div>
-  <div class="pb-visual" style="background:var(--light);border-radius:24px;margin:20px 0;">
-    <div class="phone-wrap float2">
-      <div class="phone-glow" style="background:#34c759;"></div>
-      <div class="phone">
-        <div class="phone-notch"></div>
-        <div class="phone-screen">
-          <div class="scr-a">
-            <div class="sh">
-              <div class="sh-t">Mise Analytics</div>
-              <div class="sh-p">Июнь 2025</div>
-            </div>
-            <div class="sb">
-              <div class="sg2">
-                <div class="sc"><div class="sl">Выручка</div><div class="sv" style="color:#34c759;">€38 420</div><div class="ss">▲ +14.2%</div></div>
-                <div class="sc"><div class="sl">Расходы</div><div class="sv" style="color:#ff3b30;">€8 340</div><div class="ss">из €10 000</div></div>
-              </div>
-              <div class="sg3">
-                <div class="sc"><div class="sl">ФОТ</div><div class="sv" style="color:#007aff;font-size:10px;">€6 200</div></div>
-                <div class="sc"><div class="sl">Нал</div><div class="sv" style="color:#ff9500;font-size:10px;">€4 100</div></div>
-                <div class="sc"><div class="sl">Карта</div><div class="sv" style="color:#af52de;font-size:10px;">€2 100</div></div>
-              </div>
-              <div class="chart">
-                <div class="cl">Выручка по дням</div>
-                <div class="bars">
-                  <div class="bar" style="height:55%;background:#34c759;opacity:.2;"></div>
-                  <div class="bar" style="height:72%;background:#34c759;opacity:.3;"></div>
-                  <div class="bar" style="height:48%;background:#34c759;opacity:.2;"></div>
-                  <div class="bar" style="height:88%;background:#34c759;opacity:.5;"></div>
-                  <div class="bar" style="height:65%;background:#34c759;opacity:.3;"></div>
-                  <div class="bar" style="height:79%;background:#34c759;opacity:.4;"></div>
-                  <div class="bar" style="height:100%;background:#34c759;"></div>
+
+    <div class="phone-side">
+      <div class="phone-wrap">
+        <div class="phone-aura" id="a-aura" style="background:#34c759;"></div>
+        <div class="phone">
+          <div class="phone-notch"></div>
+          <div class="phone-screen-wrap">
+
+            <div class="pscreen ps-base a-bg active" id="a0">
+              <div class="ph"><div class="ph-t">Mise Analytics</div><div class="ph-s ph-month">Июнь 2025</div></div>
+              <div class="pb">
+                <div class="pg">
+                  <div class="pc"><div class="pl">Выручка</div><div class="pv cg">€38 420</div><div class="ps">▲ +14%</div></div>
+                  <div class="pc"><div class="pl">Расходы</div><div class="pv cr">€8 340</div><div class="ps">из €10K</div></div>
                 </div>
-              </div>
-              <div class="sc" style="padding:7px 9px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                  <div><div class="sl">Лучший день</div><div style="font-size:7.5px;color:#1c1c1e;font-weight:600;">Пятница</div></div>
-                  <div style="font-size:11px;font-weight:700;color:#34c759;">€1 842</div>
+                <div class="pg3">
+                  <div class="pc"><div class="pl">ФОТ</div><div class="pv cb" style="font-size:10px;">€6 200</div></div>
+                  <div class="pc"><div class="pl">Нал</div><div class="pv co" style="font-size:10px;">€4 100</div></div>
+                  <div class="pc"><div class="pl">Карта</div><div class="pv cp" style="font-size:10px;">€2 100</div></div>
+                </div>
+                <div class="pchart">
+                  <div class="pcl">Выручка по дням</div>
+                  <div class="bars">
+                    <div class="bar" style="height:55%;background:#34c759;opacity:.2;"></div>
+                    <div class="bar" style="height:72%;background:#34c759;opacity:.3;"></div>
+                    <div class="bar" style="height:48%;background:#34c759;opacity:.2;"></div>
+                    <div class="bar" style="height:88%;background:#34c759;opacity:.5;"></div>
+                    <div class="bar" style="height:65%;background:#34c759;opacity:.3;"></div>
+                    <div class="bar" style="height:79%;background:#34c759;opacity:.45;"></div>
+                    <div class="bar" style="height:100%;background:#34c759;"></div>
+                  </div>
+                </div>
+                <div class="pc" style="padding:6px 8px;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div><div class="pl">Лучший день</div><div style="font-size:7px;color:#1c1c1e;font-weight:600;">Пятница</div></div>
+                    <div style="font-size:10px;font-weight:700;color:#34c759;">€1 842</div>
+                  </div>
                 </div>
               </div>
             </div>
+
+            <div class="pscreen ps-base a-bg" id="a1">
+              <div class="ph"><div class="ph-t">Зарплаты · Июнь</div><div class="ph-s ph-cnt">5 чел</div></div>
+              <div class="pb">
+                <div class="pcard" style="margin-bottom:5px;">
+                  <div class="prow"><span class="prn">Александр К.</span><span class="prv cg">€1 450</span></div>
+                  <div class="prow"><span class="prn">Мария С.</span><span class="prv cg">€1 200</span></div>
+                  <div class="prow"><span class="prn">Дмитрий Л.</span><span class="prv co">€980</span></div>
+                  <div class="prow"><span class="prn">Анна В.</span><span class="prv cg">€1 100</span></div>
+                  <div class="prow"><span class="prn">Игорь Р.</span><span class="prv cr">€870</span></div>
+                </div>
+                <div class="pg">
+                  <div class="pc"><div class="pl">ФОТ итого</div><div class="pv cb">€6 200</div></div>
+                  <div class="pc"><div class="pl">На карту</div><div class="pv cp">€2 100</div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="pscreen ps-base a-bg" id="a2">
+              <div class="ph"><div class="ph-t">AI-ассистент</div><div class="ph-s" style="background:rgba(175,82,222,.1);color:#af52de;">Pro</div></div>
+              <div class="pb" style="display:flex;flex-direction:column;gap:6px;">
+                <div style="background:#e8e8ee;border-radius:9px 9px 9px 3px;padding:6px 8px;font-size:7px;color:#1c1c1e;max-width:80%;">Какой день был лучшим в мае?</div>
+                <div style="background:#007aff;border-radius:9px 9px 3px 9px;padding:6px 8px;font-size:7px;color:#fff;margin-left:auto;max-width:85%;">Лучший — пятница 24 мая. Выручка €2 340, на 34% выше среднего.</div>
+                <div style="background:#e8e8ee;border-radius:9px 9px 9px 3px;padding:6px 8px;font-size:7px;color:#1c1c1e;max-width:80%;">Сравни июнь с маем</div>
+                <div style="background:#007aff;border-radius:9px 9px 3px 9px;padding:6px 8px;font-size:7px;color:#fff;margin-left:auto;max-width:85%;">Июнь лучше мая на 14.2%. Выручка +€4 780, расходы −€340.</div>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -679,201 +977,293 @@ footer{padding:56px 48px 40px;}
 </div>
 
 <!-- STASH -->
-<div class="product-block" id="stash" style="background:#f2f2f7;">
-  <div class="pb-text reveal">
-    <p class="pb-eyebrow" style="color:#ff9500;" data-i18n="s.eyebrow">
-      <svg width="16" height="16" viewBox="0 0 64 64" fill="none" style="flex-shrink:0">
-        <rect width="64" height="64" rx="14" fill="#ff9500"/>
-        <path d="M32 10L54 32L32 54L10 32Z" fill="white"/>
-        <rect x="26" y="26" width="12" height="12" rx="3" fill="#ff9500"/>
-      </svg>
-      Mise Stash · Для кальянного зала
-    </p>
-    <h2 class="pb-title" data-i18n="s.title">Склад кальяна<br>под контролем.</h2>
-    <p class="pb-desc" data-i18n="s.desc">Полный учёт табачного склада: приход, расход, остатки по вкусам и брендам, инвентаризация в один клик.</p>
-    <div class="pb-list">
-      <div class="pb-item"><div class="pb-check" style="background:#ff9500;">✓</div><span data-i18n="s.f1">Склад по брендам и вкусам</span></div>
-      <div class="pb-item"><div class="pb-check" style="background:#ff9500;">✓</div><span data-i18n="s.f2">Приход, расход и списание</span></div>
-      <div class="pb-item"><div class="pb-check" style="background:#ff9500;">✓</div><span data-i18n="s.f3">Classic / Exclusive / Cigar</span></div>
-      <div class="pb-item"><div class="pb-check" style="background:#ff9500;">✓</div><span data-i18n="s.f4">Инвентаризация и история движений</span></div>
-    </div>
-    <a href="/tobacco.html" class="pb-link" style="color:#ff9500;" data-i18n="s.link">Узнать больше</a>
-  </div>
-  <div class="pb-visual">
-    <div class="phone-wrap float">
-      <div class="phone-glow" style="background:#ff9500;"></div>
-      <div class="phone">
-        <div class="phone-notch"></div>
-        <div class="phone-screen">
-          <div class="scr-s">
-            <div class="sh">
-              <div class="sh-t">Mise Stash</div>
-              <div class="sh-b">● 12 вкусов</div>
-            </div>
-            <div class="sb">
-              <div class="scard">
-                <div class="item"><div class="itop"><div><div class="ibrand">Adalya · Love 66</div><div class="iflavor">Classic</div></div><div class="istock" style="color:#34c759;">500г</div></div><div class="ibar"><div class="ibarf" style="width:83%;background:#34c759;"></div></div></div>
-                <div class="item"><div class="itop"><div><div class="ibrand">Darkside · Twix Core</div><div class="iflavor">Cigar</div></div><div class="istock" style="color:#ff9500;">250г</div></div><div class="ibar"><div class="ibarf" style="width:42%;background:#ff9500;"></div></div></div>
-                <div class="item"><div class="itop"><div><div class="ibrand">Al Fakher · Two Apples</div><div class="iflavor">Exclusive</div></div><div class="istock" style="color:#007aff;">600г</div></div><div class="ibar"><div class="ibarf" style="width:100%;background:#007aff;"></div></div></div>
-                <div class="item"><div class="itop"><div><div class="ibrand">WTO · Blue</div><div class="iflavor">Cigar Leaf</div></div><div class="istock" style="color:#ff3b30;">80г</div></div><div class="ibar"><div class="ibarf" style="width:13%;background:#ff3b30;"></div></div></div>
-              </div>
-              <div class="cats">
-                <div class="cat"><div class="cdot" style="background:#34c759;"></div><div class="cl">Classic</div><div class="cv" style="color:#34c759;">850г</div></div>
-                <div class="cat"><div class="cdot" style="background:#007aff;"></div><div class="cl">Exclusive</div><div class="cv" style="color:#007aff;">950г</div></div>
-                <div class="cat"><div class="cdot" style="background:#ff9500;"></div><div class="cl">Cigar</div><div class="cv" style="color:#ff9500;">250г</div></div>
-                <div class="cat"><div class="cdot" style="background:#ff3b30;"></div><div class="cl">Cigar Leaf</div><div class="cv" style="color:#ff3b30;">180г</div></div>
+<div class="product-scroll" id="stash" style="background:#000;">
+  <div class="p-grid">
+    <div class="phone-side">
+      <div class="phone-wrap">
+        <div class="phone-aura" id="s-aura" style="background:#ff9500;"></div>
+        <div class="phone">
+          <div class="phone-notch"></div>
+          <div class="phone-screen-wrap">
+
+            <div class="pscreen ps-base s-bg active" id="s0">
+              <div class="ph" style="background:rgba(255,255,255,.88);"><div class="ph-t">Mise Stash</div><div class="ph-s ph-cnt">12 вкусов</div></div>
+              <div class="pb">
+                <div class="pcard" style="margin-bottom:5px;">
+                  <div class="prow" style="padding:4px 8px;"><div style="flex:1;"><div class="prn">Adalya · Love 66</div><div style="font-size:5.5px;color:#6d6d72;">Classic</div></div><div class="prv cg" style="margin-right:6px;">500г</div><div class="ibar-bg" style="width:60px;"><div class="ibar-f" style="width:83%;background:#34c759;"></div></div></div>
+                  <div class="prow" style="padding:4px 8px;"><div style="flex:1;"><div class="prn">Darkside · Twix</div><div style="font-size:5.5px;color:#6d6d72;">Cigar</div></div><div class="prv co" style="margin-right:6px;">250г</div><div class="ibar-bg" style="width:60px;"><div class="ibar-f" style="width:42%;background:#ff9500;"></div></div></div>
+                  <div class="prow" style="padding:4px 8px;"><div style="flex:1;"><div class="prn">Al Fakher · Apple</div><div style="font-size:5.5px;color:#6d6d72;">Exclusive</div></div><div class="prv cb" style="margin-right:6px;">600г</div><div class="ibar-bg" style="width:60px;"><div class="ibar-f" style="width:100%;background:#007aff;"></div></div></div>
+                  <div class="prow" style="padding:4px 8px;"><div style="flex:1;"><div class="prn">WTO · Blue</div><div style="font-size:5.5px;color:#6d6d72;">Cigar Leaf</div></div><div class="prv cr" style="margin-right:6px;">80г</div><div class="ibar-bg" style="width:60px;"><div class="ibar-f" style="width:13%;background:#ff3b30;"></div></div></div>
+                </div>
+                <div class="s-cats">
+                  <div class="s-cat"><div class="s-cdot" style="background:#34c759;"></div><div class="s-cl">Classic</div><div class="s-cv cg">850г</div></div>
+                  <div class="s-cat"><div class="s-cdot" style="background:#007aff;"></div><div class="s-cl">Exclusive</div><div class="s-cv cb">950г</div></div>
+                  <div class="s-cat"><div class="s-cdot" style="background:#ff9500;"></div><div class="s-cl">Cigar</div><div class="s-cv co">250г</div></div>
+                  <div class="s-cat"><div class="s-cdot" style="background:#ff3b30;"></div><div class="s-cl">Cigar Leaf</div><div class="s-cv cr">180г</div></div>
+                </div>
               </div>
             </div>
+
+            <div class="pscreen ps-base s-bg" id="s1">
+              <div class="ph" style="background:rgba(255,255,255,.88);"><div class="ph-t">Новый приход</div><div class="ph-s" style="background:rgba(52,199,89,.1);color:#34c759;">+ партия</div></div>
+              <div class="pb">
+                <div class="pc" style="margin-bottom:4px;">
+                  <div class="pl" style="margin-bottom:3px;">Бренд</div>
+                  <div style="font-size:8px;font-weight:600;color:#1c1c1e;">Adalya</div>
+                </div>
+                <div class="pc" style="margin-bottom:4px;">
+                  <div class="pl" style="margin-bottom:3px;">Вкус</div>
+                  <div style="font-size:8px;font-weight:600;color:#1c1c1e;">Love 66</div>
+                </div>
+                <div class="pg" style="margin-bottom:4px;">
+                  <div class="pc"><div class="pl">Количество</div><div style="font-size:8px;font-weight:600;color:#34c759;">500г</div></div>
+                  <div class="pc"><div class="pl">Категория</div><div style="font-size:8px;font-weight:600;color:#1c1c1e;">Classic</div></div>
+                </div>
+                <div style="background:#34c759;border-radius:8px;padding:7px;text-align:center;font-size:7px;font-weight:600;color:#fff;">Сохранить приход</div>
+              </div>
+            </div>
+
+            <div class="pscreen ps-base s-bg" id="s2">
+              <div class="ph" style="background:rgba(255,255,255,.88);"><div class="ph-t">Инвентаризация</div><div class="ph-s" style="background:rgba(0,122,255,.1);color:#007aff;">9 июня</div></div>
+              <div class="pb">
+                <div class="pcard" style="margin-bottom:5px;">
+                  <div class="prow"><span class="prn">Adalya Love 66</span><span class="prv cg">500г ✓</span></div>
+                  <div class="prow"><span class="prn">Al Fakher Two Apples</span><span class="prv cg">600г ✓</span></div>
+                  <div class="prow"><span class="prn">Darkside Twix</span><span class="prv co">250г ✓</span></div>
+                  <div class="prow"><span class="prn">WTO Blue</span><span class="prv cr">70г — мало</span></div>
+                </div>
+                <div style="background:#ff9500;border-radius:8px;padding:7px;text-align:center;font-size:7px;font-weight:600;color:#fff;">Завершить инвентаризацию</div>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
     </div>
+
+    <div class="text-side">
+      <div class="feat-block" data-app="stash" data-idx="0">
+        <div>
+          <div class="feat-eyebrow"><div class="feat-eyebrow-dot" style="background:#ff9500;"></div><span data-i18n="s0.ey">Mise Stash</span></div>
+          <h2 class="feat-h" data-i18n="s0.h">Знает что<br>заканчивается<br>раньше тебя.</h2>
+          <p class="feat-p" data-i18n="s0.p">Остатки по каждому бренду и вкусу. Цветные индикаторы сразу показывают что пора заказывать.</p>
+          <div class="feat-list">
+            <div class="feat-row"><div class="feat-row-dot" style="background:#ff9500;">✓</div><span data-i18n="s0.f1">Остатки по брендам и вкусам</span></div>
+            <div class="feat-row"><div class="feat-row-dot" style="background:#ff9500;">✓</div><span data-i18n="s0.f2">Цветные индикаторы уровня</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feat-block" data-app="stash" data-idx="1">
+        <div>
+          <div class="feat-eyebrow"><div class="feat-eyebrow-dot" style="background:#34c759;"></div><span data-i18n="s1.ey">Приход</span></div>
+          <h2 class="feat-h" data-i18n="s1.h">Каждая партия<br>зафиксирована.</h2>
+          <p class="feat-p" data-i18n="s1.p">Фиксируйте приход в несколько нажатий. Бренд, вкус, количество — склад обновляется мгновенно.</p>
+          <div class="feat-list">
+            <div class="feat-row"><div class="feat-row-dot" style="background:#34c759;">✓</div><span data-i18n="s1.f1">Приход с датой</span></div>
+            <div class="feat-row"><div class="feat-row-dot" style="background:#34c759;">✓</div><span data-i18n="s1.f2">История всех движений</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feat-block" data-app="stash" data-idx="2">
+        <div>
+          <div class="feat-eyebrow"><div class="feat-eyebrow-dot" style="background:#007aff;"></div><span data-i18n="s2.ey">Инвентаризация</span></div>
+          <h2 class="feat-h" data-i18n="s2.h">Инвентаризация<br>в один клик.</h2>
+          <p class="feat-p" data-i18n="s2.p">Полная проверка склада в любой момент. История всех инвентаризаций сохраняется автоматически.</p>
+          <div class="feat-list">
+            <div class="feat-row"><div class="feat-row-dot" style="background:#007aff;">✓</div><span data-i18n="s2.f1">Полная инвентаризация</span></div>
+            <div class="feat-row"><div class="feat-row-dot" style="background:#007aff;">✓</div><span data-i18n="s2.f2">История всех проверок</span></div>
+          </div>
+          <a href="#pricing" class="feat-link" style="color:var(--orange);" data-i18n="s2.next">Смотреть тарифы <span class="feat-link-arrow">›</span></a>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
-</div><!-- /products -->
+<!-- FEATURE CALLOUT -->
+<div class="callout-section">
+  <div class="callout-inner">
+    <div style="text-align:center;padding:120px 0 48px;">
+      <span class="sec-label reveal" data-i18n="cc.label">Для команды</span>
+      <h2 style="font-size:clamp(2rem,4.5vw,4rem);font-weight:700;letter-spacing:-.045em;margin-bottom:12px;" class="reveal" data-i18n="cc.title">Вход без паролей.</h2>
+      <p style="font-size:.98rem;color:rgba(255,255,255,.3);max-width:480px;margin:0 auto;line-height:1.65;letter-spacing:-.01em;" class="reveal" data-i18n="cc.sub">Каждый сотрудник входит в своё приложение через QR и PIN. Без регистрации, без email.</p>
+    </div>
+    <div class="callout-grid">
+      <div class="callout-card reveal d1">
+        <div class="cc-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="3" width="7" height="7" rx="1" stroke="rgba(0,122,255,.8)" stroke-width="1.5"/>
+            <rect x="14" y="3" width="7" height="7" rx="1" stroke="rgba(0,122,255,.8)" stroke-width="1.5"/>
+            <rect x="3" y="14" width="7" height="7" rx="1" stroke="rgba(0,122,255,.8)" stroke-width="1.5"/>
+            <rect x="15" y="15" width="2" height="2" fill="rgba(0,122,255,.8)"/>
+            <rect x="19" y="15" width="2" height="2" fill="rgba(0,122,255,.8)"/>
+            <rect x="15" y="19" width="2" height="2" fill="rgba(0,122,255,.8)"/>
+            <rect x="19" y="19" width="2" height="2" fill="rgba(0,122,255,.8)"/>
+          </svg>
+        </div>
+        <h3 class="cc-title" data-i18n="cc1.t">QR-вход</h3>
+        <p class="cc-desc" data-i18n="cc1.d">Владелец показывает QR. Сотрудник сканирует — и привязывает устройство к заведению навсегда.</p>
+      </div>
+      <div class="callout-card reveal d2">
+        <div class="cc-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="6" y="10" width="12" height="10" rx="2" stroke="rgba(0,122,255,.8)" stroke-width="1.5"/>
+            <path d="M8 10V7a4 4 0 018 0v3" stroke="rgba(0,122,255,.8)" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="12" cy="15" r="1.5" fill="rgba(0,122,255,.8)"/>
+          </svg>
+        </div>
+        <h3 class="cc-title" data-i18n="cc2.t">PIN-доступ</h3>
+        <p class="cc-desc" data-i18n="cc2.d">4-значный PIN задаёт владелец. Каждому сотруднику — свой код и свои приложения.</p>
+      </div>
+      <div class="callout-card reveal d3">
+        <div class="cc-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2C8.5 2 6 4.5 6 7c0 3.5 6 11 6 11s6-7.5 6-11c0-2.5-2.5-5-6-5z" stroke="rgba(0,122,255,.8)" stroke-width="1.5"/>
+            <circle cx="12" cy="7" r="2" stroke="rgba(0,122,255,.8)" stroke-width="1.5"/>
+          </svg>
+        </div>
+        <h3 class="cc-title" data-i18n="cc3.t">Face ID</h3>
+        <p class="cc-desc" data-i18n="cc3.d">После первого входа — предложение сохранить Face ID. Следующие входы мгновенны.</p>
+      </div>
+    </div>
+  </div>
+</div>
 
-<div class="divider"></div>
+<!-- VIDEO PLACEHOLDER -->
+<div class="video-section">
+  <div class="video-inner">
+    <div style="text-align:center;margin-bottom:36px;">
+      <span class="sec-label reveal" data-i18n="vd.label">Продукт</span>
+      <h2 style="font-size:clamp(2rem,4vw,3.8rem);font-weight:700;letter-spacing:-.045em;" class="reveal" data-i18n="vd.title">Mise в действии.</h2>
+    </div>
+    <div class="video-frame reveal" onclick="this.style.borderColor='rgba(0,122,255,.4)'">
+      <div class="video-play">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M8 5l11 7-11 7V5z" fill="rgba(255,255,255,.8)"/>
+        </svg>
+      </div>
+      <p class="video-title" data-i18n="vd.t">Обзор платформы</p>
+      <p class="video-label" data-i18n="vd.s">Mise Manager · Mise Analytics · Mise Stash</p>
+    </div>
+  </div>
+</div>
 
 <!-- HOW IT WORKS -->
-<section class="steps">
-  <span class="sec-label reveal" style="color:var(--blue);" data-i18n="steps.label">Как это работает</span>
-  <h2 class="reveal" data-i18n="steps.title">Начать просто.</h2>
-  <p class="steps-sub reveal" data-i18n="steps.sub">Четыре шага — и весь ресторан под контролем.</p>
-  <div class="steps-grid">
-    <div class="steps-line"></div>
-    <div class="step-item reveal d1">
-      <div class="step-num">1</div>
-      <p class="step-title" data-i18n="step1.t">Регистрация</p>
-      <p class="step-desc" data-i18n="step1.d">Создайте аккаунт владельца за 30 секунд.</p>
-    </div>
-    <div class="step-item reveal d2">
-      <div class="step-num">2</div>
-      <p class="step-title" data-i18n="step2.t">Подписка</p>
-      <p class="step-desc" data-i18n="step2.d">Выберите тариф — 7 дней бесплатно.</p>
-    </div>
-    <div class="step-item reveal d3">
-      <div class="step-num">3</div>
-      <p class="step-title" data-i18n="step3.t">Команда</p>
-      <p class="step-desc" data-i18n="step3.d">Дайте доступ команде через QR-код.</p>
-    </div>
-    <div class="step-item reveal d4">
-      <div class="step-num">4</div>
-      <p class="step-title" data-i18n="step4.t">Контроль</p>
-      <p class="step-desc" data-i18n="step4.d">Смотрите аналитику в любое время.</p>
+<div class="how-section">
+  <div class="how-inner">
+    <span class="sec-label reveal" data-i18n="hw.l">Как это работает</span>
+    <h2 class="reveal" data-i18n="hw.t">Начать просто.</h2>
+    <p class="reveal" data-i18n="hw.s">Четыре шага — и весь ресторан под контролем.</p>
+    <div class="steps">
+      <div class="steps-line"></div>
+      <div class="step reveal d1"><div class="step-n">1</div><p class="step-t" data-i18n="step1.t">Регистрация</p><p class="step-d" data-i18n="step1.d">Создайте аккаунт за 30 секунд.</p></div>
+      <div class="step reveal d2"><div class="step-n">2</div><p class="step-t" data-i18n="step2.t">Подписка</p><p class="step-d" data-i18n="step2.d">7 дней бесплатно.</p></div>
+      <div class="step reveal d3"><div class="step-n">3</div><p class="step-t" data-i18n="step3.t">Команда</p><p class="step-d" data-i18n="step3.d">Доступ через QR-код.</p></div>
+      <div class="step reveal d4"><div class="step-n">4</div><p class="step-t" data-i18n="step4.t">Контроль</p><p class="step-d" data-i18n="step4.d">Аналитика в любое время.</p></div>
     </div>
   </div>
-</section>
+</div>
 
 <!-- PRICING -->
-<section class="pricing" id="pricing">
+<div class="pricing" id="pricing">
   <div class="pricing-head">
-    <span class="sec-label reveal" style="color:var(--blue);" data-i18n="pr.label">Тарифы</span>
-    <h2 class="reveal" data-i18n="pr.title">Прозрачные цены.</h2>
-    <p class="reveal" data-i18n="pr.sub">Отменить или изменить можно в любой момент.</p>
+    <span class="sec-label reveal" data-i18n="pr.l">Тарифы</span>
+    <h2 class="reveal" data-i18n="pr.t">Прозрачные цены.</h2>
+    <p class="reveal" data-i18n="pr.s">Отменить или изменить в любой момент.</p>
   </div>
-  <div class="pricing-grid">
-
+  <div class="pricing-grid" style="max-width:980px;margin:0 auto;">
     <div class="plan reveal d1">
-      <p class="plan-name" data-i18n="p1.name">Starter</p>
+      <p class="plan-tier" data-i18n="p1.t">Starter</p>
       <div class="plan-price"><sup>€</sup>14</div>
-      <p class="plan-period" data-i18n="period">в месяц</p>
-      <div class="feat-list">
-        <div class="feat-item"><div class="feat-icon">✓</div><span class="feat-label">Mise Manager</span></div>
-        <div class="feat-item"><div class="feat-icon">✓</div><span class="feat-label">Mise Analytics</span></div>
-        <div class="feat-item"><div class="feat-icon">✓</div><span class="feat-label" data-i18n="p1.f1">До 2 пользователей</span></div>
-        <div class="feat-item"><div class="feat-icon" style="background:#f0f0f0;color:#ccc;">—</div><span class="feat-label feat-off">Mise Stash</span></div>
-        <div class="feat-item"><div class="feat-icon" style="background:#f0f0f0;color:#ccc;">—</div><span class="feat-label feat-off" data-i18n="p1.f2">AI-аналитика</span></div>
+      <p class="plan-day" data-i18n="p1.d">€0.47 в день</p>
+      <div class="feat-list-p">
+        <div class="feat-p-item"><div class="feat-p-check">✓</div><span>Mise Manager</span></div>
+        <div class="feat-p-item"><div class="feat-p-check">✓</div><span>Mise Analytics</span></div>
+        <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p1.f1">До 2 пользователей</span></div>
+        <div class="feat-p-item"><div class="feat-p-check" style="background:transparent;color:transparent;border:.5px solid rgba(255,255,255,.08);">—</div><span class="feat-p-off">Mise Stash</span></div>
+        <div class="feat-p-item"><div class="feat-p-check" style="background:transparent;color:transparent;border:.5px solid rgba(255,255,255,.08);">—</div><span class="feat-p-off" data-i18n="p1.f2">AI-аналитика</span></div>
       </div>
-      <button class="plan-btn outline" onclick="window.location.href='/auth/register'" data-i18n="p1.btn">Выбрать</button>
+      <button class="plan-btn" onclick="window.location.href='/auth/register'" data-i18n="p1.btn">Выбрать</button>
     </div>
 
     <div class="plan featured reveal d2">
-      <div class="pop-badge" data-i18n="popular">Популярный</div>
-      <p class="plan-name" data-i18n="p2.name">Business</p>
+      <div class="pop-tag" data-i18n="pop">Популярный</div>
+      <p class="plan-tier" data-i18n="p2.t">Business</p>
       <div class="plan-price"><sup>€</sup>24</div>
-      <p class="plan-period" data-i18n="period">в месяц</p>
-      <div class="feat-list">
-        <div class="feat-item"><div class="feat-icon">✓</div><span data-i18n="p2.f1">Все 3 приложения</span></div>
-        <div class="feat-item"><div class="feat-icon">✓</div><span data-i18n="p2.f2">До 5 пользователей</span></div>
-        <div class="feat-item"><div class="feat-icon">✓</div><span data-i18n="p2.f3">История 12 мес.</span></div>
-        <div class="feat-item"><div class="feat-icon">✓</div><span data-i18n="p2.f4">Приоритетная поддержка</span></div>
-        <div class="feat-item"><div class="feat-icon" style="background:rgba(255,255,255,.15);color:#fff;">—</div><span style="opacity:.5;" data-i18n="p2.f5">AI-аналитика</span></div>
+      <p class="plan-day" data-i18n="p2.d">€0.79 в день</p>
+      <div class="feat-list-p">
+        <div class="feat-p-item"><div class="feat-p-check" style="background:rgba(0,122,255,.2);color:var(--blue);">✓</div><span data-i18n="p2.f1">Все 3 приложения</span></div>
+        <div class="feat-p-item"><div class="feat-p-check" style="background:rgba(0,122,255,.2);color:var(--blue);">✓</div><span data-i18n="p2.f2">До 5 пользователей</span></div>
+        <div class="feat-p-item"><div class="feat-p-check" style="background:rgba(0,122,255,.2);color:var(--blue);">✓</div><span data-i18n="p2.f3">История 12 мес.</span></div>
+        <div class="feat-p-item"><div class="feat-p-check" style="background:rgba(0,122,255,.2);color:var(--blue);">✓</div><span data-i18n="p2.f4">Приоритетная поддержка</span></div>
+        <div class="feat-p-item"><div class="feat-p-check" style="background:transparent;color:transparent;border:.5px solid rgba(255,255,255,.08);">—</div><span class="feat-p-off" data-i18n="p2.f5">AI-аналитика</span></div>
       </div>
-      <button class="plan-btn" onclick="window.location.href='/auth/register'" data-i18n="p2.btn">Начать бесплатно →</button>
+      <button class="plan-btn main" onclick="window.location.href='/auth/register'" data-i18n="p2.btn">Начать бесплатно</button>
     </div>
 
     <div class="plan reveal d3">
-      <p class="plan-name" data-i18n="p3.name">Pro</p>
+      <p class="plan-tier" data-i18n="p3.t">Pro</p>
       <div class="plan-price"><sup>€</sup>39</div>
-      <p class="plan-period" data-i18n="period">в месяц</p>
-      <div class="feat-list">
-        <div class="feat-item"><div class="feat-icon">✓</div><span data-i18n="p3.f1">Все приложения</span></div>
-        <div class="feat-item"><div class="feat-icon">✓</div><span data-i18n="p3.f2">До 10 пользователей</span></div>
-        <div class="feat-item"><div class="feat-icon">✓</div><span data-i18n="p3.f3">AI-аналитика</span></div>
-        <div class="feat-item"><div class="feat-icon">✓</div><span data-i18n="p3.f4">Интеграция Syrve</span></div>
-        <div class="feat-item"><div class="feat-icon">✓</div><span data-i18n="p3.f5">QR-меню</span></div>
+      <p class="plan-day" data-i18n="p3.d">€1.29 в день</p>
+      <div class="feat-list-p">
+        <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f1">Все приложения</span></div>
+        <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f2">До 10 пользователей</span></div>
+        <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f3">AI-аналитика</span></div>
+        <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f4">Интеграция Syrve</span></div>
+        <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f5">QR-меню</span></div>
       </div>
-      <button class="plan-btn outline" onclick="window.location.href='/auth/register'" data-i18n="p3.btn">Выбрать</button>
+      <button class="plan-btn" onclick="window.location.href='/auth/register'" data-i18n="p3.btn">Выбрать</button>
     </div>
-
   </div>
-  <div class="pay-badges">
-    <div class="pay-b"> Apple Pay</div>
-    <div class="pay-b">💳 Visa / Mastercard</div>
-    <div class="pay-b">🔒 Stripe</div>
-    <div class="pay-b">⚡ 7 дней бесплатно</div>
+  <div class="pay-row">
+    <div class="pay-b">Apple Pay</div>
+    <div class="pay-b">Visa · Mastercard</div>
+    <div class="pay-b">Stripe</div>
+    <div class="pay-b" data-i18n="pay.free">7 дней бесплатно</div>
   </div>
-</section>
-
-<!-- TRUST -->
-<div class="trust">
-  <div class="trust-item"><span class="trust-icon">🔒</span><span data-i18n="tr.t1">Данные зашифрованы</span></div>
-  <div class="trust-item"><span class="trust-icon">📱</span><span data-i18n="tr.t2">iPhone и Android</span></div>
-  <div class="trust-item"><span class="trust-icon">⚡</span><span data-i18n="tr.t3">7 дней бесплатно</span></div>
-  <div class="trust-item"><span class="trust-icon">🌍</span><span data-i18n="tr.t4">Европа и СНГ</span></div>
-  <div class="trust-item"><span class="trust-icon">💬</span><span data-i18n="tr.t5">Поддержка в Telegram</span></div>
 </div>
 
-<!-- CTA -->
-<section class="cta-banner">
-  <h2 data-i18n="cta.title">Готовы начать?</h2>
-  <p data-i18n="cta.sub">Первые 7 дней бесплатно. Карта не нужна.</p>
-  <button class="btn-primary" onclick="window.location.href='/auth/register'" data-i18n="cta.btn">Создать аккаунт →</button>
+<!-- BIG CTA -->
+<section class="big-cta">
+  <div class="big-cta-word" id="cta-word" data-i18n="cta.w">Готов?</div>
+  <p class="big-cta-sub" id="cta-sub" data-i18n="cta.s">Первые 7 дней бесплатно. Карта не нужна.</p>
+  <button class="btn-primary" onclick="window.location.href='/auth/register'" data-i18n="cta.b">Создать аккаунт</button>
 </section>
 
 <!-- FOOTER -->
 <footer>
-  <div class="footer-inner">
-    <div class="footer-top">
-      <div>
-        <div class="footer-brand">mise</div>
-        <div class="footer-tag" data-i18n="ft.tag">Система управления рестораном</div>
+  <div class="ft-inner">
+    <div class="ft-body">
+      <div class="ft-brand-col">
+        <div class="ft-brand">mise</div>
+        <div class="ft-tagline" data-i18n="ft.tag">Система управления рестораном</div>
       </div>
-      <div class="footer-cols">
-        <div class="footer-col">
-          <h4 data-i18n="ft.products">Продукты</h4>
+      <div class="ft-nav">
+        <div class="ft-col">
+          <h4 data-i18n="ft.p">Продукты</h4>
           <a href="/manager.html">Mise Manager</a>
           <a href="/analytics.html">Mise Analytics</a>
           <a href="/tobacco.html">Mise Stash</a>
         </div>
-        <div class="footer-col">
-          <h4 data-i18n="ft.company">Компания</h4>
+        <div class="ft-col">
+          <h4 data-i18n="ft.c">Компания</h4>
           <a href="/about.html" data-i18n="ft.about">О нас</a>
-          <a href="/support.html" data-i18n="ft.support">Поддержка</a>
-          <a href="/contact.html" data-i18n="ft.contact">Контакты</a>
+          <a href="/support.html" data-i18n="ft.sup">Поддержка</a>
+          <a href="/contact.html" data-i18n="ft.cont">Контакты</a>
         </div>
-        <div class="footer-col">
-          <h4 data-i18n="ft.legal">Правовое</h4>
-          <a href="/privacy.html" data-i18n="ft.privacy">Конфиденциальность</a>
+        <div class="ft-col">
+          <h4 data-i18n="ft.l">Правовое</h4>
+          <a href="/privacy.html" data-i18n="ft.priv">Конфиденциальность</a>
           <a href="/terms.html" data-i18n="ft.terms">Условия</a>
         </div>
       </div>
     </div>
-    <div class="footer-bottom">
-      <p class="footer-copy">© 2025 Mise. <span data-i18n="ft.rights">Все права защищены.</span></p>
-      <div class="footer-links">
-        <a href="/privacy.html" data-i18n="ft.privacy">Конфиденциальность</a>
+    <div class="ft-bottom">
+      <p class="ft-copy">© 2025 Mise.</p>
+      <div class="ft-links">
+        <a href="/privacy.html" data-i18n="ft.priv">Конфиденциальность</a>
         <a href="/terms.html" data-i18n="ft.terms">Условия</a>
       </div>
     </div>
@@ -881,70 +1271,204 @@ footer{padding:56px 48px 40px;}
 </footer>
 
 <script>
-// i18n
-const T = {
-  ru:{
-    'nav.manager':'Mise Manager','nav.analytics':'Mise Analytics','nav.stash':'Mise Stash','nav.pricing':'Цены','nav.cta':'Войти →',
-    'hero.eyebrow':'Система управления рестораном','hero.t1':'Управляй рестораном.','hero.t2':'Умно.',
-    'hero.sub':'Три профессиональных инструмента для владельцев, менеджеров и кальянных залов. Один аккаунт — полный контроль.',
-    'hero.cta1':'Попробовать бесплатно','hero.cta2':'Узнать больше',
-    'chip.manager':'Mise Manager','chip.analytics':'Mise Analytics','chip.stash':'Mise Stash',
-    'm.eyebrow':'Mise Manager · Для менеджеров','m.title':'Каждая смена\nпод контролем.',
-    'm.desc':'Открывайте смену, фиксируйте расходы и доходы по категориям, контролируйте инкассацию и получайте полный отчёт — прямо с iPhone.',
-    'm.f1':'Открытие и закрытие смены','m.f2':'Учёт доходов и расходов по категориям','m.f3':'Инкассации и баланс кассы','m.f4':'Итоговый отчёт одним нажатием','m.link':'Узнать больше',
-    'a.eyebrow':'Mise Analytics · Для владельца','a.title':'Вся картина\nбизнеса.',
-    'a.desc':'Финансы по дням, неделям и месяцам. Зарплаты, инкассации, динамика выручки — всё в одном экране для владельца.',
-    'a.f1':'Финансовая аналитика по периодам','a.f2':'Зарплатная ведомость сотрудников','a.f3':'История и статистика по сменам','a.f4':'AI-аналитика в Pro тарифе','a.link':'Узнать больше',
-    's.eyebrow':'Mise Stash · Для кальянного зала','s.title':'Склад кальяна\nпод контролем.',
-    's.desc':'Полный учёт табачного склада: приход, расход, остатки по вкусам и брендам, инвентаризация в один клик.',
-    's.f1':'Склад по брендам и вкусам','s.f2':'Приход, расход и списание','s.f3':'Classic / Exclusive / Cigar','s.f4':'Инвентаризация и история движений','s.link':'Узнать больше',
-    'steps.label':'Как это работает','steps.title':'Начать просто.','steps.sub':'Четыре шага — и весь ресторан под контролем.',
-    'step1.t':'Регистрация','step1.d':'Создайте аккаунт владельца за 30 секунд.',
-    'step2.t':'Подписка','step2.d':'Выберите тариф — 7 дней бесплатно.',
-    'step3.t':'Команда','step3.d':'Дайте доступ команде через QR-код.',
-    'step4.t':'Контроль','step4.d':'Смотрите аналитику в любое время.',
-    'pr.label':'Тарифы','pr.title':'Прозрачные цены.','pr.sub':'Отменить или изменить можно в любой момент.',
-    'period':'в месяц','popular':'Популярный',
-    'p1.name':'Starter','p1.f1':'До 2 пользователей','p1.f2':'AI-аналитика','p1.btn':'Выбрать',
-    'p2.name':'Business','p2.f1':'Все 3 приложения','p2.f2':'До 5 пользователей','p2.f3':'История 12 мес.','p2.f4':'Приоритетная поддержка','p2.f5':'AI-аналитика','p2.btn':'Начать бесплатно →',
-    'p3.name':'Pro','p3.f1':'Все приложения','p3.f2':'До 10 пользователей','p3.f3':'AI-аналитика','p3.f4':'Интеграция Syrve','p3.f5':'QR-меню','p3.btn':'Выбрать',
-    'tr.t1':'Данные зашифрованы','tr.t2':'iPhone и Android','tr.t3':'7 дней бесплатно','tr.t4':'Европа и СНГ','tr.t5':'Поддержка в Telegram',
-    'cta.title':'Готовы начать?','cta.sub':'Первые 7 дней бесплатно. Карта не нужна.','cta.btn':'Создать аккаунт →',
-    'ft.tag':'Система управления рестораном','ft.products':'Продукты','ft.company':'Компания','ft.legal':'Правовое',
-    'ft.about':'О нас','ft.support':'Поддержка','ft.contact':'Контакты','ft.privacy':'Конфиденциальность','ft.terms':'Условия','ft.rights':'Все права защищены.',
-  },
-  en:{
-    'nav.manager':'Mise Manager','nav.analytics':'Mise Analytics','nav.stash':'Mise Stash','nav.pricing':'Pricing','nav.cta':'Sign in →',
-    'hero.eyebrow':'Restaurant Management System','hero.t1':'Manage your restaurant.','hero.t2':'Smartly.',
-    'hero.sub':'Three professional tools for owners, managers, and hookah lounges. One account — total control.',
-    'hero.cta1':'Start for free','hero.cta2':'Learn more',
-    'chip.manager':'Mise Manager','chip.analytics':'Mise Analytics','chip.stash':'Mise Stash',
-    'm.eyebrow':'Mise Manager · For managers','m.title':'Every shift under control.',
-    'm.desc':'Open a shift, log expenses and income by category, track cash collections, and get a full report — all from your iPhone.',
-    'm.f1':'Open and close shifts','m.f2':'Track income and expenses by category','m.f3':'Cash collections and balance','m.f4':'End-of-day report in one tap','m.link':'Learn more',
-    'a.eyebrow':'Mise Analytics · For owners','a.title':'The full picture of your business.',
-    'a.desc':'Finances by day, week, and month. Payroll, cash collections, revenue trends — all in one screen for the owner.',
-    'a.f1':'Financial analytics by period','a.f2':'Staff payroll breakdown','a.f3':'Shift history and statistics','a.f4':'AI analytics in Pro plan','a.link':'Learn more',
-    's.eyebrow':'Mise Stash · For hookah lounges','s.title':'Hookah stock under control.',
-    's.desc':'Full tobacco inventory: deliveries, usage, stock by flavor and brand, one-click inventory.',
-    's.f1':'Stock by brand and flavor','s.f2':'Deliveries, usage, and write-offs','s.f3':'Classic / Exclusive / Cigar','s.f4':'Inventory and movement history','s.link':'Learn more',
-    'steps.label':'How it works','steps.title':'Simple to start.','steps.sub':'Four steps — your entire restaurant under control.',
-    'step1.t':'Register','step1.d':'Create an owner account in 30 seconds.',
-    'step2.t':'Subscribe','step2.d':'Choose a plan — 7 days free.',
-    'step3.t':'Team','step3.d':'Give your team access via QR code.',
-    'step4.t':'Control','step4.d':'View analytics anytime, anywhere.',
-    'pr.label':'Pricing','pr.title':'Transparent pricing.','pr.sub':'Cancel or change anytime.',
-    'period':'per month','popular':'Most popular',
-    'p1.name':'Starter','p1.f1':'Up to 2 users','p1.f2':'AI analytics','p1.btn':'Choose',
-    'p2.name':'Business','p2.f1':'All 3 apps','p2.f2':'Up to 5 users','p2.f3':'12-month history','p2.f4':'Priority support','p2.f5':'AI analytics','p2.btn':'Start free →',
-    'p3.name':'Pro','p3.f1':'All apps','p3.f2':'Up to 10 users','p3.f3':'AI analytics','p3.f4':'Syrve integration','p3.f5':'QR menu','p3.btn':'Choose',
-    'tr.t1':'Data encrypted','tr.t2':'iPhone & Android','tr.t3':'7 days free','tr.t4':'Europe & CIS','tr.t5':'Telegram support',
-    'cta.title':'Ready to start?','cta.sub':'First 7 days free. No card required.','cta.btn':'Create account →',
-    'ft.tag':'Restaurant management system','ft.products':'Products','ft.company':'Company','ft.legal':'Legal',
-    'ft.about':'About','ft.support':'Support','ft.contact':'Contact','ft.privacy':'Privacy','ft.terms':'Terms','ft.rights':'All rights reserved.',
-  }
+// ─ PROGRESS BAR ─
+window.addEventListener('scroll', () => {
+  const h = document.documentElement.scrollHeight - window.innerHeight;
+  document.getElementById('progress').style.width = (window.scrollY / h * 100) + '%';
+}, { passive: true });
+
+// ─ SCALE TEXT ANIMATION ─
+function initScaleText() {
+  const wrap = document.getElementById('scale-wrap');
+  const text = document.getElementById('scale-text');
+  if (!wrap || !text) return;
+  window.addEventListener('scroll', () => {
+    const rect = wrap.getBoundingClientRect();
+    const total = wrap.offsetHeight - window.innerHeight;
+    const progress = Math.max(0, Math.min(1, -rect.top / total));
+    const scale = 0.4 + progress * 1.8;
+    const opacity = progress < 0.1 ? progress * 10 :
+                    progress > 0.75 ? 1 - (progress - 0.75) * 4 : 1;
+    text.style.transform = `scale(${scale})`;
+    text.style.opacity = opacity;
+  }, { passive: true });
+}
+initScaleText();
+
+// ─ PHONE SCREEN SWITCHING ─
+const appConfigs = {
+  manager:   { screens: ['m0','m1','m2','m3'], aura: 'm-aura', colors: ['#007aff','#ff3b30','#ff9500','#34c759'] },
+  analytics: { screens: ['a0','a1','a2'],      aura: 'a-aura', colors: ['#34c759','#af52de','#007aff'] },
+  stash:     { screens: ['s0','s1','s2'],      aura: 's-aura', colors: ['#ff9500','#34c759','#007aff'] },
 };
 
+function switchScreen(app, idx) {
+  const cfg = appConfigs[app];
+  if (!cfg) return;
+  cfg.screens.forEach((id, i) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', i === idx);
+  });
+  const aura = document.getElementById(cfg.aura);
+  if (aura) aura.style.background = cfg.colors[idx] || cfg.colors[0];
+}
+
+const featObserver = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (!e.isIntersecting) return;
+    switchScreen(e.target.dataset.app, parseInt(e.target.dataset.idx));
+  });
+}, { threshold: 0.55, rootMargin: '-15% 0px -15% 0px' });
+
+document.querySelectorAll('[data-app]').forEach(el => featObserver.observe(el));
+
+// ─ NAV ACCENT COLOR ─
+const navSections = [
+  { id: 'manager',   color: '#007aff' },
+  { id: 'analytics', color: '#34c759' },
+  { id: 'stash',     color: '#ff9500' },
+];
+const navAccent = document.getElementById('nav-accent');
+const sectionObserver = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (!e.isIntersecting) return;
+    const cfg = navSections.find(s => s.id === e.target.id);
+    if (cfg && navAccent) {
+      navAccent.style.background = `linear-gradient(90deg,transparent,${cfg.color} 50%,transparent)`;
+      navAccent.classList.add('show');
+    } else if (!cfg) {
+      navAccent.classList.remove('show');
+    }
+  });
+}, { threshold: 0.3 });
+navSections.forEach(s => {
+  const el = document.getElementById(s.id);
+  if (el) sectionObserver.observe(el);
+});
+
+// ─ STATEMENT LINES ─
+const stObserver = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.querySelectorAll('.statement-line').forEach(l => l.classList.add('in'));
+    }
+  });
+}, { threshold: 0.3 });
+const stmt = document.querySelector('.statement');
+if (stmt) stObserver.observe(stmt);
+
+// ─ STATS ─
+const statObserver = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.querySelectorAll('.stat-num').forEach((n, i) => {
+        setTimeout(() => n.classList.add('in'), i * 120);
+      });
+    }
+  });
+}, { threshold: 0.3 });
+const statsEl = document.querySelector('.stats');
+if (statsEl) statObserver.observe(statsEl);
+
+// ─ BIG CTA ─
+const ctaObserver = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      document.getElementById('cta-word').classList.add('in');
+      document.getElementById('cta-sub').classList.add('in');
+    }
+  });
+}, { threshold: 0.3 });
+const ctaEl = document.querySelector('.big-cta');
+if (ctaEl) ctaObserver.observe(ctaEl);
+
+// ─ REVEAL ─
+const revealObs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add('in'); revealObs.unobserve(e.target); }
+  });
+}, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+document.querySelectorAll('.reveal').forEach(el => revealObs.observe(el));
+
+// ─ i18n ─
+const T = {
+  ru:{
+    'n.m':'Mise Manager','n.a':'Mise Analytics','n.s':'Mise Stash','n.p':'Цены','n.cta':'Войти',
+    'h.label':'Система управления рестораном',
+    'h.l1':'Ресторан','h.l2':'под контролем.','h.l3':'Mise.',
+    'h.b1':'Начать бесплатно','h.b2':'Смотреть продукт',
+    'st.l1':'Три приложения.','st.l2':'Один аккаунт.','st.l3a':'Полный','st.l3b':'контроль.',
+    'st1.n':'12 сек','st1.l':'Среднее время\nоткрытия смены',
+    'st2.n':'€0','st2.l':'Потерянных смен\nв базе данных',
+    'st3.n':'3-в-1','st3.l':'Приложения в\nодном аккаунте',
+    'm0.ey':'Mise Manager','m0.h':'Открыл.\nРаботай.\nЗакрыл.','m0.p':'Смена открывается одним нажатием. Выручка, расходы и баланс — всё в реальном времени. Прямо с iPhone.','m0.f1':'Открытие и закрытие смены','m0.f2':'Выручка и баланс в реальном времени',
+    'm1.ey':'Расходы','m1.h':'Каждый евро\nна своём месте.','m1.p':'Категории задаёт владелец. Менеджер выбирает, вводит сумму — и идёт дальше работать.','m1.f1':'Расходы по категориям','m1.f2':'Лимиты и предупреждения',
+    'm2.ey':'Инкассации','m2.h':'Наличные\nне теряются.','m2.p':'Каждая инкассация зафиксирована с суммой и датой. Баланс кассы всегда точный.','m2.f1':'История всех инкассаций','m2.f2':'Баланс кассы в реальном времени',
+    'm3.ey':'Отчёт','m3.h':'Итог дня —\nодним нажатием.','m3.p':'В конце смены — полный отчёт. Владелец получает его автоматически.','m3.f1':'Полный отчёт за смену','m3.f2':'Автоматически владельцу','m3.next':'Далее: Mise Analytics',
+    'a0.ey':'Mise Analytics','a0.h':'Цифры которые\nне врут.','a0.p':'Финансы по дням, неделям и месяцам. Сравнение периодов, динамика выручки — для тех кто принимает решения.','a0.f1':'Аналитика по периодам','a0.f2':'Сравнение с прошлым периодом',
+    'a1.ey':'Зарплаты','a1.h':'Ведомость\nбез Excel.','a1.p':'ФОТ, вычеты, выплаты наличными и на карту. Полная картина без таблиц.','a1.f1':'Оклады и вычеты за прогулы','a1.f2':'Наличными и на карту',
+    'a2.ey':'AI-аналитика · Pro','a2.h':'Спроси\nсвои цифры.','a2.p':'«Какой день был лучшим в мае?» — и получишь ответ. AI говорит на языке бизнеса.','a2.f1':'Вопросы на естественном языке','a2.f2':'Доступно в тарифе Pro','a2.next':'Далее: Mise Stash',
+    's0.ey':'Mise Stash','s0.h':'Знает что\nзаканчивается\nраньше тебя.','s0.p':'Остатки по каждому бренду и вкусу. Цветные индикаторы сразу показывают что пора заказывать.','s0.f1':'Остатки по брендам и вкусам','s0.f2':'Цветные индикаторы уровня',
+    's1.ey':'Приход','s1.h':'Каждая партия\nзафиксирована.','s1.p':'Фиксируйте приход в несколько нажатий. Бренд, вкус, количество — склад обновляется мгновенно.','s1.f1':'Приход с датой','s1.f2':'История всех движений',
+    's2.ey':'Инвентаризация','s2.h':'Инвентаризация\nв один клик.','s2.p':'Полная проверка склада в любой момент. История сохраняется автоматически.','s2.f1':'Полная инвентаризация','s2.f2':'История всех проверок','s2.next':'Смотреть тарифы',
+    'cc.label':'Для команды','cc.title':'Вход без паролей.','cc.sub':'Каждый сотрудник входит через QR и PIN. Без регистрации, без email.',
+    'cc1.t':'QR-вход','cc1.d':'Владелец показывает QR. Сотрудник сканирует — и привязывает устройство навсегда.',
+    'cc2.t':'PIN-доступ','cc2.d':'4-значный PIN задаёт владелец. Каждому — свой код и свои приложения.',
+    'cc3.t':'Face ID','cc3.d':'После первого входа — предложение Face ID. Следующие входы мгновенны.',
+    'vd.label':'Продукт','vd.title':'Mise в действии.','vd.t':'Обзор платформы','vd.s':'Mise Manager · Mise Analytics · Mise Stash',
+    'hw.l':'Как это работает','hw.t':'Начать просто.','hw.s':'Четыре шага — и весь ресторан под контролем.',
+    'step1.t':'Регистрация','step1.d':'Создайте аккаунт за 30 секунд.',
+    'step2.t':'Подписка','step2.d':'7 дней бесплатно.',
+    'step3.t':'Команда','step3.d':'Доступ через QR-код.',
+    'step4.t':'Контроль','step4.d':'Аналитика в любое время.',
+    'pr.l':'Тарифы','pr.t':'Прозрачные цены.','pr.s':'Отменить или изменить в любой момент.',
+    'p1.t':'Starter','p1.d':'€0.47 в день','p1.f1':'До 2 пользователей','p1.f2':'AI-аналитика','p1.btn':'Выбрать',
+    'p2.t':'Business','p2.d':'€0.79 в день','p2.f1':'Все 3 приложения','p2.f2':'До 5 пользователей','p2.f3':'История 12 мес.','p2.f4':'Приоритетная поддержка','p2.f5':'AI-аналитика','p2.btn':'Начать бесплатно',
+    'p3.t':'Pro','p3.d':'€1.29 в день','p3.f1':'Все приложения','p3.f2':'До 10 пользователей','p3.f3':'AI-аналитика','p3.f4':'Интеграция Syrve','p3.f5':'QR-меню','p3.btn':'Выбрать',
+    'pop':'Популярный','pay.free':'7 дней бесплатно',
+    'cta.w':'Готов?','cta.s':'Первые 7 дней бесплатно. Карта не нужна.','cta.b':'Создать аккаунт',
+    'ft.tag':'Система управления рестораном','ft.p':'Продукты','ft.c':'Компания','ft.l':'Правовое',
+    'ft.about':'О нас','ft.sup':'Поддержка','ft.cont':'Контакты','ft.priv':'Конфиденциальность','ft.terms':'Условия',
+  },
+  en:{
+    'n.m':'Mise Manager','n.a':'Mise Analytics','n.s':'Mise Stash','n.p':'Pricing','n.cta':'Sign in',
+    'h.label':'Restaurant Management System',
+    'h.l1':'Your restaurant','h.l2':'under control.','h.l3':'Mise.',
+    'h.b1':'Start for free','h.b2':'See the product',
+    'st.l1':'Three apps.','st.l2':'One account.','st.l3a':'Total','st.l3b':'control.',
+    'st1.n':'12 sec','st1.l':'Average shift\nopen time',
+    'st2.n':'€0','st2.l':'Lost shifts\nin the database',
+    'st3.n':'3-in-1','st3.l':'Apps in\none account',
+    'm0.ey':'Mise Manager','m0.h':'Open.\nWork.\nClose.','m0.p':'A shift opens with one tap. Revenue, expenses, and balance — all in real time. From your iPhone.','m0.f1':'Open and close shifts','m0.f2':'Revenue and balance in real time',
+    'm1.ey':'Expenses','m1.h':'Every euro\nin its place.','m1.p':'The owner sets categories. The manager picks, enters the amount — and gets back to work.','m1.f1':'Expenses by category','m1.f2':'Limits and warnings',
+    'm2.ey':'Cash collections','m2.h':'Cash never\ngoes missing.','m2.p':'Every collection is logged with amount and date. Register balance always accurate.','m2.f1':'Full collection history','m2.f2':'Register balance in real time',
+    'm3.ey':'Report','m3.h':'End of shift —\none tap.','m3.p':'A full report at the end of every shift. The owner gets it automatically.','m3.f1':'Full shift report','m3.f2':'Automatically to owner','m3.next':'Next: Mise Analytics',
+    'a0.ey':'Mise Analytics','a0.h':'Numbers that\ndon\'t lie.','a0.p':'Finances by day, week, and month. Period comparisons, revenue trends — for people who make decisions.','a0.f1':'Analytics by period','a0.f2':'Compare to previous period',
+    'a1.ey':'Payroll','a1.h':'Payroll\nwithout Excel.','a1.p':'Salary, deductions, cash and card payouts. Full picture per employee, no spreadsheets.','a1.f1':'Salaries and absence deductions','a1.f2':'Cash and card payouts',
+    'a2.ey':'AI analytics · Pro','a2.h':'Ask your\nnumbers.','a2.p':'"What was the best day in May?" — and you get an answer. AI speaks business, not tech.','a2.f1':'Natural language questions','a2.f2':'Available in Pro plan','a2.next':'Next: Mise Stash',
+    's0.ey':'Mise Stash','s0.h':'Knows what\'s\nrunning low\nbefore you do.','s0.p':'Stock by brand and flavor. Color indicators show what needs to be ordered right now.','s0.f1':'Stock by brand and flavor','s0.f2':'Color level indicators',
+    's1.ey':'Incoming stock','s1.h':'Every delivery\nrecorded.','s1.p':'Log deliveries in a few taps. Brand, flavor, quantity — stock updates instantly.','s1.f1':'Delivery with date','s1.f2':'Full movement history',
+    's2.ey':'Inventory','s2.h':'Inventory\nin one click.','s2.p':'Full stock check at any time. All inventory history is saved automatically.','s2.f1':'Full inventory','s2.f2':'History of all checks','s2.next':'See pricing',
+    'cc.label':'For your team','cc.title':'No passwords.','cc.sub':'Every staff member signs in via QR and PIN. No registration, no email.',
+    'cc1.t':'QR sign-in','cc1.d':'Owner shows QR. Staff scans — and the device is linked to the venue forever.',
+    'cc2.t':'PIN access','cc2.d':'4-digit PIN set by owner. Each person gets their own code and their own apps.',
+    'cc3.t':'Face ID','cc3.d':'After first sign-in — option to enable Face ID. Next logins are instant.',
+    'vd.label':'Product','vd.title':'Mise in action.','vd.t':'Platform overview','vd.s':'Mise Manager · Mise Analytics · Mise Stash',
+    'hw.l':'How it works','hw.t':'Simple to start.','hw.s':'Four steps — your entire restaurant under control.',
+    'step1.t':'Register','step1.d':'Create an account in 30 seconds.',
+    'step2.t':'Subscribe','step2.d':'7 days free.',
+    'step3.t':'Team','step3.d':'Access via QR code.',
+    'step4.t':'Control','step4.d':'Analytics anytime.',
+    'pr.l':'Pricing','pr.t':'Transparent pricing.','pr.s':'Cancel or change anytime.',
+    'p1.t':'Starter','p1.d':'€0.47 per day','p1.f1':'Up to 2 users','p1.f2':'AI analytics','p1.btn':'Choose',
+    'p2.t':'Business','p2.d':'€0.79 per day','p2.f1':'All 3 apps','p2.f2':'Up to 5 users','p2.f3':'12-month history','p2.f4':'Priority support','p2.f5':'AI analytics','p2.btn':'Start free',
+    'p3.t':'Pro','p3.d':'€1.29 per day','p3.f1':'All apps','p3.f2':'Up to 10 users','p3.f3':'AI analytics','p3.f4':'Syrve integration','p3.f5':'QR menu','p3.btn':'Choose',
+    'pop':'Most popular','pay.free':'7 days free',
+    'cta.w':'Ready?','cta.s':'First 7 days free. No card required.','cta.b':'Create account',
+    'ft.tag':'Restaurant management system','ft.p':'Products','ft.c':'Company','ft.l':'Legal',
+    'ft.about':'About','ft.sup':'Support','ft.cont':'Contact','ft.priv':'Privacy','ft.terms':'Terms',
+  }
+};
 function setLang(lang) {
   document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b.textContent === lang.toUpperCase()));
   document.querySelectorAll('[data-i18n]').forEach(el => {
@@ -952,31 +1476,6 @@ function setLang(lang) {
     if (v !== undefined) el.textContent = v;
   });
 }
-
-// Scroll reveal
-const observer = new IntersectionObserver(entries => {
-  entries.forEach(e => {
-    if (e.isIntersecting) { e.target.classList.add('in'); observer.unobserve(e.target); }
-  });
-}, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
-document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
-
-// Nav scroll
-const nav = document.getElementById('nav');
-window.addEventListener('scroll', () => {
-  nav.style.background = window.scrollY > 20
-    ? 'rgba(255,255,255,.96)'
-    : 'rgba(255,255,255,.82)';
-}, { passive: true });
-
-// Parallax on hero
-const heroBg = document.querySelector('.hero-bg');
-window.addEventListener('scroll', () => {
-  const y = window.scrollY;
-  if (heroBg && y < window.innerHeight) {
-    heroBg.style.transform = `translateY(${y * 0.3}px)`;
-  }
-}, { passive: true });
 </script>
 </body>
 </html>
