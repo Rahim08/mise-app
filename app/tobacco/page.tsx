@@ -241,10 +241,7 @@ export default function StashApp() {
       }
       if (!rid) { window.location.href = '/join?error=no_session'; return }
       setRestaurantId(rid)
-      //const { data: restData } = await supabase.from('restaurants').select('subscription_status').eq('id', rid).single()
-      
-        
-      }
+      // subscription gate disabled temporarily
       await loadAll(rid)
     })
   }, [])
