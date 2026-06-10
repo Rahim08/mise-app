@@ -881,6 +881,7 @@ export default function Dashboard() {
   const [user, setUser] = useState<any>(null)
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null)
   const [tab, setTab] = useState('apps')
+  const [authChecked, setAuthChecked] = useState(false)
 
   const loadRestaurant = async (userId: string) => {
     const { data } = await supabase.from('restaurants').select('*').eq('owner_id', userId).single()
@@ -892,13 +893,18 @@ export default function Dashboard() {
     const t = params.get('tab')
     if (t) setTab(t)
     supabase.auth.getSession().then(async ({ data }) => {
-      if (!data.session?.user) { window.location.href = '/auth/login'; return }
+      if (!data.session?.user) { 
+        setAuthChecked(true)
+        window.location.href = '/auth/login'
+        return 
+      }
       setUser(data.session.user)
       await loadRestaurant(data.session.user.id)
+      setAuthChecked(true)
     })
   }, [])
 
-  if (!user) return (
+  if (!authChecked || !user) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system,sans-serif', color: '#6d6d72', fontSize: '.9rem', background: '#f2f2f7' }}>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
         <LogoMark size={48} />
