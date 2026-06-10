@@ -891,10 +891,10 @@ export default function Dashboard() {
     const params = new URLSearchParams(window.location.search)
     const t = params.get('tab')
     if (t) setTab(t)
-    supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) { window.location.href = '/auth/login'; return }
-      setUser(data.user)
-      await loadRestaurant(data.user.id)
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!data.session?.user) { window.location.href = '/auth/login'; return }
+      setUser(data.session.user)
+      await loadRestaurant(data.session.user.id)
     })
   }, [])
 
