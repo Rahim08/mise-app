@@ -2,7 +2,7 @@
 // @ts-nocheck
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import QRCode from 'qrcode.react'
+import { QRCodeSVG as QRCode } from 'qrcode.react'
 
 
 
@@ -112,32 +112,31 @@ export default function JoinPage() {
     if (!restaurant) return
     setChecking(true)
 
-    // Owner PIN
-    if (restaurant.owner_pin && enteredPin === restaurant.owner_pin) {
-      const ownerData = { id: 'owner', name: 'Владелец', apps: ['manager', 'analytics', 'stash'], is_owner: true }
-      localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify(ownerData))
-      setStaffMember(ownerData)
-      setChecking(false)
-      goToApp(ownerData.apps)
-      return
-    }
+    const res = await fetch('/api/auth/pin/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ restaurantId: restaurant.id, pin: enteredPin }),
+    })
+    const result = await res.json()
 
-    // Staff PIN
-    const { data: staffList } = await supabase
-      .from('staff').select('*')
-      .eq('restaurant_id', restaurant.id).eq('is_active', true)
-
-    const matched = (staffList || []).find((s: any) => s.pin_hash === enteredPin)
-
-    if (matched) {
-      const deviceId = getDeviceId()
-      if (!matched.device_id) {
-        await supabase.from('staff').update({ device_id: deviceId }).eq('id', matched.id)
+    if (result.match) {
+      if (result.is_owner) {
+        const ownerData = { id: 'owner', name: 'Владелец', apps: ['manager', 'analytics', 'stash'], is_owner: true }
+        localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify(ownerData))
+        setStaffMember(ownerData)
+        setChecking(false)
+        goToApp(ownerData.apps)
+      } else {
+        const matched = result.staff
+        const deviceId = getDeviceId()
+        if (!matched.device_id) {
+          await supabase.from('staff').update({ device_id: deviceId }).eq('id', matched.id)
+        }
+        localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify({ id: matched.id, name: matched.name, apps: matched.apps }))
+        setStaffMember(matched)
+        setChecking(false)
+        goToApp(matched.apps)
       }
-      localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify({ id: matched.id, name: matched.name, apps: matched.apps }))
-      setStaffMember(matched)
-      setChecking(false)
-      goToApp(matched.apps)
     } else {
       setChecking(false)
       setPinError(true)

@@ -11,6 +11,8 @@
   "dependencies": {
     "@stripe/stripe-js": "^9.7.0",
     "@supabase/supabase-js": "^2.107.0",
+    "@types/bcryptjs": "^2.4.6",
+    "bcryptjs": "^3.0.3",
     "chart.js": "^4.5.1",
     "next": "16.2.7",
     "qrcode.react": "^4.2.0",

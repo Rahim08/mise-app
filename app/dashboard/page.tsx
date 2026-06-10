@@ -421,7 +421,13 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
   const saveOwnerPin = async () => {
     if (ownerPinVal.length !== 4 || !/^\d+$/.test(ownerPinVal)) { alert('PIN должен быть 4 цифры'); return }
     setOwnerSaving(true)
-    await supabase.from('restaurants').update({ owner_pin: ownerPinVal }).eq('id', restaurantId)
+    const hashRes = await fetch('/api/auth/pin/hash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: ownerPinVal }),
+    })
+    const { hash } = await hashRes.json()
+    await supabase.from('restaurants').update({ owner_pin: hash }).eq('id', restaurantId)
     setOwnerPin(ownerPinVal); setOwnerPinEdit(false); setOwnerPinVal('')
     setOwnerSaving(false); setOwnerSaved(true); setTimeout(() => setOwnerSaved(false), 2000)
   }
@@ -435,8 +441,18 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
     if (!editingId && (form.pin.length !== 4 || !/^\d+$/.test(form.pin))) { alert('PIN должен быть 4 цифры'); return }
     if (!form.apps.length) { alert('Выберите хотя бы одно приложение'); return }
     setSaving(true)
+    let pinHash = form.pin
+    if (form.pin) {
+      const hashRes = await fetch('/api/auth/pin/hash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: form.pin }),
+      })
+      const { hash } = await hashRes.json()
+      pinHash = hash
+    }
     const payload: any = { restaurant_id: restaurantId, name: form.name, apps: form.apps, is_active: true }
-    if (form.pin) payload.pin_hash = form.pin
+    if (form.pin) payload.pin_hash = pinHash
     if (editingId) await supabase.from('staff').update(payload).eq('id', editingId)
     else await supabase.from('staff').insert(payload)
     setForm({ name: '', pin: '', apps: [] }); setShowForm(false); setEditingId(null)
