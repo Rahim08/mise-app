@@ -1,13 +1,10 @@
 'use client'
 // @ts-nocheck
 import { useEffect, useState } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from '@/lib/supabase'
 import QRCode from 'qrcode.react'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+
 
 const APPS = [
   { id: 'manager',   name: 'Mise Manager',   color: '#007aff', path: '/manager' },

@@ -1,13 +1,10 @@
 'use client'
 // @ts-nocheck
 import { useEffect, useState, useRef } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from '@/lib/supabase'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+
 
 type Restaurant = {
   id: string; name: string; currency: string

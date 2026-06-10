@@ -1,12 +1,9 @@
 'use client'
 export const dynamic = 'force-dynamic'
 import React, { useEffect, useState, useRef } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from '@/lib/supabase'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+
 
 function fg(g: number) {
   if (!g) return '0 г'

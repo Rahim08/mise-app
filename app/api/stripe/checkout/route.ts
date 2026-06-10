@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from '@/lib/supabase'
 
 const PLANS: Record<string, { priceId: string }> = {
   starter:  { priceId: 'price_1TgTbgQ50dEzENhL18edUbx7' },

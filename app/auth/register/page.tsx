@@ -1,13 +1,9 @@
 'use client'
 // @ts-nocheck
 import { useState } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from '@/lib/supabase'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  { auth: { persistSession: true, storageKey: 'mise_auth' } }
-)
+
 
 function LogoMark({ size = 36 }: { size?: number }) {
   return (

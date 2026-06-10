@@ -1,14 +1,11 @@
 'use client'
 export const dynamic = 'force-dynamic'
 import React, { useEffect, useState, useRef } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from '@/lib/supabase'
 import { Chart, registerables } from 'chart.js'
 Chart.register(...registerables)
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+
 
 function fv(v: number) { return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
 function fmtDate(d: Date) { return d.toISOString().split('T')[0] }
