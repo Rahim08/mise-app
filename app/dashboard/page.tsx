@@ -198,7 +198,8 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
   const router = useRouter()
   const plan = restaurant?.subscription_plan || ''
   const status = restaurant?.subscription_status || ''
-  const isActive = status === 'active' || status === 'trialing'
+  // 'canceling' = отмена в конце периода: Stripe держит подписку живой до endsAt
+  const isActive = status === 'active' || status === 'trialing' || status === 'canceling'
 
   return (
     <div>
@@ -1052,7 +1053,8 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
   const currentPlan = PLANS.find(p => p.id === restaurant?.subscription_plan)
   const status = restaurant?.subscription_status
   const endsAt = restaurant?.subscription_ends_at ? new Date(restaurant.subscription_ends_at) : null
-  const isActive = status === 'active' || status === 'trialing'
+  // 'canceling' = доступ сохраняется до конца оплаченного периода
+  const isActive = status === 'active' || status === 'trialing' || status === 'canceling'
 
   const statusLabel: Record<string, { label: string; color: string; bg: string }> = {
     trialing: { label: 'Пробный период', color: '#007aff', bg: 'rgba(0,122,255,.1)' },
@@ -1126,7 +1128,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
               <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--tx)', marginBottom: 2 }}>{currentPlan.name}</div>
               {endsAt && (
                 <div style={{ fontSize: '.8rem', color: 'var(--tx2)' }}>
-                  {isActive ? 'Следующий платёж' : 'Доступ до'}: {endsAt.toLocaleDateString('ru-RU')}
+                  {isActive && status !== 'canceling' ? 'Следующий платёж' : 'Доступ до'}: {endsAt.toLocaleDateString('ru-RU')}
                 </div>
               )}
             </div>
@@ -1135,7 +1137,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
               <div style={{ color: 'var(--tx2)', fontSize: '.78rem' }}>в месяц</div>
             </div>
           </div>
-          {isActive && (
+          {isActive && status !== 'canceling' && (
             <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(var(--seprgb),.08)' }}>
               {!cancelConfirm ? (
                 <button onClick={() => setCancelConfirm(true)} style={{ background: 'none', border: 'none', color: '#ff3b30', fontSize: '.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
