@@ -121,11 +121,123 @@ function StatCard({ label, value, color, t }: { label: string; value: string; co
 
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 
+// ── HOOKAH SHIFT (смена кальянщика) ───────────────────────────────────────────
+// Кальянщик отмечает, сколько кальянов каждого вкуса сделано за день.
+// Хранится в hookah_sales (строка = вкус × количество за дату), цена/порция —
+// в restaurant_settings (дашборд → Настройки → Кальян).
+
+function fmtDay(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function HookahShiftTab({ restaurantId, stock, t, toast }: { restaurantId: string; stock: StockItem[]; t: ReturnType<typeof useTheme>; toast: (m: string) => void }) {
+  const today = fmtDay(new Date())
+  const [counts, setCounts] = useState<Record<string, number>>({}) // stock.id → кол-во кальянов
+  const [settings, setSettings] = useState<{ hookah_price: number; hookah_portion_g: number } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    Promise.all([
+      db.from('hookah_sales').select('*').eq('date', today),
+      db.from('restaurant_settings').select('*').limit(1),
+    ]).then(([{ data: rows }, { data: rs }]: any[]) => {
+      const c: Record<string, number> = {}
+      ;(rows || []).forEach((r: any) => {
+        const item = stock.find(s => s.id === r.flavor_id) || stock.find(s => s.brand === r.brand && s.flavor === r.flavor)
+        if (item) c[item.id] = (c[item.id] || 0) + (r.quantity || 0)
+      })
+      setCounts(c)
+      const row = Array.isArray(rs) ? rs[0] : rs
+      setSettings({ hookah_price: Number(row?.hookah_price || 0), hookah_portion_g: Number(row?.hookah_portion_g || 20) })
+      setLoading(false)
+    })
+  }, [])
+
+  const inc = (id: string, d: number) => setCounts(c => ({ ...c, [id]: Math.max(0, (c[id] || 0) + d) }))
+
+  const totalCount = Object.values(counts).reduce((s, n) => s + n, 0)
+  const price = settings?.hookah_price || 0
+  const portion = settings?.hookah_portion_g || 20
+
+  const save = async () => {
+    setSaving(true)
+    // Перезаписываем день целиком: удалить сегодняшние строки, вставить актуальные.
+    await db.from('hookah_sales').delete().eq('date', today)
+    const rows = stock.filter(s => (counts[s.id] || 0) > 0).map(s => ({
+      flavor_id: s.id, brand: s.brand, flavor: s.flavor,
+      quantity: counts[s.id], price, date: today,
+    }))
+    if (rows.length) {
+      const { error } = await db.from('hookah_sales').insert(rows)
+      if (error) { toast('Ошибка: ' + error.message); setSaving(false); return }
+    }
+    setSaving(false)
+    toast(`Смена сохранена · ${totalCount} кальянов`)
+  }
+
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+
+  const list = stock.filter(s => `${s.brand} ${s.flavor}`.toLowerCase().includes(search.toLowerCase()))
+
+  return (
+    <div>
+      {/* Итог дня */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
+        {[
+          { l: 'Кальянов', v: String(totalCount), c: t.orange },
+          { l: 'Выручка', v: `€${(totalCount * price).toLocaleString('de-DE')}`, c: t.green },
+          { l: 'Табака', v: `${(totalCount * portion).toLocaleString('de-DE')} г`, c: t.blue },
+        ].map(it => (
+          <div key={it.l} style={{ background: t.surface, borderRadius: 14, padding: '12px 10px', boxShadow: t.sh, textAlign: 'center' }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: it.c }}>{it.v}</div>
+            <div style={{ fontSize: 10, color: t.text3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 3 }}>{it.l}</div>
+          </div>
+        ))}
+      </div>
+      {price === 0 && (
+        <div style={{ background: `${t.orange}14`, borderRadius: 12, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: t.orange }}>
+          Цена кальяна не задана — владелец указывает её в дашборде → Настройки → Кальян
+        </div>
+      )}
+
+      <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск вкуса..."
+        style={{ width: '100%', padding: '12px 14px', borderRadius: 14, border: `1px solid ${t.sep2}`, fontSize: 16, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', marginBottom: 12, boxShadow: t.sh }} />
+
+      {list.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '40px 20px', color: t.text3 }}>Нет вкусов — добавьте приход на склад</div>
+      ) : (
+        <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 14 }}>
+          {list.map((s, i) => {
+            const n = counts[s.id] || 0
+            return (
+              <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderBottom: i < list.length - 1 ? `0.5px solid ${t.sep2}` : 'none', background: n > 0 ? `${t.orange}0a` : 'transparent' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.flavor}</div>
+                  <div style={{ fontSize: 11, color: t.text3, marginTop: 1 }}>{s.brand}</div>
+                </div>
+                <button onClick={() => inc(s.id, -1)} disabled={n === 0} style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', background: t.fill, color: n === 0 ? t.text4 : t.text, cursor: n === 0 ? 'default' : 'pointer', fontSize: 18, fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>−</button>
+                <span style={{ minWidth: 26, textAlign: 'center', fontSize: 16, fontWeight: 800, color: n > 0 ? t.orange : t.text4 }}>{n}</span>
+                <button onClick={() => inc(s.id, 1)} style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', background: t.orange, color: '#fff', cursor: 'pointer', fontSize: 18, fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      <button onClick={save} disabled={saving} style={{ width: '100%', padding: '15px', borderRadius: 16, background: t.orange, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${t.orange}44` }}>
+        {saving ? 'Сохраняем...' : 'Сохранить смену'}
+      </button>
+    </div>
+  )
+}
+
 export default function StashApp() {
   const t = useTheme()
 
   const [restaurantId, setRestaurantId] = useState('')
-  const [tab, setTab] = useState<'stock' | 'movements' | 'inventory'>('stock')
+  const [tab, setTab] = useState<'shift' | 'stock' | 'movements' | 'inventory'>('shift')
   const [movMode, setMovMode] = useState<'in' | 'out' | 'writeoff'>('in')
   const [movReason, setMovReason] = useState('')
   const [invType, setInvType] = useState<'warehouse' | 'venue'>('warehouse')
@@ -289,6 +401,15 @@ export default function StashApp() {
 
   const NAV_TABS = [
     {
+      id: 'shift', label: 'Смена',
+      icon: (active: boolean) => (
+        <svg fill="none" stroke="currentColor" strokeWidth={active ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26">
+          <path d="M8 8c0-2.5 3-4 3-6" strokeLinecap="round" /><path d="M12 8c0-2.5 3-4 3-6" strokeLinecap="round" /><path d="M16 8c0-2.5 3-4 3-6" strokeLinecap="round" />
+          <path d="M5 14h14" strokeLinecap="round" /><path d="M5 17c1 1.5 2 2 3.5 2s2.5-1 4-1 2.5 1 4 1 2.5-.5 3.5-2" strokeLinecap="round" />
+        </svg>
+      )
+    },
+    {
       id: 'stock', label: 'Наличие',
       icon: (active: boolean) => (
         <svg fill="none" stroke="currentColor" strokeWidth={active ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26">
@@ -361,6 +482,11 @@ export default function StashApp() {
       {/* ── CONTENT ── */}
       <div style={{ position: 'fixed', top: 56, left: 0, right: 0, bottom: 82, overflowY: 'auto', background: t.bg }}>
         <div style={{ padding: '16px 16px 28px', maxWidth: 860, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
+
+          {/* ══ HOOKAH SHIFT ══ */}
+          {tab === 'shift' && !loading && (
+            <HookahShiftTab restaurantId={restaurantId} stock={inStockItems} t={t} toast={showToastMsg} />
+          )}
 
           {/* ══ STOCK ══ */}
           {tab === 'stock' && (

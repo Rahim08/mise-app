@@ -1,0 +1,101 @@
+table_name,column_name,data_type,is_nullable,column_default
+admin_notes,id,uuid,NO,gen_random_uuid()
+admin_notes,restaurant_id,uuid,YES,null
+admin_notes,note,text,YES,null
+admin_notes,created_at,timestamp with time zone,YES,now()
+app_errors,id,uuid,NO,gen_random_uuid()
+app_errors,source,text,NO,'client'::text
+app_errors,message,text,NO,null
+app_errors,stack,text,YES,null
+app_errors,url,text,YES,null
+app_errors,user_agent,text,YES,null
+app_errors,restaurant_id,uuid,YES,null
+app_errors,created_at,timestamp with time zone,NO,now()
+attendance_records,id,uuid,NO,gen_random_uuid()
+attendance_records,restaurant_id,uuid,NO,null
+attendance_records,staff_id,uuid,NO,null
+attendance_records,schedule_id,uuid,YES,null
+attendance_records,date,date,NO,null
+attendance_records,check_in_at,timestamp with time zone,YES,null
+attendance_records,check_in_lat,numeric,YES,null
+attendance_records,check_in_lng,numeric,YES,null
+attendance_records,check_in_distance_m,integer,YES,null
+attendance_records,check_out_at,timestamp with time zone,YES,null
+attendance_records,check_out_lat,numeric,YES,null
+attendance_records,check_out_lng,numeric,YES,null
+attendance_records,late_minutes,integer,YES,null
+attendance_records,status,text,NO,'present'::text
+attendance_records,source,text,NO,'geo'::text
+attendance_records,created_at,timestamp with time zone,NO,now()
+employees,id,uuid,NO,gen_random_uuid()
+employees,restaurant_id,uuid,YES,null
+employees,name,text,NO,null
+employees,salary,numeric,YES,0
+employees,deduct_per_absence,numeric,YES,0
+employees,card_amount,numeric,YES,0
+employees,is_active,boolean,YES,true
+employees,created_at,timestamp without time zone,YES,now()
+expense_categories,id,uuid,NO,gen_random_uuid()
+expense_categories,restaurant_id,uuid,YES,null
+expense_categories,name,text,NO,null
+expense_categories,is_salary,boolean,YES,false
+expense_categories,created_at,timestamp without time zone,YES,now()
+hookah_sales,id,uuid,NO,gen_random_uuid()
+hookah_sales,restaurant_id,uuid,YES,null
+hookah_sales,shift_id,uuid,YES,null
+hookah_sales,flavor_id,uuid,YES,null
+hookah_sales,quantity,integer,YES,1
+hookah_sales,price,numeric,YES,null
+hookah_sales,created_at,timestamp without time zone,YES,now()
+inkassations,id,uuid,NO,gen_random_uuid()
+inkassations,restaurant_id,uuid,YES,null
+inkassations,date,date,YES,CURRENT_DATE
+inkassations,amount,numeric,NO,null
+inkassations,expense,numeric,YES,0
+inkassations,reason,text,YES,null
+inkassations,total,numeric,YES,null
+inkassations,created_at,timestamp without time zone,YES,now()
+inkassations,salary,numeric,NO,0
+inkassations,salary_note,text,YES,null
+menu_categories,id,uuid,NO,gen_random_uuid()
+menu_categories,restaurant_id,uuid,YES,null
+menu_categories,name,text,NO,null
+menu_categories,description,text,YES,null
+menu_categories,image_url,text,YES,null
+menu_categories,position,integer,YES,0
+menu_categories,is_visible,boolean,YES,true
+menu_categories,created_at,timestamp with time zone,YES,now()
+menu_items,id,uuid,NO,gen_random_uuid()
+menu_items,restaurant_id,uuid,YES,null
+menu_items,category_id,uuid,YES,null
+menu_items,name,text,NO,null
+menu_items,description,text,YES,null
+menu_items,price,numeric,YES,null
+menu_items,image_url,text,YES,null
+menu_items,is_visible,boolean,YES,true
+menu_items,is_available,boolean,YES,true
+menu_items,calories,integer,YES,null
+menu_items,allergens,ARRAY,YES,null
+menu_items,position,integer,YES,0
+menu_items,syrve_id,text,YES,null
+menu_items,created_at,timestamp with time zone,YES,now()
+menu_items,updated_at,timestamp with time zone,YES,now()
+menu_items,modifiers,jsonb,YES,null
+menu_orders,id,uuid,NO,gen_random_uuid()
+menu_orders,restaurant_id,uuid,YES,null
+menu_orders,table_number,text,YES,null
+menu_orders,items,jsonb,NO,null
+menu_orders,total,numeric,YES,null
+menu_orders,status,text,YES,'new'::text
+menu_orders,pos_system,text,YES,null
+menu_orders,pos_order_id,text,YES,null
+menu_orders,created_at,timestamp with time zone,YES,now()
+menu_settings,id,uuid,NO,gen_random_uuid()
+menu_settings,restaurant_id,uuid,YES,null
+menu_settings,slug,text,YES,null
+menu_settings,is_published,boolean,YES,false
+menu_settings,theme,text,YES,'light'::text
+menu_settings,accent_color,text,YES,'#007aff'::text
+menu_settings,cover_url,text,YES,null
+menu_settings,show_photos,boolean,YES,true
+menu_settings,allow_orders,boolean,YES,false

@@ -32,8 +32,9 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   transactions:         { read: ['manager', 'analytics'], write: ['manager'] },
   monthly_card_amounts: { read: ['analytics', 'people'], write: [] },
   salary_records:       { read: ['analytics'], write: [] },
-  tobacco_stock:        { read: ['stash'], write: ['stash'] },
-  tobacco_movements:    { read: ['stash'], write: ['stash'] },
+  tobacco_stock:        { read: ['stash', 'analytics'], write: ['stash'] }, // analytics: остаток склада на вкладке Кальян
+  tobacco_movements:    { read: ['stash', 'analytics'], write: ['stash'] },
+  hookah_sales:         { read: ['stash', 'analytics'], write: ['stash'] }, // смена кальянщика
   tobacco_flavors:      { read: ['stash'], write: ['stash'] },
   tobacco_inventories:  { read: ['stash'], write: ['stash'] },
   menu_settings:        { read: ['people'], write: [] },

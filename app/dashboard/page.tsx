@@ -825,6 +825,47 @@ function AnalyticsSettingsCard() {
   )
 }
 
+// Кальян: цена порции и граммовка — основа смены кальянщика (Stash) и вкладки
+// «Кальян» в Analytics (выручка = кол-во × цена, расход табака = кол-во × граммы).
+function HookahSettingsCard() {
+  const [row, setRow] = useState<any>(null)
+  const [price, setPrice] = useState('')
+  const [portion, setPortion] = useState('20')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
+      const r = Array.isArray(data) ? data[0] : data
+      if (r) {
+        setRow(r)
+        setPrice(r.hookah_price > 0 ? String(r.hookah_price) : '')
+        setPortion(String(r.hookah_portion_g ?? 20))
+      }
+    })
+  }, [])
+
+  const save = async () => {
+    setSaving(true)
+    const payload = { hookah_price: parseFloat(price) || 0, hookah_portion_g: parseFloat(portion) || 20 }
+    if (row?.id) await db.from('restaurant_settings').update(payload).eq('id', row.id)
+    else { const { data } = await db.from('restaurant_settings').insert(payload).select().single(); if (data) setRow(data) }
+    setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000)
+  }
+
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Кальян</div>
+      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', margin: '2px 0 14px' }}>Смена кальянщика в Mise Stash и вкладка «Кальян» в Analytics</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <Field label="Цена кальяна" value={price} onChange={setPrice} type="number" placeholder="15" />
+        <Field label="Порция табака, г" value={portion} onChange={setPortion} type="number" placeholder="20" />
+      </div>
+      <Btn onClick={save}>{saving ? 'Сохранение...' : saved ? '✓ Сохранено' : 'Сохранить'}</Btn>
+    </Card>
+  )
+}
+
 function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; onUpdate: () => void }) {
   const router = useRouter()
   const [name, setName] = useState(restaurant?.name || '')
@@ -931,6 +972,8 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
         />
         <Btn onClick={save}>{saving ? 'Сохранение...' : saved ? '✓ Сохранено' : 'Сохранить'}</Btn>
       </Card>
+
+      <HookahSettingsCard />
 
       <AnalyticsSettingsCard />
 

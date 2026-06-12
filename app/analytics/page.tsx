@@ -415,6 +415,9 @@ export default function AnalyticsApp() {
   const [kassaMode, setKassaMode] = useState<'kassa' | 'inkass'>('kassa')
   const [currentDate, setCurrentDate] = useState(new Date())
   const [includeCard, setIncludeCard] = useState(false) // restaurant_settings.include_card_in_analytics
+  // Кальян: настройки + остатки (all-time) + строки смен кальянщика за месяц
+  const [hk, setHk] = useState({ price: 0, portion: 20, stockG: 0, issuedG: 0, allQty: 0 })
+  const [hookahRows, setHookahRows] = useState<any[]>([])
   const [shiftsRaw, setShifts] = useState<any[]>([])
   const [prevShiftsRaw, setPrevShifts] = useState<any[]>([])
   const [allShiftsRaw, setAllShifts] = useState<any[]>([])
@@ -447,10 +450,18 @@ export default function AnalyticsApp() {
       if (rest?.currency) setCurrency(rest.currency)
       setIsPro(rest?.subscription_plan === 'pro' && ['active', 'trialing', 'canceling'].includes(rest?.subscription_status))
     })
-    db.from('restaurant_settings').select('include_card_in_analytics').limit(1).then(({ data }: any) => {
+    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
       const r = Array.isArray(data) ? data[0] : data
       setIncludeCard(!!r?.include_card_in_analytics)
+      setHk(h => ({ ...h, price: Number(r?.hookah_price || 0), portion: Number(r?.hookah_portion_g || 20) }))
     })
+    // Кальян: склад, выдано в зал (all-time) и продано (all-time) — для остатка «в заведении»
+    db.from('tobacco_stock').select('quantity_g').then(({ data }: any) =>
+      setHk(h => ({ ...h, stockG: (data || []).reduce((s: number, r: any) => s + (r.quantity_g || 0), 0) })))
+    db.from('tobacco_movements').select('quantity_g, type').then(({ data }: any) =>
+      setHk(h => ({ ...h, issuedG: (data || []).filter((r: any) => r.type === 'out').reduce((s: number, r: any) => s + (r.quantity_g || 0), 0) })))
+    db.from('hookah_sales').select('quantity').then(({ data }: any) =>
+      setHk(h => ({ ...h, allQty: (data || []).reduce((s: number, r: any) => s + (r.quantity || 0), 0) })))
     loadAll(restaurantId, new Date())
     loadAllHistory(restaurantId)
   }, [restaurantId])
@@ -462,13 +473,15 @@ export default function AnalyticsApp() {
     const prevStart = fmtDate(new Date(date.getFullYear(), date.getMonth() - 1, 1))
     const prevEnd = fmtDate(new Date(date.getFullYear(), date.getMonth(), 0))
 
-    const [s1, s2, s3, s4, s5] = await Promise.all([
+    const [s1, s2, s3, s4, s5, s6] = await Promise.all([
       db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd).order('date'),
       db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', prevStart).lte('date', prevEnd).order('date'),
       db.from('employees').select('*').eq('restaurant_id', rid).eq('is_active', true).order('name'),
       db.from('monthly_card_amounts').select('*').eq('restaurant_id', rid).eq('month', fmtDate(date).slice(0, 7)),
-      db.from('shift_absences').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd)
+      db.from('shift_absences').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd),
+      db.from('hookah_sales').select('*').gte('date', monthStart).lte('date', monthEnd).order('date'),
     ])
+    setHookahRows(s6.data || [])
 
     const shiftList = s1.data || []
     setShifts(shiftList); setPrevShifts(s2.data || [])
@@ -1047,19 +1060,75 @@ export default function AnalyticsApp() {
 
           {tab === 'salary' && renderSalary()}
 
-          {tab === 'hookah' && (
-            <div style={{ padding: '60px 20px', textAlign: 'center' as const }}>
-              <div style={{ width: 72, height: 72, borderRadius: 20, background: `${t.purple}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
-                <svg fill="none" stroke={t.purple} strokeWidth="1.5" viewBox="0 0 24 24" width="36" height="36"><path d="M8 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M12 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M16 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M5 14h14" strokeLinecap="round"/><path d="M5 17c1 1.5 2 2 3.5 2s2.5-1 4-1 2.5 1 4 1 2.5-.5 3.5-2" strokeLinecap="round"/></svg>
+          {tab === 'hookah' && (() => {
+            // Смены кальянщика из Mise Stash: выручка = кол-во × цена, табак = кол-во × порция
+            const qtyMonth = hookahRows.reduce((s: number, r: any) => s + (r.quantity || 0), 0)
+            const revMonth = hookahRows.reduce((s: number, r: any) => s + (r.quantity || 0) * Number(r.price ?? hk.price), 0)
+            const usedMonthG = qtyMonth * hk.portion
+            const venueG = Math.max(0, hk.issuedG - hk.allQty * hk.portion) // выдано в зал − продано × порция
+            const fmtKg = (g: number) => g >= 1000 ? `${(g / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} кг` : `${Math.round(g)} г`
+            // По дням и по вкусам
+            const byDay = new Map<string, number>()
+            const byFlavor = new Map<string, number>()
+            hookahRows.forEach((r: any) => {
+              byDay.set(r.date, (byDay.get(r.date) || 0) + (r.quantity || 0))
+              const key = `${r.brand || ''} ${r.flavor || ''}`.trim() || '—'
+              byFlavor.set(key, (byFlavor.get(key) || 0) + (r.quantity || 0))
+            })
+            const flavors = [...byFlavor.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)
+            const maxFlavor = flavors[0]?.[1] || 1
+
+            return (
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                  <StatCard label="Кальянов за месяц" rawValue={qtyMonth} value={String(qtyMonth)} color={t.orange} t={t} />
+                  <StatCard label="Выручка кальяна" rawValue={revMonth} value={`${currency}${fv(revMonth)}`} color={t.green} t={t} />
+                  <StatCard label="Табака израсходовано" rawValue={usedMonthG} value={fmtKg(usedMonthG)} color={t.blue} sm t={t} />
+                  <StatCard label="На складе" rawValue={hk.stockG} value={fmtKg(hk.stockG)} color={t.purple} sm t={t} />
+                </div>
+                <div style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh, marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: t.text }}>В заведении</div>
+                    <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>выдано в зал − продано × {hk.portion} г</div>
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: t.orange }}>{fmtKg(venueG)}</div>
+                </div>
+
+                {hookahRows.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px 20px', color: t.text3 }}>
+                    <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Смен пока нет</div>
+                    <div style={{ fontSize: 13, marginTop: 4 }}>Кальянщик отмечает кальяны в Mise Stash → Смена</div>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>Топ вкусов</div>
+                    <div style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh, marginBottom: 12 }}>
+                      {flavors.map(([name, n]) => (
+                        <div key={name} style={{ marginBottom: 10 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ fontSize: 13, color: t.text, fontWeight: 500 }}>{name}</span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: t.orange }}>{n}</span>
+                          </div>
+                          <div style={{ height: 6, borderRadius: 3, background: t.fill }}>
+                            <div style={{ height: '100%', width: `${n / maxFlavor * 100}%`, borderRadius: 3, background: t.orange }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>По дням</div>
+                    <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
+                      {[...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([d, n], i, arr) => (
+                        <div key={d} style={{ display: 'flex', justifyContent: 'space-between', padding: '11px 16px', borderBottom: i < arr.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                          <span style={{ fontSize: 14, color: t.text }}>{dd(d)}</span>
+                          <span style={{ fontSize: 14 }}><span style={{ fontWeight: 700, color: t.orange }}>{n}</span><span style={{ color: t.text3 }}> · {currency}{fv(n * hk.price)}</span></span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
-              <div style={{ fontWeight: 700, fontSize: 20, color: t.text, marginBottom: 8, letterSpacing: -0.3 }}>Доступно в Pro</div>
-              <div style={{ fontSize: 14, color: t.text3, maxWidth: 240, margin: '0 auto', lineHeight: 1.5 }}>Подключите Syrve для просмотра аналитики кальяна</div>
-              <div style={{ marginTop: 20, display: 'inline-flex', alignItems: 'center', gap: 6, background: `${t.purple}14`, padding: '8px 16px', borderRadius: 20 }}>
-                <div style={{ width: 6, height: 6, borderRadius: '50%', background: t.purple }} />
-                <span style={{ fontSize: 12, color: t.purple, fontWeight: 600 }}>Pro</span>
-              </div>
-            </div>
-          )}
+            )
+          })()}
         </div>
       </div>
 
