@@ -62,7 +62,9 @@ export default function Register() {
       <div style={{ ...S.card, textAlign: 'center' }}>
         <LogoMark size={44} />
         <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#1c1c1e', letterSpacing: '-.04em', marginTop: 10, marginBottom: 24 }}>mise</div>
-        <div style={{ fontSize: '2.5rem', marginBottom: 16 }}>📬</div>
+        <div style={{ width: 64, height: 64, borderRadius: 18, background: 'rgba(0,122,255,.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+          <svg width="28" height="28" fill="none" stroke="#007aff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="3" /><path d="m2 7 10 7L22 7" /></svg>
+        </div>
         <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 8 }}>Проверьте email</div>
         <div style={{ color: '#6d6d72', fontSize: '.88rem', marginBottom: 24, lineHeight: 1.6 }}>
           Мы отправили ссылку для подтверждения на<br/>

@@ -24,9 +24,10 @@ const APPS = [
 ]
 
 const PLANS = [
-  { id: 'starter',  name: 'Starter',  price: 14, maxStaff: 2,  color: '#007aff', features: ['Mise Manager', 'Mise Analytics', 'До 2 пользователей'] },
-  { id: 'business', name: 'Business', price: 24, maxStaff: 5,  color: '#34c759', popular: true, features: ['Все 3 приложения', 'До 5 пользователей', 'История 12 мес.'] },
-  { id: 'pro',      name: 'Pro',      price: 39, maxStaff: 10, color: '#af52de', features: ['Все приложения', 'До 10 пользователей', 'AI-аналитика', 'Интеграция Syrve'] },
+  // maxStaff = доступы сотрудников (устройства); лимит дублируется на сервере в /api/db (PLAN_LIMITS)
+  { id: 'starter',  name: 'Starter',  price: 14, maxStaff: 2,  color: '#007aff', features: ['Mise Manager', 'Mise Analytics', '2 пользователя'] },
+  { id: 'business', name: 'Business', price: 24, maxStaff: 5,  color: '#34c759', popular: true, features: ['Все приложения', 'QR-меню для гостей', 'До 5 пользователей'] },
+  { id: 'pro',      name: 'Pro',      price: 39, maxStaff: 10, color: '#af52de', features: ['Всё из Business', 'AI-аналитика', 'До 10 пользователей', 'Интеграции: касса · банк'] },
 ]
 
 const ROLE_OPTS = [
@@ -52,7 +53,7 @@ function TabIcon({ id, size = 15 }: { id: string; size?: number }) {
     case 'employees':  return <svg {...p}><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 4.2a3.2 3.2 0 010 6.1M19.5 20c0-2.6-1.3-4.5-3.3-5.2"/></svg>
     case 'categories': return <svg {...p}><path d="M3 7a2 2 0 012-2h4l2 2.5h8A2 2 0 0121 9.5V17a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
     case 'team':       return <svg {...p}><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 4.2a3.2 3.2 0 010 6.1M19.5 20c0-2.6-1.3-4.5-3.3-5.2"/></svg>
-    case 'settings':   return <svg {...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-2.7 1.1V21a2 2 0 01-4 0v-.1A1.6 1.6 0 009 19.4a1.6 1.6 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.6 1.6 0 00-1.1-2.7H3a2 2 0 010-4h.1A1.6 1.6 0 004.6 9a1.6 1.6 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1A1.6 1.6 0 009 4.6V3a2 2 0 014 0v.1a1.6 1.6 0 002.7 1.1l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 00-.3 1.8v.1z"/></svg>
+    case 'settings':   return <svg {...p}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" /></svg>
     case 'billing':    return <svg {...p}><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/></svg>
     default:           return null
   }
@@ -937,7 +938,7 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
             {logoPreview ? (
               <img src={logoPreview} alt="logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             ) : (
-              <svg width="30" height="30" fill="none" stroke="#aeaeb2" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M3 3v18M8 3v6a3 3 0 01-3 3M14 21V3c-1.7 0-3 2.7-3 6 0 2.5 1.3 4.2 3 4.5"/></svg>
+              <svg width="30" height="30" fill="none" stroke="var(--tx3)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M3 9l1.2-5h15.6L21 9" /><path d="M4 9v11a1 1 0 001 1h14a1 1 0 001-1V9" /><path d="M3 9h18" /><path d="M9 21v-6h6v6" /></svg>
             )}
           </div>
           <div>
@@ -1030,9 +1031,11 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan: planId, restaurantId: restaurant.id, userId: user.id, email: user.email }),
       })
-      const { url, error } = await res.json()
-      if (error) { alert(error); return }
-      if (url) window.top.location.href = url
+      // Ошибки наружу: молчаливый фейл выглядел как «кнопка не работает»
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.error) { alert(`Не удалось открыть оплату (${res.status}): ${data.error || 'попробуйте перезайти в аккаунт'}`); return }
+      if (data.url) window.location.href = data.url
+      else alert('Stripe не вернул ссылку оплаты — напишите в поддержку')
     } finally { setLoading(false) }
   }
 
