@@ -18,6 +18,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Orders not available' }, { status: 403 })
   }
 
+  // QR-меню — с тарифа Business (или comp_apps от супер-админа)
+  const { data: rest } = await admin.from('restaurants').select('subscription_plan, comp_apps').eq('id', settings.restaurant_id).single()
+  if (!['business', 'pro'].includes(rest?.subscription_plan) && !(rest?.comp_apps || []).includes('menu')) {
+    return NextResponse.json({ error: 'Orders not available' }, { status: 403 })
+  }
+
   // Вызов официанта кодируется маркером в items — без изменения схемы menu_orders.
   const { error } = await admin.from('menu_orders').insert({
     restaurant_id: settings.restaurant_id,

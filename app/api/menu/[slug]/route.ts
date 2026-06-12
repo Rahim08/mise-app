@@ -12,14 +12,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ slu
   if (!settings) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const [rest, cats, items] = await Promise.all([
-    admin.from('restaurants').select('id, name, logo_url, currency').eq('id', settings.restaurant_id).single(),
+    admin.from('restaurants').select('id, name, logo_url, currency, subscription_plan, comp_apps').eq('id', settings.restaurant_id).single(),
     admin.from('menu_categories').select('*').eq('restaurant_id', settings.restaurant_id).eq('is_visible', true).order('position'),
     admin.from('menu_items').select('*').eq('restaurant_id', settings.restaurant_id).eq('is_visible', true).order('position'),
   ])
 
+  // QR-меню — с тарифа Business (или выдано супер-админом через comp_apps)
+  const r: any = rest.data
+  const menuAllowed = ['business', 'pro'].includes(r?.subscription_plan) || (r?.comp_apps || []).includes('menu')
+  if (!menuAllowed) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  const { subscription_plan, comp_apps, ...safeRest } = r || {}
   return NextResponse.json({
     settings,
-    restaurant: rest.data,
+    restaurant: safeRest,
     categories: cats.data || [],
     items: items.data || [],
   })

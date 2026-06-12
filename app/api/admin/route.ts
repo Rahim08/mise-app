@@ -19,7 +19,7 @@ async function isAdmin(req: NextRequest): Promise<boolean> {
 export async function POST(req: NextRequest) {
   if (!await isAdmin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { action, restaurantId, note, status, plan, ends_at, endsAt } = await req.json()
+  const { action, restaurantId, note, status, plan, ends_at, endsAt, compApps, discountPct } = await req.json()
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
   switch (action) {
@@ -65,6 +65,14 @@ export async function POST(req: NextRequest) {
     }
     case 'extendSub': {
       await admin.from('restaurants').update({ subscription_ends_at: endsAt, subscription_status: 'active' }).eq('id', restaurantId)
+      return NextResponse.json({ ok: true })
+    }
+    case 'perks': {
+      // Ручной доступ к приложениям поверх тарифа + скидка (admin-perks-2026-06.sql)
+      await admin.from('restaurants').update({
+        comp_apps: Array.isArray(compApps) ? compApps.filter((a: string) => ['stash', 'people', 'menu'].includes(a)) : [],
+        discount_pct: Math.max(0, Math.min(100, parseInt(discountPct) || 0)),
+      }).eq('id', restaurantId)
       return NextResponse.json({ ok: true })
     }
     case 'freeze': {

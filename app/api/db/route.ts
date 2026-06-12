@@ -74,12 +74,14 @@ async function checkStaffPlanLimit(admin: any, rid: string, values: any, filters
   const grantsApps = rows.some(v => Array.isArray(v?.apps) && v.apps.length > 0)
   if (!grantsApps) return null
 
-  const { data: rest } = await admin.from('restaurants').select('subscription_plan').eq('id', rid).single()
+  const { data: rest } = await admin.from('restaurants').select('subscription_plan, comp_apps').eq('id', rid).single()
   const plan = PLAN_LIMITS[rest?.subscription_plan] || PLAN_LIMITS.starter
+  // comp_apps — приложения, выданные супер-админом поверх тарифа
+  const allowedApps = [...plan.apps, ...(rest?.comp_apps || [])]
 
   for (const v of rows) {
     for (const app of (v.apps || [])) {
-      if (!plan.apps.includes(app)) return 'Приложение недоступно на вашем тарифе'
+      if (!allowedApps.includes(app)) return 'Приложение недоступно на вашем тарифе'
     }
   }
 

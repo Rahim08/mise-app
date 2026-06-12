@@ -17,11 +17,25 @@ type Restaurant = {
 }
 
 const APPS = [
-  { id: 'manager',   name: 'Mise Manager',   desc: 'Смены · Расходы · Инкассации · Явка',         color: '#007aff', hint: 'Для менеджеров',  path: '/manager',   plans: ['starter','business','pro'] },
-  { id: 'analytics', name: 'Mise Analytics', desc: 'Финансы · Зарплаты · Инкассации · AI',         color: '#34c759', hint: 'Для владельца',   path: '/analytics', plans: ['starter','business','pro'] },
-  { id: 'stash',     name: 'Mise Stash',     desc: 'Склад · Приход · Расход · Инвентаризация',     color: '#ff9500', hint: 'Для кальянщика',  path: '/tobacco',   plans: ['business','pro'] },
-  { id: 'people',    name: 'Mise People',    desc: 'Смены · Обмены · Явка · Задачи',               color: '#5856d6', hint: 'Для команды',     path: '/people',    plans: ['business','pro'] },
+  { id: 'manager',   name: 'Mise Manager',   desc: 'Смены · Расходы · Инкассации',             color: '#007aff', hint: 'Для менеджеров', path: '/manager',        plans: ['starter','business','pro'] },
+  { id: 'analytics', name: 'Mise Analytics', desc: 'Финансы · Зарплаты · AI',                  color: '#34c759', hint: 'Для владельца',  path: '/analytics',      plans: ['starter','business','pro'] },
+  { id: 'stash',     name: 'Mise Stash',     desc: 'Склад табака · Смена кальянщика',          color: '#ff9500', hint: 'Для кальянщика', path: '/tobacco',        plans: ['business','pro'] },
+  { id: 'people',    name: 'Mise People',    desc: 'Расписание · Задачи · Явка · Зал',         color: '#5856d6', hint: 'Для команды',    path: '/people',         plans: ['business','pro'] },
+  { id: 'menu',      name: 'Mise Menu',      desc: 'QR-меню · Заказы за столом',               color: '#ff2d55', hint: 'Для гостей',     path: '/dashboard/menu', plans: ['business','pro'] },
 ]
+
+// Глифы приложений для карточек (белым по цвету приложения)
+function AppGlyph({ id }: { id: string }) {
+  const p: any = { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: '#fff', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }
+  switch (id) {
+    case 'manager':   return <svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" /></svg>
+    case 'analytics': return <svg {...p}><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" /></svg>
+    case 'stash':     return <svg {...p}><path d="M12 2l9 5-9 5-9-5 9-5z" /><path d="M3 12l9 5 9-5" /><path d="M3 17l9 5 9-5" /></svg>
+    case 'people':    return <svg {...p}><circle cx="9" cy="8" r="3.2" /><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5" /><path d="M16 4.2a3.2 3.2 0 010 6.1M19.5 20c0-2.6-1.3-4.5-3.3-5.2" /></svg>
+    case 'menu':      return <svg {...p}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><path d="M14 14h3v3h-3zM20 14h1M14 20h1M20 20h1" /></svg>
+    default:          return null
+  }
+}
 
 const PLANS = [
   // maxStaff = доступы сотрудников (устройства); лимит дублируется на сервере в /api/db (PLAN_LIMITS)
@@ -117,9 +131,9 @@ function SplashScreen({ onDone }: { onDone: () => void }) {
 
 // ── UI PRIMITIVES ─────────────────────────────────────────────────────────────
 
-function Card({ children, style = {} }: any) {
+function Card({ children, style = {}, onClick }: any) {
   return (
-    <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.04)', ...style }}>
+    <div onClick={onClick} style={{ background: 'var(--surface)', borderRadius: 16, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.04)', ...(onClick ? { cursor: 'pointer' } : {}), ...style }}>
       {children}
     </div>
   )
@@ -201,37 +215,33 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 14, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(250px,1fr))', gap: 12, marginBottom: 16 }}>
         {APPS.map(app => {
-          const locked = isActive && !app.plans.includes(plan)
+          // comp_apps — доступ, выданный супер-админом поверх тарифа
+          const comped = ((restaurant as any)?.comp_apps || []).includes(app.id)
+          const locked = isActive && !app.plans.includes(plan) && !comped
+          const enabled = isActive && !locked
           return (
-            <Card key={app.id} style={{ borderTop: `3px solid ${locked ? '#c7c7cc' : app.color}`, display: 'flex', flexDirection: 'column', opacity: locked ? .55 : 1 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'inline-block', background: (locked ? '#c7c7cc' : app.color) + '18', color: locked ? 'var(--tx3)' : app.color, fontSize: '.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 12, letterSpacing: '.02em' }}>{app.hint}</div>
-                <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 3, color: 'var(--tx)' }}>{app.name}</div>
-                <div style={{ color: 'var(--tx2)', fontSize: '.8rem', marginBottom: 14, lineHeight: 1.5 }}>{app.desc}</div>
+            <Card key={app.id} onClick={enabled ? () => router.push(app.path) : undefined}
+              style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16, opacity: locked || !isActive ? .55 : 1 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: locked || !isActive ? '#c7c7cc' : app.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: enabled ? `0 4px 12px ${app.color}40` : 'none' }}>
+                <AppGlyph id={app.id} />
               </div>
-              <button onClick={() => !locked && isActive && router.push(app.path)} style={{ background: locked || !isActive ? 'var(--fill)' : app.color, color: locked || !isActive ? 'var(--tx3)' : '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: locked || !isActive ? 'not-allowed' : 'pointer', width: '100%' }}>
-                {locked ? 'Недоступно в тарифе' : !isActive ? 'Нет подписки' : 'Открыть →'}
-              </button>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontWeight: 700, fontSize: '.92rem', color: 'var(--tx)' }}>{app.name}</span>
+                  {comped && <span style={{ fontSize: '.6rem', fontWeight: 700, color: '#34c759', background: '#34c75918', padding: '2px 7px', borderRadius: 980 }}>ПОДАРОК</span>}
+                </div>
+                <div style={{ color: 'var(--tx2)', fontSize: '.74rem', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {locked ? 'Доступно с Business' : !isActive ? 'Нужна подписка' : app.desc}
+                </div>
+              </div>
+              {enabled
+                ? <svg width="8" height="14" fill="none" stroke="var(--tx3)" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 10 18"><path d="M2 1l7 8-7 8" /></svg>
+                : <svg width="14" height="14" fill="none" stroke="var(--tx3)" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg>}
             </Card>
           )
         })}
-      </div>
-
-      {/* Owner tools — managed from the dashboard, not PIN apps */}
-      <div style={{ fontSize: '.72rem', fontWeight: 700, color: 'var(--tx2)', textTransform: 'uppercase', letterSpacing: '.06em', margin: '4px 2px 10px' }}>Управление</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 14, marginBottom: 16 }}>
-        <Card style={{ borderTop: '3px solid #ff2d55', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ display: 'inline-block', background: '#ff2d5518', color: '#ff2d55', fontSize: '.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 12, letterSpacing: '.02em' }}>Для гостей</div>
-            <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 3, color: 'var(--tx)' }}>Mise Menu</div>
-            <div style={{ color: 'var(--tx2)', fontSize: '.8rem', marginBottom: 14, lineHeight: 1.5 }}>QR-меню · Категории · Позиции · Публикация</div>
-          </div>
-          <button onClick={() => router.push('/dashboard/menu')} style={{ background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: 'pointer', width: '100%' }}>
-            Открыть редактор →
-          </button>
-        </Card>
       </div>
 
       <Card style={{ background: 'var(--fill2)', boxShadow: 'none', border: '1px solid rgba(0,0,0,.06)' }}>
@@ -946,7 +956,8 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
               {logoPreview ? 'Логотип загружен' : 'Логотип не загружен'}
             </div>
             <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginBottom: 10 }}>
-              Отображается на экране входа для сотрудников
+              Отображается на экране входа для сотрудников.<br />
+              PNG или JPG, квадрат, рекомендуем 512×512, до 2 МБ
             </div>
             <button onClick={() => fileRef.current?.click()} style={{ background: 'var(--fill)', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#007aff', cursor: 'pointer', fontFamily: 'inherit' }}>
               {logoPreview ? 'Заменить' : 'Загрузить фото'}
@@ -1022,8 +1033,10 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
   }
   const badge = statusLabel[status || 'inactive'] || statusLabel['inactive']
 
+  const [pendingPlan, setPendingPlan] = useState<string | null>(null)
   const subscribe = async (planId: string) => {
-    if (!restaurant || !user) return
+    if (!restaurant || !user || pendingPlan) return
+    setPendingPlan(planId)
     setLoading(true)
     try {
       const res = await fetch('/api/stripe/checkout', {
@@ -1036,7 +1049,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
       if (!res.ok || data.error) { alert(`Не удалось открыть оплату (${res.status}): ${data.error || 'попробуйте перезайти в аккаунт'}`); return }
       if (data.url) window.location.href = data.url
       else alert('Stripe не вернул ссылку оплаты — напишите в поддержку')
-    } finally { setLoading(false) }
+    } finally { setLoading(false); setPendingPlan(null) }
   }
 
   const cancel = async () => {
@@ -1122,9 +1135,9 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
                   </div>
                 ))}
               </div>
-              <button onClick={() => !isCurrent && subscribe(plan.id)} disabled={isCurrent || loading}
-                style={{ width: '100%', padding: '9px 0', borderRadius: 10, border: 'none', background: isCurrent ? 'var(--fill)' : plan.color, color: isCurrent ? 'var(--tx3)' : '#fff', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: isCurrent ? 'default' : 'pointer' }}>
-                {isCurrent ? 'Активен' : loading ? '...' : 'Выбрать'}
+              <button type="button" onClick={() => !isCurrent && subscribe(plan.id)} disabled={isCurrent}
+                style={{ width: '100%', padding: '10px 0', borderRadius: 10, border: 'none', background: isCurrent ? 'var(--fill)' : plan.color, color: isCurrent ? 'var(--tx3)' : '#fff', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: isCurrent ? 'default' : 'pointer' }}>
+                {isCurrent ? 'Активен' : pendingPlan === plan.id ? 'Открываем оплату…' : 'Выбрать'}
               </button>
             </Card>
           )
@@ -1193,6 +1206,11 @@ export default function Dashboard() {
       {showSplash && <SplashScreen onDone={() => { sessionStorage.setItem('mise_splash_shown', '1'); setShowSplash(false) }} />}
 
       <div style={{ minHeight: '100vh', background: 'var(--bg)', fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif', WebkitFontSmoothing: 'antialiased' }}>
+        {/* Тактильный отклик: на iPhone без :active кнопки выглядят «мёртвыми» */}
+        <style>{`
+          button { -webkit-tap-highlight-color: transparent; transition: transform .1s ease, opacity .15s ease; }
+          button:active:not(:disabled) { transform: scale(.96); opacity: .8; }
+        `}</style>
         {/* NAV */}
         <nav style={{ background: 'var(--navbg)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(var(--seprgb),.1)', padding: '0 20px', height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

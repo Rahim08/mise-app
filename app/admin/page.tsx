@@ -47,6 +47,9 @@ export default function AdminPage() {
   const [savingNote, setSavingNote] = useState(false)
   const [editSub, setEditSub] = useState(false)
   const [subForm, setSubForm] = useState({ status: '', plan: '', ends_at: '' })
+  // Привилегии: доступ к приложениям поверх тарифа + скидка %
+  const [perks, setPerks] = useState<{ apps: string[]; discount: string }>({ apps: [], discount: '0' })
+  const [perksSaved, setPerksSaved] = useState(false)
 
   const adminApi = (body: any) =>
     fetch('/api/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
@@ -71,7 +74,15 @@ export default function AdminPage() {
   const selectRestaurant = async (r: Restaurant) => {
     setSelected(r)
     setSubForm({ status: r.subscription_status || 'active', plan: r.subscription_plan || 'business', ends_at: r.subscription_ends_at ? r.subscription_ends_at.slice(0, 10) : '' })
+    setPerks({ apps: (r as any).comp_apps || [], discount: String((r as any).discount_pct || 0) })
     setEditSub(false); await loadNotes(r.id)
+  }
+
+  const savePerks = async () => {
+    if (!selected) return
+    await adminApi({ action: 'perks', restaurantId: selected.id, compApps: perks.apps, discountPct: parseInt(perks.discount) || 0 })
+    setSelected({ ...(selected as any), comp_apps: perks.apps, discount_pct: parseInt(perks.discount) || 0 })
+    setPerksSaved(true); setTimeout(() => setPerksSaved(false), 2000); await loadAll()
   }
   const saveNote = async () => {
     if (!note.trim() || !selected) return
@@ -251,6 +262,31 @@ export default function AdminPage() {
                   </div>
                 </div>
               )}
+
+              {/* Perks: доступ поверх тарифа + скидка */}
+              <div style={{ borderTop: `1px solid ${t.sep2}`, paddingTop: 16, marginBottom: 16 }}>
+                <div style={{ fontSize: '.72rem', color: t.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 10 }}>Привилегии</div>
+                <div style={{ fontSize: '.72rem', color: t.text3, marginBottom: 8 }}>Доступ к приложениям независимо от тарифа:</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                  {[['stash', 'Stash'], ['people', 'People'], ['menu', 'QR-меню']].map(([id, label]) => {
+                    const on = perks.apps.includes(id)
+                    return (
+                      <button key={id} onClick={() => setPerks(p => ({ ...p, apps: on ? p.apps.filter(a => a !== id) : [...p.apps, id] }))}
+                        style={{ padding: '6px 14px', borderRadius: 980, border: `1px solid ${on ? t.green : t.sep2}`, background: on ? `${t.green}1a` : 'transparent', color: on ? t.green : t.text3, fontFamily: 'inherit', fontSize: '.78rem', fontWeight: 600, cursor: 'pointer' }}>
+                        {on ? '✓ ' : ''}{label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <span style={{ fontSize: '.78rem', color: t.text3 }}>Скидка</span>
+                  <input type="number" value={perks.discount} onChange={e => setPerks(p => ({ ...p, discount: e.target.value }))}
+                    style={{ width: 70, padding: '7px 10px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: '.85rem', color: t.text, background: t.fill2, fontFamily: 'inherit', outline: 'none', textAlign: 'right' }} />
+                  <span style={{ fontSize: '.78rem', color: t.text3 }}>%</span>
+                  <span style={{ fontSize: '.68rem', color: t.text4 }}>в Stripe — купоном вручную</span>
+                </div>
+                <button onClick={savePerks} style={btn(t, 'primary')}>{perksSaved ? '✓ Сохранено' : 'Сохранить привилегии'}</button>
+              </div>
 
               {/* Stats */}
               <div style={{ borderTop: `1px solid ${t.sep2}`, paddingTop: 16, marginBottom: 16 }}>
