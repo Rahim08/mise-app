@@ -39,7 +39,9 @@ export async function POST(req: NextRequest) {
     if (!customerId) {
       const customer = await stripe.customers.create({ email, metadata: { restaurantId, userId } })
       customerId = customer.id
-      await supabase.from('restaurants').update({ stripe_customer_id: customerId }).eq('id', restaurantId)
+      // Молчаливое падение здесь плодит дубли Stripe-customers на каждый чекаут
+      const { error: custErr } = await supabase.from('restaurants').update({ stripe_customer_id: customerId }).eq('id', restaurantId)
+      if (custErr) throw new Error(`save stripe_customer_id: ${custErr.message}`)
     }
 
     const session = await stripe.checkout.sessions.create({

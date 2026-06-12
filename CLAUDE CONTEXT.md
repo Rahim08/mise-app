@@ -5,7 +5,8 @@
 > **Обновляй раздел «СТАТУС» и «ROADMAP» после каждой рабочей сессии.**
 >
 > Легенда: ✅ готово · 🚧 в работе · ⬜ не начато
-> Дата последнего обновления: 2026-06-12 (сессии 2–8). GitHub→Vercel AUTO-DEPLOY АКТИВЕН: push в main = прод!
+> Дата последнего обновления: 2026-06-12 (сессии 2–12). GitHub→Vercel AUTO-DEPLOY АКТИВЕН: push в main = прод!
+> ⚠️ Сессии 11–12 НЕ закоммичены (виды кальянов, упрощённая смена, фиксы Stripe-вебхука, /brand) — запушить после «пуш» от владельца.
 
 ---
 
@@ -16,8 +17,8 @@ SaaS для управления рестораном. Первый клиент
 
 - **Прод:** https://mise-app-omega.vercel.app
 - **Домен (кандидат):** getmise.app
-- **Деплой:** `npx vercel --prod` (preview: `npx vercel`). GitHub auto-deploy НЕ подключён.
-- **Репо:** Rahim08/mise-app — **отстаёт**, актуальный код в `~/mise-app` (его надо закоммитить, см. roadmap).
+- **Деплой:** GitHub → Vercel auto-deploy АКТИВЕН: **push в main = прод**. Preview: `npx vercel`.
+- **Репо:** Rahim08/mise-app.
 - **Super Admin:** `/app/admin/page.tsx`, доступ только `raxim98@gmail.com`.
 
 ## 2. Стек
@@ -116,7 +117,11 @@ SaaS для управления рестораном. Первый клиент
 |---|---|---|
 | `docs/migrations/people-v3.sql` | staff.role, базовые People-таблицы, триггеры, индексы | ✅ можно сейчас (аддитивно) |
 | `docs/migrations/people-features.sql` | расписание/обмены/явка/пуши/уведомления + staff_directory | ✅ можно сейчас (аддитивно) |
-| `docs/migrations/features-2026-06.sql` | shifts.income_card, inkassations.salary(+note), include_card_in_analytics, allow_pay_at_table | ⚠️ **ОБЯЗАТЕЛЬНА перед деплоем этой версии** (аддитивно) |
+| `docs/migrations/features-2026-06.sql` | shifts.income_card, inkassations.salary(+note), include_card_in_analytics, allow_pay_at_table, modifiers, pin_attempts, app_errors | ✅ применена |
+| `docs/migrations/hookah-2026-06.sql` | hookah_sales (date/brand/flavor/is_free/portion_g) + hookah_types + настройки кальяна | ✅ применена |
+| `docs/migrations/admin-perks-2026-06.sql` | comp_apps (подарочные приложения) + discount_pct в admin | ✅ применена |
+| `docs/migrations/restaurants-currency-2026-06.sql` | restaurants.currency (код читал её из restaurants, колонка была только в restaurant_settings) | ✅ применена |
+| `docs/migrations/stripe-columns-2026-06.sql` | restaurants.stripe_customer_id + subscription_id (их НЕ существовало → вебхук молча падал); дефолты status/plan → NULL (новые аккаунты без подписки) | ⚠️ **ПРИМЕНИТЬ** (не подтверждено владельцем) |
 | `docs/migrations/shifts-dedup.sql` | чистка дублей смен + UNIQUE(restaurant_id,date) | ⚠️ с бэкапом, после инспекта |
 | `docs/security/rls.sql` | включить RLS на всех таблицах (deny anon) | 🔴 **ПОСЛЕДНИМ**, после проверки шлюза в проде |
 
@@ -173,8 +178,20 @@ SaaS для управления рестораном. Первый клиент
 - ✅ Опс: /api/log→app_errors+ErrorReporter, docs/OPS.md, vercel.json cron (daily 18:00, Hobby-лимит), CRON_SECRET в Vercel
 - ✅ Лендинг: секция People+Menu; privacy: «Геолокация сотрудников»; terms 2.1; middleware→proxy.ts; chart.js удалён
 - ✅ Git запушен + auto-deploy; полный дамп схемы: `docs/migrations/...Introspection.csv` (мёртвые: employees.card_amount, menu_items.syrve_id, menu_orders.pos_*, rs.gemini_api_key/timezone/working_days, transactions, salary_records)
-- ⚠️ **`docs/migrations/hookah-2026-06.sql` НЕ применена** (смена кальянщика не сохранит без неё)
 - Решения: Syrve в Италии мёртв — НЕ заменяем (ждём API банка); отдельные приложения, не единый shell; i18n en/ru/it/fr/az/tr/uk/kk — в самом конце, словари+ИИ-перевод; Live Activity и недельный дайджест — нет
+
+**Сессии 9–12 (2026-06-12):**
+- ✅ Тарифы перераспределены (Poster-style): Starter = Manager+Analytics+2 юзера · Business = все приложения+QR-меню+5 · Pro = +AI+10+интеграции. QR-меню гейтится по плану на сервере (/api/menu 404/403 для starter, /dashboard/menu → billing)
+- ✅ Admin: «Привилегии» в карточке клиента — comp_apps (подарочные приложения, бейдж ПОДАРОК) + discount_pct (Stripe-купон вручную)
+- ✅ AppsTab redesign (единая сетка, глиф 44px, замок/chevron); подсказка логотипа 512×512; кнопки: :active scale на iOS, per-plan pending, ошибки в alert
+- ✅ **Корень «не сохраняется»**: staff-кука перехватывала /api/db у владельца (тихие 403) → resolveCaller: sb-кука владельца приоритетнее staff-токена. Сейвы алертят ошибки
+- ✅ **Виды кальянов** (hookah_types: имя/цена/граммовка) — CRUD в дашборд → Настройки; hookah_sales хранит hookah_type_id+portion_g+price на момент продажи; Analytics «Кальян»: блок «По видам»
+- ✅ **Смена кальянщика упрощена** (решение владельца): список видов + окошко-число у каждого (сегмент Продажа|Бесплатно), пикер вкусов/брендов УДАЛЁН (вкусы — потом); полоска «Табака в заведении» = Σ(выдано в зал) − Σ(qty×порция); склад не трогается
+- ✅ **Корень «оплатил Starter — активен Business» + «No subscription» при отмене**: в restaurants НЕ существовало колонок stripe_customer_id/subscription_id — вебхук молча падал (200 для Stripe), оставались дефолты active/business → у новых аккаунтов всё открыто даром. Фикс: stripe-columns-2026-06.sql + вебхук теперь 500 при ошибке записи (Stripe ретраит) + лог в app_errors; checkout проверяет запись customer_id (дубли customers)
+- ✅ restaurants.currency: колонки не было (только в restaurant_settings) → «Could not find currency column» при сохранении настроек. Фикс: restaurants-currency-2026-06.sql
+- ✅ Брендинг (первый заход): `components/brand.tsx` (AppIcon/Wordmark/BRAND_COLORS) + превью `/brand`. **Владельцу НЕ понравилось** — см. §3.5 направление
+- Stripe у владельца в LIVE mode; тестовый customer удалён из Stripe (подписка отменилась автоматом). План повторяемого теста триала без новых мейлов — в истории сессии 12 (один тестовый аккаунт: checkout → проверка → cancel immediately в Stripe + сброс строки SQL)
+- Ресторан при регистрации создаёт DB-триггер в Supabase (НЕ в репо, по raw_user_meta_data.restaurant_name). Если после stripe-columns у свежего аккаунта всё равно всё открыто — триггер ставит status явно, запросить `pg_get_functiondef` и поправить
 
 **Capacitor:** ✅ `ios/` создан (cap add ios, SPM без CocoaPods). ⬜ Xcode-этап на машине: подпись (Bundle `app.getmise.mise`), plist-разрешения, Face ID, APNs, виджет «Касса сегодня».
 
@@ -207,40 +224,58 @@ SaaS для управления рестораном. Первый клиент
 - **Настройки в дашборде:** координаты заведения, радиус, режим напоминаний (`reminder_mode`: hours_before|fixed_time).
 - **Уведомления:** журнал `notifications` (in-app) → затем Vercel Cron создаёт напоминания о сменах за день.
 
-### 3) Дизайн / ребрендинг (единый Apple-язык)
-- Объединить «Сотрудники» + «Доступы» в один экран **«Команда»** (HR + PIN + приложения + роль на одной карточке; чинит хрупкую связь по имени).
-- **Тёмная тема** на дашборде/админке/входе (приложения уже умеют).
-- Единые примитивы (Card/Btn/Field/Sheet/Toast) — сейчас дублируются.
-- Админка: показать email владельца, единый словарь статусов подписки, реальный MRR.
+### 3) Дизайн / ребрендинг (единый Apple-язык) 🚧 — ТЕКУЩИЙ ЭТАП
+Сделано ранее: ✅ «Команда», ✅ тёмная тема дашборда, ✅ примитивы `components/ui.tsx`, ✅ редизайн админки.
 
-### 4) Меню — до продакшн-уровня
-- ✅ Загрузка **фото** блюд и обложки в Supabase Storage (bucket `restaurant-assets`, папка `menu/`).
-- ⬜ Модификаторы (размер/добавки), номер стола (QR на стол `?table=N`), экран входящих заказов (ляжет в People/Manager).
+**3.5 Брендинг / логотипы — направление от владельца (сессия 12):**
+- Первый заход (`/brand`: цветные градиентные squircle + белый глиф) — **НЕ понравился**.
+- Хочет как иконки, которые делались ему «в приложении на телефоне» — **пришлёт референс**, ЖДАТЬ его.
+- Утверждённое направление: **тёмный фон у всех иконок, акцентный цвет приложения = сам глиф** (не фон). Стиль Apple pro-приложений (Final Cut/Logic: чёрный + цветной глиф).
+- Бренд mise — нейтральный цвет; глиф-ДНК: три «строки» mise en place (из LogoMark).
+- Идея владельца для Menu: **3 квадрата + четвёртый — буква m**.
+- Дальше (после утверждения): раскатка по приложениям/хедерам/AuthGate/дашборду/лендингу, иконка iOS, OG-картинки. Потом — professional pass лендинга + about/support/contact (отдельная сессия).
+- Перевод старых экранов на `ui.tsx` — можно через Sonnet.
+
+### 4) Меню — до продакшн-уровня ✅
+- ✅ Фото блюд/обложка (Storage), ✅ модификаторы, ✅ `?table=N`, ✅ инбокс заказов (People «Зал»), ✅ цифровой счёт + «Позвать официанта», ✅ валюта.
 
 ### 5) Нативная iOS (App Store) — финал
 - `sudo gem install cocoapods` → `npx cap add ios` → подпись (Team, Bundle `app.getmise.mise`).
 - NSCameraUsageDescription (QR), NSLocationWhenInUseUsageDescription (явка).
 - Нативные плагины: push (APNs), Face ID, фоновый геофенсинг. Гайд: `docs/IOS_BUILD.md`.
 
-### 6) Интеграция Syrve/iiko (Pro)
-- org: Smoke One, ID `4484d211-87e3-4def-a1b5-30bd6c59c55a`, base `api-eu.syrve.live`.
-- Источник продаж/стоп-листов/финансов. Отдельный трек, не блокирует People.
+### 6) Интеграции (Pro) — ОТЛОЖЕНО
+- Syrve в Италии мёртв (решение: НЕ заменяем). Ждём **API банка** → тогда расходы по карте и реальные цифры. Кандидаты на будущее: Cassa in Cloud / Tilby API. CSV-импорт — решено НЕ делать.
 
-### 7) Биллинг и лимиты
-- Прогнать Stripe end-to-end (checkout, webhook, отмена, past_due).
-- Серверная проверка лимитов плана (сотрудники, приложения) — не только в UI.
+### 7) Биллинг и лимиты 🚧
+- ✅ Серверные лимиты плана в `/api/db` (PLAN_LIMITS), ✅ QR-меню гейт по плану, ✅ verifyOwner, ✅ вебхук с ретраями и логом в app_errors.
+- ⬜ **Прогнать триал end-to-end в проде** (после деплоя сессии 12 + stripe-columns.sql): checkout Starter → «Пробный период»/план/замки → отмена. Сверить Stripe Webhooks endpoint + STRIPE_WEBHOOK_SECRET в Vercel.
+- ⬜ Кандидат: гейтить экспорт Excel/PDF по плану.
 
 ### 8) Юр./опс (перед публичным запуском)
 - Privacy policy (⚠️ **согласие на геолокацию** обязательно), Terms, GDPR, удаление данных.
 - Бэкапы БД, мониторинг ошибок (Sentry), алерты.
 
 ### 9) Маркетинг / лендинг
-- Добавить на лендинг секции **People** и **Menu**; убрать «PWA · Без App Store» после нативного релиза.
+- ✅ Секции People+Menu. ⬜ Professional pass лендинга + about/support/contact (после брендинга); убрать «PWA · Без App Store» после нативного релиза.
 
-### 10) Инфраструктура
-- Закоммитить актуальный код в GitHub (репо отстаёт). Подключить GitHub → Vercel auto-deploy.
-- Убрать мусор: `chart.js` из deps (не используется), вложенная `mise-app/mise-app/`.
-- Заменить `middleware.ts` на `proxy.ts` (Next 16 deprecation warning).
+### 10) i18n — В САМОМ КОНЦЕ (решение владельца)
+- 8 языков: en/ru/it/fr/az/tr/uk/kk. JSON-словари + ИИ-перевод один раз. В приложениях — язык системы iPhone, на сайте — глобус-переключатель. Делать после дизайн-системы/брендинга.
+
+### 11) Инфраструктура
+- ✅ GitHub auto-deploy, ✅ chart.js удалён, ✅ middleware→proxy.ts. ⬜ удалить вложенную `mise-app/mise-app/` руками.
+
+---
+
+## 8.6. ОЧЕРЕДЬ ЗАДАЧ (сессия 12, по приоритету)
+
+1. ⬜ **Владелец**: применить `stripe-columns-2026-06.sql` + сказать «пуш» → деплой сессий 11–12.
+2. ⬜ **Прогон триала в проде** (план в §7) — последний непроверенный критичный флоу.
+3. ⬜ **Брендинг v2** — ждём референс от владельца (иконки из телефона); направление: тёмный фон + цветной глиф, Menu = 3 квадрата + «m».
+4. ⬜ Раскатка брендинга → лендинг professional pass → about/support/contact.
+5. ⬜ **RLS** (`docs/security/rls.sql`) — после проверки прода; блокер второго ресторана.
+6. ⬜ iOS Xcode-этап (подпись `app.getmise.mise`, plist-разрешения, Face ID, APNs, виджет «Касса сегодня») — на машине владельца.
+7. ⬜ i18n 8 языков — финал.
 
 ---
 
@@ -291,8 +326,11 @@ SaaS для управления рестораном. Первый клиент
 - **People тест:** применить people-v3 + people-features → дашборд «Доступы» дать сотруднику People+PIN → сотрудник входит по QR/PIN.
 
 ## 12. Известные долги/риски
+- **Сессии 11–12 не закоммичены** (push в main = прод — пушить по команде владельца).
+- `stripe-columns-2026-06.sql` не подтверждена владельцем — без неё биллинг не пишется в БД.
 - RLS ещё не включён (данные защищены шлюзом, но прямой anon к таблицам пока открыт — закрыть через rls.sql).
+- DB-триггер создания ресторана не в репо — может ставить status='active' явно (проверить регистрацией после stripe-columns).
 - Возможные дубли `shifts` у Smoke One → применить `shifts-dedup.sql` (с бэкапом).
 - Биометрия в вебе — заглушка (настоящий Face ID на нативном этапе).
 - Связь `staff`↔`employees` по имени (хрупко) — чинится экраном «Команда».
-- Репо отстаёт от `~/mise-app` — закоммитить.
+- Мёртвые поля БД (вычистить при случае): employees.card_amount, menu_items.syrve_id, menu_orders.pos_*, restaurant_settings.gemini_api_key/timezone/working_days, transactions, salary_records.

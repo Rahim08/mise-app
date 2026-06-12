@@ -31,6 +31,13 @@ export async function POST(req: NextRequest) {
 
     const obj = event.data.object as any
 
+    // Ошибка записи = 500 → Stripe ретраит и показывает сбой в Webhooks-логе.
+    // Раньше падение глоталось, а БД оставалась на дефолтах (active/business).
+    const updateRestaurant = async (restaurantId: string, fields: Record<string, any>) => {
+      const { error } = await supabase.from('restaurants').update(fields).eq('id', restaurantId)
+      if (error) throw new Error(`restaurants update (${event.type}): ${error.message}`)
+    }
+
     if (event.type === 'checkout.session.completed') {
       const sub = await stripe.subscriptions.retrieve(obj.subscription)
       const restaurantId = (sub as any).metadata?.restaurantId
@@ -38,12 +45,12 @@ export async function POST(req: NextRequest) {
       if (!restaurantId) return NextResponse.json({ received: true })
 
       const endsAt = periodEndISO(sub)
-      await supabase.from('restaurants').update({
+      await updateRestaurant(restaurantId, {
         subscription_status: (sub as any).status,
         subscription_plan: plan,
         subscription_id: sub.id,
         ...(endsAt ? { subscription_ends_at: endsAt } : {}),
-      }).eq('id', restaurantId)
+      })
     }
 
     // Новые версии Stripe API убрали invoice.subscription с верхнего уровня —
@@ -58,10 +65,10 @@ export async function POST(req: NextRequest) {
       if (!restaurantId) return NextResponse.json({ received: true })
 
       const endsAt = periodEndISO(sub)
-      await supabase.from('restaurants').update({
+      await updateRestaurant(restaurantId, {
         subscription_status: 'active',
         ...(endsAt ? { subscription_ends_at: endsAt } : {}),
-      }).eq('id', restaurantId)
+      })
     }
 
     if (event.type === 'invoice.payment_failed') {
@@ -71,9 +78,7 @@ export async function POST(req: NextRequest) {
       const restaurantId = sub.metadata?.restaurantId
       if (!restaurantId) return NextResponse.json({ received: true })
 
-      await supabase.from('restaurants').update({
-        subscription_status: 'past_due',
-      }).eq('id', restaurantId)
+      await updateRestaurant(restaurantId, { subscription_status: 'past_due' })
     }
 
     // Смена плана / окончание триала / реактивация в портале — синхронизируем статус и план.
@@ -82,25 +87,28 @@ export async function POST(req: NextRequest) {
       if (!restaurantId) return NextResponse.json({ received: true })
 
       const endsAt = periodEndISO(obj)
-      await supabase.from('restaurants').update({
+      await updateRestaurant(restaurantId, {
         subscription_status: obj.cancel_at_period_end ? 'canceling' : obj.status,
         ...(obj.metadata?.plan ? { subscription_plan: obj.metadata.plan } : {}),
         ...(endsAt ? { subscription_ends_at: endsAt } : {}),
-      }).eq('id', restaurantId)
+      })
     }
 
     if (event.type === 'customer.subscription.deleted') {
       const restaurantId = obj.metadata?.restaurantId
       if (!restaurantId) return NextResponse.json({ received: true })
 
-      await supabase.from('restaurants').update({
-        subscription_status: 'canceled',
-      }).eq('id', restaurantId)
+      await updateRestaurant(restaurantId, { subscription_status: 'canceled' })
     }
 
     return NextResponse.json({ received: true })
   } catch (err: any) {
     console.error(err)
+    // В app_errors — иначе ошибка видна только в Vercel-логах
+    try {
+      const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+      await admin.from('app_errors').insert({ source: 'server', message: `stripe/webhook: ${err.message}`, stack: err.stack?.slice(0, 4000) })
+    } catch {}
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }

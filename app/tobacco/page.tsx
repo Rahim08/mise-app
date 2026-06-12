@@ -122,76 +122,73 @@ function StatCard({ label, value, color, t }: { label: string; value: string; co
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 
 // ── HOOKAH SHIFT (смена кальянщика) ───────────────────────────────────────────
-// Кальянщик отмечает, сколько кальянов каждого вкуса сделано за день.
-// Хранится в hookah_sales (строка = вкус × количество за дату), цена/порция —
-// в restaurant_settings (дашборд → Настройки → Кальян).
+// Кальянщик ставит число рядом с каждым видом кальяна (виды задаёт владелец:
+// дашборд → Настройки → Виды кальянов). Табак списывается из массы «в заведении»
+// (выдано в зал − продано × порция), склад не трогается. Конкретный вкус не
+// указывается — отложено.
 
 function fmtDay(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-function HookahShiftTab({ restaurantId, stock, t, toast }: { restaurantId: string; stock: StockItem[]; t: ReturnType<typeof useTheme>; toast: (m: string) => void }) {
+function HookahShiftTab({ restaurantId, t, toast }: { restaurantId: string; t: ReturnType<typeof useTheme>; toast: (m: string) => void }) {
   const today = fmtDay(new Date())
-  // Продажи считаются по ВИДАМ кальяна (hookah_types: цена/граммовка/допустимые бренды).
-  // Списание табака — по желанию: конкретный вкус, целый бренд или без уточнения.
-  type Entry = { typeId: string; brand: string | null; flavor: string | null; stockId: string | null; qty: number; free: boolean }
-  const keyOf = (e: { typeId: string; brand: string | null; flavor: string | null; free: boolean }) => `${e.typeId}|${e.brand || ''}|${e.flavor || ''}|${e.free}`
-
   const [mode, setMode] = useState<'paid' | 'free'>('paid')
   const [types, setTypes] = useState<any[]>([])
-  const [entries, setEntries] = useState<Entry[]>([])
-  const [picker, setPicker] = useState<any | null>(null) // открытый выбор списания для типа
-  const [pickerSearch, setPickerSearch] = useState('')
+  const [vals, setVals] = useState<Record<string, { paid: string; free: string }>>({})
+  const [venueBase, setVenueBase] = useState(0) // выдано в зал − расход прошлых дней
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     Promise.all([
       db.from('hookah_types').select('*').eq('is_active', true).order('created_at'),
-      db.from('hookah_sales').select('*').eq('date', today),
-    ]).then(([{ data: tps }, { data: rows }]: any[]) => {
+      db.from('hookah_sales').select('hookah_type_id, quantity, portion_g, is_free, date'),
+      db.from('tobacco_movements').select('quantity_g').eq('restaurant_id', restaurantId).eq('type', 'out'),
+    ]).then(([{ data: tps }, { data: sales }, { data: outs }]: any[]) => {
       setTypes(tps || [])
-      const es: Entry[] = []
-      ;(rows || []).forEach((r: any) => {
-        if (!r.hookah_type_id) return // строки до введения видов — перезапишутся при сохранении
-        const e = { typeId: r.hookah_type_id, brand: r.brand || null, flavor: r.flavor || null, stockId: r.flavor_id || null, free: !!r.is_free }
-        const ex = es.find(x => keyOf(x) === keyOf(e))
-        if (ex) ex.qty += r.quantity || 0
-        else es.push({ ...e, qty: r.quantity || 0 })
+      const v: Record<string, { paid: string; free: string }> = {}
+      let pastGrams = 0
+      ;(sales || []).forEach((r: any) => {
+        if (r.date === today && r.hookah_type_id) {
+          const cur = v[r.hookah_type_id] || { paid: '', free: '' }
+          const key = r.is_free ? 'free' : 'paid'
+          cur[key] = String((Number(cur[key]) || 0) + (r.quantity || 0))
+          v[r.hookah_type_id] = cur
+        } else {
+          pastGrams += (r.quantity || 0) * Number(r.portion_g || 0)
+        }
       })
-      setEntries(es)
+      setVals(v)
+      setVenueBase((outs || []).reduce((s: number, m: any) => s + (m.quantity_g || 0), 0) - pastGrams)
       setLoading(false)
     })
   }, [])
 
-  const typeOf = (id: string) => types.find(tp => tp.id === id)
-  const addEntry = (typeId: string, brand: string | null, flavor: string | null, stockId: string | null) => {
-    const e = { typeId, brand, flavor, stockId, free: mode === 'free' }
-    setEntries(es => {
-      const ex = es.find(x => keyOf(x) === keyOf(e))
-      if (ex) return es.map(x => keyOf(x) === keyOf(e) ? { ...x, qty: x.qty + 1 } : x)
-      return [...es, { ...e, qty: 1 }]
-    })
-    setPicker(null); setPickerSearch('')
-  }
-  const incEntry = (k: string, d: number) =>
-    setEntries(es => es.map(x => keyOf(x) === k ? { ...x, qty: x.qty + d } : x).filter(x => x.qty > 0))
+  const qtyOf = (typeId: string, m: 'paid' | 'free') => Number(vals[typeId]?.[m]) || 0
+  const setQty = (typeId: string, val: string) =>
+    setVals(vs => ({ ...vs, [typeId]: { ...(vs[typeId] || { paid: '', free: '' }), [mode]: val.replace(/[^\d]/g, '') } }))
 
-  const paidTotal = entries.filter(e => !e.free).reduce((s, e) => s + e.qty, 0)
-  const freeTotal = entries.filter(e => e.free).reduce((s, e) => s + e.qty, 0)
-  const revenue = entries.filter(e => !e.free).reduce((s, e) => s + e.qty * Number(typeOf(e.typeId)?.price || 0), 0)
-  const grams = entries.reduce((s, e) => s + e.qty * Number(typeOf(e.typeId)?.portion_g || 0), 0)
+  const paidTotal = types.reduce((s, tp) => s + qtyOf(tp.id, 'paid'), 0)
+  const freeTotal = types.reduce((s, tp) => s + qtyOf(tp.id, 'free'), 0)
+  const revenue = types.reduce((s, tp) => s + qtyOf(tp.id, 'paid') * Number(tp.price || 0), 0)
+  const grams = types.reduce((s, tp) => s + (qtyOf(tp.id, 'paid') + qtyOf(tp.id, 'free')) * Number(tp.portion_g || 0), 0)
+  const venueLeft = venueBase - grams
 
   const save = async () => {
     setSaving(true)
-    await db.from('hookah_sales').delete().eq('date', today)
-    const rows = entries.map(e => {
-      const tp = typeOf(e.typeId)
-      return {
-        hookah_type_id: e.typeId, brand: e.brand, flavor: e.flavor, flavor_id: e.stockId,
-        quantity: e.qty, price: e.free ? 0 : Number(tp?.price || 0), portion_g: Number(tp?.portion_g || 0),
-        is_free: e.free, date: today,
-      }
+    const { error: delErr } = await db.from('hookah_sales').delete().eq('date', today)
+    if (delErr) { toast('Ошибка: ' + delErr.message); setSaving(false); return }
+    const rows: any[] = []
+    types.forEach(tp => {
+      ;(['paid', 'free'] as const).forEach(m => {
+        const q = qtyOf(tp.id, m)
+        if (q > 0) rows.push({
+          hookah_type_id: tp.id, quantity: q, date: today,
+          price: m === 'free' ? 0 : Number(tp.price || 0), portion_g: Number(tp.portion_g || 0),
+          is_free: m === 'free', brand: null, flavor: null, flavor_id: null,
+        })
+      })
     })
     if (rows.length) {
       const { error } = await db.from('hookah_sales').insert(rows)
@@ -211,20 +208,11 @@ function HookahShiftTab({ restaurantId, stock, t, toast }: { restaurantId: strin
   )
 
   const accent = mode === 'paid' ? t.orange : t.purple
-  const modeEntries = entries.filter(e => e.free === (mode === 'free'))
-
-  // Вкусы для пикера: фильтр по брендам типа (если заданы) и по поиску
-  const pickerBrands = picker
-    ? [...new Set(stock
-        .filter(s => !picker.brands?.length || picker.brands.some((b: string) => b.toLowerCase() === s.brand.toLowerCase()))
-        .filter(s => `${s.brand} ${s.flavor}`.toLowerCase().includes(pickerSearch.toLowerCase()))
-        .map(s => s.brand))].sort()
-    : []
 
   return (
     <div>
       {/* Итог дня */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
         {[
           { l: 'Продано', v: String(paidTotal), c: t.orange },
           { l: 'Бесплатно', v: String(freeTotal), c: t.purple },
@@ -236,6 +224,12 @@ function HookahShiftTab({ restaurantId, stock, t, toast }: { restaurantId: strin
             <div style={{ fontSize: 10, color: t.text3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 3 }}>{it.l}</div>
           </div>
         ))}
+      </div>
+
+      {/* Масса табака в заведении (выдано в зал − расход кальянов) */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: `${venueLeft < 0 ? t.red : t.blue}12`, borderRadius: 12, padding: '9px 14px', marginBottom: 12 }}>
+        <span style={{ fontSize: 12.5, color: venueLeft < 0 ? t.red : t.blue, fontWeight: 600 }}>Табака в заведении</span>
+        <span style={{ fontSize: 13, color: venueLeft < 0 ? t.red : t.blue, fontWeight: 800 }}>{fg(Math.round(venueLeft))}</span>
       </div>
 
       {/* Продажа | Бесплатно */}
@@ -250,87 +244,34 @@ function HookahShiftTab({ restaurantId, stock, t, toast }: { restaurantId: strin
         </div>
       )}
 
-      {/* Виды кальянов */}
+      {/* Виды кальянов: число за смену */}
       <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 14 }}>
-        {types.map((tp, i) => (
-          <div key={tp.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: i < types.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{tp.name}</div>
-              <div style={{ fontSize: 11, color: t.text3, marginTop: 1 }}>€{tp.price} · {tp.portion_g} г{tp.brands?.length ? ` · ${tp.brands.join(', ')}` : ''}</div>
+        {types.map((tp, i) => {
+          const q = vals[tp.id]?.[mode] || ''
+          return (
+            <div key={tp.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: i < types.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{tp.name}</div>
+                <div style={{ fontSize: 11, color: t.text3, marginTop: 1 }}>€{tp.price} · {tp.portion_g} г</div>
+              </div>
+              <input
+                value={q} onChange={e => setQty(tp.id, e.target.value)}
+                type="text" inputMode="numeric" placeholder="0"
+                style={{
+                  width: 72, padding: '10px 0', borderRadius: 12, textAlign: 'center',
+                  border: `1.5px solid ${Number(q) > 0 ? accent : t.sep2}`,
+                  fontSize: 17, fontWeight: 700, color: Number(q) > 0 ? accent : t.text,
+                  background: t.bg, fontFamily: 'inherit', outline: 'none', WebkitAppearance: 'none',
+                }}
+              />
             </div>
-            <button onClick={() => { setPicker(tp); setPickerSearch('') }} style={{ padding: '8px 16px', borderRadius: 980, border: 'none', background: accent, color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: 'inherit' }}>
-              + Добавить
-            </button>
-          </div>
-        ))}
+          )
+        })}
       </div>
-
-      {/* Отмеченные за день (текущий сегмент) */}
-      {modeEntries.length > 0 && (
-        <>
-          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '2px 4px 8px' }}>{mode === 'paid' ? 'Продано сегодня' : 'Бесплатные сегодня'}</div>
-          <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 14 }}>
-            {modeEntries.map((e, i) => {
-              const tp = typeOf(e.typeId)
-              const k = keyOf(e)
-              return (
-                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: i < modeEntries.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: t.text }}>{tp?.name || '—'}</div>
-                    <div style={{ fontSize: 11.5, color: t.text3, marginTop: 1 }}>
-                      {e.flavor ? `${e.brand} · ${e.flavor}` : e.brand ? `${e.brand} (бренд целиком)` : 'Без списания вкуса'}
-                    </div>
-                  </div>
-                  <button onClick={() => incEntry(k, -1)} style={{ width: 30, height: 30, borderRadius: '50%', border: 'none', background: t.fill, color: t.text, cursor: 'pointer', fontSize: 17, fontFamily: 'inherit' }}>−</button>
-                  <span style={{ minWidth: 24, textAlign: 'center', fontSize: 15, fontWeight: 800, color: accent }}>{e.qty}</span>
-                  <button onClick={() => incEntry(k, 1)} style={{ width: 30, height: 30, borderRadius: '50%', border: 'none', background: accent, color: '#fff', cursor: 'pointer', fontSize: 17, fontFamily: 'inherit' }}>+</button>
-                </div>
-              )
-            })}
-          </div>
-        </>
-      )}
 
       <button onClick={save} disabled={saving} style={{ width: '100%', padding: '15px', borderRadius: 16, background: t.orange, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${t.orange}44` }}>
         {saving ? 'Сохраняем...' : 'Сохранить смену'}
       </button>
-
-      {/* Пикер списания: вкус / целый бренд / без уточнения */}
-      {picker && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setPicker(null)}>
-          <div style={{ background: t.bg, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '80dvh', overflowY: 'auto', paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }} onClick={ev => ev.stopPropagation()}>
-            <div style={{ width: 40, height: 4, background: t.fill, borderRadius: 2, margin: '14px auto 0' }} />
-            <div style={{ fontSize: 17, fontWeight: 700, textAlign: 'center', color: t.text, padding: '12px 20px 2' }}>{picker.name}</div>
-            <div style={{ fontSize: 12, color: t.text3, textAlign: 'center', marginBottom: 10 }}>Что списываем?</div>
-            <div style={{ padding: '0 16px 16px' }}>
-              <input value={pickerSearch} onChange={ev => setPickerSearch(ev.target.value)} placeholder="Поиск вкуса..."
-                style={{ width: '100%', padding: '11px 14px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 16, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', marginBottom: 10 }} />
-              <button onClick={() => addEntry(picker.id, null, null, null)} style={{ width: '100%', padding: '12px', borderRadius: 12, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: t.text2, fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer', marginBottom: 12 }}>
-                Без списания вкуса
-              </button>
-              {pickerBrands.map(brand => {
-                const flavors = stock.filter(s => s.brand === brand && `${s.brand} ${s.flavor}`.toLowerCase().includes(pickerSearch.toLowerCase()))
-                return (
-                  <div key={brand} style={{ marginBottom: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 2px 6px' }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{brand}</span>
-                      <button onClick={() => addEntry(picker.id, brand, null, null)} style={{ background: 'none', border: 'none', color: t.orange, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Весь бренд</button>
-                    </div>
-                    <div style={{ background: t.surface, borderRadius: 14, overflow: 'hidden', boxShadow: t.sh }}>
-                      {flavors.map((s, i) => (
-                        <button key={s.id} onClick={() => addEntry(picker.id, s.brand, s.flavor, s.id)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', borderBottom: i < flavors.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
-                          <span style={{ fontSize: 14, color: t.text, fontWeight: 500 }}>{s.flavor}</span>
-                          <span style={{ fontSize: 11, color: t.text3 }}>{fg(s.quantity_g)}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -588,7 +529,7 @@ export default function StashApp() {
 
           {/* ══ HOOKAH SHIFT ══ */}
           {tab === 'shift' && !loading && (
-            <HookahShiftTab restaurantId={restaurantId} stock={inStockItems} t={t} toast={showToastMsg} />
+            <HookahShiftTab restaurantId={restaurantId} t={t} toast={showToastMsg} />
           )}
 
           {/* ══ STOCK ══ */}
