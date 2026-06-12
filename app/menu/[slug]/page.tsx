@@ -79,6 +79,10 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
   const [showSearch, setShowSearch] = useState(false)
   const [isDark, setIsDark] = useState(false)
   const [tableN, setTableN] = useState<string | null>(null) // ?table=N — QR на столе
+  // «Цифровой счёт»: заказы этой сессии (localStorage), живёт 6 часов
+  const [bill, setBill] = useState<{ items: any[]; total: number; at: number }[]>([])
+  const [showBill, setShowBill] = useState(false)
+  const [waiterCalled, setWaiterCalled] = useState(false)
   const categoryRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const navRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -87,7 +91,24 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
     loadMenu()
     const t = new URLSearchParams(window.location.search).get('table')
     if (t) setTableN(t.replace(/[^0-9a-zA-Zа-яА-Я-]/g, '').slice(0, 10) || null)
+    try {
+      const saved = JSON.parse(localStorage.getItem(`mise_bill_${slug}`) || '[]')
+      setBill(saved.filter((o: any) => Date.now() - o.at < 6 * 3600000))
+    } catch {}
   }, [slug])
+
+  const saveBill = (next: { items: any[]; total: number; at: number }[]) => {
+    setBill(next)
+    try { localStorage.setItem(`mise_bill_${slug}`, JSON.stringify(next)) } catch {}
+  }
+
+  const callWaiter = async () => {
+    setWaiterCalled(true); setTimeout(() => setWaiterCalled(false), 60000)
+    await fetch('/api/menu/order', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, type: 'waiter_call', table_number: tableN }),
+    })
+  }
 
   useEffect(() => {
     if (!settings) return
@@ -139,6 +160,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
     // Snapshot before clearing
     const orderItems = cart.map(c => ({ id: c.item.id, name: c.item.name, price: c.item.price, qty: c.qty }))
     const total = cartTotal
+    saveBill([...bill, { items: orderItems, total, at: Date.now() }])
     setOrderSent(true); setShowCart(false); setCart([])
     setTimeout(() => setOrderSent(false), 3000)
     await fetch('/api/menu/order', {
@@ -384,6 +406,47 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
           </div>
         </div>
       </div>
+
+      {/* ── BILL BUTTON (цифровой счёт) ── */}
+      {settings.allow_orders && bill.length > 0 && (
+        <button onClick={() => setShowBill(true)} style={{ position: 'fixed', right: 16, bottom: cartCount > 0 ? 96 : 24, zIndex: 290, width: 52, height: 52, borderRadius: '50%', border: 'none', background: T.surface, boxShadow: '0 4px 20px rgba(0,0,0,0.25)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: accent }}>
+          <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M5 2h14v20l-2.5-1.5L14 22l-2-1.5L10 22l-2.5-1.5L5 22V2z" /><path d="M9 7h6M9 11h6" /></svg>
+        </button>
+      )}
+
+      {/* ── BILL MODAL ── */}
+      {showBill && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setShowBill(false)}>
+          <div style={{ background: T.surface, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '80vh', display: 'flex', flexDirection: 'column', animation: 'slideUp .3s ease' }} onClick={e => e.stopPropagation()}>
+            <div style={{ width: 40, height: 4, background: T.fill, borderRadius: 2, margin: '14px auto 0' }} />
+            <div style={{ fontWeight: 700, fontSize: 18, textAlign: 'center', padding: '14px 20px 0', color: T.text }}>Ваш счёт{tableN ? ` · стол ${tableN}` : ''}</div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+              {bill.map((o, oi) => (
+                <div key={oi} style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, color: T.text3, fontWeight: 600, marginBottom: 6 }}>
+                    Заказ {oi + 1} · {new Date(o.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                  {o.items.map((it: any, i: number) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 14, color: T.text }}>
+                      <span>{it.name} × {it.qty}</span>
+                      {it.price != null && <span style={{ color: T.text2 }}>{money(it.price * it.qty)}</span>}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div style={{ padding: '12px 16px 20px', borderTop: `0.5px solid ${T.sep}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
+                <span style={{ fontSize: 16, color: T.text2 }}>Итого за стол</span>
+                <span style={{ fontSize: 20, fontWeight: 800, color: T.text }}>{money(bill.reduce((s, o) => s + (o.total || 0), 0))}</span>
+              </div>
+              <button onClick={callWaiter} disabled={waiterCalled} style={{ width: '100%', padding: '16px', borderRadius: 16, background: waiterCalled ? T.fill : accent, color: waiterCalled ? T.text2 : '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: waiterCalled ? 'default' : 'pointer', boxShadow: waiterCalled ? 'none' : `0 4px 20px ${accent}55` }}>
+                {waiterCalled ? '✓ Официант скоро подойдёт' : 'Позвать официанта'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── CART BAR ── */}
       {settings.allow_orders && cartCount > 0 && (

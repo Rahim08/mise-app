@@ -4,8 +4,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 export async function POST(req: NextRequest) {
-  const { slug, items, total, table_number } = await req.json()
-  if (!slug || !Array.isArray(items) || items.length === 0) {
+  const { slug, items, total, table_number, type } = await req.json()
+  const isCall = type === 'waiter_call' // вызов официанта — без позиций
+  if (!slug || (!isCall && (!Array.isArray(items) || items.length === 0))) {
     return NextResponse.json({ error: 'Bad request' }, { status: 400 })
   }
 
@@ -17,10 +18,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Orders not available' }, { status: 403 })
   }
 
+  // Вызов официанта кодируется маркером в items — без изменения схемы menu_orders.
   const { error } = await admin.from('menu_orders').insert({
     restaurant_id: settings.restaurant_id,
-    items,
-    total,
+    items: isCall ? [{ call: 'waiter' }] : items,
+    total: isCall ? 0 : total,
     table_number: table_number ?? null,
     status: 'new',
   })

@@ -1051,6 +1051,21 @@ function OrdersInbox({ currency, accent, t, toast }: { currency: string; accent:
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {list.map(o => {
             const st = ORDER_STATUS[o.status] || ORDER_STATUS.new
+            const isCall = Array.isArray(o.items) && o.items[0]?.call === 'waiter' // вызов официанта (цифровой счёт)
+            if (isCall) return (
+              <div key={o.id} style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh, borderLeft: `3px solid ${t.orange}` }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: t.text }}>Зовут официанта</span>
+                    {o.table_number && <span style={{ fontSize: 13, fontWeight: 800, color: '#fff', background: t.orange, padding: '3px 10px', borderRadius: 8 }}>Стол {o.table_number}</span>}
+                    <span style={{ fontSize: 12, color: t.text3 }}>{new Date(o.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                  {(o.status === 'new' || o.status === 'in_progress')
+                    ? <button onClick={() => setStatus(o, 'done')} style={{ ...btnB2(t), background: accent, color: '#fff' }}>Иду</button>
+                    : <span style={{ fontSize: 11, fontWeight: 700, color: t.green }}>✓</span>}
+                </div>
+              </div>
+            )
             return (
               <div key={o.id} style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
