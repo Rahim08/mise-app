@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { LogoMark } from '@/components/LogoMark'
+import { Wordmark } from '@/components/brand'
 
 export default function Login() {
   const router = useRouter()
@@ -50,8 +50,7 @@ export default function Login() {
       <div style={S.card}>
         {/* Logo */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
-          <LogoMark size={44} />
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#1c1c1e', letterSpacing: '-.04em', marginTop: 10 }}>mise</div>
+          <Wordmark size={34} color="#1c1c1e" />
           <div style={{ color: '#6d6d72', fontSize: '.88rem', marginTop: 4 }}>Войдите в свой аккаунт</div>
         </div>
 

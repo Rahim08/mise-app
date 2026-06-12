@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
 import { useTheme } from '@/hooks/useTheme'
+import { AppIcon, Wordmark, type BrandApp } from '@/components/brand'
 
 
 
@@ -23,18 +24,6 @@ const APPS = [
   { id: 'menu',      name: 'Mise Menu',      desc: 'QR-меню · Заказы за столом',               color: '#ff2d55', hint: 'Для гостей',     path: '/dashboard/menu', plans: ['business','pro'] },
 ]
 
-// Глифы приложений для карточек (белым по цвету приложения)
-function AppGlyph({ id }: { id: string }) {
-  const p: any = { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: '#fff', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }
-  switch (id) {
-    case 'manager':   return <svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" /></svg>
-    case 'analytics': return <svg {...p}><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" /></svg>
-    case 'stash':     return <svg {...p}><path d="M12 2l9 5-9 5-9-5 9-5z" /><path d="M3 12l9 5 9-5" /><path d="M3 17l9 5 9-5" /></svg>
-    case 'people':    return <svg {...p}><circle cx="9" cy="8" r="3.2" /><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5" /><path d="M16 4.2a3.2 3.2 0 010 6.1M19.5 20c0-2.6-1.3-4.5-3.3-5.2" /></svg>
-    case 'menu':      return <svg {...p}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><path d="M14 14h3v3h-3zM20 14h1M14 20h1M20 20h1" /></svg>
-    default:          return null
-  }
-}
 
 const PLANS = [
   // maxStaff = доступы сотрудников (устройства); лимит дублируется на сервере в /api/db (PLAN_LIMITS)
@@ -93,15 +82,6 @@ function timeAgo(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 }
 
-// Фирменный wordmark W2: «mise» с акцентной «e» (#8e8e93 — работает на обеих темах)
-function Wordmark({ size = 22 }: { size?: number }) {
-  return (
-    <span style={{ fontWeight: 800, fontSize: size, letterSpacing: '-.05em', lineHeight: 1, color: 'var(--tx)' }}>
-      mis<span style={{ color: '#8e8e93' }}>e</span>
-    </span>
-  )
-}
-
 // ── SPLASH SCREEN ─────────────────────────────────────────────────────────────
 
 function SplashScreen({ onDone }: { onDone: () => void }) {
@@ -135,7 +115,7 @@ function SplashScreen({ onDone }: { onDone: () => void }) {
       {/* Logo mark */}
       <div style={{ position: 'relative' }}>
         <svg width="80" height="80" viewBox="0 0 64 64" fill="none">
-          <rect width="64" height="64" rx="18" fill="#007aff"/>
+          <rect width="64" height="64" rx="18" fill="#141414" stroke="rgba(142,142,147,.45)" strokeWidth="1.5"/>
           {/* Bar 1 */}
           <rect x="14" y="20" width="0" height="5" rx="2.5" fill="white"
             style={{ width: bar1 ? 36 : 0, transition: 'width .4s cubic-bezier(.34,1.56,.64,1)' }}/>
@@ -254,8 +234,8 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
           return (
             <Card key={app.id} onClick={enabled ? () => router.push(app.path) : undefined}
               style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16, opacity: locked || !isActive ? .55 : 1 }}>
-              <div style={{ width: 44, height: 44, borderRadius: 12, background: locked || !isActive ? '#c7c7cc' : app.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: enabled ? `0 4px 12px ${app.color}40` : 'none' }}>
-                <AppGlyph id={app.id} />
+              <div style={{ flexShrink: 0, filter: enabled ? 'none' : 'grayscale(1) opacity(.6)' }}>
+                <AppIcon app={app.id as BrandApp} size={44} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

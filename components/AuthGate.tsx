@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { useTheme } from '@/hooks/useTheme'
-import { LogoMark } from '@/components/LogoMark'
+import { AppIcon, Wordmark, type BrandApp } from '@/components/brand'
 
 function QRScanner({ onResult, onClose, t }: { onResult: (data: string) => void; onClose: () => void; t: any }) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -257,7 +257,7 @@ export function AuthGate({ appId, appName, onAuth }: {
 
   if (phase === 'loading') return (
     <div style={screenStyle}>
-      <LogoMark size={64} color={t.blue} />
+      <AppIcon app={appId as BrandApp} size={64} />
       <div style={{ width: 24, height: 24, border: `2.5px solid ${t.fill}`, borderTopColor: t.blue, borderRadius: '50%', animation: 'spin .7s linear infinite', marginTop: 20 }} />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
@@ -278,7 +278,7 @@ export function AuthGate({ appId, appName, onAuth }: {
       <div style={screenStyle}>
         <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}`}</style>
         <div style={{ marginBottom: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-          <LogoMark size={72} color={t.blue} />
+          <AppIcon app={appId as BrandApp} size={72} />
           <div style={{ fontWeight: 700, fontSize: 22, color: t.text, letterSpacing: -0.5 }}>{appName}</div>
           <div style={{ fontSize: 14, color: t.text3, textAlign: 'center', maxWidth: 260 }}>Для начала работы отсканируйте QR-код в разделе Доступ на дашборде заведения</div>
         </div>
@@ -308,8 +308,7 @@ export function AuthGate({ appId, appName, onAuth }: {
           Сканировать QR
         </button>
         <div style={{ position: 'absolute', bottom: 32, display: 'flex', alignItems: 'center', gap: 8, opacity: 0.35 }}>
-          <LogoMark size={18} color={t.text} />
-          <span style={{ fontSize: 12, fontWeight: 700, color: t.text, letterSpacing: -0.3 }}>mise</span>
+          <Wordmark size={16} color={t.text} />
         </div>
       </div>
       {showQRScanner && (
@@ -329,9 +328,7 @@ export function AuthGate({ appId, appName, onAuth }: {
         {restaurant?.logo_url ? (
           <img src={restaurant.logo_url} alt="logo" style={{ width: 72, height: 72, borderRadius: 18, objectFit: 'cover', boxShadow: '0 4px 16px rgba(0,0,0,.12)' }} />
         ) : (
-          <div style={{ width: 72, height: 72, borderRadius: 18, background: t.surface, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: t.sh }}>
-            <LogoMark size={40} color={t.blue} />
-          </div>
+          <AppIcon app={appId as BrandApp} size={72} />
         )}
         <div style={{ fontWeight: 700, fontSize: 20, color: t.text }}>{restaurant?.name}</div>
         <div style={{ fontSize: 13, color: t.text3 }}>Введите PIN для входа</div>
@@ -360,8 +357,7 @@ export function AuthGate({ appId, appName, onAuth }: {
         Сменить заведение
       </button>
       <div style={{ position: 'absolute', bottom: 32, display: 'flex', alignItems: 'center', gap: 8, opacity: 0.35 }}>
-        <LogoMark size={18} color={t.text} />
-        <span style={{ fontSize: 12, fontWeight: 700, color: t.text, letterSpacing: -0.3 }}>mise</span>
+        <Wordmark size={16} color={t.text} />
       </div>
     </div>
   )

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
-import { LogoMark } from '@/components/LogoMark'
+import { Wordmark, AppIcon } from '@/components/brand'
 
 const APPS = [
   { id: 'manager',   name: 'Mise Manager',   color: '#007aff', path: '/manager' },
@@ -141,7 +141,7 @@ export default function JoinPage() {
   // ── LOADING ──
   if (phase === 'loading') return (
     <div style={S.screen}>
-      <LogoMark size={48} />
+      <Wordmark size={32} color="#1c1c1e" />
       <div style={{ color: '#aeaeb2', fontSize: '.85rem', marginTop: 16 }}>Загрузка...</div>
     </div>
   )
@@ -164,7 +164,7 @@ export default function JoinPage() {
         {restaurant?.logo_url ? (
           <img src={restaurant.logo_url} alt="logo" style={{ width: 72, height: 72, borderRadius: 18, objectFit: 'cover', boxShadow: '0 4px 16px rgba(0,0,0,.12)' }} />
         ) : (
-          <div style={{ width: 72, height: 72, borderRadius: 18, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 12px rgba(0,0,0,.08)' }}><LogoMark size={40} /></div>
+          <AppIcon app="mise" size={72} />
         )}
         <div style={{ fontWeight: 700, fontSize: '1.2rem', color: '#1c1c1e' }}>{restaurant?.name}</div>
         <div style={{ fontSize: '.82rem', color: '#aeaeb2' }}>Введите PIN для входа</div>
@@ -223,8 +223,7 @@ export default function JoinPage() {
       </div>
 
       <div style={{ position: 'absolute', bottom: 32, display: 'flex', alignItems: 'center', gap: 8, opacity: .35 }}>
-        <LogoMark size={18} />
-        <span style={{ fontSize: '.75rem', fontWeight: 700, color: '#1c1c1e', letterSpacing: '-.01em' }}>mise</span>
+        <Wordmark size={16} color="#1c1c1e" />
       </div>
 
       <style>{`
@@ -248,7 +247,7 @@ export default function JoinPage() {
           {restaurant?.logo_url ? (
             <img src={restaurant.logo_url} alt="logo" style={{ width: 60, height: 60, borderRadius: 15, objectFit: 'cover', marginBottom: 14, boxShadow: '0 4px 14px rgba(0,0,0,.1)' }} />
           ) : (
-            <div style={{ width: 60, height: 60, borderRadius: 15, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px', boxShadow: '0 2px 10px rgba(0,0,0,.07)' }}><LogoMark size={34} /></div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}><AppIcon app="mise" size={60} /></div>
           )}
           <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 4 }}>{restaurant?.name}</div>
           <div style={{ fontSize: '.82rem', color: '#6d6d72' }}>
@@ -287,8 +286,7 @@ export default function JoinPage() {
         </button>
 
         <div style={{ position: 'absolute', bottom: 32, display: 'flex', alignItems: 'center', gap: 8, opacity: .35 }}>
-          <LogoMark size={18} />
-          <span style={{ fontSize: '.75rem', fontWeight: 700, color: '#1c1c1e', letterSpacing: '-.01em' }}>mise</span>
+          <Wordmark size={16} color="#1c1c1e" />
         </div>
       </div>
     )

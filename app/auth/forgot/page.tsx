@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { LogoMark } from '@/components/LogoMark'
+import { Wordmark } from '@/components/brand'
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('')
@@ -24,8 +24,7 @@ export default function ForgotPassword() {
   if (sent) return (
     <div style={S.bg}>
       <div style={{ ...S.card, textAlign: 'center' }}>
-        <LogoMark size={44} />
-        <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#1c1c1e', letterSpacing: '-.04em', marginTop: 10, marginBottom: 24 }}>mise</div>
+        <div style={{ marginBottom: 24 }}><Wordmark size={34} color="#1c1c1e" /></div>
         <div style={{ fontSize: '2.5rem', marginBottom: 16 }}>📬</div>
         <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 8 }}>Проверьте email</div>
         <div style={{ color: '#6d6d72', fontSize: '.88rem', marginBottom: 24, lineHeight: 1.6 }}>
@@ -43,8 +42,7 @@ export default function ForgotPassword() {
     <div style={S.bg}>
       <div style={S.card}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 28 }}>
-          <LogoMark size={44} />
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#1c1c1e', letterSpacing: '-.04em', marginTop: 10 }}>mise</div>
+          <Wordmark size={34} color="#1c1c1e" />
           <div style={{ color: '#6d6d72', fontSize: '.88rem', marginTop: 4 }}>Восстановление пароля</div>
         </div>
 
