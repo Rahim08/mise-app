@@ -51,6 +51,17 @@ export async function POST(req: NextRequest) {
         subscription_id: sub.id,
         ...(endsAt ? { subscription_ends_at: endsAt } : {}),
       })
+
+      // Повторный чекаут (смена плана, дабл-клик, «не увидел подписку — оформил ещё раз»)
+      // создаёт ВТОРУЮ подписку у того же customer → двойное списание.
+      // Гасим все более старые живые подписки; «старые» — чтобы при ретраях/перестановке
+      // событий старый checkout.completed не отменил новую подписку.
+      const siblings = await stripe.subscriptions.list({ customer: (sub as any).customer, status: 'all', limit: 20 })
+      for (const o of siblings.data) {
+        if (o.id !== sub.id && o.created < (sub as any).created && ['active', 'trialing', 'past_due'].includes(o.status)) {
+          await stripe.subscriptions.cancel(o.id)
+        }
+      }
     }
 
     // Новые версии Stripe API убрали invoice.subscription с верхнего уровня —
@@ -81,10 +92,17 @@ export async function POST(req: NextRequest) {
       await updateRestaurant(restaurantId, { subscription_status: 'past_due' })
     }
 
+    // События отменённого дубля не должны затирать статус текущей подписки ресторана.
+    const isCurrentSub = async (restaurantId: string, subId: string) => {
+      const { data } = await supabase.from('restaurants').select('subscription_id').eq('id', restaurantId).single()
+      return !data?.subscription_id || data.subscription_id === subId
+    }
+
     // Смена плана / окончание триала / реактивация в портале — синхронизируем статус и план.
     if (event.type === 'customer.subscription.updated') {
       const restaurantId = obj.metadata?.restaurantId
       if (!restaurantId) return NextResponse.json({ received: true })
+      if (!(await isCurrentSub(restaurantId, obj.id))) return NextResponse.json({ received: true })
 
       const endsAt = periodEndISO(obj)
       await updateRestaurant(restaurantId, {
@@ -97,6 +115,7 @@ export async function POST(req: NextRequest) {
     if (event.type === 'customer.subscription.deleted') {
       const restaurantId = obj.metadata?.restaurantId
       if (!restaurantId) return NextResponse.json({ received: true })
+      if (!(await isCurrentSub(restaurantId, obj.id))) return NextResponse.json({ received: true })
 
       await updateRestaurant(restaurantId, { subscription_status: 'canceled' })
     }

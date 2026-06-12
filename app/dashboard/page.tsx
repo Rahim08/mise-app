@@ -1103,9 +1103,20 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
     }
   }
 
+  const justPaid = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('success') === '1'
+
   return (
     <div>
       <SectionTitle title="Подписка" sub="Управление тарифом и оплатой" />
+
+      {justPaid && !isActive && (
+        <Card style={{ marginBottom: 16, border: '1px solid rgba(0,122,255,.25)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '.85rem', color: 'var(--tx2)' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#007aff', flexShrink: 0 }} />
+            Оплата получена — активируем подписку, это занимает несколько секунд…
+          </div>
+        </Card>
+      )}
 
       {currentPlan && (
         <Card style={{ marginBottom: 16, border: `1px solid ${currentPlan.color}25` }}>
@@ -1222,6 +1233,17 @@ export default function Dashboard() {
       setUser(data.session.user)
       await loadRestaurant(data.session.user.id)
       setAuthChecked(true)
+      // После оплаты Stripe редиректит раньше, чем доходит вебхук —
+      // дотягиваем статус ~20 секунд, чтобы подписка не выглядела «не оформленной»
+      if (params.get('success') === '1') {
+        const uid = data.session.user.id
+        for (let i = 0; i < 8; i++) {
+          await new Promise(r => setTimeout(r, 2500))
+          const { data: rest } = await db.from('restaurants').select('*').eq('owner_id', uid).single()
+          if (rest) setRestaurant(rest)
+          if (rest && (rest.subscription_status === 'active' || rest.subscription_status === 'trialing')) break
+        }
+      }
     })
   }, [])
 
