@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mise · Brand v2.1</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #070707; color: #fff; min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif;
+    -webkit-font-smoothing: antialiased; padding: 64px 24px 120px;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .kicker { font-size: 12px; font-weight: 600; color: rgba(255,255,255,.35); letter-spacing: 3px; text-transform: uppercase; text-align: center; margin-bottom: 10px; }
+  h1 { font-size: 28px; font-weight: 700; letter-spacing: -.5px; text-align: center; margin-bottom: 64px; }
+  h2 { font-size: 13px; font-weight: 600; color: rgba(255,255,255,.4); letter-spacing: 2.5px; text-transform: uppercase; margin: 88px 0 8px; text-align: center; }
+  .h2sub { font-size: 13px; color: rgba(255,255,255,.3); text-align: center; margin-bottom: 40px; max-width: 520px; line-height: 1.5; }
+  .row { display: flex; gap: 40px; flex-wrap: wrap; justify-content: center; align-items: flex-start; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .cell .name { font-size: 13px; font-weight: 600; color: rgba(255,255,255,.85); letter-spacing: -.1px; }
+  .cell .sub { font-size: 11px; color: rgba(255,255,255,.35); margin-top: -10px; }
+  .icon { position: relative; overflow: hidden; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .divider { width: 100%; max-width: 640px; height: 1px; background: rgba(255,255,255,.07); margin: 72px 0 0; }
+  .lrow { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+  .lcard { border-radius: 22px; padding: 48px 56px; display: flex; flex-direction: column; align-items: center; gap: 28px;
+    border: 1px solid rgba(255,255,255,.07); }
+  .lcard.dark  { background: #0d0d0d; }
+  .lcard.light { background: #f2f2f7; border-color: rgba(0,0,0,.04); }
+  .sizes { display: flex; align-items: flex-end; gap: 22px; margin-top: 28px; }
+  .swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; flex-shrink: 0; transition: transform .12s ease; }
+  .swatch:hover { transform: scale(1.12); }
+  .swatch.on { border-color: #fff; }
+  .navdemo { width: 100%; max-width: 560px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 16px; height: 54px; padding: 0 18px; display: flex; align-items: center; justify-content: space-between; margin-top: 14px; }
+  .navdemo .dots { display: flex; gap: 10px; }
+  .navdemo .dots div { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,.08); }
+  .footnote { font-size: 12px; color: rgba(255,255,255,.25); margin-top: 80px; max-width: 560px; text-align: center; line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<div class="kicker">Mise · Brand v2.1 · Final Direction</div>
+<h1>Иконки Glow и логотип W2</h1>
+
+<!-- ════════════════ APP ICONS (style A, chosen) ════════════════ -->
+<h2>Иконки приложений · Glow</h2>
+<div class="h2sub">Тёмный фон, белый глиф, цветное свечение приложения. Menu — сетка плиток с QR-углом, Stash — списание (минус).</div>
+<div id="icons"></div>
+
+<div class="divider"></div>
+
+<!-- ════════════════ MISE LOGO W2 + accent picker ════════════════ -->
+<h2>Логотип mise · W2</h2>
+<div class="h2sub">Акцентная «e». Выбери цвет внизу — превью обновляется везде, включая навбар.</div>
+
+<div class="lrow" id="w2preview"></div>
+<div id="swatches" style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:32px;align-items:center"></div>
+<div style="display:flex;align-items:center;gap:10px;margin-top:18px;">
+  <span style="font-size:11px;font-weight:600;letter-spacing:1.5px;color:rgba(255,255,255,.4);text-transform:uppercase">Свой цвет</span>
+  <input type="color" id="custom" value="#007aff" style="width:44px;height:34px;border:none;background:none;cursor:pointer">
+  <span id="hex" style="font-size:13px;font-weight:600;color:rgba(255,255,255,.55);font-family:ui-monospace,monospace">#007aff</span>
+</div>
+
+<h2>В интерфейсе</h2>
+<div class="h2sub">Навбар и малые размеры — следят за выбранным цветом.</div>
+<div id="context" style="display:flex;flex-direction:column;align-items:center;gap:0;width:100%;max-width:560px;"></div>
+
+<div class="footnote">
+  Все глифы — векторные SVG, масштабируются от 16px до сплэш-экрана.<br>
+  Шрифт в макете — системный SF Pro; в финальной версии wordmark конвертируется в кривые.
+</div>
+
+<script>
+const APPS = [
+  { id:'manager',   name:'Mise Manager',   sub:'Смены · Расходы · Инкассации', color:'#007aff' },
+  { id:'analytics', name:'Mise Analytics', sub:'Финансы · Зарплаты · AI',      color:'#34c759' },
+  { id:'stash',     name:'Mise Stash',     sub:'Склад · Смена кальянщика',     color:'#ff9500' },
+  { id:'people',    name:'Mise People',    sub:'Расписание · Явка · Зал',      color:'#5856d6' },
+  { id:'menu',      name:'Mise Menu',      sub:'QR-меню · Заказы',             color:'#ff2d55' },
+  { id:'mise',      name:'Mise',           sub:'Дашборд владельца',            color:'#ffffff' },
+];
+
+function glyph(id, s, c) {
+  const svg = (inner) => `<svg viewBox="0 0 48 48" fill="none" width="${s}" height="${s}">${inner}</svg>`;
+  switch (id) {
+    case 'manager': return svg(`
+      <rect x="7" y="11" width="34" height="7" rx="3.5" fill="${c}"/>
+      <rect x="7" y="22" width="26" height="7" rx="3.5" fill="${c}" opacity=".72"/>
+      <rect x="7" y="33" width="17" height="7" rx="3.5" fill="${c}" opacity=".44"/>`);
+    case 'analytics': return svg(`
+      <rect x="5"  y="34" width="10" height="10" rx="3" fill="${c}" opacity=".44"/>
+      <rect x="19" y="24" width="10" height="20" rx="3" fill="${c}" opacity=".72"/>
+      <rect x="33" y="12" width="10" height="32" rx="3" fill="${c}"/>
+      <path d="M10 30 L24 20 L38 8" stroke="${c}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>`);
+    case 'stash': return svg(`
+      <rect x="6"  y="22" width="36" height="22" rx="4" stroke="${c}" stroke-width="2.5" opacity=".55"/>
+      <rect x="10" y="10" width="28" height="14" rx="4" stroke="${c}" stroke-width="2.5" opacity=".3"/>
+      <path d="M18 33 H30" stroke="${c}" stroke-width="4" stroke-linecap="round"/>`);
+    case 'people': return svg(`
+      <circle cx="18" cy="16" r="6.5" stroke="${c}" stroke-width="3"/>
+      <path d="M7 40 c0-7 5-11 11-11 s11 4 11 11" stroke="${c}" stroke-width="3" stroke-linecap="round"/>
+      <path d="M32 9.5 a6.5 6.5 0 0 1 0 13" stroke="${c}" stroke-width="3" stroke-linecap="round" opacity=".55"/>
+      <path d="M41 40 c0-5.5-2.6-9.3-6.8-10.7" stroke="${c}" stroke-width="3" stroke-linecap="round" opacity=".55"/>`);
+    case 'menu': return svg(`
+      <rect x="7"  y="7"  width="14" height="14" rx="4" fill="${c}" opacity=".44"/>
+      <rect x="27" y="7"  width="14" height="14" rx="4" fill="${c}" opacity=".72"/>
+      <rect x="7"  y="27" width="14" height="14" rx="4" fill="${c}"/>
+      <rect x="27" y="27" width="7.5" height="7.5" rx="2" fill="${c}" opacity=".9"/>
+      <rect x="37.5" y="27" width="3.5" height="3.5" rx="1.2" fill="${c}" opacity=".55"/>
+      <rect x="27" y="37.5" width="3.5" height="3.5" rx="1.2" fill="${c}" opacity=".55"/>
+      <rect x="34" y="34" width="7" height="7" rx="2" fill="${c}" opacity=".75"/>`);
+    case 'mise': return svg(`
+      <path d="M11 39 V21 a7 7 0 0 1 14 0 M25 39 V21 M25 21 a7 7 0 0 1 14 0 V39 M11 21 V15"
+        stroke="${c}" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" transform="translate(-1 -3)"/>`);
+  }
+}
+
+// Стиль A — Glow (выбран): тёмный градиент, цветная окантовка и свечение, белый глиф
+function iconBox(app, size) {
+  const r = Math.round(size * .228);
+  const c = app.color === '#ffffff' ? '#8e8e93' : app.color;
+  return `<div class="icon" style="width:${size}px;height:${size}px;border-radius:${r}px;
+    background:linear-gradient(145deg,#0e0e0e 0%,#141414 55%,${c}1a 100%);
+    border:${size > 50 ? 1.5 : 1}px solid ${c}77;
+    box-shadow:0 0 ${size*.14}px ${c}55, 0 0 ${size*.4}px ${c}26, 0 ${size*.04}px ${size*.12}px rgba(0,0,0,.55)">
+    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 40% 18%, ${c}24 0%, transparent 55%)"></div>
+    <div style="position:relative">${glyph(app.id, Math.round(size*.62), '#fff')}</div></div>`;
+}
+
+document.getElementById('icons').innerHTML = `
+  <div class="row" style="margin-bottom:48px">${APPS.map(a => `<div class="cell">${iconBox(a, 116)}
+    <div class="name">${a.name}</div><div class="sub">${a.sub}</div></div>`).join('')}</div>
+  <div class="sizes" style="justify-content:center">${[64, 44, 30].map(s => APPS.slice(0, 5).map(a => iconBox(a, s)).join('')).join('<span style="width:18px"></span>')}</div>`;
+
+// ── W2 wordmark + живой акцентный цвет ──
+const SWATCHES = [
+  ['#007aff','Blue'], ['#5856d6','Indigo'], ['#af52de','Violet'], ['#ff2d55','Pink'],
+  ['#ff3b30','Red'], ['#ff9500','Orange'], ['#ffcc00','Yellow'], ['#34c759','Green'],
+  ['#00c7be','Mint'], ['#30b0c7','Teal'], ['#8e8e93','Gray'],
+];
+let accent = '#007aff';
+
+function w2(fs, dark) {
+  const tx = dark ? '#fff' : '#1c1c1e';
+  return `<span style="font-weight:800;letter-spacing:-.05em;line-height:1;font-size:${fs}px;color:${tx}">mis<span style="color:${accent}">e</span></span>`;
+}
+
+function render() {
+  document.getElementById('w2preview').innerHTML = `
+    <div class="lcard dark">${w2(72, true)}${w2(34, true)}${w2(20, true)}</div>
+    <div class="lcard light">${w2(72, false)}${w2(34, false)}${w2(20, false)}</div>`;
+  document.getElementById('swatches').innerHTML = SWATCHES.map(([c, n]) =>
+    `<button class="swatch ${c === accent ? 'on' : ''}" title="${n}" style="background:${c}" onclick="setAccent('${c}')"></button>`).join('');
+  document.getElementById('hex').textContent = accent;
+  document.getElementById('custom').value = /^#[0-9a-f]{6}$/i.test(accent) ? accent : '#007aff';
+  document.getElementById('context').innerHTML = `
+    <div class="navdemo">${w2(22, true)}<div class="dots"><div></div><div></div></div></div>
+    <div class="navdemo" style="background:#f2f2f7;border-color:rgba(0,0,0,.05)">${w2(22, false)}
+      <div class="dots"><div style="background:rgba(0,0,0,.07)"></div><div style="background:rgba(0,0,0,.07)"></div></div></div>
+    <div style="display:flex;gap:26px;align-items:baseline;margin-top:30px">${[48, 32, 22, 16].map(s => w2(s, true)).join('')}</div>`;
+}
+function setAccent(c) { accent = c; render(); }
+document.getElementById('custom').addEventListener('input', e => setAccent(e.target.value));
+render();
+</script>
+</body>
+</html>

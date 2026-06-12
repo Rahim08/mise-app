@@ -51,12 +51,17 @@ const ROLE_OPTS = [
 ]
 function roleLabel(role?: string) { return ROLE_OPTS.find(r => r.value === role)?.label || (role || '—') }
 
-const TABS = [
-  { id: 'apps',       label: 'Приложения' },
-  { id: 'team',       label: 'Команда' },
-  { id: 'categories', label: 'Категории' },
-  { id: 'settings',   label: 'Настройки' },
-  { id: 'billing',    label: 'Подписка' },
+// Сайдбар, два этажа: верхний — «работа» (каждый день), нижний — «обслуживание» (раз в неделю/месяц).
+// Аккаунт — отдельно внизу, категории расходов живут внутри Настроек.
+const NAV_MAIN = [
+  { id: 'overview', label: 'Обзор' },
+  { id: 'apps',     label: 'Приложения' },
+  { id: 'team',     label: 'Команда' },
+]
+const NAV_SERVICE = [
+  { id: 'notifications', label: 'Уведомления' },
+  { id: 'settings',      label: 'Настройки' },
+  { id: 'billing',       label: 'Подписка' },
 ]
 
 // SF-Symbols-style line icons for the dashboard tabs (no emoji).
@@ -69,8 +74,24 @@ function TabIcon({ id, size = 15 }: { id: string; size?: number }) {
     case 'team':       return <svg {...p}><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 4.2a3.2 3.2 0 010 6.1M19.5 20c0-2.6-1.3-4.5-3.3-5.2"/></svg>
     case 'settings':   return <svg {...p}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" /></svg>
     case 'billing':    return <svg {...p}><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/></svg>
+    case 'overview':   return <svg {...p}><path d="M3 11l9-8 9 8"/><path d="M5 9.5V20a1 1 0 001 1h12a1 1 0 001-1V9.5"/></svg>
+    case 'notifications': return <svg {...p}><path d="M18 8.4a6 6 0 10-12 0c0 6.6-2.7 8.6-2.7 8.6h17.4S18 15 18 8.4"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg>
+    case 'account':    return <svg {...p}><circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.9 3.1-6.4 7-6.4s7 2.5 7 6.4"/></svg>
     default:           return null
   }
+}
+
+// Локальная дата YYYY-MM-DD — toISOString() сдвигает «сегодня» в не-UTC зонах
+function fmtDay(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+function timeAgo(iso: string) {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+  if (m < 1) return 'только что'
+  if (m < 60) return `${m} мин назад`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h} ч назад`
+  return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 }
 
 // ── SPLASH SCREEN ─────────────────────────────────────────────────────────────
@@ -258,116 +279,9 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
   )
 }
 
-// ── EMPLOYEES TAB ─────────────────────────────────────────────────────────────
+// ── CATEGORIES CARD (живёт в Настройках) ──────────────────────────────────────
 
-function EmployeesTab({ restaurantId }: { restaurantId: string }) {
-  const [employees, setEmployees] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState({ name: '', salary: '', deduct_per_absence: '', card_amount: '' })
-
-  const load = async () => {
-    setLoading(true)
-    const { data } = await db.from('employees').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name')
-    setEmployees(data || [])
-    setLoading(false)
-  }
-
-  useEffect(() => { if (restaurantId) load() }, [restaurantId])
-
-  const save = async () => {
-    if (!form.name.trim()) return
-    const payload = { restaurant_id: restaurantId, name: form.name, salary: +form.salary || 0, deduct_per_absence: +form.deduct_per_absence || 0, card_amount: +form.card_amount || 0, is_active: true }
-    if (editingId) await db.from('employees').update(payload).eq('id', editingId)
-    else await db.from('employees').insert(payload)
-    setForm({ name: '', salary: '', deduct_per_absence: '', card_amount: '' })
-    setShowForm(false); setEditingId(null); load()
-  }
-
-  const remove = async (id: string) => {
-    await db.from('employees').update({ is_active: false }).eq('id', id); load()
-  }
-
-  const startEdit = (emp: any) => {
-    setForm({ name: emp.name, salary: String(emp.salary), deduct_per_absence: String(emp.deduct_per_absence), card_amount: String(emp.card_amount) })
-    setEditingId(emp.id); setShowForm(true)
-  }
-
-  const total = employees.reduce((s, e) => s + e.salary, 0)
-  const totalCard = employees.reduce((s, e) => s + e.card_amount, 0)
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-        <SectionTitle title="Сотрудники" sub="Оклады и вычеты" />
-        <Btn onClick={() => { setShowForm(!showForm); setEditingId(null); setForm({ name: '', salary: '', deduct_per_absence: '', card_amount: '' }) }}>
-          {showForm ? 'Отмена' : '+ Добавить'}
-        </Btn>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 16 }}>
-        {[
-          { l: 'Сотрудников', v: String(employees.length), c: 'var(--tx)' },
-          { l: 'ФОТ/мес', v: `€${total.toLocaleString()}`, c: '#007aff' },
-          { l: 'На карту', v: `€${totalCard.toLocaleString()}`, c: '#af52de' },
-        ].map(item => (
-          <Card key={item.l} style={{ padding: '14px 16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '.68rem', color: 'var(--tx2)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4, letterSpacing: '.04em' }}>{item.l}</div>
-            <div style={{ fontSize: '1.3rem', fontWeight: 700, color: item.c }}>{item.v}</div>
-          </Card>
-        ))}
-      </div>
-
-      {showForm && (
-        <Card style={{ marginBottom: 14, border: '1px solid #007aff' }}>
-          <div style={{ fontWeight: 700, fontSize: '.95rem', marginBottom: 14, color: 'var(--tx)' }}>{editingId ? 'Редактировать' : 'Новый сотрудник'}</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <div style={{ gridColumn: '1/-1' }}>
-              <Field label="Имя" value={form.name} onChange={(v: string) => setForm({ ...form, name: v })} placeholder="Александр Иванов" />
-            </div>
-            <Field label="Оклад" value={form.salary} onChange={(v: string) => setForm({ ...form, salary: v })} placeholder="1000" type="number" />
-            <Field label="Вычет за пропуск" value={form.deduct_per_absence} onChange={(v: string) => setForm({ ...form, deduct_per_absence: v })} placeholder="50" type="number" />
-            <div style={{ gridColumn: '1/-1' }}>
-              <Field label="На карту (необязательно)" value={form.card_amount} onChange={(v: string) => setForm({ ...form, card_amount: v })} placeholder="0" type="number" />
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Btn onClick={save}>{editingId ? 'Сохранить' : 'Добавить'}</Btn>
-            <Btn variant="gray" onClick={() => { setShowForm(false); setEditingId(null) }}>Отмена</Btn>
-          </div>
-        </Card>
-      )}
-
-      <Card>
-        {loading ? (
-          <div style={{ color: 'var(--tx2)', textAlign: 'center', padding: 32 }}>Загрузка...</div>
-        ) : employees.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>Добавьте первого сотрудника</div>
-        ) : employees.map((emp, i) => (
-          <div key={emp.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: i < employees.length - 1 ? '1px solid rgba(var(--seprgb),.08)' : 'none', gap: 12 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: '.92rem', marginBottom: 2, color: 'var(--tx)' }}>{emp.name}</div>
-              <div style={{ fontSize: '.75rem', color: 'var(--tx2)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <span>Оклад: <strong style={{ color: 'var(--tx)' }}>€{emp.salary}</strong></span>
-                <span>Вычет: <strong style={{ color: 'var(--tx)' }}>€{emp.deduct_per_absence}</strong></span>
-                {emp.card_amount > 0 && <span>Карта: <strong style={{ color: '#af52de' }}>€{emp.card_amount}</strong></span>}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <Btn small variant="ghost" onClick={() => startEdit(emp)}>Изменить</Btn>
-              <Btn small variant="danger" onClick={() => remove(emp.id)}>✕</Btn>
-            </div>
-          </div>
-        ))}
-      </Card>
-    </div>
-  )
-}
-
-// ── CATEGORIES TAB ────────────────────────────────────────────────────────────
-
-function CategoriesTab({ restaurantId }: { restaurantId: string }) {
+function CategoriesCard({ restaurantId }: { restaurantId: string }) {
   const [cats, setCats] = useState<any[]>([])
   const [newName, setNewName] = useState('')
   const [loading, setLoading] = useState(true)
@@ -395,32 +309,28 @@ function CategoriesTab({ restaurantId }: { restaurantId: string }) {
   }
 
   return (
-    <div>
-      <SectionTitle title="Категории расходов" sub="Менеджер выбирает из этого списка при добавлении расхода" />
-      <Card style={{ marginBottom: 14 }}>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
-            placeholder="Например: Мойка, DJ, Ремонт..."
-            style={{ ...inputStyle, flex: 1 }} />
-          <Btn onClick={add}>Добавить</Btn>
-        </div>
-      </Card>
-      <Card>
-        <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx2)', marginBottom: 12 }}>Категорий: {cats.length}</div>
-        {loading ? <div style={{ color: 'var(--tx2)', fontSize: '.88rem' }}>Загрузка...</div>
-          : cats.length === 0
-            ? <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>Нет категорий</div>
-            : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {cats.map(cat => (
-                  <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--fill)', borderRadius: 980, padding: '6px 12px' }}>
-                    <span style={{ fontSize: '.85rem', fontWeight: 500, color: 'var(--tx)' }}>{cat.name}</span>
-                    <button onClick={() => remove(cat.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tx3)', fontSize: '.85rem', padding: 0, lineHeight: 1 }}>✕</button>
-                  </div>
-                ))}
-              </div>
-        }
-      </Card>
-    </div>
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Категории расходов</div>
+      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', margin: '2px 0 14px' }}>Менеджер выбирает из этого списка при добавлении расхода</div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+        <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
+          placeholder="Например: Мойка, DJ, Ремонт..."
+          style={{ ...inputStyle, flex: 1 }} />
+        <Btn onClick={add}>Добавить</Btn>
+      </div>
+      {loading ? <div style={{ color: 'var(--tx2)', fontSize: '.88rem' }}>Загрузка...</div>
+        : cats.length === 0
+          ? <div style={{ color: 'var(--tx2)', fontSize: '.85rem' }}>Нет категорий</div>
+          : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {cats.map(cat => (
+                <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--fill)', borderRadius: 980, padding: '6px 12px' }}>
+                  <span style={{ fontSize: '.85rem', fontWeight: 500, color: 'var(--tx)' }}>{cat.name}</span>
+                  <button onClick={() => remove(cat.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tx3)', fontSize: '.85rem', padding: 0, lineHeight: 1 }}>✕</button>
+                </div>
+              ))}
+            </div>
+      }
+    </Card>
   )
 }
 
@@ -908,8 +818,7 @@ function HookahSettingsCard() {
   )
 }
 
-function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; onUpdate: () => void }) {
-  const router = useRouter()
+function SettingsTab({ restaurant, theme, onUpdate }: { restaurant: Restaurant | null; theme: { dark: boolean; toggle: () => void }; onUpdate: () => void }) {
   const [name, setName] = useState(restaurant?.name || '')
   const [currency, setCurrency] = useState(restaurant?.currency || '€')
   const [saving, setSaving] = useState(false)
@@ -918,8 +827,6 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
   const [logoPreview, setLogoPreview] = useState(restaurant?.logo_url || '')
   const [logoUploading, setLogoUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-  const [deleteConfirm, setDeleteConfirm] = useState(false)
-  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (restaurant) { setName(restaurant.name); setCurrency(restaurant.currency || '€'); setLogoPreview(restaurant.logo_url || '') }
@@ -955,22 +862,9 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
     setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000); onUpdate()
   }
 
-  const deleteAccount = async () => {
-    setDeleting(true)
-    try {
-      const res = await fetch('/api/account/delete', { method: 'POST' })
-      const data = await res.json()
-      if (data.error) { alert(data.error); return }
-      await supabase.auth.signOut()
-      router.replace('/auth/login')
-    } finally {
-      setDeleting(false)
-    }
-  }
-
   return (
     <div>
-      <SectionTitle title="Настройки" sub="Основные параметры заведения" />
+      <SectionTitle title="Настройки" sub="Заведение, кальян, валюта, тема" />
 
       {/* Логотип */}
       <Card style={{ marginBottom: 14 }}>
@@ -1017,28 +911,22 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
         <Btn onClick={save}>{saving ? 'Сохранение...' : saved ? '✓ Сохранено' : 'Сохранить'}</Btn>
       </Card>
 
+      {restaurant && <CategoriesCard restaurantId={restaurant.id} />}
+
       <HookahSettingsCard />
 
       <AnalyticsSettingsCard />
 
       <GeoSettingsCard />
 
-      <Card style={{ border: '1px solid rgba(255,59,48,.15)' }}>
-        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 4, color: 'var(--tx)' }}>Опасная зона</div>
-        <div style={{ fontSize: '.82rem', color: 'var(--tx2)', marginBottom: 14 }}>Удаление аккаунта необратимо. Все данные заведения, сотрудники и подписка будут удалены.</div>
-        {!deleteConfirm ? (
-          <Btn variant="danger" onClick={() => setDeleteConfirm(true)}>Удалить аккаунт</Btn>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: '.82rem', color: '#ff3b30', fontWeight: 600 }}>Вы уверены? Это действие нельзя отменить.</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Btn variant="danger" small onClick={deleteAccount} disabled={deleting}>
-                {deleting ? 'Удаление...' : 'Да, удалить всё'}
-              </Btn>
-              <Btn variant="ghost" small onClick={() => setDeleteConfirm(false)}>Отмена</Btn>
-            </div>
+      <Card>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Тёмная тема</div>
+            <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2 }}>Оформление кабинета на этом устройстве</div>
           </div>
-        )}
+          <MiniToggle value={!!theme.dark} onChange={() => theme.toggle()} color="#007aff" />
+        </div>
       </Card>
     </div>
   )
@@ -1197,6 +1085,255 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
   )
 }
 
+// ── OVERVIEW TAB ──────────────────────────────────────────────────────────────
+// Один вопрос экрана: «как дела сегодня?» — касса, кальяны, заказы + максимум 2 аномалии.
+
+function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo: (tab: string) => void }) {
+  const cur = restaurant?.currency || '€'
+  const plan = restaurant?.subscription_plan || ''
+  const status = restaurant?.subscription_status || ''
+  const isActive = status === 'active' || status === 'trialing' || status === 'canceling'
+  const appOk = (id: string) => {
+    const a = APPS.find(x => x.id === id)
+    return isActive && !!a && (a.plans.includes(plan) || ((restaurant as any)?.comp_apps || []).includes(id))
+  }
+
+  const [loading, setLoading] = useState(true)
+  const [shift, setShift] = useState<any>(null)
+  const [hookah, setHookah] = useState({ qty: 0, revenue: 0 })
+  const [orders, setOrders] = useState({ total: 0, fresh: 0 })
+
+  useEffect(() => {
+    if (!restaurant?.id) return
+    let gone = false
+    ;(async () => {
+      const today = fmtDay(new Date())
+      const dayStartISO = new Date(new Date().setHours(0, 0, 0, 0)).toISOString()
+      const [shiftRes, hookahRes, ordersRes] = await Promise.all([
+        db.from('shifts').select('*').eq('restaurant_id', restaurant.id).eq('date', today).order('created_at', { ascending: false }).limit(1),
+        appOk('stash') ? db.from('hookah_sales').select('quantity, price, is_free, date').eq('date', today) : Promise.resolve({ data: [] }),
+        appOk('menu') ? db.from('menu_orders').select('id, status, created_at').gte('created_at', dayStartISO) : Promise.resolve({ data: [] }),
+      ])
+      if (gone) return
+      setShift((shiftRes.data || [])[0] || null)
+      const hs = hookahRes.data || []
+      setHookah({
+        qty: hs.reduce((s: number, r: any) => s + (r.quantity || 0), 0),
+        revenue: hs.reduce((s: number, r: any) => s + (r.is_free ? 0 : (r.price || 0) * (r.quantity || 0)), 0),
+      })
+      const os = ordersRes.data || []
+      setOrders({ total: os.length, fresh: os.filter((o: any) => o.status === 'new').length })
+      setLoading(false)
+    })()
+    return () => { gone = true }
+  }, [restaurant?.id])
+
+  // Аномалии: показываем максимум две, по убыванию важности
+  const issues: { key: string; title: string; sub: string; color: string; tab?: string }[] = []
+  if (status === 'past_due') issues.push({ key: 'pd', title: 'Платёж не прошёл', sub: 'Обновите карту, иначе доступ закроется', color: '#ff3b30', tab: 'billing' })
+  if (!loading && (!shift || shift.status !== 'open')) issues.push({ key: 'sh', title: 'Смена не открыта', sub: 'Менеджер ещё не открыл смену в Mise Manager', color: '#ff9500' })
+  if (orders.fresh > 0) issues.push({ key: 'or', title: `Новые заказы: ${orders.fresh}`, sub: 'Ждут принятия — People → Зал', color: '#007aff', tab: 'notifications' })
+  if (status === 'canceling' && restaurant?.subscription_ends_at) issues.push({ key: 'cn', title: 'Подписка отменена', sub: `Доступ до ${new Date(restaurant.subscription_ends_at).toLocaleDateString('ru-RU')}`, color: '#ff9500', tab: 'billing' })
+
+  const stats: { l: string; v: string; c: string }[] = [
+    { l: 'Наличные', v: `${cur}${(shift?.income || 0).toLocaleString()}`, c: '#007aff' },
+    { l: 'Безнал', v: `${cur}${(shift?.income_card || 0).toLocaleString()}`, c: '#34c759' },
+    ...(appOk('stash') ? [{ l: 'Кальяны', v: `${hookah.qty} · ${cur}${hookah.revenue.toLocaleString()}`, c: '#ff9500' }] : []),
+    ...(appOk('menu') ? [{ l: 'Заказы меню', v: String(orders.total), c: '#ff2d55' }] : []),
+  ]
+
+  return (
+    <div>
+      <SectionTitle title="Обзор" sub={new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })} />
+
+      {loading ? (
+        // Скелетоны той же геометрии, что и контент — данные «проявляются», а не грузятся
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 10 }}>
+          {[0, 1, 2, 3].map(i => <div key={i} style={{ height: 76, borderRadius: 16, background: 'var(--fill)', animation: 'dashPulse 1.2s ease-in-out infinite' }} />)}
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 10, marginBottom: 16 }}>
+            {stats.map(it => (
+              <Card key={it.l} style={{ padding: '14px 16px' }}>
+                <div style={{ fontSize: '.68rem', color: 'var(--tx2)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4, letterSpacing: '.04em' }}>{it.l}</div>
+                <div style={{ fontSize: '1.3rem', fontWeight: 700, color: it.c, whiteSpace: 'nowrap' }}>{it.v}</div>
+              </Card>
+            ))}
+          </div>
+
+          {shift?.status === 'open' && (
+            <Card style={{ marginBottom: 10, padding: '12px 16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '.85rem', color: 'var(--tx2)' }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#34c759', flexShrink: 0 }} />
+                Смена открыта · касса {cur}{(shift.closing_balance || 0).toLocaleString()}
+              </div>
+            </Card>
+          )}
+
+          {issues.slice(0, 2).map(it => (
+            <Card key={it.key} onClick={it.tab ? () => onGo(it.tab!) : undefined}
+              style={{ marginBottom: 10, padding: '12px 16px', borderLeft: `3px solid ${it.color}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>{it.title}</div>
+                  <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 1 }}>{it.sub}</div>
+                </div>
+                {it.tab && <svg width="8" height="14" fill="none" stroke="var(--tx3)" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 10 18"><path d="M2 1l7 8-7 8" /></svg>}
+              </div>
+            </Card>
+          ))}
+
+          {issues.length === 0 && (
+            <Card style={{ padding: '12px 16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '.85rem', color: 'var(--tx2)' }}>
+                <span style={{ color: '#34c759', fontWeight: 700 }}>✓</span> Всё в порядке — аномалий нет
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── NOTIFICATIONS TAB ─────────────────────────────────────────────────────────
+// Не раздел с табами, а одна лента: заказы, вызовы официанта, события подписки.
+
+function NotificationsTab({ restaurant, onSeen }: { restaurant: Restaurant | null; onSeen: () => void }) {
+  const [rows, setRows] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const status = restaurant?.subscription_status || ''
+
+  useEffect(() => { onSeen() }, [])
+  useEffect(() => {
+    if (!restaurant?.id) return
+    const from = new Date(Date.now() - 2 * 864e5).toISOString()
+    db.from('menu_orders').select('*').gte('created_at', from).order('created_at', { ascending: false }).limit(50)
+      .then(({ data }: any) => { setRows(data || []); setLoading(false) })
+  }, [restaurant?.id])
+
+  const orderStatus: Record<string, { label: string; color: string }> = {
+    new: { label: 'Новый', color: '#ff9500' }, in_progress: { label: 'В работе', color: '#007aff' },
+    done: { label: 'Выдан', color: '#34c759' }, cancelled: { label: 'Отменён', color: 'var(--tx3)' },
+  }
+
+  return (
+    <div>
+      <SectionTitle title="Уведомления" sub="Заказы, вызовы и события за последние 2 дня" />
+
+      {status === 'past_due' && (
+        <Card style={{ marginBottom: 10, padding: '12px 16px', borderLeft: '3px solid #ff3b30' }}>
+          <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>Платёж по подписке не прошёл</div>
+          <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 1 }}>Stripe повторит списание; проверьте карту во вкладке «Подписка»</div>
+        </Card>
+      )}
+
+      {loading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {[0, 1, 2].map(i => <div key={i} style={{ height: 64, borderRadius: 16, background: 'var(--fill)', animation: 'dashPulse 1.2s ease-in-out infinite' }} />)}
+        </div>
+      ) : rows.length === 0 ? (
+        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>Пока тихо — уведомлений нет</div></Card>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {rows.map(o => {
+            const isCall = Array.isArray(o.items) && o.items[0]?.call === 'waiter'
+            const st = orderStatus[o.status] || orderStatus.new
+            const count = isCall ? 0 : (Array.isArray(o.items) ? o.items.reduce((s: number, i: any) => s + (i.qty || 1), 0) : 0)
+            return (
+              <Card key={o.id} style={{ padding: '12px 16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 10, background: (isCall ? '#ff9500' : '#ff2d55') + '15', color: isCall ? '#ff9500' : '#ff2d55', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    {isCall
+                      ? <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><path d="M18 8.4a6 6 0 10-12 0c0 6.6-2.7 8.6-2.7 8.6h17.4S18 15 18 8.4"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg>
+                      : <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>
+                      {isCall ? 'Вызов официанта' : `Заказ · ${count} поз.`}{o.table_number ? ` · стол ${o.table_number}` : ''}
+                    </div>
+                    <div style={{ fontSize: '.75rem', color: 'var(--tx2)', marginTop: 1 }}>{timeAgo(o.created_at)}</div>
+                  </div>
+                  <span style={{ fontSize: '.7rem', fontWeight: 700, color: st.color, background: 'var(--fill)', padding: '3px 10px', borderRadius: 980, flexShrink: 0 }}>{st.label}</span>
+                </div>
+              </Card>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── ACCOUNT TAB ───────────────────────────────────────────────────────────────
+
+function AccountTab({ restaurant, user }: { restaurant: Restaurant | null; user: any }) {
+  const router = useRouter()
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const planName = PLANS.find(p => p.id === restaurant?.subscription_plan)?.name
+
+  const deleteAccount = async () => {
+    setDeleting(true)
+    try {
+      const res = await fetch('/api/account/delete', { method: 'POST' })
+      const data = await res.json()
+      if (data.error) { alert(data.error); return }
+      await supabase.auth.signOut()
+      router.replace('/auth/login')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div>
+      <SectionTitle title="Аккаунт" sub="Владелец заведения" />
+
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--fill)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '1.4rem', fontWeight: 700, color: 'var(--tx2)' }}>
+            {restaurant?.logo_url
+              ? <img src={restaurant.logo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : (restaurant?.name || 'M')[0].toUpperCase()}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--tx)' }}>{restaurant?.name || 'Мой ресторан'}</div>
+            <div style={{ fontSize: '.8rem', color: 'var(--tx2)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis' }}>{user?.email}</div>
+          </div>
+          {planName && <span style={{ fontSize: '.7rem', fontWeight: 700, color: '#007aff', background: '#007aff12', padding: '3px 10px', borderRadius: 980, flexShrink: 0 }}>{planName}</span>}
+        </div>
+      </Card>
+
+      <Card style={{ marginBottom: 14 }}>
+        <button onClick={async () => { await supabase.auth.signOut(); router.replace('/auth/login') }}
+          style={{ background: 'none', border: 'none', color: '#ff3b30', fontSize: '.88rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
+          Выйти из аккаунта
+        </button>
+      </Card>
+
+      <Card style={{ border: '1px solid rgba(255,59,48,.15)' }}>
+        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 4, color: 'var(--tx)' }}>Опасная зона</div>
+        <div style={{ fontSize: '.82rem', color: 'var(--tx2)', marginBottom: 14 }}>Удаление аккаунта необратимо. Все данные заведения, сотрудники и подписка будут удалены.</div>
+        {!deleteConfirm ? (
+          <Btn variant="danger" onClick={() => setDeleteConfirm(true)}>Удалить аккаунт</Btn>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: '.82rem', color: '#ff3b30', fontWeight: 600 }}>Вы уверены? Это действие нельзя отменить.</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn variant="danger" small onClick={deleteAccount} disabled={deleting}>
+                {deleting ? 'Удаление...' : 'Да, удалить всё'}
+              </Btn>
+              <Btn variant="ghost" small onClick={() => setDeleteConfirm(false)}>Отмена</Btn>
+            </div>
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -1214,18 +1351,39 @@ export default function Dashboard() {
   })
   const [user, setUser] = useState<any>(null)
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null)
-  const [tab, setTab] = useState('apps')
+  const [tab, setTab] = useState('overview')
   const [authChecked, setAuthChecked] = useState(false)
+  const [unseen, setUnseen] = useState(0)
 
   const loadRestaurant = async (userId: string) => {
     const { data } = await db.from('restaurants').select('*').eq('owner_id', userId).single()
     setRestaurant(data)
   }
 
+  // Переходы — состояние внутри страницы; URL синхронизируется без перезагрузок
+  const go = (id: string) => {
+    setTab(id)
+    history.replaceState(null, '', `/dashboard?tab=${id}`)
+  }
+
+  // Бейдж уведомлений: новые заказы, появившиеся после последнего открытия ленты
+  useEffect(() => {
+    if (!restaurant?.id) return
+    const check = async () => {
+      const seen = +(localStorage.getItem('mise_notif_seen') || 0)
+      const { data } = await db.from('menu_orders').select('id, created_at, status').eq('status', 'new').limit(50)
+      setUnseen((data || []).filter((o: any) => new Date(o.created_at).getTime() > seen).length)
+    }
+    check()
+    const iv = setInterval(check, 60000)
+    return () => clearInterval(iv)
+  }, [restaurant?.id])
+  const markSeen = () => { localStorage.setItem('mise_notif_seen', String(Date.now())); setUnseen(0) }
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const t = params.get('tab')
-    if (t) setTab(t)
+    if (t) setTab(t === 'categories' ? 'settings' : t) // категории переехали в настройки
     supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session?.user) {
         setAuthChecked(true)
@@ -1258,67 +1416,122 @@ export default function Dashboard() {
     </div>
   )
 
+  const SideItem = ({ id, label, badge = 0 }: { id: string; label: string; badge?: number }) => (
+    <button onClick={() => { go(id); if (id === 'notifications') markSeen() }} style={{
+      display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+      padding: '9px 12px', borderRadius: 10, border: 'none', fontFamily: 'inherit',
+      fontSize: '.85rem', fontWeight: tab === id ? 600 : 500, textAlign: 'left',
+      background: tab === id ? 'var(--fill)' : 'transparent',
+      color: tab === id ? 'var(--tx)' : 'var(--tx2)', cursor: 'pointer',
+    }}>
+      <TabIcon id={id} size={16} />
+      <span style={{ flex: 1 }}>{label}</span>
+      {badge > 0 && <span style={{ fontSize: '.65rem', fontWeight: 700, color: '#fff', background: '#ff3b30', borderRadius: 980, padding: '1px 7px' }}>{badge}</span>}
+    </button>
+  )
+
+  const avatar = (size: number) => (
+    <div style={{ width: size, height: size, borderRadius: size * 0.3, background: 'var(--fill)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: size * 0.42, fontWeight: 700, color: 'var(--tx2)' }}>
+      {restaurant?.logo_url
+        ? <img src={restaurant.logo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        : (restaurant?.name || 'M')[0].toUpperCase()}
+    </div>
+  )
+
   return (
     <>
       {showSplash && <SplashScreen onDone={() => { sessionStorage.setItem('mise_splash_shown', '1'); setShowSplash(false) }} />}
 
       <div style={{ minHeight: '100vh', background: 'var(--bg)', fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif', WebkitFontSmoothing: 'antialiased' }}>
-        {/* Тактильный отклик: на iPhone без :active кнопки выглядят «мёртвыми» */}
         <style>{`
-          button { -webkit-tap-highlight-color: transparent; transition: transform .1s ease, opacity .15s ease; }
+          /* Тактильный отклик: на iPhone без :active кнопки выглядят «мёртвыми» */
+          button { -webkit-tap-highlight-color: transparent; transition: transform .1s ease, opacity .15s ease, background .15s ease; }
           button:active:not(:disabled) { transform: scale(.96); opacity: .8; }
+          /* Контент проявляется: crossfade + сдвиг 8px; рама (сайдбар/шапка) неподвижна */
+          @keyframes dashIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+          @keyframes dashPulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+          .dash-fade { animation: dashIn .16s ease-out; }
+          .dash-side { display: none; }
+          @media (min-width: 900px) {
+            .dash-side { display: flex; }
+            .dash-mobilebar, .dash-pills { display: none !important; }
+            .dash-content { margin-left: 232px; }
+          }
         `}</style>
-        {/* NAV */}
-        <nav style={{ background: 'var(--navbg)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(var(--seprgb),.1)', padding: '0 20px', height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <LogoMark size={28} />
+
+        {/* Сайдбар (desktop): два этажа — работа / обслуживание, аккаунт внизу */}
+        <aside className="dash-side" style={{ position: 'fixed', top: 0, left: 0, bottom: 0, width: 232, flexDirection: 'column', padding: '22px 12px 16px', borderRight: '1px solid rgba(var(--seprgb),.1)', background: 'var(--surface)', zIndex: 100, boxSizing: 'border-box' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px', marginBottom: 24 }}>
+            <LogoMark size={26} />
             <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--tx)', letterSpacing: '-.02em' }}>mise</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button onClick={theme.toggle} style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--fill)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx)' }}>
-              {theme.dark
-                ? <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" /></svg>
-                : <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z" /></svg>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {NAV_MAIN.map(t => <SideItem key={t.id} id={t.id} label={t.label} />)}
+          </div>
+          <div style={{ height: 1, background: 'rgba(var(--seprgb),.1)', margin: '14px 12px' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {NAV_SERVICE.map(t => <SideItem key={t.id} id={t.id} label={t.label} badge={t.id === 'notifications' ? unseen : 0} />)}
+          </div>
+          <div style={{ flex: 1 }} />
+          <button onClick={() => go('account')} style={{
+            display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px',
+            borderRadius: 12, border: 'none', fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
+            background: tab === 'account' ? 'var(--fill)' : 'transparent',
+          }}>
+            {avatar(32)}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '.82rem', fontWeight: 600, color: 'var(--tx)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{restaurant?.name || 'Мой ресторан'}</div>
+              <div style={{ fontSize: '.68rem', color: 'var(--tx3)' }}>Аккаунт</div>
+            </div>
+          </button>
+        </aside>
+
+        {/* Шапка (mobile): логотип + колокольчик + аватар */}
+        <nav className="dash-mobilebar" style={{ background: 'var(--navbg)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(var(--seprgb),.1)', padding: '0 16px', height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <LogoMark size={26} />
+            <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--tx)', letterSpacing: '-.02em' }}>mise</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button onClick={() => { go('notifications'); markSeen() }} style={{ position: 'relative', width: 32, height: 32, borderRadius: '50%', background: 'var(--fill)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx)' }}>
+              <TabIcon id="notifications" size={15} />
+              {unseen > 0 && <span style={{ position: 'absolute', top: 2, right: 2, width: 9, height: 9, borderRadius: '50%', background: '#ff3b30', border: '2px solid var(--bg)' }} />}
             </button>
-            <span style={{ fontSize: '.75rem', color: 'var(--tx3)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</span>
-            <button onClick={async () => { await supabase.auth.signOut(); router.replace('/auth/login') }}
-              style={{ background: 'none', border: 'none', color: '#ff3b30', cursor: 'pointer', fontSize: '.78rem', fontFamily: 'inherit', fontWeight: 600 }}>
-              Выйти
-            </button>
+            <button onClick={() => go('account')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>{avatar(32)}</button>
           </div>
         </nav>
 
-        <div style={{ maxWidth: 920, margin: '0 auto', padding: '20px 16px' }}>
-          {/* Page header */}
-          <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--tx)', marginBottom: 2 }}>{restaurant?.name || 'Мой ресторан'}</div>
-            <div style={{ color: 'var(--tx3)', fontSize: '.78rem' }}>Личный кабинет</div>
-          </div>
+        <div className="dash-content">
+          <div style={{ maxWidth: 880, margin: '0 auto', padding: '20px 16px' }}>
+            {/* Пилюли (mobile) */}
+            <div className="dash-pills" style={{ display: 'flex', gap: 4, marginBottom: 20, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'none' }}>
+              {[...NAV_MAIN, ...NAV_SERVICE].map(t => (
+                <button key={t.id} onClick={() => { go(t.id); if (t.id === 'notifications') markSeen() }} style={{
+                  display: 'flex', alignItems: 'center', gap: 7,
+                  padding: '7px 15px', borderRadius: 10, border: 'none', fontFamily: 'inherit',
+                  fontSize: '.8rem', fontWeight: tab === t.id ? 700 : 500,
+                  cursor: 'pointer', whiteSpace: 'nowrap',
+                  background: tab === t.id ? 'var(--tx)' : 'var(--surface)',
+                  color: tab === t.id ? 'var(--tabon)' : 'var(--tx2)',
+                  boxShadow: tab === t.id ? 'none' : '0 1px 3px rgba(0,0,0,.06)',
+                }}>
+                  <TabIcon id={t.id} />
+                  {t.label}
+                </button>
+              ))}
+            </div>
 
-          {/* Tabs */}
-          <div style={{ display: 'flex', gap: 4, marginBottom: 20, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'none' }}>
-            {TABS.map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)} style={{
-                display: 'flex', alignItems: 'center', gap: 7,
-                padding: '7px 15px', borderRadius: 10, border: 'none', fontFamily: 'inherit',
-                fontSize: '.8rem', fontWeight: tab === t.id ? 700 : 500,
-                cursor: 'pointer', whiteSpace: 'nowrap',
-                background: tab === t.id ? 'var(--tx)' : 'var(--surface)',
-                color: tab === t.id ? 'var(--tabon)' : 'var(--tx2)',
-                boxShadow: tab === t.id ? 'none' : '0 1px 3px rgba(0,0,0,.06)',
-                transition: 'all .15s',
-              }}>
-                <TabIcon id={t.id} />
-                {t.label}
-              </button>
-            ))}
+            {/* key={tab} перезапускает анимацию проявления при каждом переходе */}
+            <main key={tab} className="dash-fade">
+              {tab === 'overview'      && <OverviewTab restaurant={restaurant} onGo={go} />}
+              {tab === 'apps'          && <AppsTab restaurant={restaurant} />}
+              {tab === 'team'          && <TeamTab restaurant={restaurant} />}
+              {tab === 'notifications' && <NotificationsTab restaurant={restaurant} onSeen={markSeen} />}
+              {tab === 'settings'      && <SettingsTab restaurant={restaurant} theme={theme} onUpdate={() => user && loadRestaurant(user.id)} />}
+              {tab === 'billing'       && <BillingTab restaurant={restaurant} user={user} onRefresh={() => user && loadRestaurant(user.id)} />}
+              {tab === 'account'       && <AccountTab restaurant={restaurant} user={user} />}
+            </main>
           </div>
-
-          {tab === 'apps'       && <AppsTab restaurant={restaurant} />}
-          {tab === 'categories' && restaurant && <CategoriesTab restaurantId={restaurant.id} />}
-          {tab === 'team'       && <TeamTab restaurant={restaurant} />}
-          {tab === 'settings'   && <SettingsTab restaurant={restaurant} onUpdate={() => user && loadRestaurant(user.id)} />}
-          {tab === 'billing'    && <BillingTab restaurant={restaurant} user={user} onRefresh={() => user && loadRestaurant(user.id)} />}
         </div>
       </div>
     </>
