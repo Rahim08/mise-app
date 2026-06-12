@@ -5,7 +5,7 @@
 > **Обновляй раздел «СТАТУС» и «ROADMAP» после каждой рабочей сессии.**
 >
 > Легенда: ✅ готово · 🚧 в работе · ⬜ не начато
-> Дата последнего обновления: 2026-06-12 (вторая сессия: People «Зал», нал/безнал, зарплата из инкассы, cron, лимиты)
+> Дата последнего обновления: 2026-06-12 (сессии 2–8). GitHub→Vercel AUTO-DEPLOY АКТИВЕН: push в main = прод!
 
 ---
 
@@ -162,7 +162,21 @@ SaaS для управления рестораном. Первый клиент
 - ✅ Admin: редизайн — тёмная тема, email владельца, реальный MRR, единые статусы подписки
 - ✅ Stash: списание (write-off) с причиной; цвета остатка (≤200 жёлтый, 0 красный, иначе зелёный)
 
-**Capacitor:** ✅ гибрид-конфиг + `docs/IOS_BUILD.md`. ⬜ `cap add ios` + подпись (на машине, нативный этап).
+**Сессии 3–8 (2026-06-12):**
+- ✅ Manager: нал/безнал раздельно (`income`=нал, касса от него; `income_card`), зарплата из инкассы, ошибки сохранения показываются, locked-режим «матовое стекло»+Редактировать
+- ✅ Analytics: тумблер безнала, вкладка «Кальян» (выручка/табак/склад/«в заведении»/топ вкусов), полоска Нал·Карта в «Месяц»
+- ✅ **Смена кальянщика**: Stash → таб «Смена» (счётчики по вкусам, сегмент Продажа|Бесплатно — is_free не в выручке, но табак списывается). Цена/порция: дашборд → Настройки → Кальян
+- ✅ Menu: модификаторы (jsonb + шторка выбора), цифровой счёт (localStorage 6ч) + «Позвать официанта» (items[0].call='waiter'), валюта, ?table=N
+- ✅ People: «Зал» (стоп-лист kitchen+manager / заказы+бейдж / чек-листы / техкарты), колокольчик уведомлений, часы+«Мой месяц»+Зарплата в Явке
+- ✅ Дизайн-система `components/ui.tsx` (для нового кода); тёмная тема дашборда (CSS-vars в globals.css, html.mise-dark)
+- ✅ Безопасность: серверные лимиты тарифа в /api/db (PLAN_LIMITS), rate-limit PIN в БД (pin_attempts), Stripe verifyOwner+subscription.updated+invoice-fallback
+- ✅ Опс: /api/log→app_errors+ErrorReporter, docs/OPS.md, vercel.json cron (daily 18:00, Hobby-лимит), CRON_SECRET в Vercel
+- ✅ Лендинг: секция People+Menu; privacy: «Геолокация сотрудников»; terms 2.1; middleware→proxy.ts; chart.js удалён
+- ✅ Git запушен + auto-deploy; полный дамп схемы: `docs/migrations/...Introspection.csv` (мёртвые: employees.card_amount, menu_items.syrve_id, menu_orders.pos_*, rs.gemini_api_key/timezone/working_days, transactions, salary_records)
+- ⚠️ **`docs/migrations/hookah-2026-06.sql` НЕ применена** (смена кальянщика не сохранит без неё)
+- Решения: Syrve в Италии мёртв — НЕ заменяем (ждём API банка); отдельные приложения, не единый shell; i18n en/ru/it/fr/az/tr/uk/kk — в самом конце, словари+ИИ-перевод; Live Activity и недельный дайджест — нет
+
+**Capacitor:** ✅ `ios/` создан (cap add ios, SPM без CocoaPods). ⬜ Xcode-этап на машине: подпись (Bundle `app.getmise.mise`), plist-разрешения, Face ID, APNs, виджет «Касса сегодня».
 
 **People (Этап 1 — готов):**
 - ✅ Приложение `/people`, индиго, role-aware таб-бар
