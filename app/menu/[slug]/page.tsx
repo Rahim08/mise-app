@@ -40,6 +40,7 @@ interface MenuItem {
   is_available: boolean
   calories: number | null
   allergens: string[] | null
+  modifiers: { name: string; options: { name: string; price: number }[] }[] | null
   position: number
 }
 
@@ -53,6 +54,15 @@ interface Restaurant {
 interface CartItem {
   item: MenuItem
   qty: number
+  opts?: { name: string; price: number }[] // выбранные модификаторы
+}
+
+// Один и тот же товар с разными модификаторами — разные строки корзины
+function entryKey(c: { item: MenuItem; opts?: { name: string }[] }) {
+  return c.item.id + '|' + (c.opts || []).map(o => o.name).join(',')
+}
+function unitPrice(c: CartItem) {
+  return (c.item.price || 0) + (c.opts || []).reduce((s, o) => s + (o.price || 0), 0)
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -134,31 +144,47 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
     setLoading(false)
   }
 
-  const addToCart = (item: MenuItem) => {
+  // Позиция с модификаторами сначала проходит через шторку выбора
+  const [modItem, setModItem] = useState<MenuItem | null>(null)
+  const [modSel, setModSel] = useState<number[]>([])
+
+  const addToCart = (item: MenuItem, opts?: { name: string; price: number }[]) => {
+    if (!opts && item.modifiers && item.modifiers.length > 0) {
+      setModSel(item.modifiers.map(() => 0)); setModItem(item)
+      return
+    }
+    const key = entryKey({ item, opts })
     setCart(prev => {
-      const existing = prev.find(c => c.item.id === item.id)
-      if (existing) return prev.map(c => c.item.id === item.id ? { ...c, qty: c.qty + 1 } : c)
-      return [...prev, { item, qty: 1 }]
+      const existing = prev.find(c => entryKey(c) === key)
+      if (existing) return prev.map(c => entryKey(c) === key ? { ...c, qty: c.qty + 1 } : c)
+      return [...prev, { item, qty: 1, opts }]
     })
   }
 
   const removeFromCart = (itemId: string) => {
     setCart(prev => {
-      const existing = prev.find(c => c.item.id === itemId)
-      if (!existing) return prev
-      if (existing.qty === 1) return prev.filter(c => c.item.id !== itemId)
-      return prev.map(c => c.item.id === itemId ? { ...c, qty: c.qty - 1 } : c)
+      const idx = prev.findIndex(c => c.item.id === itemId)
+      if (idx < 0) return prev
+      const c = prev[idx]
+      if (c.qty === 1) return prev.filter((_, i) => i !== idx)
+      return prev.map((x, i) => i === idx ? { ...x, qty: x.qty - 1 } : x)
     })
   }
 
-  const cartQty = (itemId: string) => cart.find(c => c.item.id === itemId)?.qty || 0
-  const cartTotal = cart.reduce((s, c) => s + (c.item.price || 0) * c.qty, 0)
+  const incEntry = (idx: number, d: number) => {
+    setCart(prev => prev
+      .map((c, i) => i === idx ? { ...c, qty: c.qty + d } : c)
+      .filter(c => c.qty > 0))
+  }
+
+  const cartQty = (itemId: string) => cart.filter(c => c.item.id === itemId).reduce((s, c) => s + c.qty, 0)
+  const cartTotal = cart.reduce((s, c) => s + unitPrice(c) * c.qty, 0)
   const cartCount = cart.reduce((s, c) => s + c.qty, 0)
 
   const sendOrder = async () => {
     if (!restaurant || cart.length === 0) return
     // Snapshot before clearing
-    const orderItems = cart.map(c => ({ id: c.item.id, name: c.item.name, price: c.item.price, qty: c.qty }))
+    const orderItems = cart.map(c => ({ id: c.item.id, name: c.item.name, price: unitPrice(c), qty: c.qty, opts: c.opts?.map(o => o.name) }))
     const total = cartTotal
     saveBill([...bill, { items: orderItems, total, at: Date.now() }])
     setOrderSent(true); setShowCart(false); setCart([])
@@ -407,6 +433,40 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
         </div>
       </div>
 
+      {/* ── MODIFIERS SHEET ── */}
+      {modItem && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 520, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setModItem(null)}>
+          <div style={{ background: T.surface, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '80dvh', overflowY: 'auto', paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))', animation: 'slideUp .3s ease' }} onClick={e => e.stopPropagation()}>
+            <div style={{ width: 40, height: 4, background: T.fill, borderRadius: 2, margin: '14px auto 0' }} />
+            <div style={{ fontWeight: 700, fontSize: 18, textAlign: 'center', padding: '14px 20px 4', color: T.text }}>{modItem.name}</div>
+            <div style={{ padding: '8px 16px 16px' }}>
+              {(modItem.modifiers || []).map((g, gi) => (
+                <div key={gi} style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.text2, textTransform: 'uppercase', letterSpacing: 0.5, padding: '0 2px 8px' }}>{g.name}</div>
+                  <div style={{ background: T.surface2, borderRadius: 14, overflow: 'hidden' }}>
+                    {g.options.map((o, oi) => (
+                      <button key={oi} onClick={() => setModSel(s => s.map((x, i) => i === gi ? oi : x))} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', borderBottom: oi < g.options.length - 1 ? `0.5px solid ${T.sep}` : 'none' }}>
+                        <span style={{ fontSize: 15, color: T.text, fontWeight: modSel[gi] === oi ? 600 : 400 }}>{o.name}{o.price > 0 ? `  +${money(o.price)}` : ''}</span>
+                        <span style={{ width: 22, height: 22, borderRadius: '50%', border: `2px solid ${modSel[gi] === oi ? accent : T.sep}`, background: modSel[gi] === oi ? accent : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          {modSel[gi] === oi && <svg width="11" height="11" fill="none" stroke="#fff" strokeWidth="3" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" /></svg>}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <button onClick={() => {
+                const opts = (modItem.modifiers || []).map((g, gi) => g.options[modSel[gi] || 0]).filter(Boolean)
+                addToCart(modItem, opts)
+                setModItem(null)
+              }} style={{ width: '100%', padding: '16px', borderRadius: 16, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 20px ${accent}55` }}>
+                Добавить · {money((modItem.price || 0) + (modItem.modifiers || []).reduce((s, g, gi) => s + (g.options[modSel[gi] || 0]?.price || 0), 0))}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── BILL BUTTON (цифровой счёт) ── */}
       {settings.allow_orders && bill.length > 0 && (
         <button onClick={() => setShowBill(true)} style={{ position: 'fixed', right: 16, bottom: cartCount > 0 ? 96 : 24, zIndex: 290, width: 52, height: 52, borderRadius: '50%', border: 'none', background: T.surface, boxShadow: '0 4px 20px rgba(0,0,0,0.25)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: accent }}>
@@ -467,22 +527,23 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
             <div style={{ fontWeight: 700, fontSize: 18, textAlign: 'center', padding: '14px 20px 0', color: T.text }}>Ваш заказ</div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
               {cart.map((c, i) => (
-                <div key={c.item.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: i < cart.length - 1 ? `0.5px solid ${T.sep}` : 'none' }}>
+                <div key={entryKey(c)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: i < cart.length - 1 ? `0.5px solid ${T.sep}` : 'none' }}>
                   {settings.show_photos && c.item.image_url && <img src={c.item.image_url} alt={c.item.name} style={{ width: 48, height: 48, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }} />}
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600, fontSize: 15, color: T.text }}>{c.item.name}</div>
-                    {c.item.price && <div style={{ fontSize: 14, color: accent, fontWeight: 600, marginTop: 2 }}>{money(c.item.price)}</div>}
+                    {c.opts && c.opts.length > 0 && <div style={{ fontSize: 12, color: T.text2, marginTop: 1 }}>{c.opts.map(o => o.name).join(' · ')}</div>}
+                    {unitPrice(c) > 0 && <div style={{ fontSize: 14, color: accent, fontWeight: 600, marginTop: 2 }}>{money(unitPrice(c))}</div>}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button onClick={() => removeFromCart(c.item.id)} style={{ width: 28, height: 28, borderRadius: '50%', background: T.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.text }}>
+                    <button onClick={() => incEntry(i, -1)} style={{ width: 28, height: 28, borderRadius: '50%', background: T.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.text }}>
                       <svg width="10" height="2" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 10 2"><path d="M1 1h8" /></svg>
                     </button>
                     <span style={{ fontWeight: 700, fontSize: 16, color: T.text, minWidth: 18, textAlign: 'center' }}>{c.qty}</span>
-                    <button onClick={() => addToCart(c.item)} style={{ width: 28, height: 28, borderRadius: '50%', background: accent, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <button onClick={() => incEntry(i, 1)} style={{ width: 28, height: 28, borderRadius: '50%', background: accent, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <svg width="10" height="10" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 10 10"><path d="M5 1v8M1 5h8" /></svg>
                     </button>
                   </div>
-                  {c.item.price && <div style={{ fontWeight: 700, fontSize: 15, color: T.text, minWidth: 60, textAlign: 'right' }}>{money(c.item.price * c.qty)}</div>}
+                  {unitPrice(c) > 0 && <div style={{ fontWeight: 700, fontSize: 15, color: T.text, minWidth: 60, textAlign: 'right' }}>{money(unitPrice(c) * c.qty)}</div>}
                 </div>
               ))}
             </div>

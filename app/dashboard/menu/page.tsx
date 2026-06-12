@@ -33,6 +33,8 @@ interface Category {
   _editing?: boolean
 }
 
+interface ModGroup { name: string; options: { name: string; price: number }[] }
+
 interface MenuItem {
   id: string
   category_id: string
@@ -44,6 +46,7 @@ interface MenuItem {
   is_available: boolean
   calories: number | null
   allergens: string[] | null
+  modifiers: ModGroup[] | null
   position: number
 }
 
@@ -111,6 +114,8 @@ export default function MenuEditor() {
 
   // Item form state
   const [itemForm, setItemForm] = useState({ name: '', description: '', price: '', image_url: '', calories: '', allergens: '', is_available: true, is_visible: true })
+  // Модификаторы (размер/добавки): цена опции в форме — строка, в БД — число
+  const [mods, setMods] = useState<{ name: string; options: { name: string; price: string }[] }[]>([])
   const [photoUploading, setPhotoUploading] = useState(false)
   const itemFileRef = useRef<HTMLInputElement>(null)
   const coverFileRef = useRef<HTMLInputElement>(null)
@@ -203,6 +208,7 @@ export default function MenuEditor() {
   const openAddItem = () => {
     setEditItem(null)
     setItemForm({ name: '', description: '', price: '', image_url: '', calories: '', allergens: '', is_available: true, is_visible: true })
+    setMods([])
     setShowAddItem(true)
   }
 
@@ -214,6 +220,7 @@ export default function MenuEditor() {
       allergens: item.allergens ? item.allergens.join(', ') : '',
       is_available: item.is_available, is_visible: item.is_visible,
     })
+    setMods((item.modifiers || []).map(g => ({ name: g.name, options: g.options.map(o => ({ name: o.name, price: String(o.price || 0) })) })))
     setShowAddItem(true)
   }
 
@@ -231,6 +238,12 @@ export default function MenuEditor() {
       allergens: itemForm.allergens ? itemForm.allergens.split(',').map(a => a.trim()).filter(Boolean) : null,
       is_available: itemForm.is_available,
       is_visible: itemForm.is_visible,
+      modifiers: (() => {
+        const clean = mods
+          .map(g => ({ name: g.name.trim(), options: g.options.filter(o => o.name.trim()).map(o => ({ name: o.name.trim(), price: parseFloat(o.price) || 0 })) }))
+          .filter(g => g.name && g.options.length > 0)
+        return clean.length ? clean : null
+      })(),
       position: editItem ? editItem.position : items.filter(i => i.category_id === selectedCat).length,
       updated_at: new Date().toISOString(),
     }
@@ -599,6 +612,33 @@ export default function MenuEditor() {
               ].map(field => (
                 <input key={field.key} value={(itemForm as any)[field.key]} onChange={e => setItemForm(f => ({ ...f, [field.key]: e.target.value }))} placeholder={field.placeholder} type={field.type || 'text'} style={{ width: '100%', padding: '14px 16px', borderRadius: 14, border: `1px solid ${t.sep2}`, fontSize: 16, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none' }} />
               ))}
+
+              {/* Модификаторы: размер / добавки */}
+              <div style={{ background: t.surface, borderRadius: 14, padding: '12px 14px' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: mods.length ? 10 : 0 }}>Модификаторы</div>
+                {mods.map((g, gi) => (
+                  <div key={gi} style={{ background: t.fill2, borderRadius: 12, padding: 10, marginBottom: 10 }}>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                      <input value={g.name} onChange={e => setMods(ms => ms.map((x, i) => i === gi ? { ...x, name: e.target.value } : x))} placeholder="Группа (Размер, Добавки...)"
+                        style={{ flex: 1, padding: '9px 12px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: 14, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', fontWeight: 600 }} />
+                      <button onClick={() => setMods(ms => ms.filter((_, i) => i !== gi))} style={{ width: 36, borderRadius: 10, border: 'none', background: `${t.red}14`, color: t.red, cursor: 'pointer', fontSize: 16, fontFamily: 'inherit' }}>−</button>
+                    </div>
+                    {g.options.map((o, oi) => (
+                      <div key={oi} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                        <input value={o.name} onChange={e => setMods(ms => ms.map((x, i) => i === gi ? { ...x, options: x.options.map((y, j) => j === oi ? { ...y, name: e.target.value } : y) } : x))} placeholder="Опция (S, M, сыр...)"
+                          style={{ flex: 1, padding: '8px 12px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: 14, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none' }} />
+                        <input type="number" value={o.price} onChange={e => setMods(ms => ms.map((x, i) => i === gi ? { ...x, options: x.options.map((y, j) => j === oi ? { ...y, price: e.target.value } : y) } : x))} placeholder="+0"
+                          style={{ width: 76, textAlign: 'right', padding: '8px 10px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: 14, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none' }} />
+                        <button onClick={() => setMods(ms => ms.map((x, i) => i === gi ? { ...x, options: x.options.filter((_, j) => j !== oi) } : x))} style={{ width: 32, borderRadius: 10, border: 'none', background: t.fill, color: t.text3, cursor: 'pointer', fontSize: 14, fontFamily: 'inherit' }}>−</button>
+                      </div>
+                    ))}
+                    <button onClick={() => setMods(ms => ms.map((x, i) => i === gi ? { ...x, options: [...x.options, { name: '', price: '' }] } : x))} style={{ background: 'none', border: 'none', color: t.purple, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: '2px 0' }}>+ Опция</button>
+                  </div>
+                ))}
+                <button onClick={() => setMods(ms => [...ms, { name: '', options: [{ name: '', price: '' }] }])} style={{ width: '100%', padding: '10px', borderRadius: 10, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: t.text3, fontFamily: 'inherit', fontSize: 13, cursor: 'pointer', marginTop: mods.length ? 0 : 8 }}>
+                  + Группа модификаторов
+                </button>
+              </div>
 
               <div style={{ display: 'flex', gap: 10 }}>
                 <div style={{ flex: 1, background: t.surface, borderRadius: 14, padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

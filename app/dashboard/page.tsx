@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
 import { LogoMark } from '@/components/LogoMark'
+import { useTheme } from '@/hooks/useTheme'
 
 
 
@@ -79,7 +80,7 @@ function SplashScreen({ onDone }: { onDone: () => void }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9999,
-      background: '#f2f2f7',
+      background: 'var(--bg)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       flexDirection: 'column', gap: 24,
       transition: phase === 'out' ? 'opacity .45s ease, transform .45s ease' : 'none',
@@ -103,7 +104,7 @@ function SplashScreen({ onDone }: { onDone: () => void }) {
         </svg>
       </div>
       <div style={{
-        fontSize: '1.8rem', fontWeight: 800, color: '#1c1c1e',
+        fontSize: '1.8rem', fontWeight: 800, color: 'var(--tx)',
         letterSpacing: '-.04em', fontFamily: '-apple-system,sans-serif',
         opacity: bar3 ? 1 : 0,
         transform: bar3 ? 'translateY(0)' : 'translateY(6px)',
@@ -117,7 +118,7 @@ function SplashScreen({ onDone }: { onDone: () => void }) {
 
 function Card({ children, style = {} }: any) {
   return (
-    <div style={{ background: '#fff', borderRadius: 16, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.04)', ...style }}>
+    <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.04)', ...style }}>
       {children}
     </div>
   )
@@ -128,7 +129,7 @@ function Btn({ children, onClick, variant = 'primary', small = false, disabled =
     primary: { background: '#007aff', color: '#fff', border: 'none' },
     danger:  { background: '#ff3b30', color: '#fff', border: 'none' },
     ghost:   { background: 'transparent', color: '#007aff', border: '1px solid rgba(0,122,255,.3)' },
-    gray:    { background: '#f2f2f7', color: '#1c1c1e', border: 'none' },
+    gray:    { background: 'var(--fill)', color: 'var(--tx)', border: 'none' },
   }
   return (
     <button onClick={onClick} disabled={disabled} style={{
@@ -147,7 +148,7 @@ function Btn({ children, onClick, variant = 'primary', small = false, disabled =
 function Field({ label, value, onChange, placeholder, type = 'text', select, options }: any) {
   return (
     <div style={{ marginBottom: 12 }}>
-      {label && <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: '#6d6d72', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</label>}
+      {label && <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: 'var(--tx2)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</label>}
       {select ? (
         <select value={value} onChange={e => onChange(e.target.value)} style={inputStyle}>
           {options.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -161,16 +162,16 @@ function Field({ label, value, onChange, placeholder, type = 'text', select, opt
 
 const inputStyle: any = {
   width: '100%', padding: '9px 12px', borderRadius: 10,
-  border: '1px solid rgba(60,60,67,.2)', fontSize: '.88rem',
+  border: '1px solid rgba(var(--seprgb),.2)', fontSize: '.88rem',
   fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
-  color: '#1c1c1e', background: '#fff',
+  color: 'var(--tx)', background: 'var(--surface)',
 }
 
 function SectionTitle({ title, sub }: { title: string; sub?: string }) {
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1c1c1e', marginBottom: 2 }}>{title}</div>
-      {sub && <div style={{ color: '#6d6d72', fontSize: '.83rem' }}>{sub}</div>}
+      <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--tx)', marginBottom: 2 }}>{title}</div>
+      {sub && <div style={{ color: 'var(--tx2)', fontSize: '.83rem' }}>{sub}</div>}
     </div>
   )
 }
@@ -205,11 +206,11 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
           return (
             <Card key={app.id} style={{ borderTop: `3px solid ${locked ? '#c7c7cc' : app.color}`, display: 'flex', flexDirection: 'column', opacity: locked ? .55 : 1 }}>
               <div style={{ flex: 1 }}>
-                <div style={{ display: 'inline-block', background: (locked ? '#c7c7cc' : app.color) + '18', color: locked ? '#aeaeb2' : app.color, fontSize: '.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 12, letterSpacing: '.02em' }}>{app.hint}</div>
-                <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 3, color: '#1c1c1e' }}>{app.name}</div>
-                <div style={{ color: '#6d6d72', fontSize: '.8rem', marginBottom: 14, lineHeight: 1.5 }}>{app.desc}</div>
+                <div style={{ display: 'inline-block', background: (locked ? '#c7c7cc' : app.color) + '18', color: locked ? 'var(--tx3)' : app.color, fontSize: '.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 12, letterSpacing: '.02em' }}>{app.hint}</div>
+                <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 3, color: 'var(--tx)' }}>{app.name}</div>
+                <div style={{ color: 'var(--tx2)', fontSize: '.8rem', marginBottom: 14, lineHeight: 1.5 }}>{app.desc}</div>
               </div>
-              <button onClick={() => !locked && isActive && router.push(app.path)} style={{ background: locked || !isActive ? '#f2f2f7' : app.color, color: locked || !isActive ? '#aeaeb2' : '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: locked || !isActive ? 'not-allowed' : 'pointer', width: '100%' }}>
+              <button onClick={() => !locked && isActive && router.push(app.path)} style={{ background: locked || !isActive ? 'var(--fill)' : app.color, color: locked || !isActive ? 'var(--tx3)' : '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: locked || !isActive ? 'not-allowed' : 'pointer', width: '100%' }}>
                 {locked ? 'Недоступно в тарифе' : !isActive ? 'Нет подписки' : 'Открыть →'}
               </button>
             </Card>
@@ -218,13 +219,13 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
       </div>
 
       {/* Owner tools — managed from the dashboard, not PIN apps */}
-      <div style={{ fontSize: '.72rem', fontWeight: 700, color: '#6d6d72', textTransform: 'uppercase', letterSpacing: '.06em', margin: '4px 2px 10px' }}>Управление</div>
+      <div style={{ fontSize: '.72rem', fontWeight: 700, color: 'var(--tx2)', textTransform: 'uppercase', letterSpacing: '.06em', margin: '4px 2px 10px' }}>Управление</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 14, marginBottom: 16 }}>
         <Card style={{ borderTop: '3px solid #ff2d55', display: 'flex', flexDirection: 'column' }}>
           <div style={{ flex: 1 }}>
             <div style={{ display: 'inline-block', background: '#ff2d5518', color: '#ff2d55', fontSize: '.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 12, letterSpacing: '.02em' }}>Для гостей</div>
-            <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 3, color: '#1c1c1e' }}>Mise Menu</div>
-            <div style={{ color: '#6d6d72', fontSize: '.8rem', marginBottom: 14, lineHeight: 1.5 }}>QR-меню · Категории · Позиции · Публикация</div>
+            <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 3, color: 'var(--tx)' }}>Mise Menu</div>
+            <div style={{ color: 'var(--tx2)', fontSize: '.8rem', marginBottom: 14, lineHeight: 1.5 }}>QR-меню · Категории · Позиции · Публикация</div>
           </div>
           <button onClick={() => router.push('/dashboard/menu')} style={{ background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: 'pointer', width: '100%' }}>
             Открыть редактор →
@@ -232,11 +233,11 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
         </Card>
       </div>
 
-      <Card style={{ background: '#f9f9f9', boxShadow: 'none', border: '1px solid rgba(0,0,0,.06)' }}>
+      <Card style={{ background: 'var(--fill2)', boxShadow: 'none', border: '1px solid rgba(0,0,0,.06)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
           <div>
-            <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 2, color: '#1c1c1e' }}>Установить на iPhone</div>
-            <div style={{ color: '#6d6d72', fontSize: '.8rem' }}>Safari → «Поделиться» → «На экран Домой»</div>
+            <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 2, color: 'var(--tx)' }}>Установить на iPhone</div>
+            <div style={{ color: 'var(--tx2)', fontSize: '.8rem' }}>Safari → «Поделиться» → «На экран Домой»</div>
           </div>
           <div style={{ background: '#34c75915', color: '#34c759', fontSize: '.72rem', fontWeight: 700, padding: '4px 12px', borderRadius: 980 }}>PWA · Без App Store</div>
         </div>
@@ -295,12 +296,12 @@ function EmployeesTab({ restaurantId }: { restaurantId: string }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 16 }}>
         {[
-          { l: 'Сотрудников', v: String(employees.length), c: '#1c1c1e' },
+          { l: 'Сотрудников', v: String(employees.length), c: 'var(--tx)' },
           { l: 'ФОТ/мес', v: `€${total.toLocaleString()}`, c: '#007aff' },
           { l: 'На карту', v: `€${totalCard.toLocaleString()}`, c: '#af52de' },
         ].map(item => (
           <Card key={item.l} style={{ padding: '14px 16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '.68rem', color: '#6d6d72', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4, letterSpacing: '.04em' }}>{item.l}</div>
+            <div style={{ fontSize: '.68rem', color: 'var(--tx2)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4, letterSpacing: '.04em' }}>{item.l}</div>
             <div style={{ fontSize: '1.3rem', fontWeight: 700, color: item.c }}>{item.v}</div>
           </Card>
         ))}
@@ -308,7 +309,7 @@ function EmployeesTab({ restaurantId }: { restaurantId: string }) {
 
       {showForm && (
         <Card style={{ marginBottom: 14, border: '1px solid #007aff' }}>
-          <div style={{ fontWeight: 700, fontSize: '.95rem', marginBottom: 14, color: '#1c1c1e' }}>{editingId ? 'Редактировать' : 'Новый сотрудник'}</div>
+          <div style={{ fontWeight: 700, fontSize: '.95rem', marginBottom: 14, color: 'var(--tx)' }}>{editingId ? 'Редактировать' : 'Новый сотрудник'}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <div style={{ gridColumn: '1/-1' }}>
               <Field label="Имя" value={form.name} onChange={(v: string) => setForm({ ...form, name: v })} placeholder="Александр Иванов" />
@@ -328,16 +329,16 @@ function EmployeesTab({ restaurantId }: { restaurantId: string }) {
 
       <Card>
         {loading ? (
-          <div style={{ color: '#6d6d72', textAlign: 'center', padding: 32 }}>Загрузка...</div>
+          <div style={{ color: 'var(--tx2)', textAlign: 'center', padding: 32 }}>Загрузка...</div>
         ) : employees.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '28px 0', color: '#6d6d72', fontSize: '.88rem' }}>Добавьте первого сотрудника</div>
+          <div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>Добавьте первого сотрудника</div>
         ) : employees.map((emp, i) => (
-          <div key={emp.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: i < employees.length - 1 ? '1px solid rgba(60,60,67,.08)' : 'none', gap: 12 }}>
+          <div key={emp.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: i < employees.length - 1 ? '1px solid rgba(var(--seprgb),.08)' : 'none', gap: 12 }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: '.92rem', marginBottom: 2, color: '#1c1c1e' }}>{emp.name}</div>
-              <div style={{ fontSize: '.75rem', color: '#6d6d72', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <span>Оклад: <strong style={{ color: '#1c1c1e' }}>€{emp.salary}</strong></span>
-                <span>Вычет: <strong style={{ color: '#1c1c1e' }}>€{emp.deduct_per_absence}</strong></span>
+              <div style={{ fontWeight: 600, fontSize: '.92rem', marginBottom: 2, color: 'var(--tx)' }}>{emp.name}</div>
+              <div style={{ fontSize: '.75rem', color: 'var(--tx2)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <span>Оклад: <strong style={{ color: 'var(--tx)' }}>€{emp.salary}</strong></span>
+                <span>Вычет: <strong style={{ color: 'var(--tx)' }}>€{emp.deduct_per_absence}</strong></span>
                 {emp.card_amount > 0 && <span>Карта: <strong style={{ color: '#af52de' }}>€{emp.card_amount}</strong></span>}
               </div>
             </div>
@@ -393,15 +394,15 @@ function CategoriesTab({ restaurantId }: { restaurantId: string }) {
         </div>
       </Card>
       <Card>
-        <div style={{ fontWeight: 600, fontSize: '.88rem', color: '#6d6d72', marginBottom: 12 }}>Категорий: {cats.length}</div>
-        {loading ? <div style={{ color: '#6d6d72', fontSize: '.88rem' }}>Загрузка...</div>
+        <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx2)', marginBottom: 12 }}>Категорий: {cats.length}</div>
+        {loading ? <div style={{ color: 'var(--tx2)', fontSize: '.88rem' }}>Загрузка...</div>
           : cats.length === 0
-            ? <div style={{ textAlign: 'center', padding: '20px 0', color: '#6d6d72', fontSize: '.88rem' }}>Нет категорий</div>
+            ? <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>Нет категорий</div>
             : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {cats.map(cat => (
-                  <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f2f2f7', borderRadius: 980, padding: '6px 12px' }}>
-                    <span style={{ fontSize: '.85rem', fontWeight: 500, color: '#1c1c1e' }}>{cat.name}</span>
-                    <button onClick={() => remove(cat.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#aeaeb2', fontSize: '.85rem', padding: 0, lineHeight: 1 }}>✕</button>
+                  <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--fill)', borderRadius: 980, padding: '6px 12px' }}>
+                    <span style={{ fontSize: '.85rem', fontWeight: 500, color: 'var(--tx)' }}>{cat.name}</span>
+                    <button onClick={() => remove(cat.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tx3)', fontSize: '.85rem', padding: 0, lineHeight: 1 }}>✕</button>
                   </div>
                 ))}
               </div>
@@ -516,9 +517,9 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 16 }}>
-        {[{ l: 'В команде', v: String(employees.length), c: '#1c1c1e' }, { l: 'С доступом', v: `${withAccess}/${maxStaff}`, c: '#007aff' }, { l: 'ФОТ/мес', v: `€${totalSalary.toLocaleString()}`, c: '#af52de' }].map(it => (
+        {[{ l: 'В команде', v: String(employees.length), c: 'var(--tx)' }, { l: 'С доступом', v: `${withAccess}/${maxStaff}`, c: '#007aff' }, { l: 'ФОТ/мес', v: `€${totalSalary.toLocaleString()}`, c: '#af52de' }].map(it => (
           <Card key={it.l} style={{ padding: '14px 16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '.68rem', color: '#6d6d72', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4, letterSpacing: '.04em' }}>{it.l}</div>
+            <div style={{ fontSize: '.68rem', color: 'var(--tx2)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4, letterSpacing: '.04em' }}>{it.l}</div>
             <div style={{ fontSize: '1.3rem', fontWeight: 700, color: it.c }}>{it.v}</div>
           </Card>
         ))}
@@ -534,8 +535,8 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
       <Card style={{ marginBottom: 14, background: 'linear-gradient(135deg, #007aff08 0%, #5856d608 100%)', border: '1px solid rgba(0,122,255,.15)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: '.95rem', color: '#1c1c1e', marginBottom: 4 }}>QR-код заведения</div>
-            <div style={{ fontSize: '.8rem', color: '#6d6d72', lineHeight: 1.5 }}>
+            <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)', marginBottom: 4 }}>QR-код заведения</div>
+            <div style={{ fontSize: '.8rem', color: 'var(--tx2)', lineHeight: 1.5 }}>
               Сотрудник сканирует при первом входе чтобы привязать устройство к заведению
             </div>
           </div>
@@ -546,10 +547,10 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
 
         {showQR && (
           <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(0,122,255,.1)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-            <div style={{ background: '#fff', borderRadius: 16, padding: 16, boxShadow: '0 2px 12px rgba(0,0,0,.08)' }}>
+            <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 16, boxShadow: '0 2px 12px rgba(0,0,0,.08)' }}>
               <QRCode value={qrUrl} size={160} />
             </div>
-            <div style={{ fontSize: '.75rem', color: '#aeaeb2', textAlign: 'center', maxWidth: 260, lineHeight: 1.5 }}>
+            <div style={{ fontSize: '.75rem', color: 'var(--tx3)', textAlign: 'center', maxWidth: 260, lineHeight: 1.5 }}>
               {qrUrl}
             </div>
             <button onClick={() => {
@@ -563,7 +564,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
                 document.execCommand('copy')
                 document.body.removeChild(el)
               }
-            }} style={{ background: '#f2f2f7', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#007aff', cursor: 'pointer', fontFamily: 'inherit' }}>
+            }} style={{ background: 'var(--fill)', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#007aff', cursor: 'pointer', fontFamily: 'inherit' }}>
               Скопировать ссылку
             </button>
           </div>
@@ -575,10 +576,10 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <div style={{ fontWeight: 700, fontSize: '.95rem', color: '#1c1c1e' }}>Владелец</div>
+              <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)' }}>Владелец</div>
               <div style={{ fontSize: '.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: 980, background: '#af52de15', color: '#af52de' }}>Полный доступ</div>
             </div>
-            <div style={{ fontSize: '.8rem', color: '#6d6d72' }}>
+            <div style={{ fontSize: '.8rem', color: 'var(--tx2)' }}>
               {ownerPin ? 'PIN установлен · Доступ ко всем приложениям' : 'PIN не установлен'}
             </div>
           </div>
@@ -590,7 +591,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
         {ownerPinEdit && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(175,82,222,.1)', display: 'flex', gap: 10, alignItems: 'flex-end' }}>
             <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: '#6d6d72', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>Новый PIN (4 цифры)</label>
+              <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: 'var(--tx2)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>Новый PIN (4 цифры)</label>
               <input
                 type="password" inputMode="numeric" maxLength={4}
                 value={ownerPinVal} onChange={e => setOwnerPinVal(e.target.value.replace(/\D/g,'').slice(0,4))}
@@ -619,15 +620,15 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
             <Field label="На карту" value={form.card} onChange={(v: string) => setForm({ ...form, card: v })} placeholder="0" type="number" />
           </div>
 
-          <div style={{ borderTop: '1px solid rgba(60,60,67,.1)', margin: '8px 0 14px', paddingTop: 14 }}>
-            <div style={{ fontSize: '.72rem', fontWeight: 600, color: '#6d6d72', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>Доступ к приложениям</div>
+          <div style={{ borderTop: '1px solid rgba(var(--seprgb),.1)', margin: '8px 0 14px', paddingTop: 14 }}>
+            <div style={{ fontSize: '.72rem', fontWeight: 600, color: 'var(--tx2)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>Доступ к приложениям</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
               {APPS.map(app => (
-                <label key={app.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '9px 12px', borderRadius: 10, background: form.apps.includes(app.id) ? app.color + '10' : '#f9f9f9', border: `1px solid ${form.apps.includes(app.id) ? app.color : 'transparent'}`, transition: 'all .15s' }}>
+                <label key={app.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '9px 12px', borderRadius: 10, background: form.apps.includes(app.id) ? app.color + '10' : 'var(--fill2)', border: `1px solid ${form.apps.includes(app.id) ? app.color : 'transparent'}`, transition: 'all .15s' }}>
                   <input type="checkbox" checked={form.apps.includes(app.id)} onChange={() => toggleApp(app.id)} style={{ width: 16, height: 16, accentColor: app.color }} />
                   <div>
-                    <div style={{ fontSize: '.88rem', fontWeight: 600, color: '#1c1c1e' }}>{app.name}</div>
-                    <div style={{ fontSize: '.72rem', color: '#6d6d72' }}>{app.hint}</div>
+                    <div style={{ fontSize: '.88rem', fontWeight: 600, color: 'var(--tx)' }}>{app.name}</div>
+                    <div style={{ fontSize: '.72rem', color: 'var(--tx2)' }}>{app.hint}</div>
                   </div>
                 </label>
               ))}
@@ -639,7 +640,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
                 placeholder="1234" type="password"
               />
             )}
-            <div style={{ fontSize: '.72rem', color: '#aeaeb2' }}>Без выбранных приложений сотрудник учитывается в зарплатах, но не входит в приложения.</div>
+            <div style={{ fontSize: '.72rem', color: 'var(--tx3)' }}>Без выбранных приложений сотрудник учитывается в зарплатах, но не входит в приложения.</div>
           </div>
 
           <div style={{ display: 'flex', gap: 8 }}>
@@ -651,9 +652,9 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
 
       {/* ─ СПИСОК ─ */}
       {loading ? (
-        <div style={{ color: '#6d6d72', textAlign: 'center', padding: 32 }}>Загрузка...</div>
+        <div style={{ color: 'var(--tx2)', textAlign: 'center', padding: 32 }}>Загрузка...</div>
       ) : employees.length === 0 ? (
-        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: '#6d6d72', fontSize: '.88rem' }}>Добавьте первого сотрудника</div></Card>
+        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>Добавьте первого сотрудника</div></Card>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {employees.map(emp => {
@@ -663,15 +664,15 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
-                      <div style={{ fontWeight: 700, fontSize: '.95rem', color: '#1c1c1e' }}>{emp.name}</div>
+                      <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)' }}>{emp.name}</div>
                       <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: '#5856d615', color: '#5856d6' }}>{roleLabel(s?.role)}</div>
                       {s
-                        ? <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: s.device_id ? '#34c75915' : '#f2f2f7', color: s.device_id ? '#34c759' : '#aeaeb2' }}>{s.device_id ? '● Привязано' : 'Не привязано'}</div>
-                        : <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: '#f2f2f7', color: '#aeaeb2' }}>Нет доступа</div>}
+                        ? <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: s.device_id ? '#34c75915' : 'var(--fill)', color: s.device_id ? '#34c759' : 'var(--tx3)' }}>{s.device_id ? '● Привязано' : 'Не привязано'}</div>
+                        : <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: 'var(--fill)', color: 'var(--tx3)' }}>Нет доступа</div>}
                     </div>
-                    <div style={{ fontSize: '.75rem', color: '#6d6d72', display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: s ? 8 : 0 }}>
-                      <span>Оклад: <strong style={{ color: '#1c1c1e' }}>€{emp.salary}</strong></span>
-                      <span>Вычет: <strong style={{ color: '#1c1c1e' }}>€{emp.deduct_per_absence}</strong></span>
+                    <div style={{ fontSize: '.75rem', color: 'var(--tx2)', display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: s ? 8 : 0 }}>
+                      <span>Оклад: <strong style={{ color: 'var(--tx)' }}>€{emp.salary}</strong></span>
+                      <span>Вычет: <strong style={{ color: 'var(--tx)' }}>€{emp.deduct_per_absence}</strong></span>
                       {emp.card_amount > 0 && <span>Карта: <strong style={{ color: '#af52de' }}>€{emp.card_amount}</strong></span>}
                     </div>
                     {s && (
@@ -704,7 +705,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
 function MiniToggle({ value, onChange, color = '#5856d6' }: { value: boolean; onChange: (v: boolean) => void; color?: string }) {
   return (
     <div onClick={() => onChange(!value)} style={{ width: 46, height: 28, borderRadius: 14, background: value ? color : 'rgba(120,120,128,0.32)', cursor: 'pointer', transition: 'background .2s', position: 'relative', flexShrink: 0 }}>
-      <div style={{ position: 'absolute', top: 2, left: value ? 20 : 2, width: 24, height: 24, borderRadius: '50%', background: '#fff', boxShadow: '0 2px 5px rgba(0,0,0,.25)', transition: 'left .2s' }} />
+      <div style={{ position: 'absolute', top: 2, left: value ? 20 : 2, width: 24, height: 24, borderRadius: '50%', background: 'var(--surface)', boxShadow: '0 2px 5px rgba(0,0,0,.25)', transition: 'left .2s' }} />
     </div>
   )
 }
@@ -764,8 +765,8 @@ function GeoSettingsCard() {
     <Card style={{ marginBottom: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <div>
-          <div style={{ fontWeight: 600, fontSize: '.9rem', color: '#1c1c1e' }}>Геолокация и явка</div>
-          <div style={{ fontSize: '.78rem', color: '#6d6d72', marginTop: 2 }}>Mise People — авто-отметка прихода по гео</div>
+          <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Геолокация и явка</div>
+          <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2 }}>Mise People — авто-отметка прихода по гео</div>
         </div>
         <MiniToggle value={f.attendance_enabled} onChange={v => setF({ ...f, attendance_enabled: v })} />
       </div>
@@ -774,12 +775,12 @@ function GeoSettingsCard() {
         <Field label="Широта" value={f.latitude} onChange={(v: string) => setF({ ...f, latitude: v })} placeholder="41.3111" />
         <Field label="Долгота" value={f.longitude} onChange={(v: string) => setF({ ...f, longitude: v })} placeholder="69.2797" />
       </div>
-      <button onClick={useMyLocation} style={{ background: '#f2f2f7', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#5856d6', cursor: 'pointer', fontFamily: 'inherit', marginBottom: 12 }}>
+      <button onClick={useMyLocation} style={{ background: 'var(--fill)', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#5856d6', cursor: 'pointer', fontFamily: 'inherit', marginBottom: 12 }}>
         {locating ? 'Определяю…' : 'Использовать моё местоположение'}
       </button>
       <Field label="Радиус, метров" value={f.geo_radius_m} onChange={(v: string) => setF({ ...f, geo_radius_m: v })} type="number" placeholder="150" />
 
-      <div style={{ fontWeight: 600, fontSize: '.82rem', color: '#1c1c1e', margin: '8px 0 10px' }}>Напоминание о смене</div>
+      <div style={{ fontWeight: 600, fontSize: '.82rem', color: 'var(--tx)', margin: '8px 0 10px' }}>Напоминание о смене</div>
       <Field label="Режим" value={f.reminder_mode} onChange={(v: string) => setF({ ...f, reminder_mode: v })} select options={[{ value: 'hours_before', label: 'За N часов до смены' }, { value: 'fixed_time', label: 'В фикс. время накануне' }]} />
       {f.reminder_mode === 'hours_before'
         ? <Field label="За сколько часов" value={f.reminder_hours} onChange={(v: string) => setF({ ...f, reminder_hours: v })} type="number" placeholder="12" />
@@ -813,8 +814,8 @@ function AnalyticsSettingsCard() {
     <Card style={{ marginBottom: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <div style={{ fontWeight: 600, fontSize: '.9rem', color: '#1c1c1e' }}>Учитывать безнал в аналитике</div>
-          <div style={{ fontSize: '.78rem', color: '#6d6d72', marginTop: 2, maxWidth: 380 }}>
+          <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Учитывать безнал в аналитике</div>
+          <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2, maxWidth: 380 }}>
             Включает доход по карте в показатели Mise Analytics. Выкл — показатели только по наличным (касса всегда считается от наличных).
           </div>
         </div>
@@ -889,9 +890,9 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
 
       {/* Логотип */}
       <Card style={{ marginBottom: 14 }}>
-        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 14, color: '#1c1c1e' }}>Логотип заведения</div>
+        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 14, color: 'var(--tx)' }}>Логотип заведения</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div style={{ width: 72, height: 72, borderRadius: 16, background: '#f2f2f7', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(60,60,67,.12)', flexShrink: 0 }}>
+          <div style={{ width: 72, height: 72, borderRadius: 16, background: 'var(--fill)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(var(--seprgb),.12)', flexShrink: 0 }}>
             {logoPreview ? (
               <img src={logoPreview} alt="logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             ) : (
@@ -899,13 +900,13 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
             )}
           </div>
           <div>
-            <div style={{ fontSize: '.85rem', color: '#1c1c1e', fontWeight: 500, marginBottom: 6 }}>
+            <div style={{ fontSize: '.85rem', color: 'var(--tx)', fontWeight: 500, marginBottom: 6 }}>
               {logoPreview ? 'Логотип загружен' : 'Логотип не загружен'}
             </div>
-            <div style={{ fontSize: '.78rem', color: '#6d6d72', marginBottom: 10 }}>
+            <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginBottom: 10 }}>
               Отображается на экране входа для сотрудников
             </div>
-            <button onClick={() => fileRef.current?.click()} style={{ background: '#f2f2f7', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#007aff', cursor: 'pointer', fontFamily: 'inherit' }}>
+            <button onClick={() => fileRef.current?.click()} style={{ background: 'var(--fill)', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#007aff', cursor: 'pointer', fontFamily: 'inherit' }}>
               {logoPreview ? 'Заменить' : 'Загрузить фото'}
             </button>
             <input ref={fileRef} type="file" accept="image/*" onChange={pickLogo} style={{ display: 'none' }} />
@@ -914,7 +915,7 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
       </Card>
 
       <Card style={{ marginBottom: 14 }}>
-        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 14, color: '#1c1c1e' }}>Заведение</div>
+        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 14, color: 'var(--tx)' }}>Заведение</div>
         <Field label="Название" value={name} onChange={setName} placeholder="Название ресторана" />
         <Field
           label="Валюта"
@@ -936,8 +937,8 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
       <GeoSettingsCard />
 
       <Card style={{ border: '1px solid rgba(255,59,48,.15)' }}>
-        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 4, color: '#1c1c1e' }}>Опасная зона</div>
-        <div style={{ fontSize: '.82rem', color: '#6d6d72', marginBottom: 14 }}>Удаление аккаунта необратимо. Все данные заведения, сотрудники и подписка будут удалены.</div>
+        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 4, color: 'var(--tx)' }}>Опасная зона</div>
+        <div style={{ fontSize: '.82rem', color: 'var(--tx2)', marginBottom: 14 }}>Удаление аккаунта необратимо. Все данные заведения, сотрудники и подписка будут удалены.</div>
         {!deleteConfirm ? (
           <Btn variant="danger" onClick={() => setDeleteConfirm(true)}>Удалить аккаунт</Btn>
         ) : (
@@ -973,7 +974,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
     past_due: { label: 'Просрочена',     color: '#ff9500', bg: 'rgba(255,149,0,.1)' },
     canceling: { label: 'Отмена в конце периода', color: '#ff9500', bg: 'rgba(255,149,0,.1)' },
     canceled:  { label: 'Отменена',       color: '#ff3b30', bg: 'rgba(255,59,48,.1)' },
-    inactive:  { label: 'Неактивна',      color: '#aeaeb2', bg: '#f2f2f7' },
+    inactive:  { label: 'Неактивна',      color: 'var(--tx3)', bg: 'var(--fill)' },
   }
   const badge = statusLabel[status || 'inactive'] || statusLabel['inactive']
 
@@ -1019,27 +1020,27 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
             <div>
               <div style={{ display: 'inline-block', background: badge.bg, color: badge.color, fontSize: '.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 10 }}>{badge.label}</div>
-              <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#1c1c1e', marginBottom: 2 }}>{currentPlan.name}</div>
+              <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--tx)', marginBottom: 2 }}>{currentPlan.name}</div>
               {endsAt && (
-                <div style={{ fontSize: '.8rem', color: '#6d6d72' }}>
+                <div style={{ fontSize: '.8rem', color: 'var(--tx2)' }}>
                   {isActive ? 'Следующий платёж' : 'Доступ до'}: {endsAt.toLocaleDateString('ru-RU')}
                 </div>
               )}
             </div>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '1.8rem', fontWeight: 700, color: '#1c1c1e' }}>€{currentPlan.price}</div>
-              <div style={{ color: '#6d6d72', fontSize: '.78rem' }}>в месяц</div>
+              <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--tx)' }}>€{currentPlan.price}</div>
+              <div style={{ color: 'var(--tx2)', fontSize: '.78rem' }}>в месяц</div>
             </div>
           </div>
           {isActive && (
-            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(60,60,67,.08)' }}>
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(var(--seprgb),.08)' }}>
               {!cancelConfirm ? (
                 <button onClick={() => setCancelConfirm(true)} style={{ background: 'none', border: 'none', color: '#ff3b30', fontSize: '.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
                   Отменить подписку
                 </button>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '.82rem', color: '#6d6d72' }}>Подтвердить отмену?</span>
+                  <span style={{ fontSize: '.82rem', color: 'var(--tx2)' }}>Подтвердить отмену?</span>
                   <Btn small variant="danger" onClick={cancel} disabled={loading}>Да, отменить</Btn>
                   <Btn small variant="gray" onClick={() => setCancelConfirm(false)}>Нет</Btn>
                 </div>
@@ -1049,7 +1050,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
         </Card>
       )}
 
-      <div style={{ fontWeight: 600, fontSize: '.78rem', color: '#6d6d72', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '.06em' }}>
+      <div style={{ fontWeight: 600, fontSize: '.78rem', color: 'var(--tx2)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '.06em' }}>
         {currentPlan ? 'Сменить тариф' : 'Выберите тариф'}
       </div>
 
@@ -1057,7 +1058,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
         {PLANS.map(plan => {
           const isCurrent = restaurant?.subscription_plan === plan.id
           return (
-            <Card key={plan.id} style={{ border: `2px solid ${isCurrent ? plan.color : plan.popular ? plan.color + '40' : 'rgba(60,60,67,.1)'}`, position: 'relative', padding: 16 }}>
+            <Card key={plan.id} style={{ border: `2px solid ${isCurrent ? plan.color : plan.popular ? plan.color + '40' : 'rgba(var(--seprgb),.1)'}`, position: 'relative', padding: 16 }}>
               {plan.popular && !isCurrent && (
                 <div style={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', background: plan.color, color: '#fff', fontSize: '.65rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, whiteSpace: 'nowrap' }}>ПОПУЛЯРНЫЙ</div>
               )}
@@ -1065,18 +1066,18 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
                 <div style={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', background: plan.color, color: '#fff', fontSize: '.65rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, whiteSpace: 'nowrap' }}>ТЕКУЩИЙ</div>
               )}
               <div style={{ marginBottom: 10 }}>
-                <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#1c1c1e', marginBottom: 2 }}>{plan.name}</div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: plan.color }}>€{plan.price}<span style={{ fontSize: '.75rem', color: '#6d6d72', fontWeight: 400 }}>/мес</span></div>
+                <div style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--tx)', marginBottom: 2 }}>{plan.name}</div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: plan.color }}>€{plan.price}<span style={{ fontSize: '.75rem', color: 'var(--tx2)', fontWeight: 400 }}>/мес</span></div>
               </div>
               <div style={{ marginBottom: 14 }}>
                 {plan.features.map(f => (
-                  <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '.8rem', color: '#3c3c43', marginBottom: 4 }}>
+                  <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '.8rem', color: 'var(--tx2)', marginBottom: 4 }}>
                     <span style={{ color: plan.color, fontWeight: 700 }}>✓</span> {f}
                   </div>
                 ))}
               </div>
               <button onClick={() => !isCurrent && subscribe(plan.id)} disabled={isCurrent || loading}
-                style={{ width: '100%', padding: '9px 0', borderRadius: 10, border: 'none', background: isCurrent ? '#f2f2f7' : plan.color, color: isCurrent ? '#aeaeb2' : '#fff', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: isCurrent ? 'default' : 'pointer' }}>
+                style={{ width: '100%', padding: '9px 0', borderRadius: 10, border: 'none', background: isCurrent ? 'var(--fill)' : plan.color, color: isCurrent ? 'var(--tx3)' : '#fff', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: isCurrent ? 'default' : 'pointer' }}>
                 {isCurrent ? 'Активен' : loading ? '...' : 'Выбрать'}
               </button>
             </Card>
@@ -1084,7 +1085,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
         })}
       </div>
 
-      <div style={{ textAlign: 'center', fontSize: '.75rem', color: '#aeaeb2' }}>
+      <div style={{ textAlign: 'center', fontSize: '.75rem', color: 'var(--tx3)' }}>
         Платежи защищены через Stripe · 7 дней бесплатно при первой оплате
       </div>
     </div>
@@ -1095,6 +1096,12 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
 
 export default function Dashboard() {
   const router = useRouter()
+  // Тёмная тема: цвета дашборда — CSS-переменные (globals.css), класс mise-dark на <html>
+  const theme = useTheme('mise_dash_dark')
+  useEffect(() => {
+    document.documentElement.classList.toggle('mise-dark', !!theme.dark)
+    return () => { document.documentElement.classList.remove('mise-dark') }
+  }, [theme.dark])
   const [showSplash, setShowSplash] = useState(() => {
     if (typeof window === 'undefined') return false
     const shown = sessionStorage.getItem('mise_splash_shown')
@@ -1127,10 +1134,10 @@ export default function Dashboard() {
   }, [])
 
   if (!authChecked || !user) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system,sans-serif', color: '#6d6d72', fontSize: '.9rem', background: '#f2f2f7' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system,sans-serif', color: 'var(--tx2)', fontSize: '.9rem', background: 'var(--bg)' }}>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
         <LogoMark size={48} />
-        <div style={{ fontSize: '.85rem', color: '#aeaeb2' }}>Загрузка...</div>
+        <div style={{ fontSize: '.85rem', color: 'var(--tx3)' }}>Загрузка...</div>
       </div>
     </div>
   )
@@ -1139,15 +1146,20 @@ export default function Dashboard() {
     <>
       {showSplash && <SplashScreen onDone={() => { sessionStorage.setItem('mise_splash_shown', '1'); setShowSplash(false) }} />}
 
-      <div style={{ minHeight: '100vh', background: '#f2f2f7', fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif', WebkitFontSmoothing: 'antialiased' }}>
+      <div style={{ minHeight: '100vh', background: 'var(--bg)', fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif', WebkitFontSmoothing: 'antialiased' }}>
         {/* NAV */}
-        <nav style={{ background: 'rgba(255,255,255,.92)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(60,60,67,.1)', padding: '0 20px', height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100 }}>
+        <nav style={{ background: 'var(--navbg)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(var(--seprgb),.1)', padding: '0 20px', height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <LogoMark size={28} />
-            <span style={{ fontWeight: 800, fontSize: '1.05rem', color: '#1c1c1e', letterSpacing: '-.02em' }}>mise</span>
+            <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--tx)', letterSpacing: '-.02em' }}>mise</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontSize: '.75rem', color: '#aeaeb2', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</span>
+            <button onClick={theme.toggle} style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--fill)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx)' }}>
+              {theme.dark
+                ? <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" /></svg>
+                : <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z" /></svg>}
+            </button>
+            <span style={{ fontSize: '.75rem', color: 'var(--tx3)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</span>
             <button onClick={async () => { await supabase.auth.signOut(); router.replace('/auth/login') }}
               style={{ background: 'none', border: 'none', color: '#ff3b30', cursor: 'pointer', fontSize: '.78rem', fontFamily: 'inherit', fontWeight: 600 }}>
               Выйти
@@ -1158,8 +1170,8 @@ export default function Dashboard() {
         <div style={{ maxWidth: 920, margin: '0 auto', padding: '20px 16px' }}>
           {/* Page header */}
           <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#1c1c1e', marginBottom: 2 }}>{restaurant?.name || 'Мой ресторан'}</div>
-            <div style={{ color: '#aeaeb2', fontSize: '.78rem' }}>Личный кабинет</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--tx)', marginBottom: 2 }}>{restaurant?.name || 'Мой ресторан'}</div>
+            <div style={{ color: 'var(--tx3)', fontSize: '.78rem' }}>Личный кабинет</div>
           </div>
 
           {/* Tabs */}
@@ -1170,8 +1182,8 @@ export default function Dashboard() {
                 padding: '7px 15px', borderRadius: 10, border: 'none', fontFamily: 'inherit',
                 fontSize: '.8rem', fontWeight: tab === t.id ? 700 : 500,
                 cursor: 'pointer', whiteSpace: 'nowrap',
-                background: tab === t.id ? '#1c1c1e' : '#fff',
-                color: tab === t.id ? '#fff' : '#3c3c43',
+                background: tab === t.id ? 'var(--tx)' : 'var(--surface)',
+                color: tab === t.id ? 'var(--tabon)' : 'var(--tx2)',
                 boxShadow: tab === t.id ? 'none' : '0 1px 3px rgba(0,0,0,.06)',
                 transition: 'all .15s',
               }}>

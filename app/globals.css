@@ -24,3 +24,17 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Mise Dashboard theme tokens (var(--*) в app/dashboard/page.tsx).
+   Тёмная тема включается классом mise-dark на <html> (toggle в наве дашборда). */
+:root {
+  --bg: #f2f2f7; --surface: #fff; --fill: #f2f2f7; --fill2: #f9f9f9;
+  --tx: #1c1c1e; --tx2: #6d6d72; --tx3: #aeaeb2; --tabon: #fff;
+  --seprgb: 60,60,67; --navbg: rgba(255,255,255,.92);
+}
+html.mise-dark {
+  --bg: #000; --surface: #1c1c1e; --fill: #2c2c2e; --fill2: #2c2c2e;
+  --tx: #fff; --tx2: rgba(235,235,245,.6); --tx3: rgba(235,235,245,.35); --tabon: #000;
+  --seprgb: 84,84,88; --navbg: rgba(18,18,20,.9);
+  color-scheme: dark;
+}

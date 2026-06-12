@@ -1118,7 +1118,7 @@ function OrdersInbox({ currency, accent, t, toast }: { currency: string; accent:
                 </div>
                 {(Array.isArray(o.items) ? o.items : []).map((it: any, i: number) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, color: t.text, padding: '3px 0' }}>
-                    <span>{it.name} × {it.qty}</span>
+                    <span>{it.name}{Array.isArray(it.opts) && it.opts.length > 0 ? <span style={{ color: t.text3 }}> · {it.opts.join(', ')}</span> : null} × {it.qty}</span>
                     {it.price != null && <span style={{ color: t.text3 }}>{(it.price * it.qty).toFixed(2)} {currency}</span>}
                   </div>
                 ))}

@@ -23,6 +23,9 @@ ALTER TABLE restaurant_settings ADD COLUMN IF NOT EXISTS include_card_in_analyti
 -- 4. Оплата за столом — отдельный тумблер поверх allow_orders.
 ALTER TABLE menu_settings ADD COLUMN IF NOT EXISTS allow_pay_at_table boolean NOT NULL DEFAULT false;
 
+-- 4.2. Модификаторы позиций меню: [{name, options: [{name, price}]}]
+ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS modifiers jsonb;
+
 -- 5. Rate-limit PIN: счётчик неудачных попыток в БД (in-memory Map не работает на
 --    Vercel — инстансы функций не делят память). key = ip:restaurant_id.
 CREATE TABLE IF NOT EXISTS pin_attempts (
