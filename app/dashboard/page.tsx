@@ -4,7 +4,6 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
-import { LogoMark } from '@/components/LogoMark'
 import { useTheme } from '@/hooks/useTheme'
 
 
@@ -94,6 +93,15 @@ function timeAgo(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 }
 
+// Фирменный wordmark W2: «mise» с акцентной «e» (#8e8e93 — работает на обеих темах)
+function Wordmark({ size = 22 }: { size?: number }) {
+  return (
+    <span style={{ fontWeight: 800, fontSize: size, letterSpacing: '-.05em', lineHeight: 1, color: 'var(--tx)' }}>
+      mis<span style={{ color: '#8e8e93' }}>e</span>
+    </span>
+  )
+}
+
 // ── SPLASH SCREEN ─────────────────────────────────────────────────────────────
 
 function SplashScreen({ onDone }: { onDone: () => void }) {
@@ -145,7 +153,7 @@ function SplashScreen({ onDone }: { onDone: () => void }) {
         opacity: bar3 ? 1 : 0,
         transform: bar3 ? 'translateY(0)' : 'translateY(6px)',
         transition: 'opacity .35s ease, transform .35s ease',
-      }}>mise</div>
+      }}>mis<span style={{ color: '#8e8e93' }}>e</span></div>
     </div>
   )
 }
@@ -1410,7 +1418,7 @@ export default function Dashboard() {
   if (!authChecked || !user) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system,sans-serif', color: 'var(--tx2)', fontSize: '.9rem', background: 'var(--bg)' }}>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-        <LogoMark size={48} />
+        <Wordmark size={34} />
         <div style={{ fontSize: '.85rem', color: 'var(--tx3)' }}>Загрузка...</div>
       </div>
     </div>
@@ -1461,9 +1469,8 @@ export default function Dashboard() {
 
         {/* Сайдбар (desktop): два этажа — работа / обслуживание, аккаунт внизу */}
         <aside className="dash-side" style={{ position: 'fixed', top: 0, left: 0, bottom: 0, width: 232, flexDirection: 'column', padding: '22px 12px 16px', borderRight: '1px solid rgba(var(--seprgb),.1)', background: 'var(--surface)', zIndex: 100, boxSizing: 'border-box' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px', marginBottom: 24 }}>
-            <LogoMark size={26} />
-            <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--tx)', letterSpacing: '-.02em' }}>mise</span>
+          <div style={{ padding: '2px 12px', marginBottom: 24 }}>
+            <Wordmark size={24} />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {NAV_MAIN.map(t => <SideItem key={t.id} id={t.id} label={t.label} />)}
@@ -1488,10 +1495,7 @@ export default function Dashboard() {
 
         {/* Шапка (mobile): логотип + колокольчик + аватар */}
         <nav className="dash-mobilebar" style={{ background: 'var(--navbg)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(var(--seprgb),.1)', padding: '0 16px', height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <LogoMark size={26} />
-            <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--tx)', letterSpacing: '-.02em' }}>mise</span>
-          </div>
+          <Wordmark size={22} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button onClick={() => { go('notifications'); markSeen() }} style={{ position: 'relative', width: 32, height: 32, borderRadius: '50%', background: 'var(--fill)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx)' }}>
               <TabIcon id="notifications" size={15} />
