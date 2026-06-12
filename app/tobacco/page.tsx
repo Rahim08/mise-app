@@ -132,7 +132,11 @@ function fmtDay(d: Date) {
 
 function HookahShiftTab({ restaurantId, stock, t, toast }: { restaurantId: string; stock: StockItem[]; t: ReturnType<typeof useTheme>; toast: (m: string) => void }) {
   const today = fmtDay(new Date())
-  const [counts, setCounts] = useState<Record<string, number>>({}) // stock.id → кол-во кальянов
+  // Раздельный учёт: продажи и бесплатные (владелец/сотрудники) — выручка только
+  // с продаж, расход табака считается по всем.
+  const [mode, setMode] = useState<'paid' | 'free'>('paid')
+  const [counts, setCounts] = useState<Record<string, number>>({})     // stock.id → продано
+  const [freeCounts, setFreeCounts] = useState<Record<string, number>>({}) // stock.id → бесплатно
   const [settings, setSettings] = useState<{ hookah_price: number; hookah_portion_g: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -143,21 +147,26 @@ function HookahShiftTab({ restaurantId, stock, t, toast }: { restaurantId: strin
       db.from('hookah_sales').select('*').eq('date', today),
       db.from('restaurant_settings').select('*').limit(1),
     ]).then(([{ data: rows }, { data: rs }]: any[]) => {
-      const c: Record<string, number> = {}
+      const c: Record<string, number> = {}; const f: Record<string, number> = {}
       ;(rows || []).forEach((r: any) => {
         const item = stock.find(s => s.id === r.flavor_id) || stock.find(s => s.brand === r.brand && s.flavor === r.flavor)
-        if (item) c[item.id] = (c[item.id] || 0) + (r.quantity || 0)
+        if (!item) return
+        const target = r.is_free ? f : c
+        target[item.id] = (target[item.id] || 0) + (r.quantity || 0)
       })
-      setCounts(c)
+      setCounts(c); setFreeCounts(f)
       const row = Array.isArray(rs) ? rs[0] : rs
       setSettings({ hookah_price: Number(row?.hookah_price || 0), hookah_portion_g: Number(row?.hookah_portion_g || 20) })
       setLoading(false)
     })
   }, [])
 
-  const inc = (id: string, d: number) => setCounts(c => ({ ...c, [id]: Math.max(0, (c[id] || 0) + d) }))
+  const activeCounts = mode === 'paid' ? counts : freeCounts
+  const setActive = mode === 'paid' ? setCounts : setFreeCounts
+  const inc = (id: string, d: number) => setActive(c => ({ ...c, [id]: Math.max(0, (c[id] || 0) + d) }))
 
-  const totalCount = Object.values(counts).reduce((s, n) => s + n, 0)
+  const paidTotal = Object.values(counts).reduce((s, n) => s + n, 0)
+  const freeTotal = Object.values(freeCounts).reduce((s, n) => s + n, 0)
   const price = settings?.hookah_price || 0
   const portion = settings?.hookah_portion_g || 20
 
@@ -165,16 +174,16 @@ function HookahShiftTab({ restaurantId, stock, t, toast }: { restaurantId: strin
     setSaving(true)
     // Перезаписываем день целиком: удалить сегодняшние строки, вставить актуальные.
     await db.from('hookah_sales').delete().eq('date', today)
-    const rows = stock.filter(s => (counts[s.id] || 0) > 0).map(s => ({
-      flavor_id: s.id, brand: s.brand, flavor: s.flavor,
-      quantity: counts[s.id], price, date: today,
-    }))
+    const rows = [
+      ...stock.filter(s => (counts[s.id] || 0) > 0).map(s => ({ flavor_id: s.id, brand: s.brand, flavor: s.flavor, quantity: counts[s.id], price, date: today, is_free: false })),
+      ...stock.filter(s => (freeCounts[s.id] || 0) > 0).map(s => ({ flavor_id: s.id, brand: s.brand, flavor: s.flavor, quantity: freeCounts[s.id], price: 0, date: today, is_free: true })),
+    ]
     if (rows.length) {
       const { error } = await db.from('hookah_sales').insert(rows)
       if (error) { toast('Ошибка: ' + error.message); setSaving(false); return }
     }
     setSaving(false)
-    toast(`Смена сохранена · ${totalCount} кальянов`)
+    toast(`Смена сохранена · ${paidTotal} продано${freeTotal ? ` · ${freeTotal} бесплатно` : ''}`)
   }
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
@@ -183,12 +192,13 @@ function HookahShiftTab({ restaurantId, stock, t, toast }: { restaurantId: strin
 
   return (
     <div>
-      {/* Итог дня */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
+      {/* Итог дня: выручка только с продаж, табак — по всем */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
         {[
-          { l: 'Кальянов', v: String(totalCount), c: t.orange },
-          { l: 'Выручка', v: `€${(totalCount * price).toLocaleString('de-DE')}`, c: t.green },
-          { l: 'Табака', v: `${(totalCount * portion).toLocaleString('de-DE')} г`, c: t.blue },
+          { l: 'Продано', v: String(paidTotal), c: t.orange },
+          { l: 'Бесплатно', v: String(freeTotal), c: t.purple },
+          { l: 'Выручка', v: `€${(paidTotal * price).toLocaleString('de-DE')}`, c: t.green },
+          { l: 'Табака', v: `${((paidTotal + freeTotal) * portion).toLocaleString('de-DE')} г`, c: t.blue },
         ].map(it => (
           <div key={it.l} style={{ background: t.surface, borderRadius: 14, padding: '12px 10px', boxShadow: t.sh, textAlign: 'center' }}>
             <div style={{ fontSize: 17, fontWeight: 800, color: it.c }}>{it.v}</div>
@@ -202,6 +212,18 @@ function HookahShiftTab({ restaurantId, stock, t, toast }: { restaurantId: strin
         </div>
       )}
 
+      {/* Продажа | Бесплатно */}
+      <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 12, gap: 2 }}>
+        {([['paid', 'Продажа'], ['free', 'Бесплатно']] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setMode(id)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: mode === id ? 700 : 500, cursor: 'pointer', background: mode === id ? t.surface : 'transparent', color: mode === id ? (id === 'paid' ? t.orange : t.purple) : t.text3 }}>{label}</button>
+        ))}
+      </div>
+      {mode === 'free' && (
+        <div style={{ background: `${t.purple}12`, borderRadius: 12, padding: '9px 14px', marginBottom: 12, fontSize: 12.5, color: t.purple }}>
+          Кальяны для владельца и сотрудников: не входят в выручку, табак списывается
+        </div>
+      )}
+
       <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск вкуса..."
         style={{ width: '100%', padding: '12px 14px', borderRadius: 14, border: `1px solid ${t.sep2}`, fontSize: 16, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', marginBottom: 12, boxShadow: t.sh }} />
 
@@ -210,16 +232,18 @@ function HookahShiftTab({ restaurantId, stock, t, toast }: { restaurantId: strin
       ) : (
         <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 14 }}>
           {list.map((s, i) => {
-            const n = counts[s.id] || 0
+            const accent = mode === 'paid' ? t.orange : t.purple
+            const n = activeCounts[s.id] || 0
+            const other = (mode === 'paid' ? freeCounts : counts)[s.id] || 0
             return (
-              <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderBottom: i < list.length - 1 ? `0.5px solid ${t.sep2}` : 'none', background: n > 0 ? `${t.orange}0a` : 'transparent' }}>
+              <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderBottom: i < list.length - 1 ? `0.5px solid ${t.sep2}` : 'none', background: n > 0 ? `${accent}0a` : 'transparent' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.flavor}</div>
-                  <div style={{ fontSize: 11, color: t.text3, marginTop: 1 }}>{s.brand}</div>
+                  <div style={{ fontSize: 11, color: t.text3, marginTop: 1 }}>{s.brand}{other > 0 ? ` · ${other} ${mode === 'paid' ? 'бесп.' : 'прод.'}` : ''}</div>
                 </div>
                 <button onClick={() => inc(s.id, -1)} disabled={n === 0} style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', background: t.fill, color: n === 0 ? t.text4 : t.text, cursor: n === 0 ? 'default' : 'pointer', fontSize: 18, fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>−</button>
-                <span style={{ minWidth: 26, textAlign: 'center', fontSize: 16, fontWeight: 800, color: n > 0 ? t.orange : t.text4 }}>{n}</span>
-                <button onClick={() => inc(s.id, 1)} style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', background: t.orange, color: '#fff', cursor: 'pointer', fontSize: 18, fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
+                <span style={{ minWidth: 26, textAlign: 'center', fontSize: 16, fontWeight: 800, color: n > 0 ? accent : t.text4 }}>{n}</span>
+                <button onClick={() => inc(s.id, 1)} style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', background: accent, color: '#fff', cursor: 'pointer', fontSize: 18, fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
               </div>
             )
           })}

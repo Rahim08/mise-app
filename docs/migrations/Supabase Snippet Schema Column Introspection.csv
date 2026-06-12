@@ -1,0 +1,343 @@
+table_name,column_name,data_type,is_nullable,column_default
+admin_notes,id,uuid,NO,gen_random_uuid()
+admin_notes,restaurant_id,uuid,YES,null
+admin_notes,note,text,YES,null
+admin_notes,created_at,timestamp with time zone,YES,now()
+app_errors,id,uuid,NO,gen_random_uuid()
+app_errors,source,text,NO,'client'::text
+app_errors,message,text,NO,null
+app_errors,stack,text,YES,null
+app_errors,url,text,YES,null
+app_errors,user_agent,text,YES,null
+app_errors,restaurant_id,uuid,YES,null
+app_errors,created_at,timestamp with time zone,NO,now()
+attendance_records,id,uuid,NO,gen_random_uuid()
+attendance_records,restaurant_id,uuid,NO,null
+attendance_records,staff_id,uuid,NO,null
+attendance_records,schedule_id,uuid,YES,null
+attendance_records,date,date,NO,null
+attendance_records,check_in_at,timestamp with time zone,YES,null
+attendance_records,check_in_lat,numeric,YES,null
+attendance_records,check_in_lng,numeric,YES,null
+attendance_records,check_in_distance_m,integer,YES,null
+attendance_records,check_out_at,timestamp with time zone,YES,null
+attendance_records,check_out_lat,numeric,YES,null
+attendance_records,check_out_lng,numeric,YES,null
+attendance_records,late_minutes,integer,YES,null
+attendance_records,status,text,NO,'present'::text
+attendance_records,source,text,NO,'geo'::text
+attendance_records,created_at,timestamp with time zone,NO,now()
+employees,id,uuid,NO,gen_random_uuid()
+employees,restaurant_id,uuid,YES,null
+employees,name,text,NO,null
+employees,salary,numeric,YES,0
+employees,deduct_per_absence,numeric,YES,0
+employees,card_amount,numeric,YES,0
+employees,is_active,boolean,YES,true
+employees,created_at,timestamp without time zone,YES,now()
+expense_categories,id,uuid,NO,gen_random_uuid()
+expense_categories,restaurant_id,uuid,YES,null
+expense_categories,name,text,NO,null
+expense_categories,is_salary,boolean,YES,false
+expense_categories,created_at,timestamp without time zone,YES,now()
+hookah_sales,id,uuid,NO,gen_random_uuid()
+hookah_sales,restaurant_id,uuid,YES,null
+hookah_sales,shift_id,uuid,YES,null
+hookah_sales,flavor_id,uuid,YES,null
+hookah_sales,quantity,integer,YES,1
+hookah_sales,price,numeric,YES,null
+hookah_sales,created_at,timestamp without time zone,YES,now()
+inkassations,id,uuid,NO,gen_random_uuid()
+inkassations,restaurant_id,uuid,YES,null
+inkassations,date,date,YES,CURRENT_DATE
+inkassations,amount,numeric,NO,null
+inkassations,expense,numeric,YES,0
+inkassations,reason,text,YES,null
+inkassations,total,numeric,YES,null
+inkassations,created_at,timestamp without time zone,YES,now()
+inkassations,salary,numeric,NO,0
+inkassations,salary_note,text,YES,null
+menu_categories,id,uuid,NO,gen_random_uuid()
+menu_categories,restaurant_id,uuid,YES,null
+menu_categories,name,text,NO,null
+menu_categories,description,text,YES,null
+menu_categories,image_url,text,YES,null
+menu_categories,position,integer,YES,0
+menu_categories,is_visible,boolean,YES,true
+menu_categories,created_at,timestamp with time zone,YES,now()
+menu_items,id,uuid,NO,gen_random_uuid()
+menu_items,restaurant_id,uuid,YES,null
+menu_items,category_id,uuid,YES,null
+menu_items,name,text,NO,null
+menu_items,description,text,YES,null
+menu_items,price,numeric,YES,null
+menu_items,image_url,text,YES,null
+menu_items,is_visible,boolean,YES,true
+menu_items,is_available,boolean,YES,true
+menu_items,calories,integer,YES,null
+menu_items,allergens,ARRAY,YES,null
+menu_items,position,integer,YES,0
+menu_items,syrve_id,text,YES,null
+menu_items,created_at,timestamp with time zone,YES,now()
+menu_items,updated_at,timestamp with time zone,YES,now()
+menu_items,modifiers,jsonb,YES,null
+menu_orders,id,uuid,NO,gen_random_uuid()
+menu_orders,restaurant_id,uuid,YES,null
+menu_orders,table_number,text,YES,null
+menu_orders,items,jsonb,NO,null
+menu_orders,total,numeric,YES,null
+menu_orders,status,text,YES,'new'::text
+menu_orders,pos_system,text,YES,null
+menu_orders,pos_order_id,text,YES,null
+menu_orders,created_at,timestamp with time zone,YES,now()
+menu_settings,id,uuid,NO,gen_random_uuid()
+menu_settings,restaurant_id,uuid,YES,null
+menu_settings,slug,text,YES,null
+menu_settings,is_published,boolean,YES,false
+menu_settings,theme,text,YES,'light'::text
+menu_settings,accent_color,text,YES,'#007aff'::text
+menu_settings,cover_url,text,YES,null
+menu_settings,show_photos,boolean,YES,true
+menu_settings,allow_orders,boolean,YES,false
+menu_settings,allow_payment,boolean,YES,false
+menu_settings,show_allergens,boolean,YES,false
+menu_settings,show_calories,boolean,YES,false
+menu_settings,language,text,YES,'ru'::text
+menu_settings,created_at,timestamp with time zone,YES,now()
+menu_settings,updated_at,timestamp with time zone,YES,now()
+menu_settings,allow_pay_at_table,boolean,NO,false
+monthly_card_amounts,id,uuid,NO,gen_random_uuid()
+monthly_card_amounts,restaurant_id,uuid,YES,null
+monthly_card_amounts,employee_id,uuid,YES,null
+monthly_card_amounts,month,text,NO,null
+monthly_card_amounts,card_amount,numeric,YES,0
+monthly_card_amounts,created_at,timestamp with time zone,YES,now()
+monthly_card_amounts,updated_at,timestamp with time zone,YES,now()
+notifications,id,uuid,NO,gen_random_uuid()
+notifications,restaurant_id,uuid,NO,null
+notifications,staff_id,uuid,NO,null
+notifications,type,text,NO,null
+notifications,title,text,NO,null
+notifications,body,text,YES,null
+notifications,data,jsonb,YES,null
+notifications,sent_at,timestamp with time zone,YES,null
+notifications,read_at,timestamp with time zone,YES,null
+notifications,created_at,timestamp with time zone,NO,now()
+pin_attempts,key,text,NO,null
+pin_attempts,count,integer,NO,0
+pin_attempts,blocked_until,timestamp with time zone,YES,null
+pin_attempts,updated_at,timestamp with time zone,NO,now()
+profiles,id,uuid,NO,null
+profiles,full_name,text,YES,null
+profiles,role,text,YES,'manager'::text
+profiles,restaurant_id,uuid,YES,null
+profiles,created_at,timestamp without time zone,YES,now()
+push_subscriptions,id,uuid,NO,gen_random_uuid()
+push_subscriptions,restaurant_id,uuid,NO,null
+push_subscriptions,staff_id,uuid,NO,null
+push_subscriptions,platform,text,NO,null
+push_subscriptions,endpoint,text,YES,null
+push_subscriptions,keys,jsonb,YES,null
+push_subscriptions,device_token,text,YES,null
+push_subscriptions,last_seen,timestamp with time zone,NO,now()
+push_subscriptions,created_at,timestamp with time zone,NO,now()
+restaurant_settings,id,uuid,NO,gen_random_uuid()
+restaurant_settings,restaurant_id,uuid,YES,null
+restaurant_settings,name,text,NO,'Мой ресторан'::text
+restaurant_settings,currency,text,YES,'€'::text
+restaurant_settings,timezone,text,YES,'Europe/Rome'::text
+restaurant_settings,working_days,integer,YES,22
+restaurant_settings,created_at,timestamp without time zone,YES,now()
+restaurant_settings,updated_at,timestamp without time zone,YES,now()
+restaurant_settings,gemini_api_key,text,YES,null
+restaurant_settings,latitude,numeric,YES,null
+restaurant_settings,longitude,numeric,YES,null
+restaurant_settings,geo_radius_m,integer,NO,150
+restaurant_settings,attendance_enabled,boolean,NO,false
+restaurant_settings,reminder_mode,text,NO,'hours_before'::text
+restaurant_settings,reminder_hours,integer,NO,12
+restaurant_settings,reminder_time,time without time zone,NO,'18:00:00'::time without time zone
+restaurant_settings,include_card_in_analytics,boolean,NO,false
+restaurants,id,uuid,NO,gen_random_uuid()
+restaurants,name,text,NO,null
+restaurants,owner_id,uuid,YES,null
+restaurants,is_active,boolean,YES,true
+restaurants,created_at,timestamp without time zone,YES,now()
+restaurants,subscription_status,text,YES,'active'::text
+restaurants,subscription_plan,text,YES,'business'::text
+restaurants,subscription_ends_at,timestamp with time zone,YES,null
+restaurants,logo_url,text,YES,null
+restaurants,owner_pin,text,YES,null
+salary_records,id,uuid,NO,gen_random_uuid()
+salary_records,restaurant_id,uuid,YES,null
+salary_records,employee_id,uuid,YES,null
+salary_records,month,integer,NO,null
+salary_records,year,integer,NO,null
+salary_records,salary,numeric,YES,0
+salary_records,absences,integer,YES,0
+salary_records,total_deduct,numeric,YES,0
+salary_records,card_amount,numeric,YES,0
+salary_records,cash_amount,numeric,YES,0
+salary_records,created_at,timestamp without time zone,YES,now()
+shift_absences,id,uuid,NO,gen_random_uuid()
+shift_absences,shift_id,uuid,YES,null
+shift_absences,restaurant_id,uuid,YES,null
+shift_absences,employee_id,uuid,YES,null
+shift_absences,date,date,NO,null
+shift_checklist_completions,id,uuid,NO,gen_random_uuid()
+shift_checklist_completions,restaurant_id,uuid,NO,null
+shift_checklist_completions,checklist_id,uuid,NO,null
+shift_checklist_completions,shift_id,uuid,YES,null
+shift_checklist_completions,staff_id,uuid,YES,null
+shift_checklist_completions,date,date,NO,null
+shift_checklist_completions,items_state,jsonb,NO,'[]'::jsonb
+shift_checklist_completions,completed_at,timestamp with time zone,YES,null
+shift_checklist_completions,created_at,timestamp with time zone,NO,now()
+shift_checklists,id,uuid,NO,gen_random_uuid()
+shift_checklists,restaurant_id,uuid,NO,null
+shift_checklists,type,text,NO,null
+shift_checklists,items,jsonb,NO,'[]'::jsonb
+shift_checklists,created_at,timestamp with time zone,NO,now()
+shift_expenses,id,uuid,NO,gen_random_uuid()
+shift_expenses,shift_id,uuid,YES,null
+shift_expenses,restaurant_id,uuid,YES,null
+shift_expenses,category_id,uuid,YES,null
+shift_expenses,category_name,text,YES,null
+shift_expenses,amount,numeric,NO,null
+shift_expenses,note,text,YES,null
+shift_expenses,created_at,timestamp with time zone,YES,now()
+shift_swap_requests,id,uuid,NO,gen_random_uuid()
+shift_swap_requests,restaurant_id,uuid,NO,null
+shift_swap_requests,schedule_id,uuid,NO,null
+shift_swap_requests,requester_id,uuid,NO,null
+shift_swap_requests,target_id,uuid,YES,null
+shift_swap_requests,status,text,NO,'pending_peer'::text
+shift_swap_requests,peer_responded_at,timestamp with time zone,YES,null
+shift_swap_requests,manager_id,uuid,YES,null
+shift_swap_requests,manager_responded_at,timestamp with time zone,YES,null
+shift_swap_requests,note,text,YES,null
+shift_swap_requests,created_at,timestamp with time zone,NO,now()
+shift_swap_requests,updated_at,timestamp with time zone,NO,now()
+shifts,id,uuid,NO,gen_random_uuid()
+shifts,restaurant_id,uuid,YES,null
+shifts,manager_id,uuid,YES,null
+shifts,opened_at,timestamp without time zone,YES,now()
+shifts,closed_at,timestamp without time zone,YES,null
+shifts,status,text,YES,'open'::text
+shifts,total_income,numeric,YES,0
+shifts,total_expense,numeric,YES,0
+shifts,notes,text,YES,null
+shifts,date,date,YES,null
+shifts,opening_balance,numeric,YES,0
+shifts,income,numeric,YES,0
+shifts,inkassation,numeric,YES,0
+shifts,closing_balance,numeric,YES,0
+shifts,opened_by,uuid,YES,null
+shifts,income_card,numeric,NO,0
+staff,id,uuid,NO,gen_random_uuid()
+staff,restaurant_id,uuid,YES,null
+staff,name,text,NO,null
+staff,pin_hash,text,NO,null
+staff,apps,ARRAY,YES,'{}'::text[]
+staff,device_id,text,YES,null
+staff,is_active,boolean,YES,true
+staff,created_at,timestamp with time zone,YES,now()
+staff,role,text,NO,'waiter'::text
+staff_directory,id,uuid,YES,null
+staff_directory,restaurant_id,uuid,YES,null
+staff_directory,name,text,YES,null
+staff_directory,role,text,YES,null
+staff_directory,apps,ARRAY,YES,null
+staff_directory,device_bound,boolean,YES,null
+staff_directory,is_active,boolean,YES,null
+staff_reports,id,uuid,NO,gen_random_uuid()
+staff_reports,restaurant_id,uuid,NO,null
+staff_reports,author_id,uuid,YES,null
+staff_reports,type,text,NO,'other'::text
+staff_reports,title,text,NO,null
+staff_reports,description,text,YES,null
+staff_reports,status,text,NO,'new'::text
+staff_reports,resolved_at,timestamp with time zone,YES,null
+staff_reports,created_at,timestamp with time zone,NO,now()
+staff_reports,updated_at,timestamp with time zone,NO,now()
+staff_schedules,id,uuid,NO,gen_random_uuid()
+staff_schedules,restaurant_id,uuid,NO,null
+staff_schedules,staff_id,uuid,NO,null
+staff_schedules,date,date,NO,null
+staff_schedules,shift_start,time without time zone,YES,null
+staff_schedules,shift_end,time without time zone,YES,null
+staff_schedules,note,text,YES,null
+staff_schedules,created_at,timestamp with time zone,NO,now()
+staff_schedules,published,boolean,NO,false
+staff_tasks,id,uuid,NO,gen_random_uuid()
+staff_tasks,restaurant_id,uuid,NO,null
+staff_tasks,title,text,NO,null
+staff_tasks,description,text,YES,null
+staff_tasks,assigned_to,uuid,YES,null
+staff_tasks,created_by,uuid,YES,null
+staff_tasks,status,text,NO,'todo'::text
+staff_tasks,priority,text,NO,'medium'::text
+staff_tasks,due_date,date,YES,null
+staff_tasks,completed_at,timestamp with time zone,YES,null
+staff_tasks,created_at,timestamp with time zone,NO,now()
+staff_tasks,updated_at,timestamp with time zone,NO,now()
+subscriptions,id,uuid,NO,gen_random_uuid()
+subscriptions,restaurant_id,uuid,YES,null
+subscriptions,plan,text,YES,'business'::text
+subscriptions,status,text,YES,'active'::text
+subscriptions,stripe_id,text,YES,null
+subscriptions,started_at,timestamp without time zone,YES,now()
+subscriptions,expires_at,timestamp without time zone,YES,null
+tech_card_sessions,id,uuid,NO,gen_random_uuid()
+tech_card_sessions,restaurant_id,uuid,NO,null
+tech_card_sessions,card_id,uuid,NO,null
+tech_card_sessions,staff_id,uuid,YES,null
+tech_card_sessions,items_state,jsonb,NO,'[]'::jsonb
+tech_card_sessions,completed_at,timestamp with time zone,YES,null
+tech_card_sessions,created_at,timestamp with time zone,NO,now()
+tech_cards,id,uuid,NO,gen_random_uuid()
+tech_cards,restaurant_id,uuid,NO,null
+tech_cards,name,text,NO,null
+tech_cards,category,text,NO,'dish'::text
+tech_cards,target_roles,ARRAY,NO,'{kitchen}'::text[]
+tech_cards,items,jsonb,NO,'[]'::jsonb
+tech_cards,is_active,boolean,NO,true
+tech_cards,created_at,timestamp with time zone,NO,now()
+tobacco_flavors,id,uuid,NO,gen_random_uuid()
+tobacco_flavors,restaurant_id,uuid,YES,null
+tobacco_flavors,brand,text,NO,null
+tobacco_flavors,flavor,text,NO,null
+tobacco_flavors,created_at,timestamp with time zone,YES,now()
+tobacco_inventories,id,uuid,NO,gen_random_uuid()
+tobacco_inventories,restaurant_id,uuid,YES,null
+tobacco_inventories,type,text,NO,'warehouse'::text
+tobacco_inventories,items,jsonb,YES,'[]'::jsonb
+tobacco_inventories,notes,text,YES,null
+tobacco_inventories,created_at,timestamp with time zone,YES,now()
+tobacco_inventories,created_by,uuid,YES,null
+tobacco_movements,id,uuid,NO,gen_random_uuid()
+tobacco_movements,restaurant_id,uuid,YES,null
+tobacco_movements,flavor_id,uuid,YES,null
+tobacco_movements,type,text,NO,null
+tobacco_movements,quantity_g,numeric,NO,null
+tobacco_movements,reason,text,YES,null
+tobacco_movements,created_at,timestamp without time zone,YES,now()
+tobacco_movements,brand,text,YES,null
+tobacco_movements,flavor,text,YES,null
+tobacco_movements,batch_id,uuid,YES,null
+tobacco_stock,id,uuid,NO,gen_random_uuid()
+tobacco_stock,restaurant_id,uuid,YES,null
+tobacco_stock,flavor_name,text,YES,null
+tobacco_stock,quantity_g,numeric,YES,0
+tobacco_stock,min_quantity_g,numeric,YES,100
+tobacco_stock,updated_at,timestamp without time zone,YES,now()
+tobacco_stock,brand,text,YES,null
+tobacco_stock,flavor,text,YES,null
+transactions,id,uuid,NO,gen_random_uuid()
+transactions,shift_id,uuid,YES,null
+transactions,restaurant_id,uuid,YES,null
+transactions,type,text,NO,null
+transactions,amount,numeric,NO,null
+transactions,category,text,YES,null
+transactions,note,text,YES,null
+transactions,created_at,timestamp without time zone,YES,now()

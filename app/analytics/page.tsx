@@ -742,6 +742,41 @@ export default function AnalyticsApp() {
           <StatCard label="Касса" rawValue={lastShift?.closing_balance || 0} value={`${currency}${fv(lastShift?.closing_balance || 0)}`} color={t.blue} sm t={t} />
         </div>
 
+        {/* Нал vs безнал: соотношение продаж за месяц (инкассация — всегда только нал) */}
+        {(() => {
+          const cash = shiftsRaw.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
+          const card = shiftsRaw.reduce((s: number, sh: any) => s + (sh.income_card || 0), 0)
+          if (card <= 0) return null
+          const total = cash + card
+          const cashPct = Math.round(cash / total * 100)
+          return (
+            <div style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh, marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: t.text }}>Наличные · Безнал</span>
+                <span style={{ fontSize: 12, color: t.text3 }}>{currency}{fv(total)} всего</span>
+              </div>
+              <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', gap: 2 }}>
+                <div style={{ width: `${cashPct}%`, background: t.green, borderRadius: 5, transition: 'width .4s ease' }} />
+                <div style={{ flex: 1, background: t.purple, borderRadius: 5 }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
+                <span style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.green }} />
+                  <span style={{ color: t.text2 }}>Нал</span>
+                  <span style={{ fontWeight: 700, color: t.green }}>{currency}{fv(cash)}</span>
+                  <span style={{ color: t.text3 }}>{cashPct}%</span>
+                </span>
+                <span style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.purple }} />
+                  <span style={{ color: t.text2 }}>Карта</span>
+                  <span style={{ fontWeight: 700, color: t.purple }}>{currency}{fv(card)}</span>
+                  <span style={{ color: t.text3 }}>{100 - cashPct}%</span>
+                </span>
+              </div>
+            </div>
+          )
+        })()}
+
 
 
         {shifts.length > 1 && <>
@@ -1062,16 +1097,22 @@ export default function AnalyticsApp() {
 
           {tab === 'hookah' && (() => {
             // Смены кальянщика из Mise Stash: выручка = кол-во × цена, табак = кол-во × порция
-            const qtyMonth = hookahRows.reduce((s: number, r: any) => s + (r.quantity || 0), 0)
-            const revMonth = hookahRows.reduce((s: number, r: any) => s + (r.quantity || 0) * Number(r.price ?? hk.price), 0)
-            const usedMonthG = qtyMonth * hk.portion
+            // Бесплатные (владелец/сотрудники) не входят в выручку, но табак расходуют
+            const paidRows = hookahRows.filter((r: any) => !r.is_free)
+            const qtyMonth = paidRows.reduce((s: number, r: any) => s + (r.quantity || 0), 0)
+            const qtyFree = hookahRows.filter((r: any) => r.is_free).reduce((s: number, r: any) => s + (r.quantity || 0), 0)
+            const revMonth = paidRows.reduce((s: number, r: any) => s + (r.quantity || 0) * Number(r.price ?? hk.price), 0)
+            const usedMonthG = (qtyMonth + qtyFree) * hk.portion
             const venueG = Math.max(0, hk.issuedG - hk.allQty * hk.portion) // выдано в зал − продано × порция
             const fmtKg = (g: number) => g >= 1000 ? `${(g / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} кг` : `${Math.round(g)} г`
             // По дням и по вкусам
-            const byDay = new Map<string, number>()
+            const byDay = new Map<string, { total: number; paid: number }>()
             const byFlavor = new Map<string, number>()
             hookahRows.forEach((r: any) => {
-              byDay.set(r.date, (byDay.get(r.date) || 0) + (r.quantity || 0))
+              const d = byDay.get(r.date) || { total: 0, paid: 0 }
+              d.total += r.quantity || 0
+              if (!r.is_free) d.paid += r.quantity || 0
+              byDay.set(r.date, d)
               const key = `${r.brand || ''} ${r.flavor || ''}`.trim() || '—'
               byFlavor.set(key, (byFlavor.get(key) || 0) + (r.quantity || 0))
             })
@@ -1081,10 +1122,13 @@ export default function AnalyticsApp() {
             return (
               <div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-                  <StatCard label="Кальянов за месяц" rawValue={qtyMonth} value={String(qtyMonth)} color={t.orange} t={t} />
+                  <StatCard label="Продано за месяц" rawValue={qtyMonth} value={String(qtyMonth)} color={t.orange} t={t} />
                   <StatCard label="Выручка кальяна" rawValue={revMonth} value={`${currency}${fv(revMonth)}`} color={t.green} t={t} />
+                  <StatCard label="Бесплатные" rawValue={qtyFree} value={`${qtyFree} · ${fmtKg(qtyFree * hk.portion)}`} color={t.purple} sm t={t} />
                   <StatCard label="Табака израсходовано" rawValue={usedMonthG} value={fmtKg(usedMonthG)} color={t.blue} sm t={t} />
-                  <StatCard label="На складе" rawValue={hk.stockG} value={fmtKg(hk.stockG)} color={t.purple} sm t={t} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 10, marginBottom: 12 }}>
+                  <StatCard label="На складе" rawValue={hk.stockG} value={fmtKg(hk.stockG)} color={t.text2 as any} sm t={t} />
                 </div>
                 <div style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh, marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div>
@@ -1120,7 +1164,11 @@ export default function AnalyticsApp() {
                       {[...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([d, n], i, arr) => (
                         <div key={d} style={{ display: 'flex', justifyContent: 'space-between', padding: '11px 16px', borderBottom: i < arr.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
                           <span style={{ fontSize: 14, color: t.text }}>{dd(d)}</span>
-                          <span style={{ fontSize: 14 }}><span style={{ fontWeight: 700, color: t.orange }}>{n}</span><span style={{ color: t.text3 }}> · {currency}{fv(n * hk.price)}</span></span>
+                          <span style={{ fontSize: 14 }}>
+                            <span style={{ fontWeight: 700, color: t.orange }}>{n.paid}</span>
+                            {n.total > n.paid && <span style={{ color: t.purple }}> +{n.total - n.paid} бесп.</span>}
+                            <span style={{ color: t.text3 }}> · {currency}{fv(n.paid * hk.price)}</span>
+                          </span>
                         </div>
                       ))}
                     </div>
