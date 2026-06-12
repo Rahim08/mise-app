@@ -1,6 +1,13 @@
-// @ts-nocheck
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@supabase/supabase-js'
+
+// Stripe moved current_period_end onto subscription items in newer API versions.
+// Read item-level first, fall back to the (legacy) top-level field, never crash on Invalid Date.
+function periodEndISO(sub: any): string | null {
+  const ts = sub?.items?.data?.[0]?.current_period_end ?? sub?.current_period_end
+  if (!ts || typeof ts !== 'number') return null
+  return new Date(ts * 1000).toISOString()
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -30,31 +37,35 @@ export async function POST(req: NextRequest) {
       const plan = (sub as any).metadata?.plan
       if (!restaurantId) return NextResponse.json({ received: true })
 
-      const endsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+      const endsAt = periodEndISO(sub)
       await supabase.from('restaurants').update({
         subscription_status: (sub as any).status,
         subscription_plan: plan,
         subscription_id: sub.id,
-        subscription_ends_at: endsAt,
+        ...(endsAt ? { subscription_ends_at: endsAt } : {}),
       }).eq('id', restaurantId)
     }
 
+    // Новые версии Stripe API убрали invoice.subscription с верхнего уровня —
+    // он живёт в parent.subscription_details. Без fallback past_due никогда не ставился бы.
+    const invoiceSubId = (o: any) => o?.subscription ?? o?.parent?.subscription_details?.subscription ?? null
+
     if (event.type === 'invoice.payment_succeeded') {
-      const subId = obj.subscription
+      const subId = invoiceSubId(obj)
       if (!subId) return NextResponse.json({ received: true })
       const sub = await stripe.subscriptions.retrieve(subId) as any
       const restaurantId = sub.metadata?.restaurantId
       if (!restaurantId) return NextResponse.json({ received: true })
 
-      const endsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+      const endsAt = periodEndISO(sub)
       await supabase.from('restaurants').update({
         subscription_status: 'active',
-        subscription_ends_at: endsAt,
+        ...(endsAt ? { subscription_ends_at: endsAt } : {}),
       }).eq('id', restaurantId)
     }
 
     if (event.type === 'invoice.payment_failed') {
-      const subId = obj.subscription
+      const subId = invoiceSubId(obj)
       if (!subId) return NextResponse.json({ received: true })
       const sub = await stripe.subscriptions.retrieve(subId) as any
       const restaurantId = sub.metadata?.restaurantId
@@ -62,6 +73,19 @@ export async function POST(req: NextRequest) {
 
       await supabase.from('restaurants').update({
         subscription_status: 'past_due',
+      }).eq('id', restaurantId)
+    }
+
+    // Смена плана / окончание триала / реактивация в портале — синхронизируем статус и план.
+    if (event.type === 'customer.subscription.updated') {
+      const restaurantId = obj.metadata?.restaurantId
+      if (!restaurantId) return NextResponse.json({ received: true })
+
+      const endsAt = periodEndISO(obj)
+      await supabase.from('restaurants').update({
+        subscription_status: obj.cancel_at_period_end ? 'canceling' : obj.status,
+        ...(obj.metadata?.plan ? { subscription_plan: obj.metadata.plan } : {}),
+        ...(endsAt ? { subscription_ends_at: endsAt } : {}),
       }).eq('id', restaurantId)
     }
 

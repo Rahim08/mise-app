@@ -1,6 +1,6 @@
-// @ts-nocheck
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@supabase/supabase-js'
+import { verifyOwner } from '@/lib/stripeAuth'
 
 const PLANS: Record<string, { priceId: string }> = {
   starter:  { priceId: 'price_1TgTbgQ50dEzENhL18edUbx7' },
@@ -10,9 +10,15 @@ const PLANS: Record<string, { priceId: string }> = {
 
 export async function POST(req: NextRequest) {
   try {
-    const { plan, restaurantId, userId, email } = await req.json()
+    const { plan, restaurantId } = await req.json()
     const planData = PLANS[plan]
     if (!planData) return NextResponse.json({ error: 'Invalid plan' }, { status: 400 })
+
+    // userId/email — из проверенной сессии владельца, а не из тела запроса.
+    const auth = await verifyOwner(req, restaurantId)
+    if (!auth.ok) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const userId = auth.userId!
+    const email = auth.email
 
     const Stripe = (await import('stripe')).default
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
@@ -45,8 +51,8 @@ export async function POST(req: NextRequest) {
         trial_period_days: 7,
         metadata: { restaurantId, plan },
       },
-      success_url: "https://mise-app-omega.vercel.app/dashboard?tab=billing&success=1",
-      cancel_url: "https://mise-app-omega.vercel.app/dashboard?tab=billing",
+      success_url: `${req.nextUrl.origin}/dashboard?tab=billing&success=1`,
+      cancel_url: `${req.nextUrl.origin}/dashboard?tab=billing`,
     })
 
     return NextResponse.json({ url: session.url })

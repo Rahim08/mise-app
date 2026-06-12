@@ -1,27 +1,16 @@
 'use client'
-// @ts-nocheck
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useRouter } from 'next/navigation'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
-
-
+import { LogoMark } from '@/components/LogoMark'
 
 const APPS = [
   { id: 'manager',   name: 'Mise Manager',   color: '#007aff', path: '/manager' },
   { id: 'analytics', name: 'Mise Analytics', color: '#34c759', path: '/analytics' },
   { id: 'stash',     name: 'Mise Stash',     color: '#ff9500', path: '/tobacco' },
+  { id: 'people',    name: 'Mise People',    color: '#5856d6', path: '/people' },
 ]
 
-function LogoMark({ size = 32 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 64 64" fill="none">
-      <rect width="64" height="64" rx="14" fill="#007aff"/>
-      <rect x="14" y="20" width="36" height="5" rx="2.5" fill="white"/>
-      <rect x="14" y="30" width="26" height="5" rx="2.5" fill="white" opacity=".7"/>
-      <rect x="14" y="40" width="18" height="5" rx="2.5" fill="white" opacity=".4"/>
-    </svg>
-  )
-}
 
 function getDeviceId(): string {
   const key = 'mise_device_id'
@@ -36,6 +25,7 @@ function getDeviceId(): string {
 type Phase = 'loading' | 'pin' | 'app_select' | 'error'
 
 export default function JoinPage() {
+  const router = useRouter()
   const [phase, setPhase] = useState<Phase>('loading')
   const [restaurant, setRestaurant] = useState<any>(null)
   const [staffMember, setStaffMember] = useState<any>(null)
@@ -45,51 +35,45 @@ export default function JoinPage() {
   const [errorMsg, setErrorMsg] = useState('')
   const [checking, setChecking] = useState(false)
 
-  useEffect(() => {
+  useEffect(() => { initJoin() }, [])
+
+  const initJoin = async () => {
     const params = new URLSearchParams(window.location.search)
     const restaurantId = params.get('restaurant')
     if (!restaurantId) { setErrorMsg('Неверная ссылка'); setPhase('error'); return }
 
-    const deviceId = getDeviceId()
+    getDeviceId() // ensure a device id exists for binding
     const savedStaff = localStorage.getItem('mise_staff_' + restaurantId)
 
-    supabase.from('restaurants')
-      .select('id,name,logo_url,subscription_status,subscription_plan,owner_pin')
-      .eq('id', restaurantId).single()
-      .then(({ data, error }) => {
-        if (error || !data) { setErrorMsg('Заведение не найдено'); setPhase('error'); return }
-        setRestaurant(data)
-        localStorage.setItem('mise_restaurant_id', restaurantId)
+    const res = await fetch('/api/auth/restaurant-info', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ restaurantId }),
+    })
+    const json = await res.json()
+    if (!res.ok || !json.restaurant) { setErrorMsg('Заведение не найдено'); setPhase('error'); return }
+    setRestaurant(json.restaurant)
+    localStorage.setItem('mise_restaurant_id', restaurantId)
+    document.cookie = `mise_restaurant_id=${restaurantId}; path=/; max-age=2592000; SameSite=Lax`
 
-        if (savedStaff) {
-          const parsed = JSON.parse(savedStaff)
-          // Owner saved
-          if (parsed.is_owner) {
-            setStaffMember(parsed)
-            goToApp(parsed.apps)
-            return
-          }
-          supabase.from('staff').select('*').eq('id', parsed.id).eq('is_active', true).single()
-            .then(({ data: s }) => {
-              if (s) {
-                setStaffMember(s)
-                goToApp(s.apps)
-              } else {
-                localStorage.removeItem('mise_staff_' + restaurantId)
-                setPhase('pin')
-              }
-            })
-        } else {
-          setPhase('pin')
-        }
-      })
-  }, [])
+    // Returning user: skip PIN only while the server data-token is still valid.
+    const m = document.cookie.match(/(?:^|; )mise_token_until=(\d+)/)
+    const tokenValid = m ? parseInt(m[1], 10) > Math.floor(Date.now() / 1000) : false
+    if (savedStaff && tokenValid) {
+      try {
+        const parsed = JSON.parse(savedStaff)
+        setStaffMember(parsed)
+        goToApp(parsed.apps)
+        return
+      } catch {}
+    }
+    setPhase('pin')
+  }
 
   const goToApp = (apps: string[]) => {
     if (!apps || apps.length === 0) { setPhase('error'); setErrorMsg('Нет доступных приложений'); return }
     if (apps.length === 1) {
       const app = APPS.find(a => a.id === apps[0])
-      if (app) { window.location.href = app.path; return }
+      if (app) { router.push(app.path); return }
     }
     setPhase('app_select')
   }
@@ -115,7 +99,7 @@ export default function JoinPage() {
     const res = await fetch('/api/auth/pin/check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ restaurantId: restaurant.id, pin: enteredPin }),
+      body: JSON.stringify({ restaurantId: restaurant.id, pin: enteredPin, deviceId: getDeviceId() }),
     })
     const result = await res.json()
 
@@ -128,11 +112,8 @@ export default function JoinPage() {
         goToApp(ownerData.apps)
       } else {
         const matched = result.staff
-        const deviceId = getDeviceId()
-        if (!matched.device_id) {
-          await supabase.from('staff').update({ device_id: deviceId }).eq('id', matched.id)
-        }
-        localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify({ id: matched.id, name: matched.name, apps: matched.apps }))
+        // Device binding now happens server-side in /api/auth/pin/check.
+        localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify({ id: matched.id, name: matched.name, apps: matched.apps, role: matched.role }))
         setStaffMember(matched)
         setChecking(false)
         goToApp(matched.apps)
@@ -146,7 +127,7 @@ export default function JoinPage() {
   }
 
   const openApp = (path: string) => {
-    window.location.href = path
+    router.push(path)
   }
 
   const logout = () => {
@@ -168,7 +149,9 @@ export default function JoinPage() {
   // ── ERROR ──
   if (phase === 'error') return (
     <div style={S.screen}>
-      <div style={{ fontSize: '2.5rem', marginBottom: 16 }}>⚠️</div>
+      <div style={{ width: 64, height: 64, borderRadius: 16, background: 'rgba(255,59,48,.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+        <svg width="30" height="30" fill="none" stroke="#ff3b30" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+      </div>
       <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 8 }}>Ошибка</div>
       <div style={{ color: '#6d6d72', fontSize: '.88rem', textAlign: 'center', maxWidth: 260 }}>{errorMsg}</div>
     </div>
@@ -181,7 +164,7 @@ export default function JoinPage() {
         {restaurant?.logo_url ? (
           <img src={restaurant.logo_url} alt="logo" style={{ width: 72, height: 72, borderRadius: 18, objectFit: 'cover', boxShadow: '0 4px 16px rgba(0,0,0,.12)' }} />
         ) : (
-          <div style={{ width: 72, height: 72, borderRadius: 18, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem', boxShadow: '0 2px 12px rgba(0,0,0,.08)' }}>🍽️</div>
+          <div style={{ width: 72, height: 72, borderRadius: 18, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 12px rgba(0,0,0,.08)' }}><LogoMark size={40} /></div>
         )}
         <div style={{ fontWeight: 700, fontSize: '1.2rem', color: '#1c1c1e' }}>{restaurant?.name}</div>
         <div style={{ fontSize: '.82rem', color: '#aeaeb2' }}>Введите PIN для входа</div>
@@ -265,11 +248,11 @@ export default function JoinPage() {
           {restaurant?.logo_url ? (
             <img src={restaurant.logo_url} alt="logo" style={{ width: 60, height: 60, borderRadius: 15, objectFit: 'cover', marginBottom: 14, boxShadow: '0 4px 14px rgba(0,0,0,.1)' }} />
           ) : (
-            <div style={{ width: 60, height: 60, borderRadius: 15, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.8rem', margin: '0 auto 14px', boxShadow: '0 2px 10px rgba(0,0,0,.07)' }}>🍽️</div>
+            <div style={{ width: 60, height: 60, borderRadius: 15, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px', boxShadow: '0 2px 10px rgba(0,0,0,.07)' }}><LogoMark size={34} /></div>
           )}
           <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 4 }}>{restaurant?.name}</div>
           <div style={{ fontSize: '.82rem', color: '#6d6d72' }}>
-            {staffMember?.is_owner ? '👑 Владелец' : staffMember?.name}
+            {staffMember?.is_owner ? 'Владелец' : staffMember?.name}
           </div>
         </div>
 

@@ -1,8 +1,10 @@
 'use client'
-// @ts-nocheck
 import { useEffect, useState, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { db } from '@/lib/db'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
+import { LogoMark } from '@/components/LogoMark'
 
 
 
@@ -17,6 +19,7 @@ const APPS = [
   { id: 'manager',   name: 'Mise Manager',   desc: 'Смены · Расходы · Инкассации · Явка',         color: '#007aff', hint: 'Для менеджеров',  path: '/manager',   plans: ['starter','business','pro'] },
   { id: 'analytics', name: 'Mise Analytics', desc: 'Финансы · Зарплаты · Инкассации · AI',         color: '#34c759', hint: 'Для владельца',   path: '/analytics', plans: ['starter','business','pro'] },
   { id: 'stash',     name: 'Mise Stash',     desc: 'Склад · Приход · Расход · Инвентаризация',     color: '#ff9500', hint: 'Для кальянщика',  path: '/tobacco',   plans: ['business','pro'] },
+  { id: 'people',    name: 'Mise People',    desc: 'Смены · Обмены · Явка · Задачи',               color: '#5856d6', hint: 'Для команды',     path: '/people',    plans: ['business','pro'] },
 ]
 
 const PLANS = [
@@ -25,14 +28,34 @@ const PLANS = [
   { id: 'pro',      name: 'Pro',      price: 39, maxStaff: 10, color: '#af52de', features: ['Все приложения', 'До 10 пользователей', 'AI-аналитика', 'Интеграция Syrve'] },
 ]
 
-const TABS = [
-  { id: 'apps',       label: 'Приложения', icon: '⊞' },
-  { id: 'employees',  label: 'Сотрудники', icon: '👥' },
-  { id: 'categories', label: 'Категории',  icon: '📂' },
-  { id: 'team',       label: 'Доступы',    icon: '🔑' },
-  { id: 'settings',   label: 'Настройки',  icon: '⚙️' },
-  { id: 'billing',    label: 'Подписка',   icon: '💳' },
+const ROLE_OPTS = [
+  { value: 'waiter', label: 'Официант' }, { value: 'kitchen', label: 'Кухня' }, { value: 'bar', label: 'Бар' },
+  { value: 'hookah', label: 'Кальянная' }, { value: 'manager', label: 'Менеджер' }, { value: 'host', label: 'Хостес' },
+  { value: 'cleaner', label: 'Уборка' }, { value: 'admin', label: 'Админ' },
 ]
+function roleLabel(role?: string) { return ROLE_OPTS.find(r => r.value === role)?.label || (role || '—') }
+
+const TABS = [
+  { id: 'apps',       label: 'Приложения' },
+  { id: 'team',       label: 'Команда' },
+  { id: 'categories', label: 'Категории' },
+  { id: 'settings',   label: 'Настройки' },
+  { id: 'billing',    label: 'Подписка' },
+]
+
+// SF-Symbols-style line icons for the dashboard tabs (no emoji).
+function TabIcon({ id, size = 15 }: { id: string; size?: number }) {
+  const p: any = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round' }
+  switch (id) {
+    case 'apps':       return <svg {...p}><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+    case 'employees':  return <svg {...p}><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 4.2a3.2 3.2 0 010 6.1M19.5 20c0-2.6-1.3-4.5-3.3-5.2"/></svg>
+    case 'categories': return <svg {...p}><path d="M3 7a2 2 0 012-2h4l2 2.5h8A2 2 0 0121 9.5V17a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+    case 'team':       return <svg {...p}><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 4.2a3.2 3.2 0 010 6.1M19.5 20c0-2.6-1.3-4.5-3.3-5.2"/></svg>
+    case 'settings':   return <svg {...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-2.7 1.1V21a2 2 0 01-4 0v-.1A1.6 1.6 0 009 19.4a1.6 1.6 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.6 1.6 0 00-1.1-2.7H3a2 2 0 010-4h.1A1.6 1.6 0 004.6 9a1.6 1.6 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1A1.6 1.6 0 009 4.6V3a2 2 0 014 0v.1a1.6 1.6 0 002.7 1.1l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 00-.3 1.8v.1z"/></svg>
+    case 'billing':    return <svg {...p}><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/></svg>
+    default:           return null
+  }
+}
 
 // ── SPLASH SCREEN ─────────────────────────────────────────────────────────────
 
@@ -152,22 +175,11 @@ function SectionTitle({ title, sub }: { title: string; sub?: string }) {
   )
 }
 
-// ── LOGO MARK ─────────────────────────────────────────────────────────────────
-
-function LogoMark({ size = 28, color = '#007aff' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 64 64" fill="none">
-      <rect width="64" height="64" rx="14" fill={color}/>
-      <rect x="14" y="20" width="36" height="5" rx="2.5" fill="white"/>
-      <rect x="14" y="30" width="26" height="5" rx="2.5" fill="white" opacity=".7"/>
-      <rect x="14" y="40" width="18" height="5" rx="2.5" fill="white" opacity=".4"/>
-    </svg>
-  )
-}
 
 // ── APPS TAB ──────────────────────────────────────────────────────────────────
 
 function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
+  const router = useRouter()
   const plan = restaurant?.subscription_plan || ''
   const status = restaurant?.subscription_status || ''
   const isActive = status === 'active' || status === 'trialing'
@@ -197,12 +209,27 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
                 <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 3, color: '#1c1c1e' }}>{app.name}</div>
                 <div style={{ color: '#6d6d72', fontSize: '.8rem', marginBottom: 14, lineHeight: 1.5 }}>{app.desc}</div>
               </div>
-              <button onClick={() => !locked && isActive && (window.location.href = app.path)} style={{ background: locked || !isActive ? '#f2f2f7' : app.color, color: locked || !isActive ? '#aeaeb2' : '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: locked || !isActive ? 'not-allowed' : 'pointer', width: '100%' }}>
+              <button onClick={() => !locked && isActive && router.push(app.path)} style={{ background: locked || !isActive ? '#f2f2f7' : app.color, color: locked || !isActive ? '#aeaeb2' : '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: locked || !isActive ? 'not-allowed' : 'pointer', width: '100%' }}>
                 {locked ? 'Недоступно в тарифе' : !isActive ? 'Нет подписки' : 'Открыть →'}
               </button>
             </Card>
           )
         })}
+      </div>
+
+      {/* Owner tools — managed from the dashboard, not PIN apps */}
+      <div style={{ fontSize: '.72rem', fontWeight: 700, color: '#6d6d72', textTransform: 'uppercase', letterSpacing: '.06em', margin: '4px 2px 10px' }}>Управление</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 14, marginBottom: 16 }}>
+        <Card style={{ borderTop: '3px solid #ff2d55', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'inline-block', background: '#ff2d5518', color: '#ff2d55', fontSize: '.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, marginBottom: 12, letterSpacing: '.02em' }}>Для гостей</div>
+            <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 3, color: '#1c1c1e' }}>Mise Menu</div>
+            <div style={{ color: '#6d6d72', fontSize: '.8rem', marginBottom: 14, lineHeight: 1.5 }}>QR-меню · Категории · Позиции · Публикация</div>
+          </div>
+          <button onClick={() => router.push('/dashboard/menu')} style={{ background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 10, padding: '9px 0', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: 'pointer', width: '100%' }}>
+            Открыть редактор →
+          </button>
+        </Card>
       </div>
 
       <Card style={{ background: '#f9f9f9', boxShadow: 'none', border: '1px solid rgba(0,0,0,.06)' }}>
@@ -229,7 +256,7 @@ function EmployeesTab({ restaurantId }: { restaurantId: string }) {
 
   const load = async () => {
     setLoading(true)
-    const { data } = await supabase.from('employees').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name')
+    const { data } = await db.from('employees').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name')
     setEmployees(data || [])
     setLoading(false)
   }
@@ -239,14 +266,14 @@ function EmployeesTab({ restaurantId }: { restaurantId: string }) {
   const save = async () => {
     if (!form.name.trim()) return
     const payload = { restaurant_id: restaurantId, name: form.name, salary: +form.salary || 0, deduct_per_absence: +form.deduct_per_absence || 0, card_amount: +form.card_amount || 0, is_active: true }
-    if (editingId) await supabase.from('employees').update(payload).eq('id', editingId)
-    else await supabase.from('employees').insert(payload)
+    if (editingId) await db.from('employees').update(payload).eq('id', editingId)
+    else await db.from('employees').insert(payload)
     setForm({ name: '', salary: '', deduct_per_absence: '', card_amount: '' })
     setShowForm(false); setEditingId(null); load()
   }
 
   const remove = async (id: string) => {
-    await supabase.from('employees').update({ is_active: false }).eq('id', id); load()
+    await db.from('employees').update({ is_active: false }).eq('id', id); load()
   }
 
   const startEdit = (emp: any) => {
@@ -334,7 +361,7 @@ function CategoriesTab({ restaurantId }: { restaurantId: string }) {
 
   const load = async () => {
     setLoading(true)
-    const { data } = await supabase.from('expense_categories').select('*').eq('restaurant_id', restaurantId).order('name')
+    const { data } = await db.from('expense_categories').select('*').eq('restaurant_id', restaurantId).order('name')
     setCats(data || []); setLoading(false)
   }
 
@@ -342,12 +369,16 @@ function CategoriesTab({ restaurantId }: { restaurantId: string }) {
 
   const add = async () => {
     if (!newName.trim()) return
-    await supabase.from('expense_categories').insert({ restaurant_id: restaurantId, name: newName.trim() })
+    await db.from('expense_categories').insert({ restaurant_id: restaurantId, name: newName.trim() })
     setNewName(''); load()
   }
 
   const remove = async (id: string) => {
-    await supabase.from('expense_categories').delete().eq('id', id); load()
+    // Detach from any saved shift expenses (keeps their category_name) so the FK doesn't block deletion.
+    await db.from('shift_expenses').update({ category_id: null }).eq('category_id', id)
+    const { error } = await db.from('expense_categories').delete().eq('id', id)
+    if (error) { alert('Не удалось удалить категорию: ' + error.message); return }
+    load()
   }
 
   return (
@@ -391,9 +422,9 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
   const [employees, setEmployees] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ name: '', pin: '', apps: [] as string[] })
+  const [form, setForm] = useState({ name: '', role: 'waiter', salary: '', deduct: '', card: '', pin: '', apps: [] as string[] })
   const [saving, setSaving] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingEmpId, setEditingEmpId] = useState<string | null>(null)
   const [ownerPin, setOwnerPin] = useState(restaurant?.owner_pin || '')
   const [ownerPinEdit, setOwnerPinEdit] = useState(false)
   const [ownerPinVal, setOwnerPinVal] = useState('')
@@ -401,15 +432,14 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
   const [ownerSaved, setOwnerSaved] = useState(false)
   const [showQR, setShowQR] = useState(false)
 
-  const qrUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}/join?restaurant=${restaurantId}`
-    : `https://mise-app-omega.vercel.app/join?restaurant=${restaurantId}`
+  const blank = { name: '', role: 'waiter', salary: '', deduct: '', card: '', pin: '', apps: [] as string[] }
+  const qrUrl = typeof window !== 'undefined' ? `${window.location.origin}/join?restaurant=${restaurantId}` : ''
 
   const load = async () => {
     setLoading(true)
     const [{ data: staffData }, { data: empData }] = await Promise.all([
-      supabase.from('staff').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name'),
-      supabase.from('employees').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name'),
+      db.from('staff').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name'),
+      db.from('employees').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name'),
     ])
     setStaff(staffData || [])
     setEmployees(empData || [])
@@ -421,13 +451,9 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
   const saveOwnerPin = async () => {
     if (ownerPinVal.length !== 4 || !/^\d+$/.test(ownerPinVal)) { alert('PIN должен быть 4 цифры'); return }
     setOwnerSaving(true)
-    const hashRes = await fetch('/api/auth/pin/hash', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: ownerPinVal }),
-    })
+    const hashRes = await fetch('/api/auth/pin/hash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: ownerPinVal }) })
     const { hash } = await hashRes.json()
-    await supabase.from('restaurants').update({ owner_pin: hash }).eq('id', restaurantId)
+    await db.from('restaurants').update({ owner_pin: hash }).eq('id', restaurantId)
     setOwnerPin(ownerPinVal); setOwnerPinEdit(false); setOwnerPinVal('')
     setOwnerSaving(false); setOwnerSaved(true); setTimeout(() => setOwnerSaved(false), 2000)
   }
@@ -435,62 +461,72 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
   const toggleApp = (appId: string) => {
     setForm(f => ({ ...f, apps: f.apps.includes(appId) ? f.apps.filter(a => a !== appId) : [...f.apps, appId] }))
   }
+  const staffFor = (name: string) => staff.find(s => s.name === name)
 
+  // One save handles both HR (employees) and access (staff).
   const save = async () => {
-    if (!form.name.trim()) return
-    if (!editingId && (form.pin.length !== 4 || !/^\d+$/.test(form.pin))) { alert('PIN должен быть 4 цифры'); return }
-    if (!form.apps.length) { alert('Выберите хотя бы одно приложение'); return }
+    if (!form.name.trim()) { alert('Введите имя'); return }
     setSaving(true)
-    let pinHash = form.pin
-    if (form.pin) {
-      const hashRes = await fetch('/api/auth/pin/hash', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: form.pin }),
-      })
-      const { hash } = await hashRes.json()
-      pinHash = hash
+    const name = form.name.trim()
+    const empPayload = { restaurant_id: restaurantId, name, salary: +form.salary || 0, deduct_per_absence: +form.deduct || 0, card_amount: +form.card || 0, is_active: true }
+    if (editingEmpId) await db.from('employees').update(empPayload).eq('id', editingEmpId)
+    else await db.from('employees').insert(empPayload)
+
+    const existing = staffFor(name)
+    if (form.apps.length) {
+      if (!existing && (form.pin.length !== 4 || !/^\d+$/.test(form.pin))) { alert('Для доступа задайте PIN (4 цифры)'); setSaving(false); return }
+      let pinHash: string | undefined
+      if (form.pin) { const r = await fetch('/api/auth/pin/hash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: form.pin }) }); pinHash = (await r.json()).hash }
+      const sp: any = { restaurant_id: restaurantId, name, apps: form.apps, role: form.role, is_active: true }
+      if (pinHash) sp.pin_hash = pinHash
+      if (existing) await db.from('staff').update(sp).eq('id', existing.id)
+      else await db.from('staff').insert(sp)
+    } else if (existing) {
+      await db.from('staff').update({ is_active: false }).eq('id', existing.id) // access revoked
     }
-    const payload: any = { restaurant_id: restaurantId, name: form.name, apps: form.apps, is_active: true }
-    if (form.pin) payload.pin_hash = pinHash
-    if (editingId) await supabase.from('staff').update(payload).eq('id', editingId)
-    else await supabase.from('staff').insert(payload)
-    setForm({ name: '', pin: '', apps: [] }); setShowForm(false); setEditingId(null)
-    setSaving(false); load()
+    setForm(blank); setShowForm(false); setEditingEmpId(null); setSaving(false); load()
   }
 
-  const remove = async (id: string) => {
-    await supabase.from('staff').update({ is_active: false }).eq('id', id); load()
+  const removePerson = async (emp: any) => {
+    await db.from('employees').update({ is_active: false }).eq('id', emp.id)
+    const s = staffFor(emp.name); if (s) await db.from('staff').update({ is_active: false }).eq('id', s.id)
+    load()
   }
+  const resetDevice = async (id: string) => { await db.from('staff').update({ device_id: null }).eq('id', id); load() }
 
-  const resetDevice = async (id: string) => {
-    await supabase.from('staff').update({ device_id: null }).eq('id', id); load()
-  }
-
-  const startEdit = (s: any) => {
-    setForm({ name: s.name, pin: '', apps: s.apps || [] })
-    setEditingId(s.id); setShowForm(true)
+  const startEdit = (emp: any) => {
+    const s = staffFor(emp.name)
+    setForm({ name: emp.name, role: s?.role || 'waiter', salary: String(emp.salary || ''), deduct: String(emp.deduct_per_absence || ''), card: String(emp.card_amount || ''), pin: '', apps: s?.apps || [] })
+    setEditingEmpId(emp.id); setShowForm(true)
   }
 
   const appColor = (id: string) => APPS.find(a => a.id === id)?.color || '#007aff'
   const appName = (id: string) => APPS.find(a => a.id === id)?.name || id
-  const usedNames = staff.map(s => s.name)
-  const availableEmployees = employees.filter(e => !usedNames.includes(e.name))
-  const atLimit = staff.length >= maxStaff
+  const totalSalary = employees.reduce((s, e) => s + (e.salary || 0), 0)
+  const withAccess = staff.length
+  const atLimit = withAccess >= maxStaff
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-        <SectionTitle title="Доступы" sub={`Сотрудников: ${staff.length} / ${maxStaff}`} />
-        <Btn onClick={() => { setShowForm(!showForm); setEditingId(null); setForm({ name: '', pin: '', apps: [] }) }}
-          disabled={!showForm && atLimit}>
+        <SectionTitle title="Команда" sub="Сотрудники, зарплаты и доступы" />
+        <Btn onClick={() => { setShowForm(!showForm); setEditingEmpId(null); setForm(blank) }}>
           {showForm ? 'Отмена' : '+ Добавить'}
         </Btn>
       </div>
 
-      {atLimit && !showForm && (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 16 }}>
+        {[{ l: 'В команде', v: String(employees.length), c: '#1c1c1e' }, { l: 'С доступом', v: `${withAccess}/${maxStaff}`, c: '#007aff' }, { l: 'ФОТ/мес', v: `€${totalSalary.toLocaleString()}`, c: '#af52de' }].map(it => (
+          <Card key={it.l} style={{ padding: '14px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: '.68rem', color: '#6d6d72', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4, letterSpacing: '.04em' }}>{it.l}</div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 700, color: it.c }}>{it.v}</div>
+          </Card>
+        ))}
+      </div>
+
+      {atLimit && (
         <div style={{ background: 'rgba(255,149,0,.08)', border: '1px solid rgba(255,149,0,.25)', borderRadius: 12, padding: '10px 14px', marginBottom: 14, fontSize: '.83rem', color: '#ff9500', fontWeight: 500 }}>
-          Достигнут лимит тарифа ({maxStaff} пользователей). Обновите подписку.
+          Лимит доступов тарифа ({maxStaff}). Новым сотрудникам доступ не выдать — обновите подписку.
         </div>
       )}
 
@@ -569,34 +605,23 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
         )}
       </Card>
 
-      {/* ─ ФОРМА ДОБАВЛЕНИЯ ─ */}
+      {/* ─ ФОРМА ─ */}
       {showForm && (
         <Card style={{ marginBottom: 14, border: '1px solid #007aff' }}>
-          <div style={{ fontWeight: 700, fontSize: '.95rem', marginBottom: 14 }}>{editingId ? 'Редактировать доступ' : 'Новый доступ'}</div>
-          <div style={{ marginBottom: 12 }}>
-            <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: '#6d6d72', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>Сотрудник</label>
-            {editingId ? (
-              <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} style={inputStyle} />
-            ) : (
-              <select value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} style={inputStyle}>
-                <option value="">Выберите сотрудника...</option>
-                {availableEmployees.map(e => (
-                  <option key={e.id} value={e.name}>{e.name}</option>
-                ))}
-                {availableEmployees.length === 0 && <option disabled>Все сотрудники уже добавлены</option>}
-              </select>
-            )}
+          <div style={{ fontWeight: 700, fontSize: '.95rem', marginBottom: 14 }}>{editingEmpId ? 'Редактировать сотрудника' : 'Новый сотрудник'}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ gridColumn: '1/-1' }}>
+              <Field label="Имя" value={form.name} onChange={(v: string) => setForm({ ...form, name: v })} placeholder="Александр Иванов" />
+            </div>
+            <Field label="Роль" value={form.role} onChange={(v: string) => setForm({ ...form, role: v })} select options={ROLE_OPTS} />
+            <Field label="Оклад" value={form.salary} onChange={(v: string) => setForm({ ...form, salary: v })} placeholder="1000" type="number" />
+            <Field label="Вычет за пропуск" value={form.deduct} onChange={(v: string) => setForm({ ...form, deduct: v })} placeholder="50" type="number" />
+            <Field label="На карту" value={form.card} onChange={(v: string) => setForm({ ...form, card: v })} placeholder="0" type="number" />
           </div>
-          <Field
-            label={editingId ? 'Новый PIN (необязательно)' : 'PIN-код (4 цифры)'}
-            value={form.pin}
-            onChange={(v: string) => setForm({ ...form, pin: v.replace(/\D/g,'').slice(0,4) })}
-            placeholder="1234"
-            type="password"
-          />
-          <div style={{ marginBottom: 14 }}>
+
+          <div style={{ borderTop: '1px solid rgba(60,60,67,.1)', margin: '8px 0 14px', paddingTop: 14 }}>
             <div style={{ fontSize: '.72rem', fontWeight: 600, color: '#6d6d72', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>Доступ к приложениям</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
               {APPS.map(app => (
                 <label key={app.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '9px 12px', borderRadius: 10, background: form.apps.includes(app.id) ? app.color + '10' : '#f9f9f9', border: `1px solid ${form.apps.includes(app.id) ? app.color : 'transparent'}`, transition: 'all .15s' }}>
                   <input type="checkbox" checked={form.apps.includes(app.id)} onChange={() => toggleApp(app.id)} style={{ width: 16, height: 16, accentColor: app.color }} />
@@ -607,10 +632,19 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
                 </label>
               ))}
             </div>
+            {form.apps.length > 0 && (
+              <Field
+                label={staffFor(form.name.trim()) ? 'Новый PIN (оставьте пустым чтобы не менять)' : 'PIN-код для входа (4 цифры)'}
+                value={form.pin} onChange={(v: string) => setForm({ ...form, pin: v.replace(/\D/g, '').slice(0, 4) })}
+                placeholder="1234" type="password"
+              />
+            )}
+            <div style={{ fontSize: '.72rem', color: '#aeaeb2' }}>Без выбранных приложений сотрудник учитывается в зарплатах, но не входит в приложения.</div>
           </div>
+
           <div style={{ display: 'flex', gap: 8 }}>
-            <Btn onClick={save} disabled={saving}>{saving ? 'Сохранение...' : editingId ? 'Сохранить' : 'Создать доступ'}</Btn>
-            <Btn variant="gray" onClick={() => { setShowForm(false); setEditingId(null) }}>Отмена</Btn>
+            <Btn onClick={save} disabled={saving}>{saving ? 'Сохранение...' : editingEmpId ? 'Сохранить' : 'Добавить'}</Btn>
+            <Btn variant="gray" onClick={() => { setShowForm(false); setEditingEmpId(null) }}>Отмена</Btn>
           </div>
         </Card>
       )}
@@ -618,38 +652,45 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
       {/* ─ СПИСОК ─ */}
       {loading ? (
         <div style={{ color: '#6d6d72', textAlign: 'center', padding: 32 }}>Загрузка...</div>
-      ) : staff.length === 0 ? (
-        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: '#6d6d72', fontSize: '.88rem' }}>Нет сотрудников с доступом</div></Card>
+      ) : employees.length === 0 ? (
+        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: '#6d6d72', fontSize: '.88rem' }}>Добавьте первого сотрудника</div></Card>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {staff.map(s => (
-            <Card key={s.id} style={{ padding: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <div style={{ fontWeight: 700, fontSize: '.95rem', color: '#1c1c1e' }}>{s.name}</div>
-                    <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: s.device_id ? '#34c75915' : '#f2f2f7', color: s.device_id ? '#34c759' : '#aeaeb2' }}>
-                      {s.device_id ? '● Привязано' : 'Не привязано'}
+          {employees.map(emp => {
+            const s = staffFor(emp.name)
+            return (
+              <Card key={emp.id} style={{ padding: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                      <div style={{ fontWeight: 700, fontSize: '.95rem', color: '#1c1c1e' }}>{emp.name}</div>
+                      <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: '#5856d615', color: '#5856d6' }}>{roleLabel(s?.role)}</div>
+                      {s
+                        ? <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: s.device_id ? '#34c75915' : '#f2f2f7', color: s.device_id ? '#34c759' : '#aeaeb2' }}>{s.device_id ? '● Привязано' : 'Не привязано'}</div>
+                        : <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: '#f2f2f7', color: '#aeaeb2' }}>Нет доступа</div>}
                     </div>
+                    <div style={{ fontSize: '.75rem', color: '#6d6d72', display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: s ? 8 : 0 }}>
+                      <span>Оклад: <strong style={{ color: '#1c1c1e' }}>€{emp.salary}</strong></span>
+                      <span>Вычет: <strong style={{ color: '#1c1c1e' }}>€{emp.deduct_per_absence}</strong></span>
+                      {emp.card_amount > 0 && <span>Карта: <strong style={{ color: '#af52de' }}>€{emp.card_amount}</strong></span>}
+                    </div>
+                    {s && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                        {(s.apps || []).map((appId: string) => (
+                          <span key={appId} style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: appColor(appId) + '15', color: appColor(appId) }}>{appName(appId)}</span>
+                        ))}
+                        {s.device_id && <button onClick={() => resetDevice(s.id)} style={{ background: 'none', border: 'none', color: '#ff9500', fontSize: '.75rem', fontWeight: 600, cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>Сбросить устройство</button>}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: s.device_id ? 8 : 0 }}>
-                    {(s.apps || []).map((appId: string) => (
-                      <span key={appId} style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: appColor(appId) + '15', color: appColor(appId) }}>{appName(appId)}</span>
-                    ))}
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <Btn small variant="ghost" onClick={() => startEdit(emp)}>Изменить</Btn>
+                    <Btn small variant="danger" onClick={() => removePerson(emp)}>✕</Btn>
                   </div>
-                  {s.device_id && (
-                    <button onClick={() => resetDevice(s.id)} style={{ background: 'none', border: 'none', color: '#ff9500', fontSize: '.78rem', fontWeight: 600, cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>
-                      Сбросить устройство
-                    </button>
-                  )}
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                  <Btn small variant="ghost" onClick={() => startEdit(s)}>Изменить</Btn>
-                  <Btn small variant="danger" onClick={() => remove(s.id)}>✕</Btn>
-                </div>
-              </div>
-            </Card>
-          ))}
+              </Card>
+            )
+          })}
         </div>
       )}
     </div>
@@ -658,7 +699,133 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
 
 // ── SETTINGS TAB ──────────────────────────────────────────────────────────────
 
+// ── GEO / ATTENDANCE SETTINGS (mise People) ───────────────────────────────────
+
+function MiniToggle({ value, onChange, color = '#5856d6' }: { value: boolean; onChange: (v: boolean) => void; color?: string }) {
+  return (
+    <div onClick={() => onChange(!value)} style={{ width: 46, height: 28, borderRadius: 14, background: value ? color : 'rgba(120,120,128,0.32)', cursor: 'pointer', transition: 'background .2s', position: 'relative', flexShrink: 0 }}>
+      <div style={{ position: 'absolute', top: 2, left: value ? 20 : 2, width: 24, height: 24, borderRadius: '50%', background: '#fff', boxShadow: '0 2px 5px rgba(0,0,0,.25)', transition: 'left .2s' }} />
+    </div>
+  )
+}
+
+function GeoSettingsCard() {
+  const [row, setRow] = useState<any>(null)
+  const [f, setF] = useState({ attendance_enabled: false, latitude: '', longitude: '', geo_radius_m: '150', reminder_mode: 'hours_before', reminder_hours: '12', reminder_time: '18:00' })
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [locating, setLocating] = useState(false)
+
+  useEffect(() => {
+    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
+      const r = Array.isArray(data) ? data[0] : data
+      if (r) {
+        setRow(r)
+        setF({
+          attendance_enabled: !!r.attendance_enabled,
+          latitude: r.latitude != null ? String(r.latitude) : '',
+          longitude: r.longitude != null ? String(r.longitude) : '',
+          geo_radius_m: String(r.geo_radius_m ?? 150),
+          reminder_mode: r.reminder_mode || 'hours_before',
+          reminder_hours: String(r.reminder_hours ?? 12),
+          reminder_time: (r.reminder_time || '18:00').slice(0, 5),
+        })
+      }
+    })
+  }, [])
+
+  const useMyLocation = () => {
+    if (!navigator.geolocation) return
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      p => { setF(s => ({ ...s, latitude: p.coords.latitude.toFixed(6), longitude: p.coords.longitude.toFixed(6) })); setLocating(false) },
+      () => { alert('Не удалось получить местоположение'); setLocating(false) },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
+  const save = async () => {
+    setSaving(true)
+    const payload: any = {
+      attendance_enabled: f.attendance_enabled,
+      latitude: f.latitude ? Number(f.latitude) : null,
+      longitude: f.longitude ? Number(f.longitude) : null,
+      geo_radius_m: parseInt(f.geo_radius_m) || 150,
+      reminder_mode: f.reminder_mode,
+      reminder_hours: parseInt(f.reminder_hours) || 12,
+      reminder_time: f.reminder_time || '18:00',
+    }
+    if (row?.id) await db.from('restaurant_settings').update(payload).eq('id', row.id)
+    else { const { data } = await db.from('restaurant_settings').insert(payload).select().single(); if (data) setRow(data) }
+    setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000)
+  }
+
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: '.9rem', color: '#1c1c1e' }}>Геолокация и явка</div>
+          <div style={{ fontSize: '.78rem', color: '#6d6d72', marginTop: 2 }}>Mise People — авто-отметка прихода по гео</div>
+        </div>
+        <MiniToggle value={f.attendance_enabled} onChange={v => setF({ ...f, attendance_enabled: v })} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 4 }}>
+        <Field label="Широта" value={f.latitude} onChange={(v: string) => setF({ ...f, latitude: v })} placeholder="41.3111" />
+        <Field label="Долгота" value={f.longitude} onChange={(v: string) => setF({ ...f, longitude: v })} placeholder="69.2797" />
+      </div>
+      <button onClick={useMyLocation} style={{ background: '#f2f2f7', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#5856d6', cursor: 'pointer', fontFamily: 'inherit', marginBottom: 12 }}>
+        {locating ? 'Определяю…' : 'Использовать моё местоположение'}
+      </button>
+      <Field label="Радиус, метров" value={f.geo_radius_m} onChange={(v: string) => setF({ ...f, geo_radius_m: v })} type="number" placeholder="150" />
+
+      <div style={{ fontWeight: 600, fontSize: '.82rem', color: '#1c1c1e', margin: '8px 0 10px' }}>Напоминание о смене</div>
+      <Field label="Режим" value={f.reminder_mode} onChange={(v: string) => setF({ ...f, reminder_mode: v })} select options={[{ value: 'hours_before', label: 'За N часов до смены' }, { value: 'fixed_time', label: 'В фикс. время накануне' }]} />
+      {f.reminder_mode === 'hours_before'
+        ? <Field label="За сколько часов" value={f.reminder_hours} onChange={(v: string) => setF({ ...f, reminder_hours: v })} type="number" placeholder="12" />
+        : <Field label="Время (накануне)" value={f.reminder_time} onChange={(v: string) => setF({ ...f, reminder_time: v })} type="time" />}
+
+      <Btn onClick={save}>{saving ? 'Сохранение...' : saved ? '✓ Сохранено' : 'Сохранить'}</Btn>
+    </Card>
+  )
+}
+
+// Безнал в аналитике: менеджер не видит расходов по карте, поэтому включённый безнал
+// раздувает итог. По умолчанию выкл — владелец видит реальные (наличные) показатели.
+function AnalyticsSettingsCard() {
+  const [row, setRow] = useState<any>(null)
+  const [includeCard, setIncludeCard] = useState(false)
+
+  useEffect(() => {
+    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
+      const r = Array.isArray(data) ? data[0] : data
+      if (r) { setRow(r); setIncludeCard(!!r.include_card_in_analytics) }
+    })
+  }, [])
+
+  const toggle = async (v: boolean) => {
+    setIncludeCard(v)
+    if (row?.id) await db.from('restaurant_settings').update({ include_card_in_analytics: v }).eq('id', row.id)
+    else { const { data } = await db.from('restaurant_settings').insert({ include_card_in_analytics: v }).select().single(); if (data) setRow(data) }
+  }
+
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: '.9rem', color: '#1c1c1e' }}>Учитывать безнал в аналитике</div>
+          <div style={{ fontSize: '.78rem', color: '#6d6d72', marginTop: 2, maxWidth: 380 }}>
+            Включает доход по карте в показатели Mise Analytics. Выкл — показатели только по наличным (касса всегда считается от наличных).
+          </div>
+        </div>
+        <MiniToggle value={includeCard} onChange={toggle} color="#34c759" />
+      </div>
+    </Card>
+  )
+}
+
 function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; onUpdate: () => void }) {
+  const router = useRouter()
   const [name, setName] = useState(restaurant?.name || '')
   const [currency, setCurrency] = useState(restaurant?.currency || '€')
   const [saving, setSaving] = useState(false)
@@ -667,6 +834,8 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
   const [logoPreview, setLogoPreview] = useState(restaurant?.logo_url || '')
   const [logoUploading, setLogoUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (restaurant) { setName(restaurant.name); setCurrency(restaurant.currency || '€'); setLogoPreview(restaurant.logo_url || '') }
@@ -687,7 +856,7 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
     const { error } = await supabase.storage.from('restaurant-assets').upload(path, logoFile, { upsert: true })
     if (!error) {
       const { data: { publicUrl } } = supabase.storage.from('restaurant-assets').getPublicUrl(path)
-      await supabase.from('restaurants').update({ logo_url: publicUrl }).eq('id', restaurant.id)
+      await db.from('restaurants').update({ logo_url: publicUrl }).eq('id', restaurant.id)
       onUpdate()
     }
     setLogoUploading(false)
@@ -696,9 +865,22 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
   const save = async () => {
     if (!restaurant) return
     setSaving(true)
-    await supabase.from('restaurants').update({ name, currency }).eq('id', restaurant.id)
+    await db.from('restaurants').update({ name, currency }).eq('id', restaurant.id)
     if (logoFile) await uploadLogo()
     setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000); onUpdate()
+  }
+
+  const deleteAccount = async () => {
+    setDeleting(true)
+    try {
+      const res = await fetch('/api/account/delete', { method: 'POST' })
+      const data = await res.json()
+      if (data.error) { alert(data.error); return }
+      await supabase.auth.signOut()
+      router.replace('/auth/login')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
@@ -713,7 +895,7 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
             {logoPreview ? (
               <img src={logoPreview} alt="logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             ) : (
-              <span style={{ fontSize: '1.8rem' }}>🍽️</span>
+              <svg width="30" height="30" fill="none" stroke="#aeaeb2" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M3 3v18M8 3v6a3 3 0 01-3 3M14 21V3c-1.7 0-3 2.7-3 6 0 2.5 1.3 4.2 3 4.5"/></svg>
             )}
           </div>
           <div>
@@ -749,10 +931,26 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
         <Btn onClick={save}>{saving ? 'Сохранение...' : saved ? '✓ Сохранено' : 'Сохранить'}</Btn>
       </Card>
 
+      <AnalyticsSettingsCard />
+
+      <GeoSettingsCard />
+
       <Card style={{ border: '1px solid rgba(255,59,48,.15)' }}>
         <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 4, color: '#1c1c1e' }}>Опасная зона</div>
-        <div style={{ fontSize: '.82rem', color: '#6d6d72', marginBottom: 14 }}>Удаление аккаунта необратимо.</div>
-        <Btn variant="danger">Удалить аккаунт</Btn>
+        <div style={{ fontSize: '.82rem', color: '#6d6d72', marginBottom: 14 }}>Удаление аккаунта необратимо. Все данные заведения, сотрудники и подписка будут удалены.</div>
+        {!deleteConfirm ? (
+          <Btn variant="danger" onClick={() => setDeleteConfirm(true)}>Удалить аккаунт</Btn>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: '.82rem', color: '#ff3b30', fontWeight: 600 }}>Вы уверены? Это действие нельзя отменить.</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn variant="danger" small onClick={deleteAccount} disabled={deleting}>
+                {deleting ? 'Удаление...' : 'Да, удалить всё'}
+              </Btn>
+              <Btn variant="ghost" small onClick={() => setDeleteConfirm(false)}>Отмена</Btn>
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   )
@@ -760,7 +958,7 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
 
 // ── BILLING TAB ───────────────────────────────────────────────────────────────
 
-function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user: any }) {
+function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | null; user: any; onRefresh: () => void }) {
   const [loading, setLoading] = useState(false)
   const [cancelConfirm, setCancelConfirm] = useState(false)
 
@@ -773,8 +971,9 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
     trialing: { label: 'Пробный период', color: '#007aff', bg: 'rgba(0,122,255,.1)' },
     active:   { label: 'Активна',        color: '#34c759', bg: 'rgba(52,199,89,.1)' },
     past_due: { label: 'Просрочена',     color: '#ff9500', bg: 'rgba(255,149,0,.1)' },
-    canceled: { label: 'Отменена',       color: '#ff3b30', bg: 'rgba(255,59,48,.1)' },
-    inactive: { label: 'Неактивна',      color: '#aeaeb2', bg: '#f2f2f7' },
+    canceling: { label: 'Отмена в конце периода', color: '#ff9500', bg: 'rgba(255,149,0,.1)' },
+    canceled:  { label: 'Отменена',       color: '#ff3b30', bg: 'rgba(255,59,48,.1)' },
+    inactive:  { label: 'Неактивна',      color: '#aeaeb2', bg: '#f2f2f7' },
   }
   const badge = statusLabel[status || 'inactive'] || statusLabel['inactive']
 
@@ -796,13 +995,19 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
   const cancel = async () => {
     if (!restaurant) return
     setLoading(true)
-    await fetch('/api/stripe/cancel', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ restaurantId: restaurant.id }),
-    })
-    setCancelConfirm(false); setLoading(false)
-    alert('Подписка будет отменена в конце периода')
+    try {
+      const res = await fetch('/api/stripe/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ restaurantId: restaurant.id }),
+      })
+      const data = await res.json()
+      if (data.error) { alert(data.error); return }
+      setCancelConfirm(false)
+      onRefresh()
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -889,6 +1094,7 @@ function BillingTab({ restaurant, user }: { restaurant: Restaurant | null; user:
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
+  const router = useRouter()
   const [showSplash, setShowSplash] = useState(() => {
     if (typeof window === 'undefined') return false
     const shown = sessionStorage.getItem('mise_splash_shown')
@@ -900,7 +1106,7 @@ export default function Dashboard() {
   const [authChecked, setAuthChecked] = useState(false)
 
   const loadRestaurant = async (userId: string) => {
-    const { data } = await supabase.from('restaurants').select('*').eq('owner_id', userId).single()
+    const { data } = await db.from('restaurants').select('*').eq('owner_id', userId).single()
     setRestaurant(data)
   }
 
@@ -909,10 +1115,10 @@ export default function Dashboard() {
     const t = params.get('tab')
     if (t) setTab(t)
     supabase.auth.getSession().then(async ({ data }) => {
-      if (!data.session?.user) { 
+      if (!data.session?.user) {
         setAuthChecked(true)
-        window.location.href = '/auth/login'
-        return 
+        router.replace('/auth/login')
+        return
       }
       setUser(data.session.user)
       await loadRestaurant(data.session.user.id)
@@ -942,7 +1148,7 @@ export default function Dashboard() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: '.75rem', color: '#aeaeb2', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</span>
-            <button onClick={async () => { await supabase.auth.signOut(); window.location.href = '/auth/login' }}
+            <button onClick={async () => { await supabase.auth.signOut(); router.replace('/auth/login') }}
               style={{ background: 'none', border: 'none', color: '#ff3b30', cursor: 'pointer', fontSize: '.78rem', fontFamily: 'inherit', fontWeight: 600 }}>
               Выйти
             </button>
@@ -960,6 +1166,7 @@ export default function Dashboard() {
           <div style={{ display: 'flex', gap: 4, marginBottom: 20, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'none' }}>
             {TABS.map(t => (
               <button key={t.id} onClick={() => setTab(t.id)} style={{
+                display: 'flex', alignItems: 'center', gap: 7,
                 padding: '7px 15px', borderRadius: 10, border: 'none', fontFamily: 'inherit',
                 fontSize: '.8rem', fontWeight: tab === t.id ? 700 : 500,
                 cursor: 'pointer', whiteSpace: 'nowrap',
@@ -968,17 +1175,17 @@ export default function Dashboard() {
                 boxShadow: tab === t.id ? 'none' : '0 1px 3px rgba(0,0,0,.06)',
                 transition: 'all .15s',
               }}>
+                <TabIcon id={t.id} />
                 {t.label}
               </button>
             ))}
           </div>
 
           {tab === 'apps'       && <AppsTab restaurant={restaurant} />}
-          {tab === 'employees'  && restaurant && <EmployeesTab restaurantId={restaurant.id} />}
           {tab === 'categories' && restaurant && <CategoriesTab restaurantId={restaurant.id} />}
           {tab === 'team'       && <TeamTab restaurant={restaurant} />}
           {tab === 'settings'   && <SettingsTab restaurant={restaurant} onUpdate={() => user && loadRestaurant(user.id)} />}
-          {tab === 'billing'    && <BillingTab restaurant={restaurant} user={user} />}
+          {tab === 'billing'    && <BillingTab restaurant={restaurant} user={user} onRefresh={() => user && loadRestaurant(user.id)} />}
         </div>
       </div>
     </>

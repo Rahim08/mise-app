@@ -1,20 +1,7 @@
 'use client'
-// @ts-nocheck
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
-
-
-
-function LogoMark({ size = 36 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 64 64" fill="none">
-      <rect width="64" height="64" rx="14" fill="#007aff"/>
-      <rect x="14" y="20" width="36" height="5" rx="2.5" fill="white"/>
-      <rect x="14" y="30" width="26" height="5" rx="2.5" fill="white" opacity=".7"/>
-      <rect x="14" y="40" width="18" height="5" rx="2.5" fill="white" opacity=".4"/>
-    </svg>
-  )
-}
+import { LogoMark } from '@/components/LogoMark'
 
 function PasswordRule({ ok, text }: { ok: boolean; text: string }) {
   return (

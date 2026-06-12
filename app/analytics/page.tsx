@@ -1,184 +1,432 @@
 'use client'
 export const dynamic = 'force-dynamic'
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Chart, registerables } from 'chart.js'
-Chart.register(...registerables)
+import { db } from '@/lib/db'
+import { useTheme } from '@/hooks/useTheme'
+import { AuthGate } from '@/components/AuthGate'
 
-
+// ── HELPERS ───────────────────────────────────────────────────────────────────
 
 function fv(v: number) { return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
-function fmtDate(d: Date) { return d.toISOString().split('T')[0] }
-function dd(s: string) { return s.slice(8,10)+'.'+s.slice(5,7) }
-const MRU = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь']
-const DOW = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб']
-const COLORS = ['#007aff','#ff3b30','#34c759','#ff9500','#af52de','#00c7be','#ff6b35','#5856d6']
+// Local calendar date (YYYY-MM-DD). Using toISOString() would shift the day in non-UTC timezones.
+function fmtDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+function dd(s: string) { return s.slice(8, 10) + '.' + s.slice(5, 7) }
+const MRU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
+const DOW = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+const COLORS = ['#34c759', '#ff3b30', '#007aff', '#ff9500', '#af52de', '#00c7be', '#ff6b35', '#5856d6']
+const SUGGESTED = ['Как идёт этот месяц?', 'Где больше всего трат?', 'Сравни с прошлым месяцем', 'Хватит ли на зарплаты?']
 
-const SUGGESTED = [
-  'Как идёт этот месяц?',
-  'Где больше всего трат?',
-  'Сравни с прошлым месяцем',
-  'Хватит ли на зарплаты?',
-]
+// ── CSV EXPORT (Excel-compatible: ';' delimiter + UTF-8 BOM for Cyrillic) ──────
+function downloadCSV(filename: string, rows: (string | number)[][]) {
+  const esc = (cell: string | number) => {
+    const s = String(cell ?? '')
+    return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const csv = rows.map(r => r.map(esc).join(';')).join('\r\n')
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 
-interface StatProps { label: string; val: string; color?: string; sub?: string; sm?: boolean; pct?: number|null; surface: string; text: string; t3: string; t4: string; sh: string }
-function Stat({ label, val, color, sub, sm, pct, surface, text, t3, t4, sh }: StatProps) {
+// ── PDF EXPORT (jsPDF + embedded PT Sans for Cyrillic) ─────────────────────────
+async function makePdfDoc() {
+  const { jsPDF } = await import('jspdf')
+  const { ptSansBase64 } = await import('@/lib/ptSansFont')
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+  doc.addFileToVFS('PTSans.ttf', ptSansBase64)
+  doc.addFont('PTSans.ttf', 'PTSans', 'normal')
+  doc.setFont('PTSans')
+  return doc
+}
+
+function pdfTable(doc: any, title: string, headers: string[], rows: string[][], colX: number[]) {
+  doc.setFontSize(15); doc.text(title, 40, 40)
+  let y = 64
+  doc.setFontSize(9)
+  doc.setTextColor(130); headers.forEach((h, i) => doc.text(h, colX[i], y)); doc.setTextColor(20)
+  y += 5; doc.setDrawColor(210); doc.line(40, y, 555, y); y += 15
+  rows.forEach((r, ri) => {
+    if (y > 800) { doc.addPage(); y = 56 }
+    if (ri === rows.length - 1 && r[0] === 'Итого') { doc.setDrawColor(210); doc.line(40, y - 11, 555, y - 11) }
+    r.forEach((c, i) => doc.text(String(c ?? ''), colX[i], y))
+    y += 16
+  })
+}
+
+// ── ANIMATED NUMBER ───────────────────────────────────────────────────────────
+
+function AnimatedNumber({ value, prefix = '', suffix = '', duration = 800, style = {} }: {
+  value: number; prefix?: string; suffix?: string; duration?: number; style?: React.CSSProperties
+}) {
+  const [display, setDisplay] = useState(0)
+  const startRef = useRef(0)
+  const startTimeRef = useRef(0)
+  const rafRef = useRef(0)
+
+  useEffect(() => {
+    startRef.current = display
+    startTimeRef.current = performance.now()
+    const target = value
+
+    const animate = (now: number) => {
+      const elapsed = now - startTimeRef.current
+      const progress = Math.min(elapsed / duration, 1)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setDisplay(startRef.current + (target - startRef.current) * eased)
+      if (progress < 1) rafRef.current = requestAnimationFrame(animate)
+    }
+    rafRef.current = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [value])
+
+  const formatted = display.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return <span style={style}>{prefix}{formatted}{suffix}</span>
+}
+
+// ── SPARKLINE ─────────────────────────────────────────────────────────────────
+
+function Sparkline({ values, color, width = 60, height = 24 }: { values: number[]; color: string; width?: number; height?: number }) {
+  if (values.length < 2) return null
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const range = max - min || 1
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * width
+    const y = height - ((v - min) / range) * height
+    return `${x},${y}`
+  }).join(' ')
+
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ overflow: 'visible' }}>
+      <defs>
+        <linearGradient id={`sg-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+// ── LINE CHART (SVG, Apple Stocks style) ──────────────────────────────────────
+
+function LineChartSVG({ labels, values, color, currency, height = 160 }: {
+  labels: string[]; values: number[]; color: string; currency: string; height?: number
+}) {
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; label: string; val: number } | null>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+  const [animated, setAnimated] = useState(false)
+
+  useEffect(() => {
+    setTimeout(() => setAnimated(true), 50)
+  }, [values])
+
+  if (values.length < 2) return null
+
+  const W = 320; const H = height
+  const pad = { top: 12, right: 16, bottom: 24, left: 8 }
+  const min = Math.min(...values); const max = Math.max(...values)
+  const range = max - min || 1
+
+  const toX = (i: number) => pad.left + (i / (values.length - 1)) * (W - pad.left - pad.right)
+  const toY = (v: number) => pad.top + ((max - v) / range) * (H - pad.top - pad.bottom)
+
+  const linePts = values.map((v, i) => `${toX(i)},${toY(v)}`).join(' L ')
+  const areaPath = `M ${toX(0)},${toY(values[0])} L ${linePts.split(' L ').slice(1).join(' L ')} L ${toX(values.length - 1)},${H - pad.bottom} L ${toX(0)},${H - pad.bottom} Z`
+  const linePath = `M ${toX(0)},${toY(values[0])} L ${linePts.split(' L ').slice(1).join(' L ')}`
+
+  const gradId = `lg-${color.replace('#', '')}`
+
+  const handleMove = (e: React.TouchEvent | React.MouseEvent) => {
+    if (!svgRef.current) return
+    const rect = svgRef.current.getBoundingClientRect()
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
+    const relX = (clientX - rect.left) / rect.width * W
+    const idx = Math.max(0, Math.min(values.length - 1, Math.round((relX - pad.left) / (W - pad.left - pad.right) * (values.length - 1))))
+    setTooltip({ x: toX(idx), y: toY(values[idx]), label: labels[idx], val: values[idx] })
+  }
+
+  return (
+    <div style={{ position: 'relative', width: '100%' }}>
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height, overflow: 'visible', touchAction: 'none' }}
+        onMouseMove={handleMove} onTouchMove={handleMove}
+        onMouseLeave={() => setTooltip(null)} onTouchEnd={() => setTooltip(null)}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+          <clipPath id={`clip-${gradId}`}>
+            <rect x="0" y="0" width={animated ? W : 0} height={H} style={{ transition: `width 0.9s cubic-bezier(.16,1,.3,1)` }} />
+          </clipPath>
+        </defs>
+
+        {/* Grid lines */}
+        {[0, 0.25, 0.5, 0.75, 1].map(t => {
+          const y = pad.top + t * (H - pad.top - pad.bottom)
+          const val = max - t * range
+          return (
+            <g key={t}>
+              <line x1={pad.left} y1={y} x2={W - pad.right} y2={y} stroke="currentColor" strokeOpacity="0.06" strokeWidth="1" />
+              <text x={W - pad.right + 4} y={y + 4} fontSize="8" fill="currentColor" fillOpacity="0.35">{currency}{Math.round(val)}</text>
+            </g>
+          )
+        })}
+
+        {/* Area */}
+        <path d={areaPath} fill={`url(#${gradId})`} clipPath={`url(#clip-${gradId})`} />
+
+        {/* Line */}
+        <path d={linePath} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" clipPath={`url(#clip-${gradId})`} />
+
+        {/* X labels */}
+        {labels.filter((_, i) => i === 0 || i === labels.length - 1 || (labels.length > 5 && i === Math.floor(labels.length / 2))).map((l, _, arr) => {
+          const origIdx = labels.indexOf(l)
+          return (
+            <text key={l} x={toX(origIdx)} y={H - 2} textAnchor="middle" fontSize="8" fill="currentColor" fillOpacity="0.4">{l}</text>
+          )
+        })}
+
+        {/* Tooltip */}
+        {tooltip && (
+          <>
+            <line x1={tooltip.x} y1={pad.top} x2={tooltip.x} y2={H - pad.bottom} stroke={color} strokeOpacity="0.4" strokeWidth="1" strokeDasharray="3,3" />
+            <circle cx={tooltip.x} cy={tooltip.y} r="5" fill={color} />
+            <circle cx={tooltip.x} cy={tooltip.y} r="3" fill="white" />
+            <rect x={Math.max(4, Math.min(tooltip.x - 36, W - 76))} y={Math.max(4, tooltip.y - 32)} width={72} height={22} rx="6" fill={color} />
+            <text x={Math.max(4, Math.min(tooltip.x - 36, W - 76)) + 36} y={Math.max(4, tooltip.y - 32) + 15} textAnchor="middle" fontSize="10" fontWeight="700" fill="white">{currency}{fv(tooltip.val)}</text>
+          </>
+        )}
+      </svg>
+    </div>
+  )
+}
+
+// ── BAR CHART (SVG) ───────────────────────────────────────────────────────────
+
+function BarChartSVG({ labels, income, expense, currency }: { labels: string[]; income: number[]; expense: number[]; currency: string }) {
+  const [animated, setAnimated] = useState(false)
+  useEffect(() => { setTimeout(() => setAnimated(true), 50) }, [income])
+
+  const W = 320; const H = 130
+  const pad = { top: 8, right: 8, bottom: 20, left: 8 }
+  const max = Math.max(...income, ...expense, 1)
+  const barW = Math.max(4, (W - pad.left - pad.right) / labels.length / 2 - 2)
+  const gap = (W - pad.left - pad.right) / labels.length
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: H }}>
+      <defs>
+        <linearGradient id="inc-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#34c759" stopOpacity="0.9" />
+          <stop offset="100%" stopColor="#34c759" stopOpacity="0.5" />
+        </linearGradient>
+        <linearGradient id="exp-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ff3b30" stopOpacity="0.9" />
+          <stop offset="100%" stopColor="#ff3b30" stopOpacity="0.5" />
+        </linearGradient>
+      </defs>
+      {labels.map((l, i) => {
+        const x = pad.left + i * gap
+        const aH = income[i] / max * (H - pad.top - pad.bottom)
+        const bH = expense[i] / max * (H - pad.top - pad.bottom)
+        const base = H - pad.bottom
+        return (
+          <g key={l}>
+            <rect x={x + gap / 2 - barW - 1} y={base - (animated ? aH : 0)} width={barW} height={animated ? aH : 0} rx="3" fill="url(#inc-grad)" style={{ transition: `y 0.7s cubic-bezier(.16,1,.3,1) ${i * 30}ms, height 0.7s cubic-bezier(.16,1,.3,1) ${i * 30}ms` }} />
+            <rect x={x + gap / 2 + 1} y={base - (animated ? bH : 0)} width={barW} height={animated ? bH : 0} rx="3" fill="url(#exp-grad)" style={{ transition: `y 0.7s cubic-bezier(.16,1,.3,1) ${i * 30}ms, height 0.7s cubic-bezier(.16,1,.3,1) ${i * 30}ms` }} />
+            <text x={x + gap / 2} y={H - 4} textAnchor="middle" fontSize="7.5" fill="currentColor" fillOpacity="0.4">{l}</text>
+          </g>
+        )
+      })}
+      <g>
+        <rect x={W - 80} y={4} width={8} height={8} rx="2" fill="#34c759" opacity="0.8" />
+        <text x={W - 70} y={12} fontSize="8" fill="currentColor" fillOpacity="0.5">Доход</text>
+        <rect x={W - 80} y={16} width={8} height={8} rx="2" fill="#ff3b30" opacity="0.8" />
+        <text x={W - 70} y={24} fontSize="8" fill="currentColor" fillOpacity="0.5">Расход</text>
+      </g>
+    </svg>
+  )
+}
+
+// ── DONUT CHART (SVG, Apple style with center value) ──────────────────────────
+
+function DonutChartSVG({ data, colors, labels, centerVal, centerLabel }: {
+  data: number[]; colors: string[]; labels: string[]; centerVal: string; centerLabel: string
+}) {
+  const [animated, setAnimated] = useState(false)
+  useEffect(() => { setTimeout(() => setAnimated(true), 100) }, [data])
+
+  const size = 120; const cx = size / 2; const cy = size / 2
+  const r = 44; const innerR = 30
+  const total = data.reduce((s, v) => s + v, 0) || 1
+  const circumference = 2 * Math.PI * r
+
+  let cumAngle = -Math.PI / 2
+  const slices = data.map((v, i) => {
+    const angle = (v / total) * 2 * Math.PI
+    const startAngle = cumAngle
+    cumAngle += angle
+    const endAngle = cumAngle
+
+    const x1 = cx + r * Math.cos(startAngle)
+    const y1 = cy + r * Math.sin(startAngle)
+    const x2 = cx + r * Math.cos(endAngle)
+    const y2 = cy + r * Math.sin(endAngle)
+    const largeArc = angle > Math.PI ? 1 : 0
+
+    const ix1 = cx + innerR * Math.cos(startAngle)
+    const iy1 = cy + innerR * Math.sin(startAngle)
+    const ix2 = cx + innerR * Math.cos(endAngle)
+    const iy2 = cy + innerR * Math.sin(endAngle)
+
+    const d = `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} L ${ix2} ${iy2} A ${innerR} ${innerR} 0 ${largeArc} 0 ${ix1} ${iy1} Z`
+    return { d, color: colors[i], angle }
+  })
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 16 }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
+        {slices.map((s, i) => (
+          <path key={i} d={s.d} fill={s.color}
+            style={{ opacity: animated ? 1 : 0, transition: `opacity 0.4s ease ${i * 80}ms, transform 0.6s cubic-bezier(.16,1,.3,1) ${i * 80}ms`, transformOrigin: `${cx}px ${cy}px`, transform: animated ? 'scale(1)' : 'scale(0.8)' }}
+          />
+        ))}
+        <text x={cx} y={cy - 4} textAnchor="middle" fontSize="13" fontWeight="800" fill="currentColor">{centerVal}</text>
+        <text x={cx} y={cy + 11} textAnchor="middle" fontSize="8" fill="currentColor" fillOpacity="0.45">{centerLabel}</text>
+      </svg>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {labels.map((l, i) => (
+          <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: colors[i], flexShrink: 0 }} />
+            <div style={{ fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{l}</div>
+            <div style={{ fontSize: 12, fontWeight: 600 }}>{fv(data[i])}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── HORIZONTAL BAR ────────────────────────────────────────────────────────────
+
+function HBar({ name, val, max, color, currency, sub, t }: { name: string; val: number; max: number; color: string; currency: string; sub?: string; t: any }) {
+  const [animated, setAnimated] = useState(false)
+  useEffect(() => { setTimeout(() => setAnimated(true), 100) }, [val])
+  const pct = Math.min(val / max * 100, 100)
+
+  return (
+    <div style={{ padding: '12px 16px', borderBottom: `0.5px solid ${t.sep2}` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div>
+          <span style={{ fontSize: 15, color: t.text }}>{name}</span>
+          {sub && <span style={{ fontSize: 11, color: t.text3, marginLeft: 6 }}>{sub}</span>}
+        </div>
+        <span style={{ fontSize: 15, fontWeight: 700, color }}>{currency}{fv(val)}</span>
+      </div>
+      <div style={{ height: 4, background: t.fill, borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{
+          height: '100%',
+          width: animated ? `${pct}%` : '0%',
+          background: color,
+          borderRadius: 2,
+          transition: 'width 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
+        }} />
+      </div>
+    </div>
+  )
+}
+
+// ── STAT CARD ─────────────────────────────────────────────────────────────────
+
+function StatCard({ label, value, rawValue, color, sub, sm, pct, sparkValues, t }: {
+  label: string; value: string; rawValue?: number; color?: string; sub?: string; sm?: boolean; pct?: number | null; sparkValues?: number[]; t: any
+}) {
   const up = pct !== null && pct !== undefined && pct >= 0
   return (
-    <div style={{ background:surface, borderRadius:14, padding:sm?'12px':'14px 12px', boxShadow:sh }}>
-      <div style={{ fontSize:10, color:t3, fontWeight:600, textTransform:'uppercase' as const, letterSpacing:.4, marginBottom:5 }}>{label}</div>
-      <div style={{ fontSize:sm?15:22, fontWeight:700, color:color||text }}>{val}</div>
+    <div style={{ background: t.surface, borderRadius: 16, padding: sm ? '12px 14px' : '16px 14px', boxShadow: t.sh, position: 'relative', overflow: 'hidden' }}>
+      <div style={{ fontSize: 10, color: t.text3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: sm ? 17 : 26, fontWeight: 800, color: color || t.text, letterSpacing: -0.5 }}>
+        {rawValue !== undefined ? <AnimatedNumber value={rawValue} style={{ fontSize: sm ? 17 : 26, fontWeight: 800, color: color || t.text, letterSpacing: -0.5 }} /> : value}
+      </div>
       {pct !== null && pct !== undefined && (
-        <div style={{ display:'flex', alignItems:'center', gap:3, marginTop:4 }}>
-          <span style={{ fontSize:11, color: up ? '#34c759' : '#ff3b30', fontWeight:600 }}>{up ? '↑' : '↓'} {Math.abs(pct).toFixed(1)}%</span>
-          <span style={{ fontSize:10, color:t4 }}>vs пред.</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 5 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: up ? `${t.green}18` : `${t.red}18`, padding: '2px 7px', borderRadius: 8 }}>
+            <span style={{ fontSize: 10, color: up ? t.green : t.red, fontWeight: 700 }}>{up ? '↑' : '↓'} {Math.abs(pct).toFixed(1)}%</span>
+          </div>
+          <span style={{ fontSize: 10, color: t.text4 }}>vs прошлый</span>
         </div>
       )}
-      {sub && !pct && <div style={{ fontSize:11, color:t4, marginTop:4 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 11, color: t.text4, marginTop: 4 }}>{sub}</div>}
+      {sparkValues && sparkValues.length > 2 && (
+        <div style={{ position: 'absolute', bottom: 8, right: 10, opacity: 0.5 }}>
+          <Sparkline values={sparkValues} color={color || t.text} />
+        </div>
+      )}
     </div>
   )
 }
 
-interface CardProps { children: React.ReactNode; style?: React.CSSProperties; surface: string; sh: string }
-function Card({ children, style={}, surface, sh }: CardProps) {
-  return <div style={{ background:surface, borderRadius:16, overflow:'hidden', marginBottom:12, boxShadow:sh, ...style }}>{children}</div>
-}
+// ── PROGRESS RING ─────────────────────────────────────────────────────────────
 
-interface SecProps { children: React.ReactNode; t3: string }
-function Sec({ children, t3 }: SecProps) {
-  return <div style={{ fontSize:12, fontWeight:600, color:t3, textTransform:'uppercase' as const, letterSpacing:.5, padding:'16px 4px 8px' }}>{children}</div>
-}
+function ProgressRing({ value, max, color, size = 56, label }: { value: number; max: number; color: string; size?: number; label: string }) {
+  const [animated, setAnimated] = useState(false)
+  useEffect(() => { setTimeout(() => setAnimated(true), 100) }, [value])
+  const r = (size - 8) / 2; const circ = 2 * Math.PI * r
+  const pct = Math.min(value / max, 1)
+  const offset = circ - (animated ? pct : 0) * circ
 
-interface ProgProps { name: string; val: number; max: number; color: string; currency: string; text: string; b2: string; s2: string }
-function Prog({ name, val, max, color, currency, text, b2, s2 }: ProgProps) {
   return (
-    <div style={{ padding:'10px 16px', borderBottom:`1px solid ${b2}` }}>
-      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-        <span style={{ fontSize:15, color:text, maxWidth:'65%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' as const }}>{name}</span>
-        <span style={{ fontSize:15, fontWeight:600, color:text }}>{currency}{fv(val)}</span>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+      <div style={{ position: 'relative', width: size, height: size }}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-90deg)' }}>
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeOpacity="0.1" strokeWidth="4" />
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth="4" strokeLinecap="round"
+            strokeDasharray={circ} strokeDashoffset={offset} style={{ transition: 'stroke-dashoffset 1s cubic-bezier(.16,1,.3,1)' }} />
+        </svg>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color }}>
+          {Math.round(pct * 100)}%
+        </div>
       </div>
-      <div style={{ height:4, background:s2, borderRadius:2, overflow:'hidden' }}>
-        <div style={{ height:'100%', width:`${Math.min(val/max*100,100).toFixed(1)}%`, background:color, borderRadius:2, transition:'width .8s cubic-bezier(.16,1,.3,1)' }} />
-      </div>
+      <div style={{ fontSize: 10, color: 'currentColor', opacity: 0.5, textAlign: 'center' }}>{label}</div>
     </div>
   )
 }
 
-interface TableHeaderProps { cols: string[]; isDark: boolean; t4: string }
-function TableHeader({ cols, isDark, t4 }: TableHeaderProps) {
-  return (
-    <div style={{ display:'grid', gridTemplateColumns:`${cols.map(()=>'1fr').join(' ')}`, background:isDark?'rgba(255,255,255,.06)':'rgba(0,0,0,.04)', padding:'7px 14px', gap:4 }}>
-      {cols.map(h => <div key={h} style={{ fontSize:10, color:t4, fontWeight:600, textTransform:'uppercase' as const }}>{h}</div>)}
-    </div>
-  )
-}
-
-// Chart.js Donut
-function DonutChart({ data, colors, labels, isDark }: { data: number[]; colors: string[]; labels: string[]; isDark: boolean }) {
-  const ref = useRef<HTMLCanvasElement>(null)
-  const chartRef = useRef<Chart|null>(null)
-  useEffect(() => {
-    if (!ref.current || !data.length) return
-    if (chartRef.current) chartRef.current.destroy()
-    chartRef.current = new Chart(ref.current, {
-      type: 'doughnut',
-      data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0, hoverOffset: 6 }] },
-      options: {
-        responsive: false, cutout: '68%', animation: { animateRotate: true, duration: 800 },
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${c.label}: ${fv(c.raw as number)}` } } }
-      }
-    })
-    return () => { chartRef.current?.destroy() }
-  }, [data, colors])
-  return <canvas ref={ref} width={110} height={110} />
-}
-
-// Chart.js Line
-function LineChart({ labels, values, color, isDark, currency }: { labels: string[]; values: number[]; color: string; isDark: boolean; currency: string }) {
-  const ref = useRef<HTMLCanvasElement>(null)
-  const chartRef = useRef<Chart|null>(null)
-  const gridColor = isDark ? 'rgba(255,255,255,.06)' : 'rgba(60,60,67,.06)'
-  const tickColor = '#aeaeb2'
-  useEffect(() => {
-    if (!ref.current || !values.length) return
-    if (chartRef.current) chartRef.current.destroy()
-    const gradient = ref.current.getContext('2d')?.createLinearGradient(0,0,0,140)
-    gradient?.addColorStop(0, color + '30')
-    gradient?.addColorStop(1, color + '00')
-    chartRef.current = new Chart(ref.current, {
-      type: 'line',
-      data: { labels, datasets: [{ data: values, borderColor: color, backgroundColor: gradient, borderWidth: 2, pointRadius: 3, pointBackgroundColor: color, fill: true, tension: 0.4 }] },
-      options: {
-        responsive: true, animation: { duration: 800 },
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${currency}${fv(c.raw as number)}` } } },
-        scales: {
-          x: { ticks: { color: tickColor, font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: gridColor } },
-          y: { min: 0, ticks: { color: tickColor, font: { size: 9 }, callback: (v) => currency + Math.round(v as number) }, grid: { color: gridColor } }
-        }
-      }
-    })
-    return () => { chartRef.current?.destroy() }
-  }, [labels, values, color, isDark])
-  return <canvas ref={ref} style={{ width:'100%', maxHeight:140 }} />
-}
-
-// Chart.js Bar
-function BarChart({ labels, income, expense, isDark, currency }: { labels: string[]; income: number[]; expense: number[]; isDark: boolean; currency: string }) {
-  const ref = useRef<HTMLCanvasElement>(null)
-  const chartRef = useRef<Chart|null>(null)
-  const gridColor = isDark ? 'rgba(255,255,255,.06)' : 'rgba(60,60,67,.06)'
-  const tickColor = '#aeaeb2'
-  useEffect(() => {
-    if (!ref.current || !income.length) return
-    if (chartRef.current) chartRef.current.destroy()
-    chartRef.current = new Chart(ref.current, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [
-          { label: 'Доход', data: income, backgroundColor: 'rgba(52,199,89,.75)', borderRadius: 4 },
-          { label: 'Расход', data: expense, backgroundColor: 'rgba(255,59,48,.65)', borderRadius: 4 }
-        ]
-      },
-      options: {
-        responsive: true, animation: { duration: 800 },
-        plugins: { legend: { labels: { color: tickColor, font: { size: 11 }, boxWidth: 10 } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${currency}${fv(c.raw as number)}` } } },
-        scales: {
-          x: { ticks: { color: tickColor, font: { size: 9 }, maxTicksLimit: 8 }, grid: { display: false } },
-          y: { ticks: { color: tickColor, font: { size: 9 }, callback: (v) => currency + Math.round(v as number) }, grid: { color: gridColor } }
-        }
-      }
-    })
-    return () => { chartRef.current?.destroy() }
-  }, [labels, income, expense, isDark])
-  return <canvas ref={ref} style={{ width:'100%', maxHeight:130 }} />
-}
+// ── MAIN APP ──────────────────────────────────────────────────────────────────
 
 export default function AnalyticsApp() {
-  const [user, setUser] = useState<any>(null)
+  const t = useTheme('mise_ana_dark')
   const [restaurantId, setRestaurantId] = useState('')
-  const [restaurantName, setRestaurantName] = useState('')
-  const [logoUrl, setLogoUrl] = useState('')
   const [currency, setCurrency] = useState('€')
-  const [tab, setTab] = useState<'period'|'kassa'|'sales'|'salary'|'hookah'>('period')
-  const [periodMode, setPeriodMode] = useState<'day'|'week'|'month'>('day')
-  const [kassaMode, setKassaMode] = useState<'kassa'|'inkass'>('kassa')
+  const [isPro, setIsPro] = useState(false)
+  const [tab, setTab] = useState<'period' | 'kassa' | 'sales' | 'salary' | 'hookah'>('period')
+  const [periodMode, setPeriodMode] = useState<'day' | 'week' | 'month'>('month')
+  const [kassaMode, setKassaMode] = useState<'kassa' | 'inkass'>('kassa')
   const [currentDate, setCurrentDate] = useState(new Date())
-  const [shifts, setShifts] = useState<any[]>([])
-  const [prevShifts, setPrevShifts] = useState<any[]>([])
-  const [allShifts, setAllShifts] = useState<any[]>([])
+  const [includeCard, setIncludeCard] = useState(false) // restaurant_settings.include_card_in_analytics
+  const [shiftsRaw, setShifts] = useState<any[]>([])
+  const [prevShiftsRaw, setPrevShifts] = useState<any[]>([])
+  const [allShiftsRaw, setAllShifts] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
   const [allExpenses, setAllExpenses] = useState<any[]>([])
-  const [inkassations, setInkassations] = useState<any[]>([])
   const [employees, setEmployees] = useState<any[]>([])
   const [cardAmounts, setCardAmounts] = useState<any[]>([])
   const [absences, setAbsences] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [isDark, setIsDark] = useState<boolean>(false)
-  const [mounted, setMounted] = useState(false)
   const [showMonthPicker, setShowMonthPicker] = useState(false)
   const [showAI, setShowAI] = useState(false)
-  const [chatMsgs, setChatMsgs] = useState<{role:string;text:string}[]>([])
+  const [chatMsgs, setChatMsgs] = useState<{ role: string; text: string }[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
@@ -186,37 +434,6 @@ export default function AnalyticsApp() {
   useEffect(() => {
     const saved = localStorage.getItem('mise_chat')
     if (saved) { try { setChatMsgs(JSON.parse(saved)) } catch {} }
-
-    const storedRestaurantId = localStorage.getItem('mise_restaurant_id')
-
-    supabase.auth.getUser().then(async ({ data }) => {
-      let rid = ''
-
-      if (data.user) {
-        setUser(data.user)
-        const { data: profile } = await supabase.from('profiles').select('restaurant_id').eq('id', data.user.id).single()
-        if (!profile) return
-        rid = profile.restaurant_id
-      } else if (storedRestaurantId) {
-        setUser({ id: 'staff', email: 'staff' })
-        rid = storedRestaurantId
-      } else {
-        window.location.href = '/join?error=no_session'
-        return
-      }
-
-      if (!rid) { window.location.href = '/join?error=no_session'; return }
-      setRestaurantId(rid)
-
-      const { data: rest } = await supabase.from('restaurants').select('name,logo_url,currency,subscription_status').eq('id', rid).single()
-      if (rest?.subscription_status !== 'active' && rest?.subscription_status !== 'trialing') {
-        window.location.href = '/dashboard?tab=billing'; return
-      }
-      if (rest) { setRestaurantName(rest.name||''); setLogoUrl(rest.logo_url||'') }
-      if (rest?.currency) setCurrency(rest.currency)
-      await loadAll(rid, new Date())
-      await loadAllHistory(rid)
-    })
   }, [])
 
   useEffect(() => {
@@ -224,513 +441,697 @@ export default function AnalyticsApp() {
     if (chatMsgs.length) localStorage.setItem('mise_chat', JSON.stringify(chatMsgs.slice(-30)))
   }, [chatMsgs])
 
+  useEffect(() => {
+    if (!restaurantId) return
+    db.from('restaurants').select('currency, subscription_plan, subscription_status').eq('id', restaurantId).single().then(({ data: rest }) => {
+      if (rest?.currency) setCurrency(rest.currency)
+      setIsPro(rest?.subscription_plan === 'pro' && ['active', 'trialing', 'canceling'].includes(rest?.subscription_status))
+    })
+    db.from('restaurant_settings').select('include_card_in_analytics').limit(1).then(({ data }: any) => {
+      const r = Array.isArray(data) ? data[0] : data
+      setIncludeCard(!!r?.include_card_in_analytics)
+    })
+    loadAll(restaurantId, new Date())
+    loadAllHistory(restaurantId)
+  }, [restaurantId])
+
   const loadAll = async (rid: string, date: Date) => {
     setLoading(true)
     const monthStart = fmtDate(new Date(date.getFullYear(), date.getMonth(), 1))
-    const monthEnd = fmtDate(new Date(date.getFullYear(), date.getMonth()+1, 0))
-    const prevStart = fmtDate(new Date(date.getFullYear(), date.getMonth()-1, 1))
+    const monthEnd = fmtDate(new Date(date.getFullYear(), date.getMonth() + 1, 0))
+    const prevStart = fmtDate(new Date(date.getFullYear(), date.getMonth() - 1, 1))
     const prevEnd = fmtDate(new Date(date.getFullYear(), date.getMonth(), 0))
+
     const [s1, s2, s3, s4, s5] = await Promise.all([
-      supabase.from('shifts').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd).order('date'),
-      supabase.from('shifts').select('*').eq('restaurant_id', rid).gte('date', prevStart).lte('date', prevEnd).order('date'),
-      supabase.from('employees').select('*').eq('restaurant_id', rid).eq('is_active', true).order('name'),
-      supabase.from('monthly_card_amounts').select('*').eq('restaurant_id', rid).eq('month', fmtDate(date).slice(0,7)),
-      supabase.from('shift_absences').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd)
+      db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd).order('date'),
+      db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', prevStart).lte('date', prevEnd).order('date'),
+      db.from('employees').select('*').eq('restaurant_id', rid).eq('is_active', true).order('name'),
+      db.from('monthly_card_amounts').select('*').eq('restaurant_id', rid).eq('month', fmtDate(date).slice(0, 7)),
+      db.from('shift_absences').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd)
     ])
+
     const shiftList = s1.data || []
     setShifts(shiftList); setPrevShifts(s2.data || [])
     setEmployees(s3.data || []); setCardAmounts(s4.data || []); setAbsences(s5.data || [])
+
     if (shiftList.length > 0) {
-      const ids = shiftList.map((s:any) => s.id)
-      const [e1, e2] = await Promise.all([
-        supabase.from('shift_expenses').select('*').in('shift_id', ids),
-        supabase.from('inkassations').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd).order('date')
-      ])
-      setExpenses(e1.data || []); setInkassations(e2.data || [])
+      const ids = shiftList.map((s: any) => s.id)
+      const { data: e1 } = await db.from('shift_expenses').select('*').in('shift_id', ids)
+      setExpenses(e1 || [])
     }
     setLoading(false)
   }
 
   const loadAllHistory = async (rid: string) => {
-    const yearStart = fmtDate(new Date(new Date().getFullYear()-1, 0, 1))
-    const { data: sh } = await supabase.from('shifts').select('*').eq('restaurant_id', rid).gte('date', yearStart).order('date')
+    const yearStart = fmtDate(new Date(new Date().getFullYear() - 1, 0, 1))
+    const { data: sh } = await db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', yearStart).order('date')
     setAllShifts(sh || [])
     if (sh && sh.length > 0) {
-      const ids = sh.map((s:any) => s.id)
-      const { data: ex } = await supabase.from('shift_expenses').select('*').in('shift_id', ids)
+      const { data: ex } = await db.from('shift_expenses').select('*').in('shift_id', sh.map((s: any) => s.id))
       setAllExpenses(ex || [])
     }
   }
 
-  const toggleDark = () => {
-    const d = !isDark; setIsDark(d)
-    localStorage.setItem('mise_ana_dark', d ? '1' : '0')
+  // ── COMPUTED ──
+  // shifts.income хранит НАЛИЧНЫЕ; безнал (income_card) добавляется только если
+  // владелец включил «учитывать безнал в аналитике» в настройках дашборда.
+  const adjustCard = useCallback((rows: any[]) => includeCard
+    ? rows.map((s: any) => ({ ...s, income: (s.income || 0) + (s.income_card || 0) }))
+    : rows, [includeCard])
+  const shifts = useMemo(() => adjustCard(shiftsRaw), [shiftsRaw, adjustCard])
+  const prevShifts = useMemo(() => adjustCard(prevShiftsRaw), [prevShiftsRaw, adjustCard])
+  const allShifts = useMemo(() => adjustCard(allShiftsRaw), [allShiftsRaw, adjustCard])
+
+  const totalIncome = shifts.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
+  const totalExpense = shifts.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
+  const totalInkass = shifts.reduce((s: number, sh: any) => s + (sh.inkassation || 0), 0)
+  const lastShift = shifts[shifts.length - 1]
+  const prevIncome = prevShifts.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
+  const prevExpense = prevShifts.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
+  const pct = (cur: number, prev: number) => prev ? ((cur - prev) / prev * 100) : null
+
+  const getCatMap = (exps: any[]) => {
+    const m: Record<string, number> = {}
+    exps.filter((e: any) => !e.employee_id).forEach((e: any) => { m[e.category_name] = (m[e.category_name] || 0) + e.amount })
+    return Object.entries(m).sort((a, b) => b[1] - a[1])
   }
 
-  const totalIncome = shifts.reduce((s:number,sh:any)=>s+(sh.income||0),0)
-  const totalExpense = shifts.reduce((s:number,sh:any)=>s+(sh.total_expense||0),0)
-  const totalInkass = inkassations.reduce((s:number,i:any)=>s+(i.amount||0),0)
-  const lastShift = shifts[shifts.length-1]
-  const prevIncome = prevShifts.reduce((s:number,sh:any)=>s+(sh.income||0),0)
-  const prevExpense = prevShifts.reduce((s:number,sh:any)=>s+(sh.total_expense||0),0)
-  const pct = (cur:number, prev:number) => prev ? ((cur-prev)/prev*100) : null
-
-  const bg = mounted && isDark ? '#1c1c1e' : '#f2f2f7'
-  const surface = mounted && isDark ? '#2c2c2e' : '#fff'
-  const text = mounted && isDark ? '#f2f2f7' : '#1c1c1e'
-  const t3 = mounted && isDark ? '#aeaeb2' : '#6d6d72'
-  const t4 = mounted && isDark ? '#636366' : '#aeaeb2'
-  const border = mounted && isDark ? 'rgba(255,255,255,.15)' : 'rgba(60,60,67,.13)'
-  const b2 = mounted && isDark ? 'rgba(255,255,255,.08)' : 'rgba(60,60,67,.07)'
-  const s2 = mounted && isDark ? 'rgba(255,255,255,.1)' : 'rgba(118,118,128,.12)'
-  const sh = mounted && isDark ? '0 1px 3px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.2)' : '0 1px 3px rgba(0,0,0,.08),0 4px 16px rgba(0,0,0,.05)'
-  const hbg = mounted && isDark ? 'rgba(28,28,30,.96)' : 'rgba(242,242,247,.95)'
-  const nbg = mounted && isDark ? 'rgba(28,28,30,.97)' : 'rgba(248,248,252,.97)'
-
-  // Build AI context from all history
   const buildContext = () => {
-    const catMap: Record<string,number> = {}
-    allExpenses.filter((e:any)=>!e.employee_id).forEach((e:any)=>{catMap[e.category_name]=(catMap[e.category_name]||0)+e.amount})
-    const topCats = Object.entries(catMap).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([n,v])=>`${n}: ${currency}${fv(v)}`).join(', ')
-    const totalAllIncome = allShifts.reduce((s:number,sh:any)=>s+(sh.income||0),0)
-    const totalAllExpense = allShifts.reduce((s:number,sh:any)=>s+(sh.total_expense||0),0)
-    return `Ты AI-ассистент ресторана "${restaurantName}". 
-Текущий месяц (${MRU[currentDate.getMonth()]} ${currentDate.getFullYear()}): доход ${currency}${fv(totalIncome)}, расходы ${currency}${fv(totalExpense)}, касса ${currency}${fv(lastShift?.closing_balance||0)}, инкассация ${currency}${fv(totalInkass)}, смен ${shifts.length}.
-Прошлый месяц: доход ${currency}${fv(prevIncome)}, расходы ${currency}${fv(prevExpense)}.
-За последний год: общий доход ${currency}${fv(totalAllIncome)}, общие расходы ${currency}${fv(totalAllExpense)}, смен ${allShifts.length}.
-Топ расходов за всё время: ${topCats}.
-Сотрудников: ${employees.length}, ФОТ: ${currency}${fv(employees.reduce((s:number,e:any)=>s+e.salary,0))}.
-Отвечай кратко и по делу на русском.`
+    const catMap: Record<string, number> = {}
+    allExpenses.filter((e: any) => !e.employee_id).forEach((e: any) => { catMap[e.category_name] = (catMap[e.category_name] || 0) + e.amount })
+    const topCats = Object.entries(catMap).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, v]) => `${n}: ${currency}${fv(v)}`).join(', ')
+    const totalAllIncome = allShifts.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
+    const totalAllExpense = allShifts.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
+    return `Ты AI-ассистент ресторана. Текущий месяц (${MRU[currentDate.getMonth()]} ${currentDate.getFullYear()}): доход ${currency}${fv(totalIncome)}, расходы ${currency}${fv(totalExpense)}, касса ${currency}${fv(lastShift?.closing_balance || 0)}, инкассация ${currency}${fv(totalInkass)}, смен ${shifts.length}. Прошлый месяц: доход ${currency}${fv(prevIncome)}, расходы ${currency}${fv(prevExpense)}. За последний год: общий доход ${currency}${fv(totalAllIncome)}, общие расходы ${currency}${fv(totalAllExpense)}, смен ${allShifts.length}. Топ расходов за всё время: ${topCats}. Сотрудников: ${employees.length}, ФОТ: ${currency}${fv(employees.reduce((s: number, e: any) => s + e.salary, 0))}. Отвечай кратко и по делу на русском.`
   }
 
   const sendAI = async (msg?: string) => {
-    const input = msg || chatInput.trim()
-    if (!input) return
+    const input = msg || chatInput.trim(); if (!input) return
     setChatInput('')
-    const userMsg = { role:'user', text:input }
-    setChatMsgs(p=>[...p, userMsg])
-    setChatLoading(true)
+    const userMsg = { role: 'user', text: input }
+    setChatMsgs(p => [...p, userMsg]); setChatLoading(true)
     try {
-      const r = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [...chatMsgs, userMsg], context: buildContext() })
-      })
+      const r = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: [...chatMsgs, userMsg], context: buildContext() }) })
       const d = await r.json()
-      setChatMsgs(p=>[...p, { role:'ai', text: d.text || 'Нет ответа' }])
-    } catch {
-      setChatMsgs(p=>[...p, { role:'ai', text:'Ошибка соединения' }])
-    }
+      setChatMsgs(p => [...p, { role: 'ai', text: d.text || 'Нет ответа' }])
+    } catch { setChatMsgs(p => [...p, { role: 'ai', text: 'Ошибка соединения' }]) }
     setChatLoading(false)
   }
 
-  const getCatMap = (exps: any[]) => {
-    const m: Record<string,number> = {}
-    exps.filter((e:any)=>!e.employee_id).forEach((e:any)=>{m[e.category_name]=(m[e.category_name]||0)+e.amount})
-    return Object.entries(m).sort((a,b)=>b[1]-a[1])
+  // ── EXPORTS ──
+  const monthTag = `${MRU[currentDate.getMonth()]}_${currentDate.getFullYear()}`
+  const pdfCur = currency === '₸' ? 'KZT ' : currency // ₸ glyph not in embedded font
+  const monthTitle = `${MRU[currentDate.getMonth()]} ${currentDate.getFullYear()}`
+
+  const exportShifts = () => {
+    const rows: (string | number)[][] = [['Дата', 'Вход', 'Доход', 'Расход', 'Инкассация', 'Касса']]
+    shifts.forEach((s: any) => rows.push([
+      s.date,
+      (s.opening_balance || 0).toFixed(2),
+      (s.income || 0).toFixed(2),
+      (s.total_expense || 0).toFixed(2),
+      (s.inkassation || 0).toFixed(2),
+      (s.closing_balance || 0).toFixed(2),
+    ]))
+    rows.push(['Итого', '', totalIncome.toFixed(2), totalExpense.toFixed(2), totalInkass.toFixed(2), (lastShift?.closing_balance || 0).toFixed(2)])
+    downloadCSV(`smeny_${monthTag}.csv`, rows)
   }
 
+  const exportShiftsPDF = async () => {
+    const doc = await makePdfDoc()
+    const headers = ['Дата', 'Вход', 'Доход', 'Расход', 'Инкасс', 'Касса']
+    const colX = [40, 130, 220, 310, 400, 485]
+    const rows: string[][] = shifts.map((s: any) => [
+      s.date,
+      pdfCur + fv(s.opening_balance || 0),
+      pdfCur + fv(s.income || 0),
+      pdfCur + fv(s.total_expense || 0),
+      pdfCur + fv(s.inkassation || 0),
+      pdfCur + fv(s.closing_balance || 0),
+    ])
+    rows.push(['Итого', '', pdfCur + fv(totalIncome), pdfCur + fv(totalExpense), pdfCur + fv(totalInkass), pdfCur + fv(lastShift?.closing_balance || 0)])
+    pdfTable(doc, `Смены — ${monthTitle}`, headers, rows, colX)
+    doc.save(`smeny_${monthTag}.pdf`)
+  }
+
+  const exportSalary = () => {
+    const rows: (string | number)[][] = [['Сотрудник', 'Оклад', 'Пропуски', 'Вычет', 'Карта', 'Наличные', 'Итого']]
+    employees.forEach((emp: any) => {
+      const abs = absences.filter((a: any) => a.employee_id === emp.id).length
+      const deduct = abs * emp.deduct_per_absence
+      const card = cardAmounts.find((c: any) => c.employee_id === emp.id)?.card_amount || 0
+      const cash = emp.salary - deduct - card
+      rows.push([emp.name, (emp.salary || 0).toFixed(2), abs, deduct.toFixed(2), card.toFixed(2), cash.toFixed(2), (cash + card).toFixed(2)])
+    })
+    downloadCSV(`zarplaty_${monthTag}.csv`, rows)
+  }
+
+  const exportSalaryPDF = async () => {
+    const doc = await makePdfDoc()
+    const headers = ['Сотрудник', 'Оклад', 'Проп.', 'Вычет', 'Карта', 'Нал.', 'Итого']
+    const colX = [40, 200, 270, 330, 400, 465, 520]
+    const rows: string[][] = employees.map((emp: any) => {
+      const abs = absences.filter((a: any) => a.employee_id === emp.id).length
+      const deduct = abs * emp.deduct_per_absence
+      const card = cardAmounts.find((c: any) => c.employee_id === emp.id)?.card_amount || 0
+      const cash = emp.salary - deduct - card
+      return [emp.name, pdfCur + fv(emp.salary || 0), String(abs), pdfCur + fv(deduct), pdfCur + fv(card), pdfCur + fv(cash), pdfCur + fv(cash + card)]
+    })
+    pdfTable(doc, `Зарплаты — ${monthTitle}`, headers, rows, colX)
+    doc.save(`zarplaty_${monthTag}.pdf`)
+  }
+
+  // ── RENDER PERIOD ──
   const renderPeriod = () => {
     const dayStr = fmtDate(currentDate)
-    const dayShift = shifts.find((s:any)=>s.date===dayStr)
-    const dayExps = dayShift ? expenses.filter((e:any)=>e.shift_id===dayShift.id&&!e.employee_id) : []
-    const dayInk = dayShift ? inkassations.find((i:any)=>i.shift_id===dayShift.id) : null
+    const dayShift = shifts.find((s: any) => s.date === dayStr)
+    const dayExps = dayShift ? expenses.filter((e: any) => e.shift_id === dayShift.id && !e.employee_id) : []
+    const inkAmt = dayShift?.inkassation || 0
+    const dayInk = inkAmt > 0 ? { amount: inkAmt, expense: 0, reason: null, balance: inkAmt } : null
 
     const getWeekShifts = () => {
       const start = new Date(currentDate); const day = start.getDay()
-      start.setDate(start.getDate()-(day===0?6:day-1))
-      const end = new Date(start); end.setDate(start.getDate()+6)
-      return shifts.filter((s:any)=>s.date>=fmtDate(start)&&s.date<=fmtDate(end))
+      start.setDate(start.getDate() - (day === 0 ? 6 : day - 1))
+      const end = new Date(start); end.setDate(start.getDate() + 6)
+      return shifts.filter((s: any) => s.date >= fmtDate(start) && s.date <= fmtDate(end))
     }
 
     if (periodMode === 'day') {
-      if (!dayShift) return <div style={{padding:'48px 20px',textAlign:'center' as const,color:t4}}>Нет данных за {dd(dayStr)}</div>
+      if (!dayShift) return (
+        <div style={{ padding: '60px 20px', textAlign: 'center', color: t.text3 }}>
+          <div style={{ fontSize: 44, marginBottom: 12, opacity: 0.3 }}>
+            <svg fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" width="48" height="48"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
+          </div>
+          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Нет данных за {dd(dayStr)}</div>
+        </div>
+      )
+
+      const maxExp = Math.max(...dayExps.map((e: any) => e.amount), 1)
       return (
         <div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
-            <Stat label="Расход дня" val={`${currency}${fv(dayShift.total_expense)}`} color="#ff3b30" surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
-            <Stat label="Доход" val={`${currency}${fv(dayShift.income)}`} color="#34c759" surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+          {/* Hero cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+            <StatCard label="Доход" rawValue={dayShift.income} value={`${currency}${fv(dayShift.income)}`} color={t.green} t={t} />
+            <StatCard label="Расход" rawValue={dayShift.total_expense} value={`${currency}${fv(dayShift.total_expense)}`} color={t.red} t={t} />
           </div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:12}}>
-            <Stat label="Вход" val={`${currency}${fv(dayShift.opening_balance)}`} color="#007aff" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
-            <Stat label="Доход" val={`${currency}${fv(dayShift.income)}`} color="#34c759" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
-            <Stat label="Расход" val={`${currency}${fv(dayShift.total_expense)}`} color="#ff3b30" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
-            <Stat label="Касса" val={`${currency}${fv(dayShift.closing_balance)}`} color="#007aff" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 16 }}>
+            <StatCard label="Вход" value={`${currency}${fv(dayShift.opening_balance)}`} rawValue={dayShift.opening_balance} color={t.blue} sm t={t} />
+            <StatCard label="Доход" value={`${currency}${fv(dayShift.income)}`} rawValue={dayShift.income} color={t.green} sm t={t} />
+            <StatCard label="Расход" value={`${currency}${fv(dayShift.total_expense)}`} rawValue={dayShift.total_expense} color={t.red} sm t={t} />
+            <StatCard label="Касса" value={`${currency}${fv(dayShift.closing_balance)}`} rawValue={dayShift.closing_balance} color={t.blue} sm t={t} />
           </div>
-          {dayExps.length>0&&<><Sec t3={t3}>Расходы</Sec><Card surface={surface} sh={sh}>{dayExps.map((e:any,i:number)=>(
-            <div key={e.id} style={{display:'flex',justifyContent:'space-between',padding:'12px 16px',borderBottom:i<dayExps.length-1?`1px solid ${b2}`:'none'}}>
-              <span style={{color:text}}>{e.category_name}{e.note?` · ${e.note}`:''}</span>
-              <span style={{color:'#ff3b30',fontWeight:600}}>−{currency}{fv(e.amount)}</span>
-            </div>
-          ))}</Card></>}
-          {dayInk&&<><Sec t3={t3}>Инкассация</Sec><Card surface={surface} sh={sh}>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'1px',background:b2}}>
-              {[{l:'Приход',v:dayInk.amount>0?`${currency}${fv(dayInk.amount)}`:'—',c:'#34c759'},{l:'Расход',v:dayInk.expense>0?`${currency}${fv(dayInk.expense)}`:'—',c:'#ff3b30'},{l:'Причина',v:dayInk.reason||'—',c:t3},{l:'Итог',v:`${currency}${fv(dayInk.balance)}`,c:'#ff9500'}].map(cell=>(
-                <div key={cell.l} style={{background:surface,padding:'10px 8px'}}>
-                  <div style={{fontSize:9,color:t3,textTransform:'uppercase' as const,marginBottom:4,fontWeight:600}}>{cell.l}</div>
-                  <div style={{fontSize:13,fontWeight:700,color:cell.c}}>{cell.v}</div>
-                </div>
+          {dayExps.length > 0 && <>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Расходы дня</div>
+            <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
+              {dayExps.map((e: any, i: number) => (
+                <HBar key={e.id} name={e.category_name} val={e.amount} max={maxExp} color={COLORS[i % COLORS.length]} currency={currency} sub={e.note} t={t} />
               ))}
             </div>
-          </Card></>}
+          </>}
+          {dayInk && <>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Инкассация</div>
+            <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '0.5px', background: t.sep2 }}>
+                {[{ l: 'Приход', v: dayInk.amount > 0 ? `${currency}${fv(dayInk.amount)}` : '—', c: t.green }, { l: 'Расход', v: dayInk.expense > 0 ? `${currency}${fv(dayInk.expense)}` : '—', c: t.red }, { l: 'Причина', v: dayInk.reason || '—', c: t.text3 }, { l: 'Итог', v: `${currency}${fv(dayInk.balance)}`, c: t.orange }].map(cell => (
+                  <div key={cell.l} style={{ background: t.surface, padding: '12px 10px' }}>
+                    <div style={{ fontSize: 9, color: t.text3, textTransform: 'uppercase', marginBottom: 5, fontWeight: 600 }}>{cell.l}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: cell.c }}>{cell.v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>}
         </div>
       )
     }
 
     if (periodMode === 'week') {
       const ws = getWeekShifts()
-      const wi = ws.reduce((s:number,sh:any)=>s+sh.income,0)
-      const we = ws.reduce((s:number,sh:any)=>s+sh.total_expense,0)
-      const wExps = expenses.filter((e:any)=>ws.map((s:any)=>s.id).includes(e.shift_id))
-      const cats = getCatMap(wExps)
-      const maxV = cats[0]?.[1]||1
-      const ip = pct(wi, prevIncome/4); const ep = pct(we, prevExpense/4)
-      const chartLabels = ws.map((s:any)=>dd(s.date))
-      const incArr = ws.map((s:any)=>s.income||0)
-      const expArr = ws.map((s:any)=>s.total_expense||0)
+      const wi = ws.reduce((s: number, sh: any) => s + sh.income, 0)
+      const we = ws.reduce((s: number, sh: any) => s + sh.total_expense, 0)
+      const wExps = expenses.filter((e: any) => ws.map((s: any) => s.id).includes(e.shift_id))
+      const cats = getCatMap(wExps); const maxV = cats[0]?.[1] || 1
+      const ip = pct(wi, prevIncome / 4); const ep = pct(we, prevExpense / 4)
+
       return (
         <div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
-            <Stat label="Итог за неделю" val={`${currency}${fv(wi)}`} color="#34c759" pct={ip} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
-            <Stat label="Расходы" val={`${currency}${fv(we)}`} color="#ff3b30" pct={ep} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+            <StatCard label="Доход за неделю" rawValue={wi} value={`${currency}${fv(wi)}`} color={t.green} pct={ip} t={t} />
+            <StatCard label="Расходы" rawValue={we} value={`${currency}${fv(we)}`} color={t.red} pct={ep} t={t} />
           </div>
-          {ws.length>1&&<><Sec t3={t3}>Доходы и расходы</Sec><Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><BarChart labels={chartLabels} income={incArr} expense={expArr} isDark={isDark} currency={currency} /></div></Card></>}
-          {cats.length>0&&<><Sec t3={t3}>Структура расходов</Sec><Card surface={surface} sh={sh}>{cats.map(([n,v],i)=><Prog key={n} name={n} val={v} max={maxV} color={COLORS[i%COLORS.length]} currency={currency} text={text} b2={b2} s2={s2} />)}</Card></>}
-          <Sec t3={t3}>По дням</Sec>
-          <Card surface={surface} sh={sh}>
-            <TableHeader cols={['Дата','Вход','Доход','Расход','Касса']} isDark={isDark} t4={t4} />
-            {ws.map((s:any)=>(
-              <div key={s.id} style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',padding:'10px 14px',gap:4,borderBottom:`1px solid ${b2}`,fontSize:13,color:text}}>
-                <span style={{color:t3}}>{dd(s.date)}</span>
-                <span style={{color:'#007aff'}}>{s.opening_balance>0?`${currency}${fv(s.opening_balance)}`:'—'}</span>
-                <span style={{color:'#34c759',fontWeight:600}}>{s.income>0?`${currency}${fv(s.income)}`:'—'}</span>
-                <span style={{color:'#ff3b30'}}>{s.total_expense>0?`${currency}${fv(s.total_expense)}`:'—'}</span>
-                <span style={{color:'#007aff',fontWeight:700}}>{currency}{fv(s.closing_balance)}</span>
+          {ws.length > 1 && <>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Доходы и расходы</div>
+            <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
+              <div style={{ padding: '14px 14px 10px', color: t.text }}>
+                <BarChartSVG labels={ws.map((s: any) => dd(s.date))} income={ws.map((s: any) => s.income || 0)} expense={ws.map((s: any) => s.total_expense || 0)} currency={currency} />
+              </div>
+            </div>
+          </>}
+          {cats.length > 0 && <>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Структура расходов</div>
+            <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
+              {cats.map(([n, v], i) => <HBar key={n} name={n} val={v} max={maxV} color={COLORS[i % COLORS.length]} currency={currency} t={t} />)}
+            </div>
+          </>}
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>По дням</div>
+          <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
+            {ws.map((s: any, i: number) => (
+              <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '44px 1fr 1fr 1fr 1fr', padding: '12px 14px', gap: 4, borderBottom: i < ws.length - 1 ? `0.5px solid ${t.sep2}` : 'none', fontSize: 13 }}>
+                <span style={{ color: t.text3 }}>{dd(s.date)}</span>
+                <span style={{ color: t.blue }}>{s.opening_balance > 0 ? `${currency}${fv(s.opening_balance)}` : '—'}</span>
+                <span style={{ color: t.green, fontWeight: 600 }}>{s.income > 0 ? `${currency}${fv(s.income)}` : '—'}</span>
+                <span style={{ color: t.red }}>{s.total_expense > 0 ? `${currency}${fv(s.total_expense)}` : '—'}</span>
+                <span style={{ color: t.blue, fontWeight: 700 }}>{currency}{fv(s.closing_balance)}</span>
               </div>
             ))}
-          </Card>
+          </div>
         </div>
       )
     }
 
-    const cats = getCatMap(expenses)
-    const top5 = cats.slice(0,5)
-    const maxV = cats[0]?.[1]||1
+    // Month
+    const cats = getCatMap(expenses); const top5 = cats.slice(0, 5); const maxV = cats[0]?.[1] || 1
     const ip = pct(totalIncome, prevIncome); const ep = pct(totalExpense, prevExpense)
-    const donutData = top5.map(([,v])=>v)
-    const donutColors = COLORS.slice(0,top5.length)
-    const donutLabels = top5.map(([n])=>n)
-    const chartLabels = shifts.map((s:any)=>dd(s.date))
-    const incArr = shifts.map((s:any)=>s.income||0)
-    const expArr = shifts.map((s:any)=>s.total_expense||0)
+    const incomeArr = shifts.map((s: any) => s.income || 0)
+    const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
+    const daysPassed = currentDate.getMonth() === new Date().getMonth() && currentDate.getFullYear() === new Date().getFullYear() ? new Date().getDate() : daysInMonth
+
     return (
       <div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
-          <Stat label="Итого за месяц" val={`${currency}${fv(totalIncome)}`} color="#34c759" pct={ip} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
-          <Stat label="Расходы" val={`${currency}${fv(totalExpense)}`} color="#ff3b30" pct={ep} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+        {/* Top stats */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+          <StatCard label="Доход" rawValue={totalIncome} value={`${currency}${fv(totalIncome)}`} color={t.green} pct={ip} sparkValues={incomeArr} t={t} />
+          <StatCard label="Расходы" rawValue={totalExpense} value={`${currency}${fv(totalExpense)}`} color={t.red} pct={ep} t={t} />
         </div>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:12}}>
-          <Stat label="Смен" val={String(shifts.length)} sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
-          <Stat label="Инкасс" val={`${currency}${fv(totalInkass)}`} color="#ff9500" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
-          <Stat label="Касса" val={`${currency}${fv(lastShift?.closing_balance||0)}`} color="#007aff" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
+          <StatCard label="Смен" value={String(shifts.length)} sm t={t} />
+          <StatCard label="Инкасс" rawValue={totalInkass} value={`${currency}${fv(totalInkass)}`} color={t.orange} sm t={t} />
+          <StatCard label="Касса" rawValue={lastShift?.closing_balance || 0} value={`${currency}${fv(lastShift?.closing_balance || 0)}`} color={t.blue} sm t={t} />
         </div>
-        {shifts.length>1&&<><Sec t3={t3}>Динамика доходов и расходов</Sec><Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><BarChart labels={chartLabels} income={incArr} expense={expArr} isDark={isDark} currency={currency} /></div></Card></>}
-        {top5.length>0&&<>
-          <Sec t3={t3}>Структура расходов</Sec>
-          <Card surface={surface} sh={sh}>
-            <div style={{display:'flex',alignItems:'center',gap:16,padding:16}}>
-              <DonutChart data={donutData} colors={donutColors} labels={donutLabels} isDark={isDark} />
-              <div style={{flex:1,display:'flex',flexDirection:'column' as const,gap:7}}>
-                {top5.map(([n,v],i)=>(
-                  <div key={n} style={{display:'flex',alignItems:'center',gap:8}}>
-                    <div style={{width:9,height:9,borderRadius:'50%',background:donutColors[i],flexShrink:0}} />
-                    <div style={{fontSize:12,color:text,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{n}</div>
-                    <div style={{fontSize:12,fontWeight:600,color:text}}>{currency}{fv(v)}</div>
-                  </div>
-                ))}
-              </div>
+
+
+
+        {shifts.length > 1 && <>
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Доходы и расходы</div>
+          <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
+            <div style={{ padding: '14px 14px 8px', color: t.text }}>
+              <BarChartSVG labels={shifts.map((s: any) => dd(s.date))} income={incomeArr} expense={shifts.map((s: any) => s.total_expense || 0)} currency={currency} />
             </div>
-          </Card>
-          <Sec t3={t3}>Топ расходов</Sec>
-          <Card surface={surface} sh={sh}>{top5.map(([n,v],i)=><Prog key={n} name={n} val={v} max={maxV} color={COLORS[i%COLORS.length]} currency={currency} text={text} b2={b2} s2={s2} />)}</Card>
-        </>}
-        {cats.length>0&&<><Sec t3={t3}>Все категории</Sec><Card surface={surface} sh={sh}>{cats.map(([n,v],i)=>(
-          <div key={n} style={{display:'flex',justifyContent:'space-between',padding:'12px 16px',borderBottom:i<cats.length-1?`1px solid ${b2}`:'none'}}>
-            <span style={{color:text}}>{n}</span><span style={{color:'#ff3b30',fontWeight:600}}>{currency}{fv(v)}</span>
           </div>
-        ))}</Card></>}
+        </>}
+
+        {/* Donut */}
+        {top5.length > 0 && <>
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Структура расходов</div>
+          <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh, color: t.text }}>
+            <DonutChartSVG data={top5.map(([, v]) => v)} colors={COLORS.slice(0, top5.length)} labels={top5.map(([n]) => n)} centerVal={`${currency}${Math.round(totalExpense)}`} centerLabel="расходы" />
+          </div>
+
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Топ расходов</div>
+          <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
+            {top5.map(([n, v], i) => <HBar key={n} name={n} val={v} max={maxV} color={COLORS[i % COLORS.length]} currency={currency} t={t} />)}
+          </div>
+        </>}
+
+        {cats.length > 0 && <>
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Все категории</div>
+          <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
+            {cats.map(([n, v], i) => (
+              <div key={n} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: i < cats.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                <span style={{ color: t.text }}>{n}</span>
+                <span style={{ color: t.red, fontWeight: 600 }}>{currency}{fv(v)}</span>
+              </div>
+            ))}
+          </div>
+        </>}
       </div>
     )
   }
 
   const renderKassa = () => {
-    const filled = shifts.filter((s:any)=>s.income>0||s.total_expense>0)
-    const chartLabels = filled.map((s:any)=>dd(s.date))
-    const balArr = filled.map((s:any)=>s.closing_balance||0)
-    const incArr = filled.map((s:any)=>s.income||0)
-    const expArr = filled.map((s:any)=>s.total_expense||0)
+    const filled = shifts.filter((s: any) => s.income > 0 || s.total_expense > 0)
+    const balArr = filled.map((s: any) => s.closing_balance || 0)
 
     if (kassaMode === 'kassa') {
       return (
         <div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
-            <Stat label="Остаток" val={`${currency}${fv(lastShift?.closing_balance||0)}`} color="#007aff" surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
-            <Stat label="Доход посл." val={`${currency}${fv(lastShift?.income||0)}`} color="#34c759" sub={lastShift?dd(lastShift.date):undefined} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+            <StatCard label="Остаток" rawValue={lastShift?.closing_balance || 0} value={`${currency}${fv(lastShift?.closing_balance || 0)}`} color={t.blue} sparkValues={balArr} t={t} />
+            <StatCard label="Последний доход" rawValue={lastShift?.income || 0} value={`${currency}${fv(lastShift?.income || 0)}`} color={t.green} sub={lastShift ? dd(lastShift.date) : undefined} t={t} />
           </div>
-          {filled.length>1&&<>
-            <Sec t3={t3}>Баланс кассы</Sec>
-            <Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><LineChart labels={chartLabels} values={balArr} color="#007aff" isDark={isDark} currency={currency} /></div></Card>
-            <Sec t3={t3}>Доходы и расходы</Sec>
-            <Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><BarChart labels={chartLabels} income={incArr} expense={expArr} isDark={isDark} currency={currency} /></div></Card>
+          {filled.length > 1 && <>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Баланс кассы</div>
+            <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
+              <div style={{ padding: '14px 14px 8px', color: t.text }}>
+                <LineChartSVG labels={filled.map((s: any) => dd(s.date))} values={balArr} color={t.blue} currency={currency} />
+              </div>
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Доходы и расходы</div>
+            <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
+              <div style={{ padding: '14px 14px 8px', color: t.text }}>
+                <BarChartSVG labels={filled.map((s: any) => dd(s.date))} income={filled.map((s: any) => s.income || 0)} expense={filled.map((s: any) => s.total_expense || 0)} currency={currency} />
+              </div>
+            </div>
           </>}
-          <Sec t3={t3}>По дням</Sec>
-          <Card surface={surface} sh={sh}>
-            <TableHeader cols={['Дата','Вход','Доход','Расход','Касса']} isDark={isDark} t4={t4} />
-            {filled.map((s:any)=>(
-              <div key={s.id} style={{display:'grid',gridTemplateColumns:'50px 1fr 1fr 1fr 1fr',padding:'11px 14px',gap:4,borderBottom:`1px solid ${b2}`,fontSize:13,color:text}}>
-                <span style={{color:t3}}>{dd(s.date)}</span>
-                <span style={{color:'#007aff'}}>{s.opening_balance>0?`${currency}${fv(s.opening_balance)}`:'—'}</span>
-                <span style={{color:'#34c759',fontWeight:600}}>{s.income>0?`${currency}${fv(s.income)}`:'—'}</span>
-                <span style={{color:'#ff3b30'}}>{s.total_expense>0?`${currency}${fv(s.total_expense)}`:'—'}</span>
-                <span style={{color:'#007aff',fontWeight:700}}>{currency}{fv(s.closing_balance)}</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 4px 8px' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>По дням</div>
+            {filled.length > 0 && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={exportShifts} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.green}18`, border: 'none', borderRadius: 16, padding: '5px 12px', fontSize: 12, fontWeight: 600, color: t.green, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+                  Excel
+                </button>
+                <button onClick={exportShiftsPDF} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.red}14`, border: 'none', borderRadius: 16, padding: '5px 12px', fontSize: 12, fontWeight: 600, color: t.red, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+                  PDF
+                </button>
+              </div>
+            )}
+          </div>
+          <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
+            {filled.map((s: any, i: number) => (
+              <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '44px 1fr 1fr 1fr 1fr', padding: '12px 14px', gap: 4, borderBottom: i < filled.length - 1 ? `0.5px solid ${t.sep2}` : 'none', fontSize: 13 }}>
+                <span style={{ color: t.text3 }}>{dd(s.date)}</span>
+                <span style={{ color: t.blue }}>{s.opening_balance > 0 ? `${currency}${fv(s.opening_balance)}` : '—'}</span>
+                <span style={{ color: t.green, fontWeight: 600 }}>{s.income > 0 ? `${currency}${fv(s.income)}` : '—'}</span>
+                <span style={{ color: t.red }}>{s.total_expense > 0 ? `${currency}${fv(s.total_expense)}` : '—'}</span>
+                <span style={{ color: t.blue, fontWeight: 700 }}>{currency}{fv(s.closing_balance)}</span>
               </div>
             ))}
-          </Card>
+          </div>
         </div>
       )
     }
 
-    const now = new Date()
-    const dIM = new Date(now.getFullYear(),now.getMonth()+1,0).getDate()
-    const lastInk = inkassations[inkassations.length-1]
-    const inkBal = lastInk?.balance||0
-    const totalSal = employees.reduce((s:number,e:any)=>s+e.salary,0)
-    const salToday = Math.round(totalSal/dIM*now.getDate())
-    const diff = inkBal-salToday
-    const inkLabels = inkassations.map((i:any)=>dd(i.date))
-    const inkTotals = inkassations.map((i:any)=>i.balance||0)
+    const now = new Date(); const dIM = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    const shiftsWithInk = shifts.filter((s: any) => (s.inkassation || 0) > 0)
+    const inkBal = totalInkass
+    const totalSal = employees.reduce((s: number, e: any) => s + e.salary, 0)
+    const salToday = Math.round(totalSal / dIM * now.getDate()); const diff = inkBal - salToday
+
     return (
       <div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
-          <Stat label="Баланс" val={`${currency}${fv(inkBal)}`} color="#ff9500" surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
-          <Stat label="ЗП на сегодня" val={`${currency}${fv(salToday)}`} color={diff>=0?'#34c759':'#ff3b30'} sub={`${diff>=0?'Опережаем':'Отстаём'} ${currency}${fv(Math.abs(diff))}`} surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+          <StatCard label="Итого инкасс." rawValue={inkBal} value={`${currency}${fv(inkBal)}`} color={t.orange} t={t} />
+          <StatCard label="ЗП на сегодня" rawValue={salToday} value={`${currency}${fv(salToday)}`} color={diff >= 0 ? t.green : t.red} sub={`${diff >= 0 ? 'Опережаем' : 'Отстаём'} ${currency}${fv(Math.abs(diff))}`} t={t} />
         </div>
-        {inkassations.length>1&&<>
-          <Sec t3={t3}>Динамика</Sec>
-          <Card surface={surface} sh={sh}><div style={{padding:'12px 14px 14px'}}><LineChart labels={inkLabels} values={inkTotals} color="#ff9500" isDark={isDark} currency={currency} /></div></Card>
+        {shiftsWithInk.length > 1 && <>
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Динамика</div>
+          <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
+            <div style={{ padding: '14px 14px 8px', color: t.text }}>
+              <LineChartSVG labels={shiftsWithInk.map((s: any) => dd(s.date))} values={shiftsWithInk.map((s: any) => s.inkassation || 0)} color={t.orange} currency={currency} />
+            </div>
+          </div>
         </>}
-        <Sec t3={t3}>История</Sec>
-        <Card surface={surface} sh={sh}>
-          {inkassations.length===0
-            ?<div style={{padding:'32px',textAlign:'center' as const,color:t4}}>Нет инкассаций</div>
-            :<><TableHeader cols={['Дата','Сумма','Расход','Причина','Итог']} isDark={isDark} t4={t4} />
-              {inkassations.map((ink:any)=>(
-                <div key={ink.id} style={{display:'grid',gridTemplateColumns:'44px 1fr 1fr 1fr 1fr',padding:'11px 14px',gap:4,borderBottom:`1px solid ${b2}`,fontSize:13,color:text}}>
-                  <span style={{color:t3}}>{dd(ink.date)}</span>
-                  <span style={{color:'#34c759',fontWeight:600}}>{ink.amount>0?`${currency}${fv(ink.amount)}`:'—'}</span>
-                  <span style={{color:'#ff3b30'}}>{ink.expense>0?`${currency}${fv(ink.expense)}`:'—'}</span>
-                  <span style={{color:t4,fontSize:11}}>{ink.reason||'—'}</span>
-                  <span style={{color:'#ff9500',fontWeight:600}}>{currency}{fv(ink.balance)}</span>
-                </div>
-              ))}</>}
-        </Card>
+        <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>История</div>
+        <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
+          {shiftsWithInk.length === 0
+            ? <div style={{ padding: '32px', textAlign: 'center', color: t.text4 }}>Нет инкассаций</div>
+            : shiftsWithInk.map((s: any, i: number) => (
+              <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '44px 1fr 1fr', padding: '12px 14px', gap: 4, borderBottom: i < shiftsWithInk.length - 1 ? `0.5px solid ${t.sep2}` : 'none', fontSize: 13 }}>
+                <span style={{ color: t.text3 }}>{dd(s.date)}</span>
+                <span style={{ color: t.text }}>{s.date}</span>
+                <span style={{ color: t.orange, fontWeight: 600 }}>{currency}{fv(s.inkassation)}</span>
+              </div>
+            ))
+          }
+        </div>
       </div>
     )
   }
 
   const renderSalary = () => {
-    const totFOT = employees.reduce((s:number,e:any)=>s+e.salary,0)
-    const totCard = cardAmounts.reduce((s:number,c:any)=>s+c.card_amount,0)
-    const totCash = employees.reduce((s:number,emp:any)=>{
-      const abs = absences.filter((a:any)=>a.employee_id===emp.id).length
-      const card = cardAmounts.find((c:any)=>c.employee_id===emp.id)?.card_amount||0
-      return s+(emp.salary-abs*emp.deduct_per_absence-card)
-    },0)
+    const totFOT = employees.reduce((s: number, e: any) => s + e.salary, 0)
+    const totCard = cardAmounts.reduce((s: number, c: any) => s + c.card_amount, 0)
+    const totCash = employees.reduce((s: number, emp: any) => {
+      const abs = absences.filter((a: any) => a.employee_id === emp.id).length
+      const card = cardAmounts.find((c: any) => c.employee_id === emp.id)?.card_amount || 0
+      return s + (emp.salary - abs * emp.deduct_per_absence - card)
+    }, 0)
+
     return (
       <div>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:12}}>
-          <Stat label="ФОТ" val={`${currency}${fv(totFOT)}`} color="#007aff" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
-          <Stat label="Нал" val={`${currency}${fv(totCash)}`} color="#ff9500" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
-          <Stat label="Карта" val={`${currency}${fv(totCard)}`} color="#af52de" sm surface={surface} text={text} t3={t3} t4={t4} sh={sh} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
+          <StatCard label="ФОТ" rawValue={totFOT} value={`${currency}${fv(totFOT)}`} color={t.blue} sm t={t} />
+          <StatCard label="Наличные" rawValue={totCash} value={`${currency}${fv(totCash)}`} color={t.orange} sm t={t} />
+          <StatCard label="Карта" rawValue={totCard} value={`${currency}${fv(totCard)}`} color={t.purple} sm t={t} />
         </div>
-        <Sec t3={t3}>Сотрудники</Sec>
-        <Card surface={surface} sh={sh}>
-          {employees.map((emp:any,i:number)=>{
-            const abs = absences.filter((a:any)=>a.employee_id===emp.id).length
-            const deduct = abs*emp.deduct_per_absence
-            const card = cardAmounts.find((c:any)=>c.employee_id===emp.id)?.card_amount||0
-            const cash = emp.salary-deduct-card
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 4px 8px' }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>Сотрудники</div>
+          {employees.length > 0 && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={exportSalary} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.green}18`, border: 'none', borderRadius: 16, padding: '5px 12px', fontSize: 12, fontWeight: 600, color: t.green, cursor: 'pointer', fontFamily: 'inherit' }}>
+                <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+                Excel
+              </button>
+              <button onClick={exportSalaryPDF} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.red}14`, border: 'none', borderRadius: 16, padding: '5px 12px', fontSize: 12, fontWeight: 600, color: t.red, cursor: 'pointer', fontFamily: 'inherit' }}>
+                <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+                PDF
+              </button>
+            </div>
+          )}
+        </div>
+        <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
+          {employees.map((emp: any, i: number) => {
+            const abs = absences.filter((a: any) => a.employee_id === emp.id).length
+            const deduct = abs * emp.deduct_per_absence
+            const card = cardAmounts.find((c: any) => c.employee_id === emp.id)?.card_amount || 0
+            const cash = emp.salary - deduct - card
+            const cashPct = totCash > 0 ? cash / totCash * 100 : 0
+            const cardPct = totCard > 0 ? card / totCard * 100 : 0
+
             return (
-              <div key={emp.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 16px',borderBottom:i<employees.length-1?`1px solid ${b2}`:'none'}}>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:15,color:text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{emp.name}</div>
-                  <div style={{fontSize:11,color:t3,marginTop:1}}>ЗП: {currency}{fv(emp.salary)}{deduct>0?` · −${currency}${fv(deduct)}`:''}{abs>0?` · Пропусков: ${abs}`:''}</div>
-                  {abs>0&&<div style={{marginTop:5,height:3,background:s2,borderRadius:2,overflow:'hidden'}}><div style={{height:'100%',width:`${Math.min(abs/22*100,100).toFixed(1)}%`,background:'#ff3b30',borderRadius:2}}/></div>}
+              <div key={emp.id} style={{ padding: '14px 16px', borderBottom: i < employees.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 15, color: t.text, fontWeight: 600 }}>{emp.name}</div>
+                    <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>
+                      ЗП: {currency}{fv(emp.salary)}{deduct > 0 ? ` · −${currency}${fv(deduct)}` : ''}{abs > 0 ? ` · ${abs} пропусков` : ''}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: t.blue }}>{currency}{fv(cash + card)}</div>
                 </div>
-                <div style={{textAlign:'right' as const,paddingLeft:12}}>
-                  <div style={{fontSize:17,fontWeight:700,color:'#007aff'}}>{currency}{fv(cash)}</div>
-                  {card>0&&<div style={{fontSize:11,color:t4}}>карта: {currency}{fv(card)}</div>}
+                {/* Нал vs Карта бар */}
+                {abs > 0 && <div style={{ marginTop: 6, height: 3, background: t.fill2, borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${Math.min(abs / 22 * 100, 100).toFixed(1)}%`, background: t.red, borderRadius: 2, transition: 'width 0.8s cubic-bezier(.16,1,.3,1)' }} />
+                </div>}
+                <div style={{ display: 'flex', gap: 12, marginTop: 5 }}>
+                  <span style={{ fontSize: 11, color: t.orange }}>Нал {currency}{fv(cash)}</span>
+                  {card > 0 && <span style={{ fontSize: 11, color: t.purple }}>Карта {currency}{fv(card)}</span>}
                 </div>
               </div>
             )
           })}
-        </Card>
+        </div>
       </div>
     )
   }
 
-  if (!mounted||loading) return (
-    <div style={{minHeight:'100vh',background:'#f2f2f7',display:'flex',alignItems:'center',justifyContent:'center'}}>
-      <div style={{width:28,height:28,border:`2.5px solid rgba(118,118,128,.2)`,borderTopColor:'#007aff',borderRadius:'50%',animation:'spin .7s linear infinite'}}/>
+  if (!restaurantId) return <AuthGate appId="analytics" appName="Mise Analytics" onAuth={setRestaurantId} />
+
+  if (!t.mounted || loading) return (
+    <div style={{ minHeight: '100vh', background: '#f2f2f7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+        <span style={{ fontWeight: 800, fontSize: 24, color: '#34c759', letterSpacing: -0.8 }}>mise</span>
+        <span style={{ fontWeight: 400, fontSize: 22, color: '#1c1c1e', letterSpacing: -0.3 }}>Analytics</span>
+      </div>
+      <div style={{ width: 24, height: 24, border: '2.5px solid rgba(52,199,89,0.2)', borderTopColor: '#34c759', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   )
 
   const TABS = [
-    { id:'period', label:'Период', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> },
-    { id:'kassa', label:'Касса', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3H8L2 7h20z"/></svg> },
-    { id:'sales', label:'Продажи', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg> },
-    { id:'salary', label:'Смены', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg> },
-    { id:'hookah', label:'Кальян', icon:<svg fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" width="26" height="26"><path d="M12 3c-1.1 0-2 .9-2 2h4c0-1.1-.9-2-2-2z"/><path d="M8 8c0-1.7 1.3-3 3-3h2c1.7 0 3 1.3 3 3v1H8V8z"/><rect x="7" y="9" width="10" height="2" rx="1"/><path d="M12 11v3"/><path d="M9 14c0 0-3 1-3 4h12c0-3-3-4-3-4"/><path d="M6 18c-.5.5-.5 1 0 1.5"/><path d="M18 18c.5.5.5 1 0 1.5"/><path d="M4 16c-1 2 0 4 2 4"/><path d="M20 16c1 2 0 4-2 4"/></svg>},
+    { id: 'period', label: 'Период', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },
+    { id: 'kassa', label: 'Касса', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 3H8L2 7h20z" /></svg> },
+    { id: 'sales', label: 'Продажи', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" /><line x1="3" y1="6" x2="21" y2="6" /><path d="M16 10a4 4 0 01-8 0" /></svg> },
+    { id: 'salary', label: 'Зарплаты', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" /></svg> },
+    { id: 'hookah', label: 'Кальян', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M8 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M12 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M16 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M5 14h14" strokeLinecap="round"/><path d="M5 17c1 1.5 2 2 3.5 2s2.5-1 4-1 2.5 1 4 1 2.5-.5 3.5-2" strokeLinecap="round"/></svg> },
   ] as const
 
   return (
-    <div style={{height:'100vh',overflow:'hidden',background:bg,fontFamily:"-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif",WebkitFontSmoothing:'antialiased'}}>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}} @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.15);opacity:.7}} @keyframes orbit{from{transform:rotate(0deg) translateX(7px) rotate(0deg)}to{transform:rotate(360deg) translateX(7px) rotate(-360deg)}}`}</style>
+    <div style={{ height: '100vh', overflow: 'hidden', background: t.bg, fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }}>
+      <style>{`
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.2);opacity:.6}}
+        @keyframes orbit{from{transform:rotate(0deg) translateX(7px) rotate(0deg)}to{transform:rotate(360deg) translateX(7px) rotate(-360deg)}}
+        * { box-sizing: border-box }
+        ::-webkit-scrollbar { display: none }
+      `}</style>
 
-      {/* Header */}
-      <div style={{position:'fixed',top:0,left:0,right:0,zIndex:300,height:56,background:hbg,backdropFilter:'saturate(180%) blur(20px)',borderBottom:`1px solid ${border}`,display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 16px'}}>
-        <div style={{display:'flex',alignItems:'center',gap:10}}>
-          {logoUrl && <img src={logoUrl} alt="logo" style={{width:28,height:28,borderRadius:6,objectFit:'cover'}} />}
-          <div style={{fontWeight:700,fontSize:'1rem',color:text}}>{restaurantName||'Mise Analytics'}</div>
+      {/* HEADER */}
+      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 300, height: 56, background: t.hbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderBottom: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+          <span style={{ fontWeight: 800, fontSize: 18, color: t.green, letterSpacing: -0.8 }}>mise</span>
+          <span style={{ fontWeight: 400, fontSize: 17, color: t.text, letterSpacing: -0.3 }}>Analytics</span>
         </div>
-        <div style={{display:'flex',gap:8,alignItems:'center'}}>
-          <button onClick={toggleDark} style={{width:36,height:36,borderRadius:'50%',background:s2,border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:text}}>
-            {isDark
-              ? <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-              : <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={t.toggle} style={{ width: 36, height: 36, borderRadius: '50%', background: t.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text }}>
+            {t.dark
+              ? <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>
+              : <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
             }
           </button>
-          <button onClick={()=>setShowMonthPicker(true)} style={{display:'flex',alignItems:'center',gap:5,background:'rgba(0,122,255,.1)',borderRadius:20,padding:'7px 14px',cursor:'pointer',fontSize:15,fontWeight:600,color:'#007aff',border:'none',fontFamily:'inherit'}}>
-            {MRU[currentDate.getMonth()].slice(0,3)} {currentDate.getFullYear()}
-            <span style={{display:'inline-block',width:8,height:8,borderRight:'2px solid #007aff',borderBottom:'2px solid #007aff',transform:'rotate(45deg)',marginTop:-3}}/>
+          <button onClick={() => setShowMonthPicker(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.green}18`, borderRadius: 20, padding: '7px 14px', cursor: 'pointer', fontSize: 14, fontWeight: 600, color: t.green, border: 'none', fontFamily: 'inherit' }}>
+            {MRU[currentDate.getMonth()].slice(0, 3)} {currentDate.getFullYear()}
+            <svg width="10" height="6" fill="none" stroke={t.green} strokeWidth="2.5" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" /></svg>
           </button>
-          <button onClick={()=>setShowAI(true)} style={{width:36,height:36,borderRadius:'50%',background:'rgba(0,122,255,.1)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',position:'relative' as const}}>
-            <div style={{position:'relative' as const,width:20,height:20}}>
-              <div style={{position:'absolute' as const,inset:0,borderRadius:'50%',border:'1.5px solid rgba(0,122,255,.5)',animation:'pulse 2s ease-in-out infinite'}}/>
-              <div style={{position:'absolute' as const,inset:3,borderRadius:'50%',background:'#007aff',animation:'pulse 2s ease-in-out infinite .3s'}}/>
-              <div style={{position:'absolute' as const,width:4,height:4,borderRadius:'50%',background:'#fff',top:'50%',left:'50%',marginTop:-2,marginLeft:-2,animation:'orbit 1.5s linear infinite'}}/>
+          <button onClick={() => isPro ? setShowAI(true) : alert('AI-аналитика доступна в тарифе Pro')} style={{ width: 36, height: 36, borderRadius: '50%', background: `${t.green}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' as const, opacity: isPro ? 1 : 0.55 }}>
+            <div style={{ position: 'relative' as const, width: 20, height: 20 }}>
+              <div style={{ position: 'absolute' as const, inset: 0, borderRadius: '50%', border: `1.5px solid ${t.green}66`, animation: 'pulse 2s ease-in-out infinite' }} />
+              <div style={{ position: 'absolute' as const, inset: 3, borderRadius: '50%', background: t.green, animation: 'pulse 2s ease-in-out infinite .3s' }} />
+              <div style={{ position: 'absolute' as const, width: 4, height: 4, borderRadius: '50%', background: '#fff', top: '50%', left: '50%', marginTop: -2, marginLeft: -2, animation: 'orbit 1.5s linear infinite' }} />
             </div>
           </button>
         </div>
       </div>
 
-      {/* Content */}
-      <div style={{position:'fixed',top:56,left:0,right:0,bottom:80,overflowY:'auto',background:bg}}>
-        <div style={{padding:'16px 16px 28px',maxWidth:860,margin:'0 auto',animation:'fadeUp .22s ease'}}>
-          {tab==='period'&&(
+      {/* CONTENT */}
+      <div style={{ position: 'fixed', top: 56, left: 0, right: 0, bottom: 82, overflowY: 'auto', background: t.bg }}>
+        <div style={{ padding: '16px 16px 28px', maxWidth: 640, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
+
+          {tab === 'period' && (
             <>
-              <div style={{display:'flex',background:s2,borderRadius:10,padding:2,marginBottom:16}}>
-                {(['day','week','month'] as const).map(m=>(
-                  <button key={m} onClick={()=>setPeriodMode(m)} style={{flex:1,padding:7,borderRadius:8,border:'none',fontFamily:'inherit',fontSize:13,fontWeight:periodMode===m?600:500,cursor:'pointer',background:periodMode===m?surface:'transparent',color:periodMode===m?text:t3,boxShadow:periodMode===m?'0 1px 3px rgba(0,0,0,.1)':'none',transition:'all .15s'}}>
-                    {m==='day'?'День':m==='week'?'Неделя':'Месяц'}
+              <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
+                {(['day', 'week', 'month'] as const).map(m => (
+                  <button key={m} onClick={() => setPeriodMode(m)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: periodMode === m ? 700 : 500, cursor: 'pointer', background: periodMode === m ? t.surface : 'transparent', color: periodMode === m ? t.green : t.text3, boxShadow: periodMode === m ? t.sh2 : 'none', transition: 'all .18s' }}>
+                    {m === 'day' ? 'День' : m === 'week' ? 'Неделя' : 'Месяц'}
                   </button>
                 ))}
               </div>
-              {periodMode!=='month'&&(
-                <div style={{display:'flex',alignItems:'center',gap:12,background:surface,borderRadius:14,padding:'12px 16px',marginBottom:16,boxShadow:sh}}>
-                  <button onClick={()=>{const d=new Date(currentDate);d.setDate(d.getDate()-(periodMode==='week'?7:1));setCurrentDate(d)}} style={{width:40,height:40,borderRadius:'50%',background:s2,border:'none',fontSize:20,color:text,cursor:'pointer',fontFamily:'inherit'}}>‹</button>
-                  <div style={{flex:1,textAlign:'center' as const}}>
-                    <div style={{fontSize:16,fontWeight:700,color:text}}>{periodMode==='day'?`${currentDate.getDate()} ${MRU[currentDate.getMonth()].slice(0,3)}`:`Неделя ${currentDate.getDate()} ${MRU[currentDate.getMonth()].slice(0,3)}`}</div>
-                    <div style={{fontSize:12,color:'#007aff',marginTop:1,fontWeight:500}}>{periodMode==='day'?DOW[currentDate.getDay()]:'выбрать ↑'}</div>
+              {periodMode !== 'month' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: t.surface, borderRadius: 14, padding: '12px 16px', marginBottom: 16, boxShadow: t.sh }}>
+                  <button onClick={() => { const d = new Date(currentDate); d.setDate(d.getDate() - (periodMode === 'week' ? 7 : 1)); setCurrentDate(d) }} style={{ width: 40, height: 40, borderRadius: '50%', background: t.fill, border: 'none', color: t.text, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <svg width="10" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 10 18"><path d="M8 1L1 9l7 8" /></svg>
+                  </button>
+                  <div style={{ flex: 1, textAlign: 'center' as const }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>{periodMode === 'day' ? `${currentDate.getDate()} ${MRU[currentDate.getMonth()].slice(0, 3)}` : `Неделя ${currentDate.getDate()} ${MRU[currentDate.getMonth()].slice(0, 3)}`}</div>
+                    <div style={{ fontSize: 12, color: t.green, marginTop: 1, fontWeight: 500 }}>{periodMode === 'day' ? DOW[currentDate.getDay()] : ''}</div>
                   </div>
-                  <button onClick={()=>{const d=new Date(currentDate);d.setDate(d.getDate()+(periodMode==='week'?7:1));setCurrentDate(d)}} style={{width:40,height:40,borderRadius:'50%',background:s2,border:'none',fontSize:20,color:text,cursor:'pointer',fontFamily:'inherit'}}>›</button>
+                  <button onClick={() => { const d = new Date(currentDate); d.setDate(d.getDate() + (periodMode === 'week' ? 7 : 1)); setCurrentDate(d) }} style={{ width: 40, height: 40, borderRadius: '50%', background: t.fill, border: 'none', color: t.text, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <svg width="10" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 10 18"><path d="M2 1l7 8-7 8" /></svg>
+                  </button>
                 </div>
               )}
               {renderPeriod()}
             </>
           )}
-          {tab==='kassa'&&(
+
+          {tab === 'kassa' && (
             <>
-              <div style={{display:'flex',background:s2,borderRadius:10,padding:2,marginBottom:16}}>
-                {(['kassa','inkass'] as const).map(m=>(
-                  <button key={m} onClick={()=>setKassaMode(m)} style={{flex:1,padding:7,borderRadius:8,border:'none',fontFamily:'inherit',fontSize:13,fontWeight:kassaMode===m?600:500,cursor:'pointer',background:kassaMode===m?surface:'transparent',color:kassaMode===m?text:t3,boxShadow:kassaMode===m?'0 1px 3px rgba(0,0,0,.1)':'none',transition:'all .15s'}}>
-                    {m==='kassa'?'Касса':'Инкасс'}
+              <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
+                {(['kassa', 'inkass'] as const).map(m => (
+                  <button key={m} onClick={() => setKassaMode(m)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: kassaMode === m ? 700 : 500, cursor: 'pointer', background: kassaMode === m ? t.surface : 'transparent', color: kassaMode === m ? t.green : t.text3, boxShadow: kassaMode === m ? t.sh2 : 'none', transition: 'all .18s' }}>
+                    {m === 'kassa' ? 'Касса' : 'Инкасс'}
                   </button>
                 ))}
               </div>
               {renderKassa()}
             </>
           )}
-          {tab==='sales'&&<div style={{padding:'60px 20px',textAlign:'center' as const,color:t4}}><svg style={{marginBottom:16,opacity:.3}} fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" width="48" height="48"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg><div style={{fontWeight:700,fontSize:17,color:text,marginBottom:8}}>Продажи</div><div style={{fontSize:14}}>Скоро — статистика из Syrve</div></div>}
-          {tab==='salary'&&renderSalary()}
-          {tab==='hookah'&&<div style={{padding:'60px 20px',textAlign:'center' as const,color:t4}}><svg style={{marginBottom:16,opacity:.3}} fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" width="48" height="48"><path d="M12 3c-1.1 0-2 .9-2 2h4c0-1.1-.9-2-2-2z"/><path d="M8 8c0-1.7 1.3-3 3-3h2c1.7 0 3 1.3 3 3v1H8V8z"/><rect x="7" y="9" width="10" height="2" rx="1"/><path d="M12 11v3"/><path d="M9 14c0 0-3 1-3 4h12c0-3-3-4-3-4"/></svg><div style={{fontWeight:700,fontSize:17,color:text,marginBottom:8}}>Кальян</div><div style={{fontSize:14}}>Скоро — аналитика из Syrve</div></div>}
+
+          {tab === 'sales' && (
+            <div style={{ padding: '60px 20px', textAlign: 'center' as const }}>
+              <div style={{ width: 72, height: 72, borderRadius: 20, background: `${t.blue}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
+                <svg fill="none" stroke={t.blue} strokeWidth="1.5" viewBox="0 0 24 24" width="36" height="36"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" /><line x1="3" y1="6" x2="21" y2="6" /><path d="M16 10a4 4 0 01-8 0" /></svg>
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 20, color: t.text, marginBottom: 8, letterSpacing: -0.3 }}>Доступно в Pro</div>
+              <div style={{ fontSize: 14, color: t.text3, maxWidth: 240, margin: '0 auto', lineHeight: 1.5 }}>Подключите Syrve для просмотра статистики продаж</div>
+              <div style={{ marginTop: 20, display: 'inline-flex', alignItems: 'center', gap: 6, background: `${t.blue}14`, padding: '8px 16px', borderRadius: 20 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: t.blue }} />
+                <span style={{ fontSize: 12, color: t.blue, fontWeight: 600 }}>Pro</span>
+              </div>
+            </div>
+          )}
+
+          {tab === 'salary' && renderSalary()}
+
+          {tab === 'hookah' && (
+            <div style={{ padding: '60px 20px', textAlign: 'center' as const }}>
+              <div style={{ width: 72, height: 72, borderRadius: 20, background: `${t.purple}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
+                <svg fill="none" stroke={t.purple} strokeWidth="1.5" viewBox="0 0 24 24" width="36" height="36"><path d="M8 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M12 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M16 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M5 14h14" strokeLinecap="round"/><path d="M5 17c1 1.5 2 2 3.5 2s2.5-1 4-1 2.5 1 4 1 2.5-.5 3.5-2" strokeLinecap="round"/></svg>
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 20, color: t.text, marginBottom: 8, letterSpacing: -0.3 }}>Доступно в Pro</div>
+              <div style={{ fontSize: 14, color: t.text3, maxWidth: 240, margin: '0 auto', lineHeight: 1.5 }}>Подключите Syrve для просмотра аналитики кальяна</div>
+              <div style={{ marginTop: 20, display: 'inline-flex', alignItems: 'center', gap: 6, background: `${t.purple}14`, padding: '8px 16px', borderRadius: 20 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: t.purple }} />
+                <span style={{ fontSize: 12, color: t.purple, fontWeight: 600 }}>Pro</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Bottom Nav */}
-      <div style={{position:'fixed',bottom:0,left:0,right:0,zIndex:300,height:80,background:nbg,backdropFilter:'saturate(180%) blur(20px)',borderTop:`1px solid ${border}`,display:'flex',alignItems:'flex-start',paddingTop:10}}>
-        {TABS.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id as any)} style={{flex:1,display:'flex',flexDirection:'column' as const,alignItems:'center',gap:3,cursor:'pointer',color:tab===t.id?'#007aff':t4,border:'none',background:'none',fontFamily:'inherit',padding:0,fontSize:10,fontWeight:600,transition:'color .18s'}}>
-            <span style={{transform:tab===t.id?'scale(1.1)':'scale(1)',transition:'transform .18s',display:'flex'}}>{t.icon}</span>
-            {t.label}
+      {/* BOTTOM NAV */}
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 300, height: 82, background: t.nbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderTop: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'flex-start', paddingTop: 10, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+        {TABS.map(tb => (
+          <button key={tb.id} onClick={() => setTab(tb.id as any)} style={{ flex: 1, display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: 3, cursor: 'pointer', color: tab === tb.id ? t.green : t.text3, border: 'none', background: 'none', fontFamily: 'inherit', padding: 0, fontSize: 10, fontWeight: tab === tb.id ? 700 : 500, transition: 'color .18s' }}>
+            <span style={{ transform: tab === tb.id ? 'scale(1.08)' : 'scale(1)', transition: 'transform .18s ease', display: 'flex' }}>{tb.icon(tab === tb.id)}</span>
+            {tb.label}
           </button>
         ))}
       </div>
 
-      {/* Month Picker */}
-      {showMonthPicker&&(
-        <div style={{position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,.4)',backdropFilter:'blur(4px)',display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={()=>setShowMonthPicker(false)}>
-          <div style={{background:surface,borderRadius:'22px 22px 0 0',width:'100%',maxWidth:480,paddingBottom:32}} onClick={(e:any)=>e.stopPropagation()}>
-            <div style={{width:36,height:4,background:s2,borderRadius:2,margin:'12px auto 0'}}/>
-            <div style={{fontSize:17,fontWeight:700,textAlign:'center' as const,padding:'13px 20px 0',color:text}}>Выбор месяца</div>
-            {Array.from({length:12},(_,i)=>{
-              const d=new Date(); d.setMonth(d.getMonth()-i)
-              const active=d.getMonth()===currentDate.getMonth()&&d.getFullYear()===currentDate.getFullYear()
-              return <div key={i} onClick={()=>{setCurrentDate(d);setShowMonthPicker(false);loadAll(restaurantId,d)}} style={{padding:'15px 20px',fontSize:16,cursor:'pointer',borderBottom:`1px solid ${b2}`,display:'flex',alignItems:'center',justifyContent:'space-between',color:active?'#007aff':text,fontWeight:active?700:400}}>
-                {MRU[d.getMonth()]} {d.getFullYear()}
-                {active&&<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="9" fill="#007aff"/><path d="m5 9 2.5 2.5L13 6" stroke="#fff" strokeWidth="2.2" strokeLinecap="round"/></svg>}
-              </div>
+      {/* MONTH PICKER */}
+      {showMonthPicker && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setShowMonthPicker(false)}>
+          <div style={{ background: t.surface, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, paddingBottom: 32 }} onClick={(e: any) => e.stopPropagation()}>
+            <div style={{ width: 36, height: 4, background: t.fill, borderRadius: 2, margin: '12px auto 0' }} />
+            <div style={{ fontSize: 17, fontWeight: 700, textAlign: 'center' as const, padding: '14px 20px 0', color: t.text }}>Выбор месяца</div>
+            {Array.from({ length: 12 }, (_, i) => {
+              const d = new Date(); d.setMonth(d.getMonth() - i)
+              const active = d.getMonth() === currentDate.getMonth() && d.getFullYear() === currentDate.getFullYear()
+              return (
+                <div key={i} onClick={() => { setCurrentDate(d); setShowMonthPicker(false); loadAll(restaurantId, d) }} style={{ padding: '15px 20px', fontSize: 16, cursor: 'pointer', borderBottom: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: active ? t.green : t.text, fontWeight: active ? 700 : 400 }}>
+                  {MRU[d.getMonth()]} {d.getFullYear()}
+                  {active && <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="10" fill={t.green} /><path d="m6 10 2.5 2.5L14 7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>}
+                </div>
+              )
             })}
           </div>
         </div>
       )}
 
-      {/* AI Chat */}
-      {showAI&&(
-        <div style={{position:'fixed',inset:0,zIndex:500,background:'rgba(0,0,0,.4)',backdropFilter:'blur(4px)',display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={()=>setShowAI(false)}>
-          <div style={{background:surface,borderRadius:'22px 22px 0 0',width:'100%',maxWidth:480,height:'82vh',display:'flex',flexDirection:'column' as const}} onClick={(e:any)=>e.stopPropagation()}>
-            <div style={{width:36,height:4,background:s2,borderRadius:2,margin:'12px auto 0'}}/>
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 20px 0'}}>
-              <div style={{fontSize:17,fontWeight:700,color:text}}>Mise AI</div>
-              <button onClick={()=>{setChatMsgs([]);localStorage.removeItem('mise_chat')}} style={{background:'none',border:'none',color:t4,fontSize:12,cursor:'pointer',fontFamily:'inherit'}}>Очистить</button>
+      {/* AI CHAT */}
+      {showAI && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setShowAI(false)}>
+          <div style={{ background: t.surface, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, height: '82vh', display: 'flex', flexDirection: 'column' as const }} onClick={(e: any) => e.stopPropagation()}>
+            <div style={{ width: 36, height: 4, background: t.fill, borderRadius: 2, margin: '12px auto 0' }} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ position: 'relative' as const, width: 28, height: 28 }}>
+                  <div style={{ position: 'absolute' as const, inset: 0, borderRadius: '50%', border: `1.5px solid ${t.green}55`, animation: 'pulse 2s ease-in-out infinite' }} />
+                  <div style={{ position: 'absolute' as const, inset: 4, borderRadius: '50%', background: t.green }} />
+                </div>
+                <div style={{ fontSize: 17, fontWeight: 700, color: t.text }}>Mise AI</div>
+              </div>
+              <button onClick={() => { setChatMsgs([]); localStorage.removeItem('mise_chat') }} style={{ background: 'none', border: 'none', color: t.text4, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Очистить</button>
             </div>
-            <div style={{flex:1,overflowY:'auto' as const,padding:'12px 16px',display:'flex',flexDirection:'column' as const,gap:10}}>
-              {chatMsgs.length===0&&(
+            <div style={{ flex: 1, overflowY: 'auto' as const, padding: '12px 16px', display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+              {chatMsgs.length === 0 && (
                 <div>
-                  <div style={{textAlign:'center' as const,color:t4,padding:'16px 0 20px'}}>
-                    <div style={{fontSize:13,marginBottom:14}}>Спросите о вашем бизнесе</div>
-                  </div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-                    {SUGGESTED.map(q=>(
-                      <button key={q} onClick={()=>sendAI(q)} style={{padding:'10px 12px',borderRadius:12,background:s2,border:'none',fontFamily:'inherit',fontSize:13,color:text,cursor:'pointer',textAlign:'left' as const,lineHeight:1.4}}>
-                        {q}
-                      </button>
+                  <div style={{ textAlign: 'center' as const, color: t.text4, padding: '16px 0 20px', fontSize: 13 }}>Спросите о вашем бизнесе</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    {SUGGESTED.map(q => (
+                      <button key={q} onClick={() => sendAI(q)} style={{ padding: '10px 12px', borderRadius: 12, background: t.fill, border: 'none', fontFamily: 'inherit', fontSize: 13, color: t.text, cursor: 'pointer', textAlign: 'left' as const, lineHeight: 1.4 }}>{q}</button>
                     ))}
                   </div>
                 </div>
               )}
-              {chatMsgs.map((m,i)=>(
-                <div key={i} style={{display:'flex',justifyContent:m.role==='user'?'flex-end':'flex-start'}}>
-                  <div style={{maxWidth:'82%',padding:'10px 14px',borderRadius:m.role==='user'?'16px 16px 4px 16px':'16px 16px 16px 4px',background:m.role==='user'?'#007aff':s2,color:m.role==='user'?'#fff':text,fontSize:14,lineHeight:1.5}}>{m.text}</div>
+              {chatMsgs.map((m, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                  <div style={{ maxWidth: '82%', padding: '10px 14px', borderRadius: m.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px', background: m.role === 'user' ? t.green : t.fill, color: m.role === 'user' ? '#fff' : t.text, fontSize: 14, lineHeight: 1.5 }}>{m.text}</div>
                 </div>
               ))}
-              {chatLoading&&<div style={{display:'flex',justifyContent:'flex-start'}}><div style={{padding:'10px 14px',borderRadius:'16px 16px 16px 4px',background:s2,color:t3,fontSize:14}}>Думаю...</div></div>}
-              <div ref={chatEndRef}/>
+              {chatLoading && <div style={{ display: 'flex' }}><div style={{ padding: '10px 14px', borderRadius: '16px 16px 16px 4px', background: t.fill, color: t.text3, fontSize: 14 }}>Думаю...</div></div>}
+              <div ref={chatEndRef} />
             </div>
-            <div style={{padding:'10px 16px 20px',display:'flex',gap:8}}>
-              <input value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendAI()} placeholder="Спросите о бизнесе..." style={{flex:1,padding:'11px 14px',borderRadius:12,border:`1px solid ${border}`,fontSize:14,color:text,background:surface,fontFamily:'inherit',outline:'none'}}/>
-              <button onClick={()=>sendAI()} disabled={chatLoading||!chatInput.trim()} style={{padding:'11px 18px',borderRadius:12,background:'#007aff',color:'#fff',border:'none',fontFamily:'inherit',fontSize:14,fontWeight:600,cursor:'pointer',opacity:chatLoading||!chatInput.trim()?.5:1}}>→</button>
+            <div style={{ padding: '10px 16px 20px', display: 'flex', gap: 8 }}>
+              <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendAI()} placeholder="Спросите о бизнесе..." style={{ flex: 1, padding: '11px 14px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 14, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none' }} />
+              <button onClick={() => sendAI()} disabled={chatLoading || !chatInput.trim()} style={{ padding: '11px 18px', borderRadius: 12, background: t.green, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer', opacity: chatLoading || !chatInput.trim() ? 0.5 : 1 }}>
+                <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" /></svg>
+              </button>
             </div>
           </div>
         </div>

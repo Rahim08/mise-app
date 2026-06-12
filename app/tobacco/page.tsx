@@ -2,6 +2,10 @@
 export const dynamic = 'force-dynamic'
 import React, { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
+import { db } from '@/lib/db'
+import { Segmented } from '@/components/Segmented'
+import { useTheme } from '@/hooks/useTheme'
+import { AuthGate } from '@/components/AuthGate'
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -11,67 +15,6 @@ function fg(g: number) {
 }
 function timeStr(iso: string) {
   return new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', ' ')
-}
-
-// ── THEME ─────────────────────────────────────────────────────────────────────
-
-function useTheme() {
-  const [dark, setDark] = useState(false)
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    setDark(mq.matches)
-    const h = (e: MediaQueryListEvent) => setDark(e.matches)
-    mq.addEventListener('change', h)
-    return () => mq.removeEventListener('change', h)
-  }, [])
-
-  return dark ? {
-    dark: true,
-    bg:      '#000000',
-    bg2:     '#1c1c1e',
-    bg3:     '#2c2c2e',
-    surface: '#1c1c1e',
-    surface2:'#2c2c2e',
-    text:    '#ffffff',
-    text2:   '#ebebf5cc',
-    text3:   '#ebebf599',
-    text4:   '#ebebf54d',
-    sep:     'rgba(84,84,88,0.65)',
-    sep2:    'rgba(84,84,88,0.36)',
-    fill:    'rgba(120,120,128,0.36)',
-    fill2:   'rgba(120,120,128,0.20)',
-    blue:    '#0a84ff',
-    green:   '#32d74b',
-    orange:  '#ff9f0a',
-    red:     '#ff453a',
-    hbg:     'rgba(28,28,30,0.92)',
-    nbg:     'rgba(28,28,30,0.95)',
-    sh:      '0 2px 12px rgba(0,0,0,0.6)',
-    sh2:     '0 1px 3px rgba(0,0,0,0.4)',
-  } : {
-    dark: false,
-    bg:      '#f2f2f7',
-    bg2:     '#ffffff',
-    bg3:     '#f2f2f7',
-    surface: '#ffffff',
-    surface2:'#f2f2f7',
-    text:    '#000000',
-    text2:   '#3c3c4399',
-    text3:   '#3c3c4399',
-    text4:   '#3c3c434d',
-    sep:     'rgba(60,60,67,0.29)',
-    sep2:    'rgba(60,60,67,0.12)',
-    fill:    'rgba(120,120,128,0.16)',
-    fill2:   'rgba(120,120,128,0.08)',
-    blue:    '#007aff',
-    green:   '#34c759',
-    orange:  '#ff9500',
-    red:     '#ff3b30',
-    hbg:     'rgba(242,242,247,0.92)',
-    nbg:     'rgba(249,249,249,0.95)',
-    sh:      '0 1px 3px rgba(0,0,0,0.08),0 4px 16px rgba(0,0,0,0.05)',
-    sh2:     '0 1px 2px rgba(0,0,0,0.06)',
-  }
 }
 
 // ── AUTOCOMPLETE INPUT ────────────────────────────────────────────────────────
@@ -175,30 +118,6 @@ function StatCard({ label, value, color, t }: { label: string; value: string; co
 
 // ── SEGMENTED CONTROL ─────────────────────────────────────────────────────────
 
-function Segmented({ options, value, onChange, t }: {
-  options: { id: string; label: string }[]
-  value: string; onChange: (v: string) => void
-  t: ReturnType<typeof useTheme>
-}) {
-  return (
-    <div style={{
-      display: 'flex', background: t.fill, borderRadius: 12,
-      padding: 3, marginBottom: 16, gap: 2,
-    }}>
-      {options.map(o => (
-        <button key={o.id} onClick={() => onChange(o.id)} style={{
-          flex: 1, padding: '8px 0', borderRadius: 10, border: 'none',
-          fontFamily: 'inherit', fontSize: 14, fontWeight: value === o.id ? 600 : 500,
-          cursor: 'pointer',
-          background: value === o.id ? t.surface : 'transparent',
-          color: value === o.id ? t.text : t.text3,
-          boxShadow: value === o.id ? t.sh2 : 'none',
-          transition: 'all .18s',
-        }}>{o.label}</button>
-      ))}
-    </div>
-  )
-}
 
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 
@@ -207,7 +126,8 @@ export default function StashApp() {
 
   const [restaurantId, setRestaurantId] = useState('')
   const [tab, setTab] = useState<'stock' | 'movements' | 'inventory'>('stock')
-  const [movMode, setMovMode] = useState<'in' | 'out'>('in')
+  const [movMode, setMovMode] = useState<'in' | 'out' | 'writeoff'>('in')
+  const [movReason, setMovReason] = useState('')
   const [invType, setInvType] = useState<'warehouse' | 'venue'>('warehouse')
   const [stock, setStock] = useState<StockItem[]>([])
   const [movements, setMovements] = useState<Movement[]>([])
@@ -228,30 +148,19 @@ export default function StashApp() {
 
   useEffect(() => {
     setMounted(true)
-    const storedRestaurantId = localStorage.getItem('mise_restaurant_id')
-    supabase.auth.getUser().then(async ({ data }) => {
-      let rid = ''
-      if (data.user) {
-        const { data: profile } = await supabase.from('profiles').select('restaurant_id').eq('id', data.user.id).single()
-        rid = profile?.restaurant_id || storedRestaurantId || ''
-      } else if (storedRestaurantId) {
-        rid = storedRestaurantId
-      } else {
-        window.location.href = '/join?error=no_session'; return
-      }
-      if (!rid) { window.location.href = '/join?error=no_session'; return }
-      setRestaurantId(rid)
-      // subscription gate disabled temporarily
-      await loadAll(rid)
-    })
   }, [])
+
+  useEffect(() => {
+    if (!restaurantId) return
+    loadAll(restaurantId)
+  }, [restaurantId])
 
   const loadAll = async (rid: string) => {
     setLoading(true)
     const [s1, s2, s3] = await Promise.all([
-      supabase.from('tobacco_stock').select('*').eq('restaurant_id', rid).order('brand').order('flavor'),
-      supabase.from('tobacco_movements').select('*').eq('restaurant_id', rid).order('created_at', { ascending: false }).limit(200),
-      supabase.from('tobacco_inventories').select('*').eq('restaurant_id', rid).order('created_at', { ascending: false }).limit(50),
+      db.from('tobacco_stock').select('*').eq('restaurant_id', rid).order('brand').order('flavor'),
+      db.from('tobacco_movements').select('*').eq('restaurant_id', rid).order('created_at', { ascending: false }).limit(200),
+      db.from('tobacco_inventories').select('*').eq('restaurant_id', rid).order('created_at', { ascending: false }).limit(50),
     ])
     setStock(s1.data || [])
     setMovements(s2.data || [])
@@ -292,12 +201,13 @@ export default function StashApp() {
     if (!filled.length) { showToastMsg('Добавьте хотя бы одну позицию'); return }
     for (const r of filled) {
       const qty = parseFloat(r.quantity_g)
-      if (movMode === 'out') {
+      if (movMode !== 'in') {
         const item = stock.find(s => s.brand === r.brand && s.flavor === r.flavor)
         if (!item) { showToastMsg(`${r.brand} · ${r.flavor} не найден`); return }
         if (qty > item.quantity_g) { showToastMsg(`${r.brand} · ${r.flavor}: только ${fg(item.quantity_g)}`); return }
       }
     }
+    if (movMode === 'writeoff' && !movReason.trim()) { showToastMsg('Укажите причину списания'); return }
     setSaving(true)
     const batchId = editBatch || crypto.randomUUID()
     if (editBatch) {
@@ -306,32 +216,34 @@ export default function StashApp() {
         const item = stock.find(s => s.brand === m.brand && s.flavor === m.flavor)
         if (item) {
           const revert = m.type === 'in' ? -m.quantity_g : m.quantity_g
-          await supabase.from('tobacco_stock').update({ quantity_g: item.quantity_g + revert }).eq('id', item.id)
+          await db.from('tobacco_stock').update({ quantity_g: item.quantity_g + revert }).eq('id', item.id)
         }
       }
-      await supabase.from('tobacco_movements').delete().eq('batch_id', editBatch)
+      await db.from('tobacco_movements').delete().eq('batch_id', editBatch)
     }
-    const { data: freshStock } = await supabase.from('tobacco_stock').select('*').eq('restaurant_id', restaurantId)
+    const { data: freshStock } = await db.from('tobacco_stock').select('*').eq('restaurant_id', restaurantId)
     const currentStock: StockItem[] = freshStock || []
     for (const r of filled) {
       const qty = parseFloat(r.quantity_g)
       const existing = currentStock.find(s => s.brand === r.brand && s.flavor === r.flavor)
-      await supabase.from('tobacco_movements').insert({ restaurant_id: restaurantId, brand: r.brand, flavor: r.flavor, quantity_g: qty, type: movMode, batch_id: batchId, reason: movMode === 'in' ? 'Поставка' : 'Выдача в зал', flavor_id: existing?.id || null })
+      const reason = movReason.trim() || (movMode === 'in' ? 'Поставка' : movMode === 'out' ? 'Выдача в зал' : 'Списание')
+      await db.from('tobacco_movements').insert({ restaurant_id: restaurantId, brand: r.brand, flavor: r.flavor, quantity_g: qty, type: movMode, batch_id: batchId, reason, flavor_id: existing?.id || null })
       if (existing) {
         const delta = movMode === 'in' ? qty : -qty
-        await supabase.from('tobacco_stock').update({ quantity_g: existing.quantity_g + delta, updated_at: new Date().toISOString() }).eq('id', existing.id)
+        await db.from('tobacco_stock').update({ quantity_g: existing.quantity_g + delta, updated_at: new Date().toISOString() }).eq('id', existing.id)
       } else if (movMode === 'in') {
-        await supabase.from('tobacco_stock').insert({ restaurant_id: restaurantId, brand: r.brand, flavor: r.flavor, quantity_g: qty, flavor_name: r.flavor, updated_at: new Date().toISOString() })
+        await db.from('tobacco_stock').insert({ restaurant_id: restaurantId, brand: r.brand, flavor: r.flavor, quantity_g: qty, flavor_name: r.flavor, updated_at: new Date().toISOString() })
       }
     }
     await loadAll(restaurantId)
-    setMovRows([newRow()]); setShowAddMov(false); setEditBatch(null); setSaving(false)
+    setMovRows([newRow()]); setMovReason(''); setShowAddMov(false); setEditBatch(null); setSaving(false)
     showToastMsg(`Сохранено (${filled.length} поз.)`)
   }
 
   const openEdit = (batchId: string, items: Movement[]) => {
     setEditBatch(batchId)
-    setMovMode(items[0].type as 'in' | 'out')
+    setMovMode(items[0].type as any)
+    setMovReason((items[0] as any).reason && items[0].type === 'writeoff' ? (items[0] as any).reason : '')
     setMovRows([...items.map(m => ({ id: m.id, brand: m.brand, flavor: m.flavor, quantity_g: String(m.quantity_g) }))])
     setShowAddMov(true)
   }
@@ -346,10 +258,10 @@ export default function StashApp() {
     if (!filled.length) { showToastMsg('Нет расхождений — всё совпадает'); return }
     setSaving(true)
     const items = filled.map(r => ({ brand: r.brand, flavor: r.flavor, expected_g: r.expected_g, actual_g: parseFloat(r.actual_g), diff_g: parseFloat(r.actual_g) - r.expected_g }))
-    await supabase.from('tobacco_inventories').insert({ restaurant_id: restaurantId, type: 'warehouse', items })
+    await db.from('tobacco_inventories').insert({ restaurant_id: restaurantId, type: 'warehouse', items })
     for (const r of filled) {
       const item = stock.find(s => s.brand === r.brand && s.flavor === r.flavor)
-      if (item) await supabase.from('tobacco_stock').update({ quantity_g: parseFloat(r.actual_g), updated_at: new Date().toISOString() }).eq('id', item.id)
+      if (item) await db.from('tobacco_stock').update({ quantity_g: parseFloat(r.actual_g), updated_at: new Date().toISOString() }).eq('id', item.id)
     }
     await loadAll(restaurantId)
     setSaving(false); setShowInv(false)
@@ -362,6 +274,8 @@ export default function StashApp() {
     filtered.forEach(m => { const key = m.batch_id || m.id; if (!batches[key]) batches[key] = []; batches[key].push(m) })
     return Object.entries(batches).sort((a, b) => new Date(b[1][0].created_at).getTime() - new Date(a[1][0].created_at).getTime())
   }
+
+  if (!restaurantId) return <AuthGate appId="stash" appName="Mise Stash" onAuth={setRestaurantId} />
 
   if (!mounted || loading) return (
     <div style={{ minHeight: '100vh', background: t.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
@@ -423,11 +337,13 @@ export default function StashApp() {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <IconStash color={t.orange} />
-          <span style={{ fontWeight: 700, fontSize: 17, color: t.text, letterSpacing: -0.3 }}>Mise Stash</span>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+            <span style={{ fontWeight: 800, fontSize: 18, color: t.orange, letterSpacing: -0.8, fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif' }}>mise</span>
+            <span style={{ fontWeight: 400, fontSize: 17, color: t.text, letterSpacing: -0.3 }}>Stash</span>
+          </div>
         </div>
         <button
-          onClick={() => { setEditBatch(null); setMovRows([newRow()]); setShowAddMov(true) }}
+          onClick={() => { setEditBatch(null); setMovRows([newRow()]); setMovReason(''); setShowAddMov(true) }}
           style={{
             display: 'flex', alignItems: 'center', gap: 6,
             background: `${t.orange}1a`, borderRadius: 20,
@@ -519,11 +435,11 @@ export default function StashApp() {
                           }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                               <div style={{ fontSize: 16, color: t.text, fontWeight: 500 }}>{item.flavor}</div>
-                              <div style={{ fontSize: 15, fontWeight: 700, color: low ? t.orange : t.blue }}>{fg(item.quantity_g)}</div>
+                              <div style={{ fontSize: 15, fontWeight: 700, color: low ? t.orange : t.green }}>{fg(item.quantity_g)}</div>
                             </div>
                             {/* Progress bar */}
                             <div style={{ height: 3, background: t.fill2, borderRadius: 2, overflow: 'hidden' }}>
-                              <div style={{ height: '100%', width: `${pct}%`, background: low ? t.orange : t.blue, borderRadius: 2, transition: 'width .6s ease' }} />
+                              <div style={{ height: '100%', width: `${pct}%`, background: low ? t.orange : t.green, borderRadius: 2, transition: 'width .6s ease' }} />
                             </div>
                           </div>
                         )
@@ -556,20 +472,22 @@ export default function StashApp() {
           {/* ══ MOVEMENTS ══ */}
           {tab === 'movements' && (
             <div>
-              <Segmented
-                options={[{ id: 'in', label: 'Поставка' }, { id: 'out', label: 'Выдача в зал' }]}
-                value={movMode} onChange={v => setMovMode(v as 'in' | 'out')} t={t}
-              />
+              <div style={{ marginBottom: 16 }}>
+                <Segmented
+                  options={[{ id: 'in', label: 'Поставка' }, { id: 'out', label: 'Выдача' }, { id: 'writeoff', label: 'Списание' }]}
+                  value={movMode} onChange={v => setMovMode(v as any)} t={t}
+                />
+              </div>
               {batches.length === 0 ? (
                 <div style={{ padding: '60px 20px', textAlign: 'center', color: t.text3 }}>
-                  <div style={{ fontSize: 44, marginBottom: 12, opacity: 0.3 }}>{movMode === 'in' ? '📥' : '📤'}</div>
-                  <div style={{ fontSize: 16, fontWeight: 600, color: t.text2, marginBottom: 6 }}>{movMode === 'in' ? 'Поставок пока нет' : 'Выдач пока нет'}</div>
+                  <div style={{ fontSize: 44, marginBottom: 12, opacity: 0.3 }}>{movMode === 'in' ? '📥' : movMode === 'out' ? '📤' : '🗑️'}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600, color: t.text2, marginBottom: 6 }}>{movMode === 'in' ? 'Поставок пока нет' : movMode === 'out' ? 'Выдач пока нет' : 'Списаний пока нет'}</div>
                 </div>
               ) : batches.map(([batchId, items], bi) => {
                 const isExpanded = expandedBatch === batchId
                 const total = items.reduce((s, i) => s + i.quantity_g, 0)
                 const isFirst = bi === 0
-                const color = movMode === 'in' ? t.green : t.orange
+                const color = movMode === 'in' ? t.green : movMode === 'out' ? t.orange : t.red
                 return (
                   <div key={batchId} style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 10, boxShadow: t.sh }}>
                     <div
@@ -623,10 +541,12 @@ export default function StashApp() {
           {/* ══ INVENTORY ══ */}
           {tab === 'inventory' && (
             <div>
-              <Segmented
-                options={[{ id: 'warehouse', label: 'Склад' }, { id: 'venue', label: 'Заведение' }]}
-                value={invType} onChange={v => setInvType(v as 'warehouse' | 'venue')} t={t}
-              />
+              <div style={{ marginBottom: 16 }}>
+                <Segmented
+                  options={[{ id: 'warehouse', label: 'Склад' }, { id: 'venue', label: 'Заведение' }]}
+                  value={invType} onChange={v => setInvType(v as 'warehouse' | 'venue')} t={t}
+                />
+              </div>
 
               {invType === 'warehouse' && (
                 <div>
@@ -762,19 +682,28 @@ export default function StashApp() {
             </div>
 
             <div style={{ padding: '12px 16px 4px' }}>
-              <Segmented
-                options={[{ id: 'in', label: 'Поставка' }, { id: 'out', label: 'Выдача в зал' }]}
-                value={movMode}
-                onChange={v => { setMovMode(v as 'in' | 'out'); if (!editBatch) setMovRows([newRow()]) }}
-                t={t}
-              />
+              <div style={{ marginBottom: 16 }}>
+                <Segmented
+                  options={[{ id: 'in', label: 'Поставка' }, { id: 'out', label: 'Выдача' }, { id: 'writeoff', label: 'Списание' }]}
+                  value={movMode}
+                  onChange={v => { setMovMode(v as any); if (!editBatch) setMovRows([newRow()]) }}
+                  t={t}
+                />
+              </div>
             </div>
 
             <div style={{ padding: '4px 16px 36px' }}>
+              {movMode === 'writeoff' && (
+                <input
+                  value={movReason} onChange={e => setMovReason(e.target.value)}
+                  placeholder="Причина списания (бой, просрочка, брак...)"
+                  style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: `1px solid ${movReason.trim() ? t.sep2 : t.red}`, fontSize: 16, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', marginBottom: 12 }}
+                />
+              )}
               {movRows.map((row) => {
-                const brandsForMode = movMode === 'out' ? outBrands : allBrands
-                const flavors = flavorsForBrand(row.brand, movMode === 'out')
-                const maxQty = movMode === 'out' ? stock.find(s => s.brand === row.brand && s.flavor === row.flavor)?.quantity_g : undefined
+                const brandsForMode = movMode !== 'in' ? outBrands : allBrands
+                const flavors = flavorsForBrand(row.brand, movMode !== 'in')
+                const maxQty = movMode !== 'in' ? stock.find(s => s.brand === row.brand && s.flavor === row.flavor)?.quantity_g : undefined
                 return (
                   <div key={row.id} style={{ background: t.surface, borderRadius: 16, padding: '14px', marginBottom: 10, boxShadow: t.sh2 }}>
                     <div style={{ display: 'flex', gap: 10, marginBottom: 10, alignItems: 'center' }}>
@@ -789,7 +718,7 @@ export default function StashApp() {
                         onChange={v => updateMovRow(row.id, 'flavor', v)}
                         suggestions={flavors.length > 0 ? flavors : (row.brand ? [] : allFlavors)}
                         placeholder="Вкус"
-                        disabled={movMode === 'out' && !row.brand}
+                        disabled={movMode !== 'in' && !row.brand}
                         t={t}
                       />
                       <input
@@ -831,7 +760,7 @@ export default function StashApp() {
                   boxShadow: saving ? 'none' : `0 4px 16px ${t.orange}44`,
                   transition: 'all .18s',
                 }}>
-                {saving ? 'Сохранение...' : editBatch ? 'Сохранить изменения' : movMode === 'in' ? 'Сохранить поставку' : 'Сохранить выдачу'}
+                {saving ? 'Сохранение...' : editBatch ? 'Сохранить изменения' : movMode === 'in' ? 'Сохранить поставку' : movMode === 'out' ? 'Сохранить выдачу' : 'Списать'}
               </button>
             </div>
           </div>

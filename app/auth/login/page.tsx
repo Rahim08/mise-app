@@ -1,34 +1,21 @@
 'use client'
-// @ts-nocheck
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-
-
-
-function LogoMark({ size = 36 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 64 64" fill="none">
-      <rect width="64" height="64" rx="14" fill="#007aff"/>
-      <rect x="14" y="20" width="36" height="5" rx="2.5" fill="white"/>
-      <rect x="14" y="30" width="26" height="5" rx="2.5" fill="white" opacity=".7"/>
-      <rect x="14" y="40" width="18" height="5" rx="2.5" fill="white" opacity=".4"/>
-    </svg>
-  )
-}
+import { LogoMark } from '@/components/LogoMark'
 
 export default function Login() {
+  const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [remember, setRemember] = useState(true)
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
   const [error, setError] = useState('')
   const [showPass, setShowPass] = useState(false)
 
   useEffect(() => {
-    // If already logged in — redirect
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) window.location.href = '/dashboard'
+      if (data.session) router.replace('/dashboard')
     })
   }, [])
 
@@ -41,7 +28,7 @@ export default function Login() {
       if (error.message.includes('Invalid login')) setError('Неверный email или пароль')
       else setError(error.message)
     } else {
-      window.location.href = '/dashboard'
+      router.push('/dashboard')
     }
     setLoading(false)
   }
@@ -134,14 +121,6 @@ export default function Login() {
             </button>
           </div>
         </div>
-
-        {/* Remember me */}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 20, userSelect: 'none' }}>
-          <div onClick={() => setRemember(!remember)} style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${remember ? '#007aff' : 'rgba(60,60,67,.3)'}`, background: remember ? '#007aff' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all .15s' }}>
-            {remember && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4l3 3 5-6" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-          </div>
-          <span style={{ fontSize: '.85rem', color: '#3c3c43' }}>Запомнить меня</span>
-        </label>
 
         {/* Submit */}
         <button onClick={handleLogin} disabled={loading} style={{ ...S.primaryBtn, opacity: loading ? .7 : 1 }}>
