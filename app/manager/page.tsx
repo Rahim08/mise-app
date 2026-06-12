@@ -87,6 +87,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const [inkSalary, setInkSalary] = useState('')    // выплата зарплаты — вычитается из итога инкассации
   const [inkSalaryNote, setInkSalaryNote] = useState('')
   const [showSummary, setShowSummary] = useState(false)
+  const [locked, setLocked] = useState(false) // сохранённая смена закрыта «матовым стеклом» до Редактировать
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
@@ -121,6 +122,8 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
 
     if (sh) {
       setShift({ ...sh, opening_balance: openingBalance })
+      // Уже сохранённая смена (есть цифры) открывается в режиме просмотра.
+      setLocked(sh.income > 0 || sh.total_expense > 0 || sh.inkassation > 0)
       setIncome(sh.income > 0 ? String(sh.income) : '')
       setIncomeCard(sh.income_card > 0 ? String(sh.income_card) : '')
       setInkSum(sh.inkassation > 0 ? String(sh.inkassation) : '')
@@ -141,7 +144,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
         setInkSalary(ink.salary > 0 ? String(ink.salary) : ''); setInkSalaryNote(ink.salary_note || '')
       } else { setInkExpense(''); setInkReason(''); setInkSalary(''); setInkSalaryNote('') }
     } else {
-      setShift(null); setIncome(''); setIncomeCard(''); setInkSum(''); setInkExpense(''); setInkReason(''); setInkSalary(''); setInkSalaryNote('')
+      setShift(null); setLocked(false); setIncome(''); setIncomeCard(''); setInkSum(''); setInkExpense(''); setInkReason(''); setInkSalary(''); setInkSalaryNote('')
       setCatAmounts({}); setCatNotes({}); setAbsences([]); setEmpExtras({})
     }
     setLoading(false)
@@ -149,7 +152,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
 
   const changeDate = async (dir: number) => {
     // Auto-save the current day before leaving so nothing entered is lost.
-    if (shift) { try { await persistShift() } catch {} }
+    if (shift && !locked) { try { await persistShift() } catch (e: any) { showToast('Ошибка автосохранения: ' + (e?.message || '')) } }
     const d = new Date(currentDate); d.setDate(d.getDate() + dir)
     setCurrentDate(d)
     await loadDay(restaurantId, d, employees, categories)
@@ -214,7 +217,10 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const persistShift = async (sh = shift, dateForInk = currentDate) => {
     if (!sh) return
     const { inc, card, ink, totalExp, balance, salary } = calc()
-    await db.from('shifts').update({ income: inc, income_card: card, inkassation: ink, total_expense: totalExp, closing_balance: balance }).eq('id', sh.id)
+    // db.from не бросает исключений — ошибку надо проверять явно, иначе ввод молча теряется
+    // (например, если миграция features-2026-06 не применена и колонки income_card нет).
+    const { error: upErr } = await db.from('shifts').update({ income: inc, income_card: card, inkassation: ink, total_expense: totalExp, closing_balance: balance }).eq('id', sh.id)
+    if (upErr) throw new Error(upErr.message)
     // Replace ALL expense lines (categories + employee extras) for this shift.
     await db.from('shift_expenses').delete().eq('shift_id', sh.id)
     const inserts: any[] = []
@@ -243,8 +249,9 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const saveShift = async () => {
     if (!shift) return
     setSaving(true)
-    try { await persistShift() } catch (e: any) { showToast('Ошибка сохранения'); setSaving(false); return }
+    try { await persistShift() } catch (e: any) { showToast('Ошибка: ' + (e?.message || 'не сохранилось')); setSaving(false); return }
     setShowSummary(false)
+    setLocked(true)
     showToast('Смена сохранена')
     setSaving(false)
   }
@@ -335,7 +342,16 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
               </button>
             </div>
           ) : (
-            <>
+            <div style={{ position: 'relative' }}>
+              {/* Матовое стекло: смена сохранена, ввод заблокирован до «Редактировать» */}
+              {locked && (
+                <div style={{ position: 'absolute', inset: -6, zIndex: 60, background: t.dark ? 'rgba(0,0,0,0.30)' : 'rgba(242,242,247,0.45)', backdropFilter: 'blur(2.5px)', WebkitBackdropFilter: 'blur(2.5px)', borderRadius: 18, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: 18 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: t.surface, borderRadius: 980, padding: '9px 18px', boxShadow: '0 4px 20px rgba(0,0,0,0.18)' }}>
+                    <svg width="14" height="14" fill="none" stroke={t.green} strokeWidth="2.2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: t.text }}>Смена сохранена</span>
+                  </div>
+                </div>
+              )}
               {/* СОТРУДНИКИ */}
               <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Сотрудники</div>
               <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
@@ -491,7 +507,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                   <div style={{ fontSize: 22, fontWeight: 700, color: balance < 0 ? t.red : t.blue }}>€{fv(balance)}</div>
                 </div>
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -505,15 +521,16 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
           WebkitBackdropFilter: 'saturate(200%) blur(24px)',
           borderTop: `0.5px solid ${t.sep2}`, zIndex: 100,
         }}>
-          <button onClick={() => setShowSummary(true)} style={{
+          <button onClick={() => locked ? setLocked(false) : setShowSummary(true)} style={{
             width: '100%', padding: '16px', borderRadius: 16,
-            background: t.blue, color: '#fff', border: 'none',
+            background: locked ? t.fill : t.blue, color: locked ? t.blue : '#fff', border: 'none',
             fontFamily: 'inherit', fontSize: 16, fontWeight: 700,
-            cursor: 'pointer', boxShadow: `0 4px 16px ${t.blue}44`,
+            cursor: 'pointer', boxShadow: locked ? 'none' : `0 4px 16px ${t.blue}44`,
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
           }}>
-            <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>
-            Сохранить смену
+            {locked
+              ? <><svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>Редактировать</>
+              : <><svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>Сохранить смену</>}
           </button>
         </div>
       )}

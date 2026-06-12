@@ -43,7 +43,7 @@ function getMe(rid: string): { id?: string; name?: string; role?: string; is_own
 function Sheet({ children, onClose, t }: { children: React.ReactNode; onClose: () => void; t: any }) {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
-      <div style={{ background: t.bg, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: t.bg, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '85dvh', overflowY: 'auto', paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }} onClick={e => e.stopPropagation()}>
         <div style={{ width: 40, height: 4, background: t.fill, borderRadius: 2, margin: '14px auto 0' }} />
         {children}
       </div>
@@ -679,6 +679,23 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
   const [geoErr, setGeoErr] = useState('')
   const [loading, setLoading] = useState(true)
   const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null)
+  // Мой расчёт зарплаты (HR-запись находится по имени — staff↔employees связаны именем)
+  const [pay, setPay] = useState<{ salary: number; absences: number; deduct: number; card: number } | null>(null)
+
+  const loadPay = async () => {
+    if (isManager || !me.name) return
+    const monthStart = today.slice(0, 7) + '-01'
+    const { data: emps } = await db.from('employees').select('id, name, salary, deduct_per_absence').eq('is_active', true)
+    const emp = (emps || []).find((e: any) => e.name === me.name)
+    if (!emp) return
+    const [{ data: abs }, { data: cards }] = await Promise.all([
+      db.from('shift_absences').select('id').eq('employee_id', emp.id).gte('date', monthStart),
+      db.from('monthly_card_amounts').select('amount, employee_id').eq('month', today.slice(0, 7)),
+    ])
+    const absences = (abs || []).length
+    const card = Number((cards || []).find((c: any) => c.employee_id === emp.id)?.amount || 0)
+    setPay({ salary: Number(emp.salary || 0), absences, deduct: absences * Number(emp.deduct_per_absence || 0), card })
+  }
 
   const load = async () => {
     const [{ data: rs }, { data: hist }, { data: sc }] = await Promise.all([
@@ -696,7 +713,7 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
     }
     setLoading(false)
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(); loadPay() }, [])
 
   const todayRec = history.find(r => r.staff_id === myId && r.date === today)
 
@@ -854,6 +871,30 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
           </>
         )
       })()}
+
+      {/* Мой расчёт зарплаты за текущий месяц */}
+      {pay && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>Зарплата · {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</div>
+          <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 8 }}>
+            {[
+              { l: 'Оклад', v: `€${pay.salary.toLocaleString('de-DE')}`, c: t.text },
+              ...(pay.absences > 0 ? [{ l: `Пропуски · ${pay.absences}`, v: `−€${pay.deduct.toLocaleString('de-DE')}`, c: t.red }] : []),
+              ...(pay.card > 0 ? [{ l: 'На карту', v: `€${pay.card.toLocaleString('de-DE')}`, c: t.blue }] : []),
+              { l: 'Наличными', v: `€${Math.max(0, pay.salary - pay.deduct - pay.card).toLocaleString('de-DE')}`, c: t.green },
+            ].map((r, i, arr) => (
+              <div key={r.l} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: i < arr.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                <span style={{ fontSize: 14, color: t.text2 }}>{r.l}</span>
+                <span style={{ fontSize: 15, fontWeight: 700, color: r.c }}>{r.v}</span>
+              </div>
+            ))}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', background: `${accent}0d` }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Итого к выплате</span>
+              <span style={{ fontSize: 18, fontWeight: 800, color: accent }}>€{Math.max(0, pay.salary - pay.deduct).toLocaleString('de-DE')}</span>
+            </div>
+          </div>
+        </>
+      )}
       <HistoryList records={history} t={t} accent={accent} />
     </div>
   )
