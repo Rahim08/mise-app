@@ -767,8 +767,11 @@ function GeoSettingsCard() {
       reminder_hours: parseInt(f.reminder_hours) || 12,
       reminder_time: f.reminder_time || '18:00',
     }
-    if (row?.id) await db.from('restaurant_settings').update(payload).eq('id', row.id)
-    else { const { data } = await db.from('restaurant_settings').insert(payload).select().single(); if (data) setRow(data) }
+    const res = row?.id
+      ? await db.from('restaurant_settings').update(payload).eq('id', row.id)
+      : await db.from('restaurant_settings').insert(payload).select().single()
+    if (res.error) { alert('Не сохранилось: ' + res.error.message); setSaving(false); return }
+    if (!row?.id && res.data) setRow(res.data)
     setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000)
   }
 
@@ -836,43 +839,70 @@ function AnalyticsSettingsCard() {
   )
 }
 
-// Кальян: цена порции и граммовка — основа смены кальянщика (Stash) и вкладки
-// «Кальян» в Analytics (выручка = кол-во × цена, расход табака = кол-во × граммы).
+// Виды кальянов: у каждого своё имя, цена, граммовка и допустимые бренды
+// (пусто = любые). Кальянщик в Stash отмечает продажи по этим видам.
 function HookahSettingsCard() {
-  const [row, setRow] = useState<any>(null)
-  const [price, setPrice] = useState('')
-  const [portion, setPortion] = useState('20')
+  const [types, setTypes] = useState<any[]>([])
+  const [edit, setEdit] = useState<{ id?: string; name: string; price: string; portion: string; brands: string } | null>(null)
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
 
-  useEffect(() => {
-    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
-      const r = Array.isArray(data) ? data[0] : data
-      if (r) {
-        setRow(r)
-        setPrice(r.hookah_price > 0 ? String(r.hookah_price) : '')
-        setPortion(String(r.hookah_portion_g ?? 20))
-      }
-    })
-  }, [])
+  const load = () => db.from('hookah_types').select('*').eq('is_active', true).order('created_at').then(({ data }: any) => setTypes(data || []))
+  useEffect(() => { load() }, [])
 
   const save = async () => {
+    if (!edit || !edit.name.trim()) { alert('Укажите название'); return }
     setSaving(true)
-    const payload = { hookah_price: parseFloat(price) || 0, hookah_portion_g: parseFloat(portion) || 20 }
-    if (row?.id) await db.from('restaurant_settings').update(payload).eq('id', row.id)
-    else { const { data } = await db.from('restaurant_settings').insert(payload).select().single(); if (data) setRow(data) }
-    setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000)
+    const payload = {
+      name: edit.name.trim(),
+      price: parseFloat(edit.price) || 0,
+      portion_g: parseFloat(edit.portion) || 20,
+      brands: edit.brands.split(',').map(b => b.trim()).filter(Boolean),
+    }
+    const res = edit.id
+      ? await db.from('hookah_types').update(payload).eq('id', edit.id)
+      : await db.from('hookah_types').insert(payload)
+    setSaving(false)
+    if (res.error) { alert('Не сохранилось: ' + res.error.message); return }
+    setEdit(null); await load()
+  }
+  const remove = async (id: string) => {
+    if (!confirm('Убрать этот вид кальяна?')) return
+    await db.from('hookah_types').update({ is_active: false }).eq('id', id)
+    await load()
   }
 
   return (
     <Card style={{ marginBottom: 14 }}>
-      <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Кальян</div>
-      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', margin: '2px 0 14px' }}>Смена кальянщика в Mise Stash и вкладка «Кальян» в Analytics</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <Field label="Цена кальяна" value={price} onChange={setPrice} type="number" placeholder="15" />
-        <Field label="Порция табака, г" value={portion} onChange={setPortion} type="number" placeholder="20" />
-      </div>
-      <Btn onClick={save}>{saving ? 'Сохранение...' : saved ? '✓ Сохранено' : 'Сохранить'}</Btn>
+      <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Виды кальянов</div>
+      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', margin: '2px 0 14px' }}>Смена кальянщика в Stash и вкладка «Кальян» в Analytics. У каждого вида — цена, граммовка и допустимые бренды.</div>
+
+      {types.map(tp => (
+        <div key={tp.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--fill)', borderRadius: 12, marginBottom: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: '.86rem', color: 'var(--tx)' }}>{tp.name} · €{tp.price} · {tp.portion_g} г</div>
+            <div style={{ fontSize: '.72rem', color: 'var(--tx2)', marginTop: 1 }}>{tp.brands?.length ? tp.brands.join(', ') : 'Любые бренды'}</div>
+          </div>
+          <button onClick={() => setEdit({ id: tp.id, name: tp.name, price: String(tp.price), portion: String(tp.portion_g), brands: (tp.brands || []).join(', ') })} style={{ background: 'none', border: 'none', color: '#007aff', fontSize: '.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Изменить</button>
+          <button onClick={() => remove(tp.id)} style={{ background: 'none', border: 'none', color: '#ff3b30', fontSize: '.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Убрать</button>
+        </div>
+      ))}
+
+      {edit ? (
+        <div style={{ background: 'var(--fill2)', borderRadius: 12, padding: 12, marginTop: 8 }}>
+          <Field label="Название" value={edit.name} onChange={(v: string) => setEdit({ ...edit, name: v })} placeholder="Классика / Премиум / Фрукт..." />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <Field label="Цена" value={edit.price} onChange={(v: string) => setEdit({ ...edit, price: v })} type="number" placeholder="15" />
+            <Field label="Граммовка, г" value={edit.portion} onChange={(v: string) => setEdit({ ...edit, portion: v })} type="number" placeholder="20" />
+          </div>
+          <Field label="Бренды (через запятую; пусто = любые)" value={edit.brands} onChange={(v: string) => setEdit({ ...edit, brands: v })} placeholder="Darkside, Element" />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Btn onClick={save}>{saving ? 'Сохранение...' : 'Сохранить вид'}</Btn>
+            <Btn variant="gray" onClick={() => setEdit(null)}>Отмена</Btn>
+          </div>
+        </div>
+      ) : (
+        <Btn variant="ghost" onClick={() => setEdit({ name: '', price: '', portion: '20', brands: '' })}>+ Добавить вид кальяна</Btn>
+      )}
     </Card>
   )
 }
@@ -918,7 +948,8 @@ function SettingsTab({ restaurant, onUpdate }: { restaurant: Restaurant | null; 
   const save = async () => {
     if (!restaurant) return
     setSaving(true)
-    await db.from('restaurants').update({ name, currency }).eq('id', restaurant.id)
+    const { error } = await db.from('restaurants').update({ name, currency }).eq('id', restaurant.id)
+    if (error) { alert('Не сохранилось: ' + error.message); setSaving(false); return }
     if (logoFile) await uploadLogo()
     setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000); onUpdate()
   }
@@ -1049,6 +1080,8 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
       if (!res.ok || data.error) { alert(`Не удалось открыть оплату (${res.status}): ${data.error || 'попробуйте перезайти в аккаунт'}`); return }
       if (data.url) window.location.href = data.url
       else alert('Stripe не вернул ссылку оплаты — напишите в поддержку')
+    } catch (e: any) {
+      alert('Ошибка сети при открытии оплаты: ' + (e?.message || e))
     } finally { setLoading(false); setPendingPlan(null) }
   }
 

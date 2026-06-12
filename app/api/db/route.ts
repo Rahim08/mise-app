@@ -35,6 +35,7 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   tobacco_stock:        { read: ['stash', 'analytics'], write: ['stash'] }, // analytics: остаток склада на вкладке Кальян
   tobacco_movements:    { read: ['stash', 'analytics'], write: ['stash'] },
   hookah_sales:         { read: ['stash', 'analytics'], write: ['stash'] }, // смена кальянщика
+  hookah_types:         { read: ['stash', 'analytics'], write: [] },        // виды кальянов — правит владелец
   tobacco_flavors:      { read: ['stash'], write: ['stash'] },
   tobacco_inventories:  { read: ['stash'], write: ['stash'] },
   menu_settings:        { read: ['people'], write: [] },
@@ -96,7 +97,13 @@ async function checkStaffPlanLimit(admin: any, rid: string, values: any, filters
 
 async function resolveCaller(req: NextRequest): Promise<Caller | null> {
   const staff = verifyStaffToken(req.cookies.get(STAFF_COOKIE)?.value)
-  if (staff) return { rid: staff.rid, owner: staff.owner, apps: staff.apps || [] }
+
+  // Владелец тестирует PIN-приложения в том же браузере → есть И staff-кука, И
+  // Supabase-сессия. Раньше staff-кука побеждала и записи владельца резались
+  // правами сотрудника (тихие 403 в настройках). Если есть Supabase-кука —
+  // сначала пробуем владельца; у сотрудников её нет, для них ничего не меняется.
+  const hasSbSession = req.cookies.getAll().some(c => c.name.startsWith('sb-') && c.name.includes('auth-token'))
+  if (staff && !hasSbSession) return { rid: staff.rid, owner: staff.owner, apps: staff.apps || [] }
 
   // Owner via Supabase session
   const supabase = createServerClient(
@@ -105,10 +112,10 @@ async function resolveCaller(req: NextRequest): Promise<Caller | null> {
     { cookies: { getAll: () => req.cookies.getAll(), setAll: () => {} } }
   )
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  if (!user) return staff ? { rid: staff.rid, owner: staff.owner, apps: staff.apps || [] } : null
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
   const { data } = await admin.from('restaurants').select('id').eq('owner_id', user.id).single()
-  if (!data?.id) return null
+  if (!data?.id) return staff ? { rid: staff.rid, owner: staff.owner, apps: staff.apps || [] } : null
   return { rid: data.id, owner: true, apps: ['manager', 'analytics', 'stash'] }
 }
 

@@ -416,7 +416,7 @@ export default function AnalyticsApp() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [includeCard, setIncludeCard] = useState(false) // restaurant_settings.include_card_in_analytics
   // Кальян: настройки + остатки (all-time) + строки смен кальянщика за месяц
-  const [hk, setHk] = useState({ price: 0, portion: 20, stockG: 0, issuedG: 0, allQty: 0 })
+  const [hk, setHk] = useState<{ price: number; portion: number; stockG: number; issuedG: number; allRows: any[]; types: any[] }>({ price: 0, portion: 20, stockG: 0, issuedG: 0, allRows: [], types: [] })
   const [hookahRows, setHookahRows] = useState<any[]>([])
   const [shiftsRaw, setShifts] = useState<any[]>([])
   const [prevShiftsRaw, setPrevShifts] = useState<any[]>([])
@@ -460,8 +460,10 @@ export default function AnalyticsApp() {
       setHk(h => ({ ...h, stockG: (data || []).reduce((s: number, r: any) => s + (r.quantity_g || 0), 0) })))
     db.from('tobacco_movements').select('quantity_g, type').then(({ data }: any) =>
       setHk(h => ({ ...h, issuedG: (data || []).filter((r: any) => r.type === 'out').reduce((s: number, r: any) => s + (r.quantity_g || 0), 0) })))
-    db.from('hookah_sales').select('quantity').then(({ data }: any) =>
-      setHk(h => ({ ...h, allQty: (data || []).reduce((s: number, r: any) => s + (r.quantity || 0), 0) })))
+    db.from('hookah_sales').select('quantity, portion_g').then(({ data }: any) =>
+      setHk(h => ({ ...h, allRows: data || [] })))
+    db.from('hookah_types').select('id, name').then(({ data }: any) =>
+      setHk(h => ({ ...h, types: data || [] })))
     loadAll(restaurantId, new Date())
     loadAllHistory(restaurantId)
   }, [restaurantId])
@@ -1102,8 +1104,11 @@ export default function AnalyticsApp() {
             const qtyMonth = paidRows.reduce((s: number, r: any) => s + (r.quantity || 0), 0)
             const qtyFree = hookahRows.filter((r: any) => r.is_free).reduce((s: number, r: any) => s + (r.quantity || 0), 0)
             const revMonth = paidRows.reduce((s: number, r: any) => s + (r.quantity || 0) * Number(r.price ?? hk.price), 0)
-            const usedMonthG = (qtyMonth + qtyFree) * hk.portion
-            const venueG = Math.max(0, hk.issuedG - hk.allQty * hk.portion) // выдано в зал − продано × порция
+            // Граммовка хранится в строке продажи (у каждого вида кальяна — своя)
+            const rowG = (r: any) => (r.quantity || 0) * Number(r.portion_g ?? hk.portion)
+            const usedMonthG = hookahRows.reduce((s: number, r: any) => s + rowG(r), 0)
+            const allUsedG = hk.allRows.reduce((s: number, r: any) => s + rowG(r), 0)
+            const venueG = Math.max(0, hk.issuedG - allUsedG) // выдано в зал − списано по сменам
             const fmtKg = (g: number) => g >= 1000 ? `${(g / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} кг` : `${Math.round(g)} г`
             // По дням и по вкусам
             const byDay = new Map<string, { total: number; paid: number }>()
@@ -1145,6 +1150,35 @@ export default function AnalyticsApp() {
                   </div>
                 ) : (
                   <>
+                    {/* По видам кальяна */}
+                    {hk.types.length > 0 && (() => {
+                      const byType = new Map<string, { paid: number; free: number }>()
+                      hookahRows.forEach((r: any) => {
+                        if (!r.hookah_type_id) return
+                        const d = byType.get(r.hookah_type_id) || { paid: 0, free: 0 }
+                        if (r.is_free) d.free += r.quantity || 0; else d.paid += r.quantity || 0
+                        byType.set(r.hookah_type_id, d)
+                      })
+                      const list = [...byType.entries()].sort((a, b) => (b[1].paid + b[1].free) - (a[1].paid + a[1].free))
+                      if (!list.length) return null
+                      return (
+                        <>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>По видам</div>
+                          <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 12 }}>
+                            {list.map(([id, n], i) => (
+                              <div key={id} style={{ display: 'flex', justifyContent: 'space-between', padding: '11px 16px', borderBottom: i < list.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                                <span style={{ fontSize: 14, color: t.text, fontWeight: 500 }}>{hk.types.find((tp: any) => tp.id === id)?.name || '—'}</span>
+                                <span style={{ fontSize: 14 }}>
+                                  <span style={{ fontWeight: 700, color: t.orange }}>{n.paid}</span>
+                                  {n.free > 0 && <span style={{ color: t.purple }}> +{n.free} бесп.</span>}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )
+                    })()}
+
                     <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>Топ вкусов</div>
                     <div style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh, marginBottom: 12 }}>
                       {flavors.map(([name, n]) => (
