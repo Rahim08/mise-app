@@ -831,7 +831,7 @@ function HookahSettingsCard() {
   )
 }
 
-function SettingsTab({ restaurant, theme, onUpdate }: { restaurant: Restaurant | null; theme: { dark: boolean; toggle: () => void }; onUpdate: () => void }) {
+function SettingsTab({ restaurant, theme, onUpdate }: { restaurant: Restaurant | null; theme: { dark: boolean; toggle: () => void; mode: 'system' | 'light' | 'dark'; setMode: (m: 'system' | 'light' | 'dark') => void }; onUpdate: () => void }) {
   const [name, setName] = useState(restaurant?.name || '')
   const [currency, setCurrency] = useState(restaurant?.currency || '€')
   const [saving, setSaving] = useState(false)
@@ -933,12 +933,23 @@ function SettingsTab({ restaurant, theme, onUpdate }: { restaurant: Restaurant |
       <GeoSettingsCard />
 
       <Card>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Тёмная тема</div>
-            <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2 }}>Оформление кабинета на этом устройстве</div>
-          </div>
-          <MiniToggle value={!!theme.dark} onChange={() => theme.toggle()} color="#007aff" />
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Тема оформления</div>
+          <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2 }}>«Система» следует настройке устройства</div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, background: 'var(--fill, rgba(120,120,128,.12))', padding: 4, borderRadius: 12 }}>
+          {([['system', 'Система'], ['light', 'Светлая'], ['dark', 'Тёмная']] as const).map(([m, label]) => {
+            const on = theme.mode === m
+            return (
+              <button key={m} type="button" onClick={() => theme.setMode(m)} style={{
+                flex: 1, padding: '8px 4px', borderRadius: 9, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                fontSize: '.82rem', fontWeight: on ? 700 : 500,
+                background: on ? 'var(--surface,#fff)' : 'transparent',
+                color: on ? '#007aff' : 'var(--tx2)',
+                boxShadow: on ? '0 1px 4px rgba(0,0,0,.12)' : 'none', transition: 'all .15s',
+              }}>{label}</button>
+            )
+          })}
         </div>
       </Card>
     </div>
