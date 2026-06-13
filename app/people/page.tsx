@@ -107,6 +107,15 @@ function ScheduleTab({ restaurantId, accent, t, toast }: { restaurantId: string;
 
   const unpublishedCount = schedules.filter(s => !s.published).length
 
+  // Быстрый выбор: сначала диапазоны, уже используемые в заведении, затем типовые дефолты.
+  const shiftPresets: [string, string][] = (() => {
+    const used = schedules.filter(s => s.shift_start && s.shift_end).map(s => [hhmm(s.shift_start), hhmm(s.shift_end)] as [string, string])
+    const defaults: [string, string][] = [['10:00', '22:00'], ['12:00', '00:00'], ['09:00', '18:00'], ['18:00', '02:00']]
+    const seen = new Set<string>(); const out: [string, string][] = []
+    for (const [s, e] of [...used, ...defaults]) { const k = `${s}-${e}`; if (s && e && !seen.has(k)) { seen.add(k); out.push([s, e]) } }
+    return out.slice(0, 6)
+  })()
+
   return (
     <div>
       {/* Week nav */}
@@ -177,7 +186,23 @@ function ScheduleTab({ restaurantId, accent, t, toast }: { restaurantId: string;
         <Sheet onClose={() => setEdit(null)} t={t}>
           <div style={{ padding: '14px 20px 32px' }}>
             <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 4 }}>{edit.staff.name}</div>
-            <div style={{ fontSize: 13, color: t.text3, textAlign: 'center', marginBottom: 20 }}>{DOW_FULL[new Date(edit.date + 'T00:00:00').getDay()]}, {dayLabel(edit.date)}</div>
+            <div style={{ fontSize: 13, color: t.text3, textAlign: 'center', marginBottom: 16 }}>{DOW_FULL[new Date(edit.date + 'T00:00:00').getDay()]}, {dayLabel(edit.date)}</div>
+
+            {/* Быстрый выбор смены — типовые диапазоны заведения в один тап */}
+            {shiftPresets.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14, justifyContent: 'center' }}>
+                {shiftPresets.map(([s, e]) => {
+                  const on = start === s && end === e
+                  return (
+                    <button key={`${s}-${e}`} onClick={() => { setStart(s); setEnd(e) }} style={{
+                      padding: '8px 13px', borderRadius: 980, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+                      border: `1px solid ${on ? accent : t.sep2}`, background: on ? accent : t.surface, color: on ? '#fff' : t.text2,
+                    }}>{s}–{e}</button>
+                  )
+                })}
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
               {[{ l: 'Начало', v: start, set: setStart }, { l: 'Конец', v: end, set: setEnd }].map(f => (
                 <div key={f.l} style={{ flex: 1 }}>
@@ -887,23 +912,24 @@ function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: boolean; 
   const load = async () => {
     const monthStart = ym + '-01'
     const [{ data: emps }, { data: abs }, { data: cards }, { data: att }, { data: dir }] = await Promise.all([
-      db.from('employees').select('id, name, salary, deduct_per_absence').eq('is_active', true).order('name'),
+      db.from('employees').select('id, name, salary, deduct_per_absence, card_amount').eq('is_active', true).order('name'),
       db.from('shift_absences').select('employee_id, date').gte('date', monthStart),
-      db.from('monthly_card_amounts').select('employee_id, amount').eq('month', ym),
+      db.from('monthly_card_amounts').select('employee_id, card_amount').eq('month', ym),
       db.from('attendance_records').select('staff_id, check_in_at, check_out_at, date').gte('date', monthStart),
       db.from('staff_directory').select('id, name').eq('is_active', true),
     ])
     const staffName: Record<string, string> = {}; (dir || []).forEach((s: any) => { staffName[s.id] = s.name })
     const hoursByName: Record<string, number> = {}
     ;(att || []).forEach((r: any) => { const n = staffName[r.staff_id]; if (n) hoursByName[n] = (hoursByName[n] || 0) + hoursOf(r) })
-    const cardByEmp: Record<string, number> = {}; (cards || []).forEach((c: any) => { cardByEmp[c.employee_id] = Number(c.amount || 0) })
+    // Помесячная сумма на карту перекрывает фиксированную (employees.card_amount).
+    const cardByEmp: Record<string, number> = {}; (cards || []).forEach((c: any) => { cardByEmp[c.employee_id] = Number(c.card_amount || 0) })
     const absByEmp: Record<string, string[]> = {}; (abs || []).forEach((a: any) => { (absByEmp[a.employee_id] = absByEmp[a.employee_id] || []).push(a.date) })
 
     let list = (emps || []).map((e: any) => {
       const salary = Number(e.salary || 0)
       const dates = (absByEmp[e.id] || []).sort()
       const deduct = dates.length * Number(e.deduct_per_absence || 0)
-      const card = cardByEmp[e.id] || 0
+      const card = e.id in cardByEmp ? cardByEmp[e.id] : Number(e.card_amount || 0)
       const total = Math.max(0, salary - deduct)
       return { id: e.id, name: e.name, salary, dates, absences: dates.length, deduct, card, total, cash: Math.max(0, total - card), hours: hoursByName[e.name] || 0 }
     })

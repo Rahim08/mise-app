@@ -592,12 +592,18 @@ export default function AnalyticsApp() {
     doc.save(`smeny_${monthTag}.pdf`)
   }
 
+  // Сумма на карту за выбранный месяц: помесячная перекрывает фиксированную (employees.card_amount).
+  const cardOf = (emp: any) => {
+    const m = cardAmounts.find((c: any) => c.employee_id === emp.id)
+    return m ? Number(m.card_amount || 0) : Number(emp.card_amount || 0)
+  }
+
   const exportSalary = () => {
     const rows: (string | number)[][] = [['Сотрудник', 'Оклад', 'Пропуски', 'Вычет', 'Карта', 'Наличные', 'Итого']]
     employees.forEach((emp: any) => {
       const abs = absences.filter((a: any) => a.employee_id === emp.id).length
       const deduct = abs * emp.deduct_per_absence
-      const card = cardAmounts.find((c: any) => c.employee_id === emp.id)?.card_amount || 0
+      const card = cardOf(emp)
       const cash = emp.salary - deduct - card
       rows.push([emp.name, (emp.salary || 0).toFixed(2), abs, deduct.toFixed(2), card.toFixed(2), cash.toFixed(2), (cash + card).toFixed(2)])
     })
@@ -611,7 +617,7 @@ export default function AnalyticsApp() {
     const rows: string[][] = employees.map((emp: any) => {
       const abs = absences.filter((a: any) => a.employee_id === emp.id).length
       const deduct = abs * emp.deduct_per_absence
-      const card = cardAmounts.find((c: any) => c.employee_id === emp.id)?.card_amount || 0
+      const card = cardOf(emp)
       const cash = emp.salary - deduct - card
       return [emp.name, pdfCur + fv(emp.salary || 0), String(abs), pdfCur + fv(deduct), pdfCur + fv(card), pdfCur + fv(cash), pdfCur + fv(cash + card)]
     })
@@ -914,12 +920,25 @@ export default function AnalyticsApp() {
   }
 
   const renderSalary = () => {
+    const monthKey = fmtDate(currentDate).slice(0, 7)
+    // Правка суммы на карту за выбранный месяц (каждый месяц своя). Без unique-constraint: update by id или insert.
+    const saveCard = async (emp: any, value: string) => {
+      const amt = Math.max(0, parseFloat(value) || 0)
+      if (amt === cardOf(emp)) return
+      const existing = cardAmounts.find((c: any) => c.employee_id === emp.id)
+      if (existing) {
+        await db.from('monthly_card_amounts').update({ card_amount: amt }).eq('id', existing.id)
+        setCardAmounts((prev: any[]) => prev.map(c => c.id === existing.id ? { ...c, card_amount: amt } : c))
+      } else {
+        const { data } = await db.from('monthly_card_amounts').insert({ employee_id: emp.id, month: monthKey, card_amount: amt }).select().single()
+        if (data) setCardAmounts((prev: any[]) => [...prev, data])
+      }
+    }
     const totFOT = employees.reduce((s: number, e: any) => s + e.salary, 0)
-    const totCard = cardAmounts.reduce((s: number, c: any) => s + c.card_amount, 0)
+    const totCard = employees.reduce((s: number, e: any) => s + cardOf(e), 0)
     const totCash = employees.reduce((s: number, emp: any) => {
       const abs = absences.filter((a: any) => a.employee_id === emp.id).length
-      const card = cardAmounts.find((c: any) => c.employee_id === emp.id)?.card_amount || 0
-      return s + (emp.salary - abs * emp.deduct_per_absence - card)
+      return s + (emp.salary - abs * emp.deduct_per_absence - cardOf(emp))
     }, 0)
 
     return (
@@ -949,10 +968,8 @@ export default function AnalyticsApp() {
           {employees.map((emp: any, i: number) => {
             const abs = absences.filter((a: any) => a.employee_id === emp.id).length
             const deduct = abs * emp.deduct_per_absence
-            const card = cardAmounts.find((c: any) => c.employee_id === emp.id)?.card_amount || 0
+            const card = cardOf(emp)
             const cash = emp.salary - deduct - card
-            const cashPct = totCash > 0 ? cash / totCash * 100 : 0
-            const cardPct = totCard > 0 ? card / totCard * 100 : 0
 
             return (
               <div key={emp.id} style={{ padding: '14px 16px', borderBottom: i < employees.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
@@ -969,9 +986,18 @@ export default function AnalyticsApp() {
                 {abs > 0 && <div style={{ marginTop: 6, height: 3, background: t.fill2, borderRadius: 2, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: `${Math.min(abs / 22 * 100, 100).toFixed(1)}%`, background: t.red, borderRadius: 2, transition: 'width 0.8s cubic-bezier(.16,1,.3,1)' }} />
                 </div>}
-                <div style={{ display: 'flex', gap: 12, marginTop: 5 }}>
-                  <span style={{ fontSize: 11, color: t.orange }}>Нал {currency}{fv(cash)}</span>
-                  {card > 0 && <span style={{ fontSize: 11, color: t.purple }}>Карта {currency}{fv(card)}</span>}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 7 }}>
+                  <span style={{ fontSize: 12, color: t.orange, fontWeight: 600 }}>Нал {currency}{fv(cash)}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 11, color: t.text3 }}>На карту {currency}</span>
+                    <input
+                      key={`card-${emp.id}-${monthKey}`} type="number" inputMode="decimal"
+                      defaultValue={card || ''} placeholder="0"
+                      onBlur={e => saveCard(emp, e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                      style={{ width: 76, textAlign: 'right', padding: '6px 9px', borderRadius: 9, border: `1px solid ${t.sep2}`, background: t.fill, color: t.purple, fontWeight: 700, fontSize: 13, fontFamily: 'inherit', outline: 'none' }}
+                    />
+                  </div>
                 </div>
               </div>
             )
