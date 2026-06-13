@@ -1180,6 +1180,7 @@ function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo
   const [shift, setShift] = useState<any>(null)
   const [hookah, setHookah] = useState({ qty: 0, revenue: 0 })
   const [orders, setOrders] = useState({ total: 0, fresh: 0 })
+  const [setup, setSetup] = useState({ hasStaff: false, hasShift: false })
 
   useEffect(() => {
     if (!restaurant?.id) return
@@ -1187,12 +1188,15 @@ function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo
     ;(async () => {
       const today = fmtDay(new Date())
       const dayStartISO = new Date(new Date().setHours(0, 0, 0, 0)).toISOString()
-      const [shiftRes, hookahRes, ordersRes] = await Promise.all([
+      const [shiftRes, hookahRes, ordersRes, staffRes, anyShiftRes] = await Promise.all([
         db.from('shifts').select('*').eq('restaurant_id', restaurant.id).eq('date', today).order('created_at', { ascending: false }).limit(1),
         appOk('stash') ? db.from('hookah_sales').select('quantity, price, is_free, date').eq('date', today) : Promise.resolve({ data: [] }),
         appOk('menu') ? db.from('menu_orders').select('id, status, created_at').gte('created_at', dayStartISO) : Promise.resolve({ data: [] }),
+        db.from('employees').select('id').eq('restaurant_id', restaurant.id).eq('is_active', true).limit(1),
+        db.from('shifts').select('id').eq('restaurant_id', restaurant.id).limit(1),
       ])
       if (gone) return
+      setSetup({ hasStaff: (staffRes.data || []).length > 0, hasShift: (anyShiftRes.data || []).length > 0 })
       setShift((shiftRes.data || [])[0] || null)
       const hs = hookahRes.data || []
       setHookah({
@@ -1220,13 +1224,17 @@ function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo
     ...(appOk('menu') ? [{ l: 'Заказы меню', v: String(orders.total), c: '#ff2d55' }] : []),
   ]
 
-  // Шаги настройки: показываем пока подписка не активна (новый аккаунт)
-  const setupSteps = !isActive ? [
-    { done: true,     label: 'Аккаунт создан',                 sub: null,                    tab: null },
-    { done: false,    label: 'Активировать подписку',           sub: '7 дней бесплатно',      tab: 'billing' },
-    { done: false,    label: 'Добавить сотрудников',            sub: 'Раздайте PIN-доступы',  tab: 'team' },
-    { done: false,    label: 'Открыть первую смену',            sub: 'Через Mise Manager',    tab: 'apps' },
-  ] : null
+  // Шаги настройки: data-driven, ведём до полной активации (даже после оплаты — пока не добавлены
+  // сотрудники и не открыта первая смена). Скрываем, когда всё готово.
+  const allSteps = [
+    { done: true,          label: 'Аккаунт создан',        sub: null,                    tab: null },
+    { done: isActive,      label: 'Активировать подписку',  sub: '7 дней бесплатно',      tab: 'billing' },
+    { done: setup.hasStaff, label: 'Добавить сотрудников',   sub: 'Раздайте PIN-доступы',  tab: 'team' },
+    { done: setup.hasShift, label: 'Открыть первую смену',   sub: 'Через Mise Manager',    tab: 'apps' },
+  ]
+  const setupDone = allSteps.every(s => s.done)
+  const nextStepIdx = allSteps.findIndex(s => !s.done)
+  const setupSteps = !loading && !setupDone ? allSteps : null
 
   return (
     <div>
@@ -1235,15 +1243,20 @@ function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo
       {/* Onboarding: показывается пока нет активной подписки */}
       {setupSteps && (
         <Card style={{ marginBottom: 16, border: '1px solid rgba(0,122,255,.18)', background: 'linear-gradient(135deg,rgba(0,122,255,.05) 0%,rgba(88,86,214,.05) 100%)' }}>
-          <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)', marginBottom: 14 }}>С чего начать</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)' }}>С чего начать</div>
+            <div style={{ fontSize: '.72rem', fontWeight: 700, color: '#007aff', background: 'rgba(0,122,255,.1)', padding: '3px 10px', borderRadius: 980 }}>
+              {allSteps.filter(s => s.done).length} из {allSteps.length}
+            </div>
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {setupSteps.map((step, i) => (
-              <button key={i} onClick={step.tab ? () => onGo(step.tab!) : undefined}
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 12, border: 'none', background: step.done ? 'rgba(52,199,89,.08)' : 'var(--surface)', cursor: step.tab ? 'pointer' : 'default', textAlign: 'left', width: '100%', fontFamily: 'inherit' }}>
-                <div style={{ width: 28, height: 28, borderRadius: '50%', background: step.done ? '#34c759' : i === 1 ? '#007aff' : 'var(--fill)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <button key={i} onClick={step.tab && !step.done ? () => onGo(step.tab!) : undefined}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 12, border: 'none', background: step.done ? 'rgba(52,199,89,.08)' : 'var(--surface)', cursor: step.tab && !step.done ? 'pointer' : 'default', textAlign: 'left', width: '100%', fontFamily: 'inherit' }}>
+                <div style={{ width: 28, height: 28, borderRadius: '50%', background: step.done ? '#34c759' : i === nextStepIdx ? '#007aff' : 'var(--fill)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   {step.done
                     ? <svg width="12" height="10" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 12 10"><path d="M1 5l3.5 3.5L11 1" /></svg>
-                    : <span style={{ fontSize: '.72rem', fontWeight: 700, color: i === 1 ? '#fff' : 'var(--tx3)' }}>{i + 1}</span>}
+                    : <span style={{ fontSize: '.72rem', fontWeight: 700, color: i === nextStepIdx ? '#fff' : 'var(--tx3)' }}>{i + 1}</span>}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: '.88rem', fontWeight: 600, color: step.done ? '#34c759' : 'var(--tx)' }}>{step.label}</div>
@@ -1312,6 +1325,7 @@ function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo
 
 function NotificationsTab({ restaurant, onSeen }: { restaurant: Restaurant | null; onSeen: () => void }) {
   const [rows, setRows] = useState<any[]>([])
+  const [lowStock, setLowStock] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const status = restaurant?.subscription_status || ''
 
@@ -1319,9 +1333,20 @@ function NotificationsTab({ restaurant, onSeen }: { restaurant: Restaurant | nul
   useEffect(() => {
     if (!restaurant?.id) return
     const from = new Date(Date.now() - 2 * 864e5).toISOString()
-    db.from('menu_orders').select('*').gte('created_at', from).order('created_at', { ascending: false }).limit(50)
-      .then(({ data }: any) => { setRows(data || []); setLoading(false) })
+    Promise.all([
+      db.from('menu_orders').select('*').gte('created_at', from).order('created_at', { ascending: false }).limit(50),
+      db.from('tobacco_stock').select('flavor_name, brand, flavor, quantity_g, min_quantity_g'),
+    ]).then(([ord, stock]: any) => {
+      setRows(ord.data || [])
+      const low = (stock.data || [])
+        .filter((s: any) => Number(s.quantity_g || 0) <= Number(s.min_quantity_g ?? 100))
+        .sort((a: any, b: any) => Number(a.quantity_g || 0) - Number(b.quantity_g || 0))
+      setLowStock(low)
+      setLoading(false)
+    })
   }, [restaurant?.id])
+
+  const stockName = (s: any) => s.flavor_name || [s.brand, s.flavor].filter(Boolean).join(' ') || 'Табак'
 
   const orderStatus: Record<string, { label: string; color: string }> = {
     new: { label: 'Новый', color: '#ff9500' }, in_progress: { label: 'В работе', color: '#007aff' },
@@ -1339,13 +1364,31 @@ function NotificationsTab({ restaurant, onSeen }: { restaurant: Restaurant | nul
         </Card>
       )}
 
+      {/* Проактивно: заканчивающийся табак (Stash) */}
+      {lowStock.slice(0, 5).map((s, i) => {
+        const out = Number(s.quantity_g || 0) <= 0
+        return (
+          <Card key={`low-${i}`} style={{ marginBottom: 10, padding: '12px 16px', borderLeft: `3px solid ${out ? '#ff3b30' : '#ff9500'}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 10, background: (out ? '#ff3b30' : '#ff9500') + '15', color: out ? '#ff3b30' : '#ff9500', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>{out ? 'Табак закончился' : 'Табак заканчивается'}</div>
+                <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 1 }}>{stockName(s)} · {Math.round(Number(s.quantity_g || 0))} г</div>
+              </div>
+            </div>
+          </Card>
+        )
+      })}
+
       {loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {[0, 1, 2].map(i => <div key={i} style={{ height: 64, borderRadius: 16, background: 'var(--fill)', animation: 'dashPulse 1.2s ease-in-out infinite' }} />)}
         </div>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && lowStock.length === 0 ? (
         <Card><div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>Пока тихо — уведомлений нет</div></Card>
-      ) : (
+      ) : rows.length === 0 ? null : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {rows.map(o => {
             const isCall = Array.isArray(o.items) && o.items[0]?.call === 'waiter'
