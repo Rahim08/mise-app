@@ -105,7 +105,7 @@ export default function JoinPage() {
 
     if (result.match) {
       if (result.is_owner) {
-        const ownerData = { id: 'owner', name: 'Владелец', apps: ['manager', 'analytics', 'stash'], is_owner: true }
+        const ownerData = { id: 'owner', name: 'Владелец', apps: ['manager', 'analytics', 'stash', 'people'], is_owner: true }
         localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify(ownerData))
         setStaffMember(ownerData)
         setChecking(false)
@@ -270,9 +270,7 @@ export default function JoinPage() {
             onPointerUp={e => { e.currentTarget.style.transform = 'scale(1)' }}
             onPointerLeave={e => { e.currentTarget.style.transform = 'scale(1)' }}
             >
-              <div style={{ width: 44, height: 44, borderRadius: 12, background: app.color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <div style={{ width: 22, height: 22, borderRadius: 6, background: app.color }} />
-              </div>
+              <AppIcon app={app.id as any} size={44} />
               <div style={{ textAlign: 'left', flex: 1 }}>
                 <div style={{ fontWeight: 700, fontSize: '.95rem', color: '#1c1c1e' }}>{app.name}</div>
               </div>

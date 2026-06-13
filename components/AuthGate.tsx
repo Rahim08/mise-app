@@ -153,12 +153,10 @@ export function AuthGate({ appId, appName, onAuth }: {
             router.replace('/join?error=no_access')
             return
           }
-          // Skip PIN via Face ID only if the data-token is still valid; otherwise re-enter PIN.
-          const bioKey = `mise_bio_${storedRid}`
-          if (localStorage.getItem(bioKey) === '1' && window.PublicKeyCredential && staffTokenValid()) {
-            const bioOk = await tryBiometric(storedRid)
-            if (bioOk) { onAuth(storedRid); return }
-          }
+          // Токен ещё жив → пользователь уже авторизован, PIN заново НЕ спрашиваем.
+          // Это убирает «лишний экран входа» при переходе между приложениями (People→Stash и т.п.).
+          // Токен истёк → нужен PIN (он перевыпускает серверный токен; Face ID этого не умеет).
+          if (staffTokenValid()) { onAuth(storedRid); return }
         } catch {}
       }
       await loadRestaurant(storedRid)
@@ -225,7 +223,7 @@ export function AuthGate({ appId, appName, onAuth }: {
 
     if (result.match) {
       const staffData = result.is_owner
-        ? { id: 'owner', name: 'Владелец', apps: ['manager', 'analytics', 'stash'], is_owner: true }
+        ? { id: 'owner', name: 'Владелец', apps: ['manager', 'analytics', 'stash', 'people'], is_owner: true }
         : result.staff
       if (!result.is_owner && !staffData?.apps?.includes(appId)) {
         setChecking(false)
