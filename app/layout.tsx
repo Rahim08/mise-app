@@ -9,13 +9,22 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "Mise",
-  description: "Система управления рестораном",
+  title: { default: "Mise", template: "%s · Mise" },
+  description: "Mise — система управления рестораном: кассовые смены, аналитика, склад, команда и QR-меню в одном приложении.",
   manifest: "/manifest.json",
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "default",
-    title: "Mise",
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "Mise" },
+  openGraph: {
+    type: "website",
+    siteName: "Mise",
+    title: "Mise — управление рестораном",
+    description: "Кассовые смены, аналитика, склад, команда и QR-меню в одном приложении.",
+    images: [{ url: "/icons/icon-512.png", width: 512, height: 512, alt: "Mise" }],
+  },
+  twitter: {
+    card: "summary",
+    title: "Mise — управление рестораном",
+    description: "Кассовые смены, аналитика, склад, команда и QR-меню в одном приложении.",
+    images: ["/icons/icon-512.png"],
   },
 };
 

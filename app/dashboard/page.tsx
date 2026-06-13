@@ -925,12 +925,35 @@ function SettingsTab({ restaurant, theme, onUpdate }: { restaurant: Restaurant |
 function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | null; user: any; onRefresh: () => void }) {
   const [loading, setLoading] = useState(false)
   const [cancelConfirm, setCancelConfirm] = useState(false)
+  const [portalLoading, setPortalLoading] = useState(false)
 
   const currentPlan = PLANS.find(p => p.id === restaurant?.subscription_plan)
   const status = restaurant?.subscription_status
   const endsAt = restaurant?.subscription_ends_at ? new Date(restaurant.subscription_ends_at) : null
   // 'canceling' = доступ сохраняется до конца оплаченного периода
   const isActive = status === 'active' || status === 'trialing' || status === 'canceling'
+
+  // Дней до конца триала (показываем баннер при ≤ 3 дня)
+  const trialDaysLeft = status === 'trialing' && endsAt
+    ? Math.ceil((endsAt.getTime() - Date.now()) / 86400000)
+    : null
+
+  const openPortal = async () => {
+    if (!restaurant) return
+    setPortalLoading(true)
+    try {
+      const res = await fetch('/api/stripe/portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ restaurantId: restaurant.id }),
+      })
+      const data = await res.json()
+      if (data.error) { alert(data.error); return }
+      if (data.url) window.location.href = data.url
+    } catch (e: any) {
+      alert('Ошибка: ' + e?.message)
+    } finally { setPortalLoading(false) }
+  }
 
   const statusLabel: Record<string, { label: string; color: string; bg: string }> = {
     trialing: { label: 'Пробный период', color: '#007aff', bg: 'rgba(0,122,255,.1)' },
@@ -996,6 +1019,21 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
         </Card>
       )}
 
+      {/* Баннер: триал заканчивается */}
+      {trialDaysLeft !== null && trialDaysLeft <= 3 && (
+        <Card style={{ marginBottom: 16, border: '1px solid rgba(255,149,0,.35)', background: 'rgba(255,149,0,.06)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '.92rem', color: 'var(--tx)', marginBottom: 2 }}>
+                {trialDaysLeft <= 0 ? 'Пробный период заканчивается сегодня' : `Пробный период заканчивается через ${trialDaysLeft} ${trialDaysLeft === 1 ? 'день' : 'дня'}`}
+              </div>
+              <div style={{ fontSize: '.8rem', color: 'var(--tx2)' }}>Выберите тариф ниже, чтобы не потерять доступ</div>
+            </div>
+            <svg width="20" height="20" fill="none" stroke="#ff9500" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" /></svg>
+          </div>
+        </Card>
+      )}
+
       {currentPlan && (
         <Card style={{ marginBottom: 16, border: `1px solid ${currentPlan.color}25` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
@@ -1028,6 +1066,21 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
               )}
             </div>
           )}
+        </Card>
+      )}
+
+      {/* Stripe Customer Portal: обновить карту, посмотреть инвойсы */}
+      {isActive && (restaurant as any)?.stripe_customer_id && (
+        <Card style={{ marginBottom: 16, background: 'var(--fill2)', boxShadow: 'none' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)', marginBottom: 2 }}>Управление картой и инвойсами</div>
+              <div style={{ fontSize: '.78rem', color: 'var(--tx2)' }}>Обновить карту, скачать счета, изменить платёжные данные</div>
+            </div>
+            <button onClick={openPortal} disabled={portalLoading} style={{ background: 'var(--surface)', border: '1px solid rgba(var(--seprgb),.15)', borderRadius: 10, padding: '9px 16px', fontSize: '.82rem', fontWeight: 600, color: '#007aff', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+              {portalLoading ? '...' : 'Открыть портал →'}
+            </button>
+          </div>
         </Card>
       )}
 
@@ -1130,9 +1183,41 @@ function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo
     ...(appOk('menu') ? [{ l: 'Заказы меню', v: String(orders.total), c: '#ff2d55' }] : []),
   ]
 
+  // Шаги настройки: показываем пока подписка не активна (новый аккаунт)
+  const setupSteps = !isActive ? [
+    { done: true,     label: 'Аккаунт создан',                 sub: null,                    tab: null },
+    { done: false,    label: 'Активировать подписку',           sub: '7 дней бесплатно',      tab: 'billing' },
+    { done: false,    label: 'Добавить сотрудников',            sub: 'Раздайте PIN-доступы',  tab: 'team' },
+    { done: false,    label: 'Открыть первую смену',            sub: 'Через Mise Manager',    tab: 'apps' },
+  ] : null
+
   return (
     <div>
       <SectionTitle title="Обзор" sub={new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })} />
+
+      {/* Onboarding: показывается пока нет активной подписки */}
+      {setupSteps && (
+        <Card style={{ marginBottom: 16, border: '1px solid rgba(0,122,255,.18)', background: 'linear-gradient(135deg,rgba(0,122,255,.05) 0%,rgba(88,86,214,.05) 100%)' }}>
+          <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)', marginBottom: 14 }}>С чего начать</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {setupSteps.map((step, i) => (
+              <button key={i} onClick={step.tab ? () => onGo(step.tab!) : undefined}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 12, border: 'none', background: step.done ? 'rgba(52,199,89,.08)' : 'var(--surface)', cursor: step.tab ? 'pointer' : 'default', textAlign: 'left', width: '100%', fontFamily: 'inherit' }}>
+                <div style={{ width: 28, height: 28, borderRadius: '50%', background: step.done ? '#34c759' : i === 1 ? '#007aff' : 'var(--fill)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {step.done
+                    ? <svg width="12" height="10" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 12 10"><path d="M1 5l3.5 3.5L11 1" /></svg>
+                    : <span style={{ fontSize: '.72rem', fontWeight: 700, color: i === 1 ? '#fff' : 'var(--tx3)' }}>{i + 1}</span>}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '.88rem', fontWeight: 600, color: step.done ? '#34c759' : 'var(--tx)' }}>{step.label}</div>
+                  {step.sub && <div style={{ fontSize: '.74rem', color: 'var(--tx2)', marginTop: 1 }}>{step.sub}</div>}
+                </div>
+                {step.tab && !step.done && <svg width="7" height="12" fill="none" stroke="var(--tx3)" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 8 14"><path d="M2 1l6 6-6 6" /></svg>}
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {loading ? (
         // Скелетоны той же геометрии, что и контент — данные «проявляются», а не грузятся
