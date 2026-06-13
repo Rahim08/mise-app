@@ -598,9 +598,9 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
         <p class="cc-desc" data-i18n="cc2.d">4-значный PIN задаёт владелец. Каждому сотруднику — свой код и свой набор приложений.</p>
       </div>
       <div class="callout-card glass reveal d3">
-        <div class="cc-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2C8.5 2 6 4.5 6 7c0 3.5 6 11 6 11s6-7.5 6-11c0-2.5-2.5-5-6-5z" stroke="rgba(0,122,255,.85)" stroke-width="1.6"/><circle cx="12" cy="7" r="2" stroke="rgba(0,122,255,.85)" stroke-width="1.6"/></svg></div>
-        <h3 class="cc-title" data-i18n="cc3.t">Face ID</h3>
-        <p class="cc-desc" data-i18n="cc3.d">После первого входа — предложение включить Face ID. Следующие входы мгновенны.</p>
+        <div class="cc-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="8" height="8" rx="1.5" stroke="rgba(0,122,255,.85)" stroke-width="1.6"/><rect x="13" y="3" width="8" height="8" rx="1.5" stroke="rgba(0,122,255,.45)" stroke-width="1.6"/><rect x="3" y="13" width="8" height="8" rx="1.5" stroke="rgba(0,122,255,.45)" stroke-width="1.6"/><rect x="13" y="13" width="8" height="8" rx="1.5" stroke="rgba(0,122,255,.45)" stroke-width="1.6"/></svg></div>
+        <h3 class="cc-title" data-i18n="cc3.t">Единый вход</h3>
+        <p class="cc-desc" data-i18n="cc3.d">Один PIN открывает все доступные сотруднику разделы. Переключение между ними — без повторного входа.</p>
       </div>
     </div>
   </div>
@@ -794,7 +794,7 @@ const T = {
     'cc.label':'Доступ для команды','cc.title':'Вход без паролей.','cc.sub':'Каждый сотрудник входит в своё приложение через QR и PIN. Без регистрации, без email, без забытых паролей.',
     'cc1.t':'QR-вход','cc1.d':'Владелец показывает QR. Сотрудник сканирует — устройство привязано к заведению.',
     'cc2.t':'PIN-доступ','cc2.d':'4-значный PIN задаёт владелец. Каждому — свой код и свой набор приложений.',
-    'cc3.t':'Face ID','cc3.d':'После первого входа — Face ID. Следующие входы мгновенны.',
+    'cc3.t':'Единый вход','cc3.d':'Один PIN открывает все доступные сотруднику разделы. Переключение между ними — без повторного входа.',
     'hw.l':'Как это работает','hw.t':'Запуск за минуты.','hw.s':'Четыре шага — и весь ресторан под контролем.',
     'step1.t':'Регистрация','step1.d':'Аккаунт за 30 секунд.','step2.t':'Подписка','step2.d':'7 дней бесплатно, карта не нужна.','step3.t':'Команда','step3.d':'Доступ по QR и PIN.','step4.t':'Контроль','step4.d':'Аналитика и отчёты в любое время.',
     'pr.l':'Тарифы','pr.t':'Прозрачные цены.','pr.s':'Сменить или отменить тариф — в любой момент.',
@@ -825,7 +825,7 @@ const T = {
     'cc.label':'Team access','cc.title':'No passwords.','cc.sub':'Every staff member signs into their app via QR and PIN. No registration, no email, no forgotten passwords.',
     'cc1.t':'QR sign-in','cc1.d':'The owner shows a QR. Staff scan it — and the device is linked to the venue.',
     'cc2.t':'PIN access','cc2.d':'A 4-digit PIN, set by the owner. Each person gets their own code and their own apps.',
-    'cc3.t':'Face ID','cc3.d':'After the first sign-in, enable Face ID. Every login after is instant.',
+    'cc3.t':'One sign-in','cc3.d':'One PIN opens every section the staff member can access. Switching between them needs no repeat login.',
     'hw.l':'How it works','hw.t':'Live in minutes.','hw.s':'Four steps, and your whole restaurant is under control.',
     'step1.t':'Register','step1.d':'An account in 30 seconds.','step2.t':'Subscribe','step2.d':'7 days free, no card required.','step3.t':'Team','step3.d':'Access by QR and PIN.','step4.t':'Control','step4.d':'Analytics and reports, anytime.',
     'pr.l':'Pricing','pr.t':'Transparent pricing.','pr.s':'Switch or cancel anytime.',
@@ -856,7 +856,7 @@ const T = {
     'cc.label':"Accesso per il team",'cc.title':"Niente password.",'cc.sub':"Ogni membro del team accede alla sua app con QR e PIN. Nessuna registrazione, nessuna email, nessuna password dimenticata.",
     'cc1.t':"Accesso QR",'cc1.d':"Il titolare mostra un QR. Il personale lo scansiona — e il dispositivo resta legato al locale.",
     'cc2.t':"Accesso PIN",'cc2.d':"Un PIN di 4 cifre, impostato dal titolare. A ciascuno il proprio codice e le proprie app.",
-    'cc3.t':"Face ID",'cc3.d':"Dopo il primo accesso, attivi Face ID. Ogni accesso successivo è istantaneo.",
+    'cc3.t':"Accesso unico",'cc3.d':"Un solo PIN apre tutte le sezioni a cui il dipendente ha accesso. Passare dall'una all'altra non richiede un nuovo accesso.",
     'hw.l':"Come funziona",'hw.t':"Operativo in pochi minuti.",'hw.s':"Quattro passi, e tutto il ristorante è sotto controllo.",
     'step1.t':"Registrazione",'step1.d':"Un account in 30 secondi.",'step2.t':"Abbonamento",'step2.d':"7 giorni gratis, senza carta.",'step3.t':"Team",'step3.d':"Accesso con QR e PIN.",'step4.t':"Controllo",'step4.d':"Analisi e report, sempre.",
     'pr.l':"Prezzi",'pr.t':"Prezzi trasparenti.",'pr.s':"Cambia o annulla quando vuoi.",
@@ -887,7 +887,7 @@ const T = {
     'cc.label':"Accès équipe",'cc.title':"Sans mot de passe.",'cc.sub':"Chaque membre accède à son app par QR et PIN. Pas d'inscription, pas d'email, pas de mot de passe oublié.",
     'cc1.t':"Connexion QR",'cc1.d':"Le gérant montre un QR. L'employé le scanne — et l'appareil reste lié à l'établissement.",
     'cc2.t':"Accès PIN",'cc2.d':"Un PIN à 4 chiffres, défini par le gérant. À chacun son code et ses apps.",
-    'cc3.t':"Face ID",'cc3.d':"Après la première connexion, activez Face ID. Les suivantes sont instantanées.",
+    'cc3.t':"Connexion unique",'cc3.d':"Un seul PIN ouvre toutes les sections autorisées. Passer de l'une à l'autre ne demande aucune reconnexion.",
     'hw.l':"Fonctionnement",'hw.t':"Opérationnel en minutes.",'hw.s':"Quatre étapes, et tout le restaurant est sous contrôle.",
     'step1.t':"Inscription",'step1.d':"Un compte en 30 secondes.",'step2.t':"Abonnement",'step2.d':"7 jours gratuits, sans carte.",'step3.t':"Équipe",'step3.d':"Accès par QR et PIN.",'step4.t':"Contrôle",'step4.d':"Analyses et rapports, à tout moment.",
     'pr.l':"Tarifs",'pr.t':"Des tarifs transparents.",'pr.s':"Changez ou annulez à tout moment.",
@@ -918,7 +918,7 @@ const T = {
     'cc.label':"Komanda girişi",'cc.title':"Parolsuz giriş.",'cc.sub':"Hər işçi öz tətbiqinə QR və PIN ilə daxil olur. Qeydiyyatsız, e-poçtsuz, unudulan parolsuz.",
     'cc1.t':"QR-giriş",'cc1.d':"Sahib QR göstərir. İşçi skan edir — və cihaz müəssisəyə bağlanır.",
     'cc2.t':"PIN-giriş",'cc2.d':"4 rəqəmli PIN sahib tərəfindən təyin olunur. Hər kəsə öz kodu və öz tətbiqləri.",
-    'cc3.t':"Face ID",'cc3.d':"İlk girişdən sonra Face ID-ni aktiv edin. Sonrakı girişlər ani olur.",
+    'cc3.t':"Vahid giriş",'cc3.d':"Bir PIN işçinin icazəli bütün bölmələrini açır. Onlar arasında keçid təkrar giriş tələb etmir.",
     'hw.l':"Necə işləyir",'hw.t':"Dəqiqələrdə işə hazır.",'hw.s':"Dörd addım — və bütün restoran nəzarətdədir.",
     'step1.t':"Qeydiyyat",'step1.d':"30 saniyəyə hesab.",'step2.t':"Abunəlik",'step2.d':"7 gün pulsuz, kart lazım deyil.",'step3.t':"Komanda",'step3.d':"QR və PIN ilə giriş.",'step4.t':"Nəzarət",'step4.d':"Analitika və hesabatlar istənilən vaxt.",
     'pr.l':"Qiymətlər",'pr.t':"Şəffaf qiymətlər.",'pr.s':"İstənilən vaxt dəyiş və ya ləğv et.",
@@ -949,7 +949,7 @@ const T = {
     'cc.label':"Ekip erişimi",'cc.title':"Şifre yok.",'cc.sub':"Her ekip üyesi kendi uygulamasına QR ve PIN ile girer. Kayıt yok, e-posta yok, unutulan şifre yok.",
     'cc1.t':"QR ile giriş",'cc1.d':"Sahip bir QR gösterir. Personel okutur — ve cihaz mekâna bağlanır.",
     'cc2.t':"PIN erişimi",'cc2.d':"Sahibin belirlediği 4 haneli PIN. Herkese kendi kodu ve kendi uygulamaları.",
-    'cc3.t':"Face ID",'cc3.d':"İlk girişten sonra Face ID'yi açın. Sonraki girişler anında.",
+    'cc3.t':"Tek giriş",'cc3.d':"Tek PIN, çalışanın erişebildiği tüm bölümleri açar. Aralarında geçiş için tekrar giriş gerekmez.",
     'hw.l':"Nasıl çalışır",'hw.t':"Dakikalar içinde hazır.",'hw.s':"Dört adım — ve tüm restoran kontrol altında.",
     'step1.t':"Kayıt",'step1.d':"30 saniyede hesap.",'step2.t':"Abonelik",'step2.d':"7 gün ücretsiz, kart gerekmez.",'step3.t':"Ekip",'step3.d':"QR ve PIN ile erişim.",'step4.t':"Kontrol",'step4.d':"Her an analiz ve rapor.",
     'pr.l':"Fiyatlar",'pr.t':"Şeffaf fiyatlar.",'pr.s':"İstediğin zaman değiştir ya da iptal et.",
@@ -980,7 +980,7 @@ const T = {
     'cc.label':"Доступ для команди",'cc.title':"Вхід без паролів.",'cc.sub':"Кожен співробітник входить у свій застосунок через QR і PIN. Без реєстрації, без email, без забутих паролів.",
     'cc1.t':"QR-вхід",'cc1.d':"Власник показує QR. Співробітник сканує — і пристрій прив'язується до закладу.",
     'cc2.t':"PIN-доступ",'cc2.d':"4-значний PIN задає власник. Кожному — свій код і свій набір застосунків.",
-    'cc3.t':"Face ID",'cc3.d':"Після першого входу — увімкніть Face ID. Наступні входи миттєві.",
+    'cc3.t':"Єдиний вхід",'cc3.d':"Один PIN відкриває всі доступні працівнику розділи. Перемикання між ними не потребує повторного входу.",
     'hw.l':"Як це працює",'hw.t':"Запуск за хвилини.",'hw.s':"Чотири кроки — і весь ресторан під контролем.",
     'step1.t':"Реєстрація",'step1.d':"Акаунт за 30 секунд.",'step2.t':"Підписка",'step2.d':"7 днів безкоштовно, без картки.",'step3.t':"Команда",'step3.d':"Доступ через QR і PIN.",'step4.t':"Контроль",'step4.d':"Аналітика та звіти будь-коли.",
     'pr.l':"Ціни",'pr.t':"Прозорі ціни.",'pr.s':"Змінити чи скасувати тариф — будь-коли.",
@@ -1011,7 +1011,7 @@ const T = {
     'cc.label':"Команда қолжетімі",'cc.title':"Парольсіз кіру.",'cc.sub':"Әр қызметкер өз қолданбасына QR және PIN арқылы кіреді. Тіркеусіз, email-сіз, ұмытылған парольсіз.",
     'cc1.t':"QR-кіру",'cc1.d':"Иесі QR көрсетеді. Қызметкер сканерлейді — құрылғы мекемеге байланады.",
     'cc2.t':"PIN-қолжетім",'cc2.d':"4 таңбалы PIN-ді иесі белгілейді. Әрқайсысына — өз коды мен өз қолданбалары.",
-    'cc3.t':"Face ID",'cc3.d':"Алғашқы кіруден кейін Face ID-ді қосыңыз. Келесі кірулер лезде.",
+    'cc3.t':"Бірыңғай кіру",'cc3.d':"Бір PIN қызметкерге қолжетімді барлық бөлімдерді ашады. Олардың арасында ауысу қайта кіруді қажет етпейді.",
     'hw.l':"Қалай жұмыс істейді",'hw.t':"Минут ішінде іске қосу.",'hw.s':"Төрт қадам — және бүкіл мейрамхана бақылауда.",
     'step1.t':"Тіркелу",'step1.d':"30 секундта аккаунт.",'step2.t':"Жазылым",'step2.d':"7 күн тегін, карта қажет емес.",'step3.t':"Команда",'step3.d':"QR және PIN арқылы қолжетім.",'step4.t':"Бақылау",'step4.d':"Аналитика мен есептер кез келген уақытта.",
     'pr.l':"Бағалар",'pr.t':"Айқын бағалар.",'pr.s':"Кез келген уақытта ауыстыр немесе бас тарт.",
