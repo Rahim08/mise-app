@@ -487,7 +487,10 @@ export default function AnalyticsApp() {
 
     const shiftList = s1.data || []
     setShifts(shiftList); setPrevShifts(s2.data || [])
-    setEmployees(s3.data || []); setCardAmounts(s4.data || []); setAbsences(s5.data || [])
+    // Авто-прогулы (source='auto') — черновик до подтверждения менеджером при закрытии смены.
+    // Исключаем из расчёта ЗП, пока не подтверждены (тогда source='manager'). Фильтр в JS —
+    // чтобы не падать до применения миграции (у старых строк source отсутствует → учитываются).
+    setEmployees(s3.data || []); setCardAmounts(s4.data || []); setAbsences((s5.data || []).filter((a: any) => a.source !== 'auto'))
 
     if (shiftList.length > 0) {
       const ids = shiftList.map((s: any) => s.id)

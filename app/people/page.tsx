@@ -700,33 +700,38 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
 
   const todayRec = history.find(r => r.staff_id === myId && r.date === today)
 
-  // Geolocation + auto check-in
+  // Geolocation — следим за дистанцией пока экран открыт (foreground). Сам приход — по кнопке «Я пришёл».
   useEffect(() => {
     if (isManager || loading) return
     if (!settings?.attendance_enabled || settings?.latitude == null || settings?.longitude == null) return
     if (!navigator.geolocation) { setGeoErr('Геолокация недоступна'); return }
-    navigator.geolocation.getCurrentPosition(
-      async p => {
+    const watchId = navigator.geolocation.watchPosition(
+      p => {
         const d = distMeters(p.coords.latitude, p.coords.longitude, Number(settings.latitude), Number(settings.longitude))
-        setPos({ lat: p.coords.latitude, lng: p.coords.longitude }); setDist(d)
-        if (d <= (settings.geo_radius_m || 150) && !todayRec) {
-          let late: number | null = null, status = 'present'
-          if (mySched?.shift_start) {
-            const [h, m] = mySched.shift_start.split(':').map(Number)
-            const start = new Date(); start.setHours(h, m, 0, 0)
-            late = Math.max(0, Math.round((Date.now() - start.getTime()) / 60000)); status = late > 5 ? 'late' : 'present'
-          }
-          await db.from('attendance_records').upsert(
-            { staff_id: myId, date: today, check_in_at: new Date().toISOString(), check_in_lat: p.coords.latitude, check_in_lng: p.coords.longitude, check_in_distance_m: Math.round(d), late_minutes: late, status, source: 'geo' },
-            { onConflict: 'restaurant_id,staff_id,date' }
-          )
-          toast(status === 'late' ? `Отмечено · опоздание ${late} мин` : 'Приход отмечен'); await load()
-        }
+        setPos({ lat: p.coords.latitude, lng: p.coords.longitude }); setDist(d); setGeoErr('')
       },
       () => setGeoErr('Нет доступа к геолокации'),
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
     )
-  }, [loading, settings])
+    return () => navigator.geolocation.clearWatch(watchId)
+  }, [loading, settings, isManager])
+
+  // Явный приход: доступен только в радиусе заведения, фиксирует точное время и опоздание.
+  const checkIn = async () => {
+    if (!pos || dist == null || todayRec) return
+    if (dist > (settings?.geo_radius_m || 150)) { toast('Вы вне зоны заведения'); return }
+    let late: number | null = null, status = 'present'
+    if (mySched?.shift_start) {
+      const [h, m] = mySched.shift_start.split(':').map(Number)
+      const start = new Date(); start.setHours(h, m, 0, 0)
+      late = Math.max(0, Math.round((Date.now() - start.getTime()) / 60000)); status = late > 5 ? 'late' : 'present'
+    }
+    await db.from('attendance_records').upsert(
+      { staff_id: myId, date: today, check_in_at: new Date().toISOString(), check_in_lat: pos.lat, check_in_lng: pos.lng, check_in_distance_m: Math.round(dist), late_minutes: late, status, source: 'geo' },
+      { onConflict: 'restaurant_id,staff_id,date' }
+    )
+    toast(status === 'late' ? `Отмечено · опоздание ${late} мин` : 'Приход отмечен'); await load()
+  }
 
   const checkOut = async () => {
     if (!pos) return
@@ -819,7 +824,10 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
           ) : dist == null ? (
             <div style={{ fontSize: 15, color: t.text3 }}>Определяем местоположение…</div>
           ) : inRange ? (
-            <div style={{ fontSize: 16, fontWeight: 700, color: accent }}>Вы на месте — отмечаем…</div>
+            <>
+              <div style={{ fontSize: 15, color: t.text3, marginBottom: 2 }}>Вы на месте</div>
+              <button onClick={checkIn} style={{ marginTop: 12, padding: '13px 36px', borderRadius: 14, border: 'none', background: accent, color: '#fff', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${accent}55` }}>Я пришёл</button>
+            </>
           ) : (
             <>
               <div style={{ fontSize: 18, fontWeight: 700, color: t.text }}>Подойдите ближе</div>

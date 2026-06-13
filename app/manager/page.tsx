@@ -76,6 +76,8 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [absences, setAbsences] = useState<string[]>([])
+  // employee_id'ы с авто-прогулом (source='auto') — черновик от геоконтроля, ещё не подтверждён менеджером
+  const [autoAbsences, setAutoAbsences] = useState<Set<string>>(new Set())
   const [empExtras, setEmpExtras] = useState<Record<string, string>>({})
   const [catAmounts, setCatAmounts] = useState<Record<string, string>>({})
   const [catNotes, setCatNotes] = useState<Record<string, string>>({})
@@ -110,6 +112,14 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
 
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2500) }
 
+  // Прогулы грузим ПО ДАТЕ (а не по shift_id): авто-прогул от геоконтроля создаётся cron'ом
+  // ещё до того, как менеджер открыл смену, поэтому shift_id у него может отсутствовать.
+  const loadAbsencesByDate = async (rid: string, dateStr: string) => {
+    const { data: abs } = await db.from('shift_absences').select('*').eq('restaurant_id', rid).eq('date', dateStr)
+    setAbsences((abs || []).map((a: any) => a.employee_id))
+    setAutoAbsences(new Set((abs || []).filter((a: any) => a.source === 'auto').map((a: any) => a.employee_id)))
+  }
+
   const loadDay = async (rid: string, date: Date, emps: Employee[], cats: Category[]) => {
     setLoading(true)
     const dateStr = fmtDate(date)
@@ -135,8 +145,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
         else if (e.category_id) { amounts[e.category_id] = String(e.amount); if (e.note) notes[e.category_id] = e.note }
       })
       setCatAmounts(amounts); setCatNotes(notes); setEmpExtras(extras)
-      const { data: abs } = await db.from('shift_absences').select('employee_id').eq('shift_id', sh.id)
-      setAbsences(abs?.map((a: any) => a.employee_id) || [])
+      await loadAbsencesByDate(rid, dateStr)
       const { data: inkList } = await db.from('inkassations').select('*').eq('shift_id', sh.id).limit(1)
       const ink = Array.isArray(inkList) ? inkList[0] : inkList
       if (ink) {
@@ -145,7 +154,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       } else { setInkExpense(''); setInkReason(''); setInkSalary(''); setInkSalaryNote('') }
     } else {
       setShift(null); setLocked(false); setIncome(''); setIncomeCard(''); setInkSum(''); setInkExpense(''); setInkReason(''); setInkSalary(''); setInkSalaryNote('')
-      setCatAmounts({}); setCatNotes({}); setAbsences([]); setEmpExtras({})
+      setCatAmounts({}); setCatNotes({}); setAbsences([]); setAutoAbsences(new Set()); setEmpExtras({})
     }
     setLoading(false)
   }
@@ -174,6 +183,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       }).select().single()
       if (sh) {
         setShift({ ...sh, opening_balance: openingBalance })
+        await loadAbsencesByDate(restaurantId, fmtDate(currentDate)) // подтянуть авто-прогулы дня
         showToast('Смена открыта')
       } else if (error?.code === '23505') {
         // Shift already exists — reload it
@@ -188,13 +198,18 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
 
   const toggleAbsence = async (empId: string) => {
     if (!shift) return
+    const dateStr = fmtDate(currentDate)
     if (absences.includes(empId)) {
-      await db.from('shift_absences').delete().eq('shift_id', shift.id).eq('employee_id', empId)
+      // ключ по дате — чтобы можно было снять и авто-прогул (у него может не быть shift_id)
+      await db.from('shift_absences').delete().eq('restaurant_id', restaurantId).eq('date', dateStr).eq('employee_id', empId)
       setAbsences(absences.filter(id => id !== empId))
     } else {
-      await db.from('shift_absences').insert({ shift_id: shift.id, restaurant_id: restaurantId, employee_id: empId, date: fmtDate(currentDate) })
+      // ручная отметка менеджера → source по умолчанию 'manager' (учитывается в ЗП сразу)
+      await db.from('shift_absences').insert({ shift_id: shift.id, restaurant_id: restaurantId, employee_id: empId, date: dateStr })
       setAbsences([...absences, empId])
     }
+    // явное действие менеджера снимает «черновик»-маркер
+    if (autoAbsences.has(empId)) setAutoAbsences(prev => { const n = new Set(prev); n.delete(empId); return n })
   }
 
   const calc = () => {
@@ -242,6 +257,11 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
         salary, salary_note: inkSalaryNote || null, balance
       })
     }
+    // Подтверждаем прогулы этого дня: привязываем к смене и снимаем «черновик» (source→manager),
+    // только теперь авто-прогулы попадают в вычет ЗП в Аналитике. До миграции колонки source нет —
+    // db.from вернёт ошибку молча (не бросит), что безвредно: авто-прогулов до миграции не бывает.
+    await db.from('shift_absences').update({ shift_id: sh.id, source: 'manager' }).eq('restaurant_id', restaurantId).eq('date', fmtDate(dateForInk))
+    setAutoAbsences(new Set())
     setShift({ ...sh, income: inc, inkassation: ink, total_expense: totalExp, closing_balance: balance })
     return balance
   }
@@ -357,10 +377,14 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
               <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
                 {employees.map((emp, i) => {
                   const absent = absences.includes(emp.id)
+                  const isAuto = autoAbsences.has(emp.id)
                   const extra = empExtras[emp.id] || ''
                   return (
                     <div key={emp.id} style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 10, borderBottom: i < employees.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
-                      <div style={{ flex: 1, fontSize: 15, color: absent ? t.text4 : t.text, textDecoration: absent ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{emp.name}</div>
+                      <div style={{ flex: 1, fontSize: 15, color: absent ? t.text4 : t.text, textDecoration: absent ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{emp.name}</span>
+                        {isAuto && absent && <span title="Авто-прогул по геоконтролю. Проверьте и сохраните смену." style={{ fontSize: 9, fontWeight: 800, color: t.orange, background: `${t.orange}1a`, padding: '2px 6px', borderRadius: 6, textTransform: 'uppercase', letterSpacing: 0.3, flexShrink: 0, textDecoration: 'none' }}>авто</span>}
+                      </div>
                       <input type="number" value={extra}
                         onChange={e => setEmpExtras({ ...empExtras, [emp.id]: e.target.value })}
                         placeholder="€ 0"

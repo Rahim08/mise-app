@@ -61,6 +61,51 @@ async function sendTrialReminders(admin: any, now: Date): Promise<number> {
   }
 }
 
+// Авто-прогул: для опубликованных смен сегодня, где с начала смены прошло grace-часов
+// и нет гео-чек-ина, ставим черновик shift_absences (source='auto'). Менеджер увидит «X»
+// при закрытии смены и подтвердит/снимет. Server-side, без фоновой геолокации → батарея не тратится.
+// Полностью обёрнуто; no-op до применения миграции attendance-automation.sql.
+async function autoMarkNoShows(admin: any, now: Date): Promise<number> {
+  try {
+    const today = fmtDate(now)
+    const { data: settings } = await admin.from('restaurant_settings').select('restaurant_id, attendance_enabled, no_show_grace_hours')
+    const cfg: Record<string, any> = {}; (settings || []).forEach((s: any) => { cfg[s.restaurant_id] = s })
+
+    const { data: scheds } = await admin.from('staff_schedules')
+      .select('restaurant_id, staff_id, date, shift_start')
+      .eq('published', true).eq('date', today).not('shift_start', 'is', null)
+    if (!scheds?.length) return 0
+
+    const staffIds = [...new Set(scheds.map((s: any) => s.staff_id))]
+    const { data: staffRows } = await admin.from('staff').select('id, employee_id').in('id', staffIds)
+    const empOf: Record<string, string> = {}; (staffRows || []).forEach((s: any) => { if (s.employee_id) empOf[s.id] = s.employee_id })
+
+    const { data: att } = await admin.from('attendance_records').select('staff_id').eq('date', today)
+    const checkedIn = new Set((att || []).map((a: any) => a.staff_id))
+    const { data: existAbs } = await admin.from('shift_absences').select('employee_id').eq('date', today)
+    const hasAbs = new Set((existAbs || []).map((a: any) => a.employee_id))
+
+    const inserts: any[] = []
+    for (const sc of scheds) {
+      const c = cfg[sc.restaurant_id]
+      if (!c?.attendance_enabled) continue            // геоконтроль выключен у этой точки
+      if (checkedIn.has(sc.staff_id)) continue          // отметился — не прогул
+      const empId = empOf[sc.staff_id]
+      if (!empId || hasAbs.has(empId)) continue         // нет связи staff↔employee или прогул уже есть
+      const grace = Number(c.no_show_grace_hours ?? 3)
+      const [h, m] = String(sc.shift_start).split(':').map(Number)
+      const start = new Date(now); start.setHours(h || 0, m || 0, 0, 0)
+      if (now.getTime() < start.getTime() + grace * 3600000) continue // grace ещё не истёк
+      inserts.push({ restaurant_id: sc.restaurant_id, employee_id: empId, date: today, source: 'auto', auto_reason: 'no_show' })
+      hasAbs.add(empId)
+    }
+    if (inserts.length) await admin.from('shift_absences').insert(inserts)
+    return inserts.length
+  } catch {
+    return 0
+  }
+}
+
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET
   if (!secret || req.headers.get('authorization') !== `Bearer ${secret}`) {
@@ -77,7 +122,8 @@ export async function GET(req: NextRequest) {
     .eq('published', true).in('date', [today, tomorrow])
   if (!schedules?.length) {
     const trialEmails = await sendTrialReminders(admin, now)
-    return NextResponse.json({ ok: true, sent: 0, trialEmails })
+    const noShows = await autoMarkNoShows(admin, now)
+    return NextResponse.json({ ok: true, sent: 0, trialEmails, noShows })
   }
 
   // Уже отправленные напоминания за последние 2 дня → set(schedule_id)
@@ -112,5 +158,6 @@ export async function GET(req: NextRequest) {
   }
 
   const trialEmails = await sendTrialReminders(admin, now)
-  return NextResponse.json({ ok: true, sent: inserts.length, trialEmails })
+  const noShows = await autoMarkNoShows(admin, now)
+  return NextResponse.json({ ok: true, sent: inserts.length, trialEmails, noShows })
 }
