@@ -418,8 +418,9 @@ export default function AnalyticsApp() {
   const [includeCard, setIncludeCard] = useState(false) // restaurant_settings.include_card_in_analytics
   const [revGoal, setRevGoal] = useState(0)             // restaurant_settings.monthly_revenue_goal (цель выручки на месяц)
   const [expSalary, setExpSalary] = useState<string | null>(null) // раскрытая карточка ЗП (сворачиваемые)
+  const [expDay, setExpDay] = useState<string | null>(null)       // раскрытый день в «По дням» (кальян)
   // Кальян: настройки + остатки (all-time) + строки смен кальянщика за месяц
-  const [hk, setHk] = useState<{ price: number; portion: number; stockG: number; issuedG: number; allRows: any[]; types: any[] }>({ price: 0, portion: 20, stockG: 0, issuedG: 0, allRows: [], types: [] })
+  const [hk, setHk] = useState<{ price: number; portion: number; stockG: number; issuedG: number; allRows: any[]; types: any[]; stockRows: any[] }>({ price: 0, portion: 20, stockG: 0, issuedG: 0, allRows: [], types: [], stockRows: [] })
   const [hookahRows, setHookahRows] = useState<any[]>([])
   const [shiftsRaw, setShifts] = useState<any[]>([])
   const [prevShiftsRaw, setPrevShifts] = useState<any[]>([])
@@ -460,8 +461,8 @@ export default function AnalyticsApp() {
       setHk(h => ({ ...h, price: Number(r?.hookah_price || 0), portion: Number(r?.hookah_portion_g || 20) }))
     })
     // Кальян: склад, выдано в зал (all-time) и продано (all-time) — для остатка «в заведении»
-    db.from('tobacco_stock').select('quantity_g').then(({ data }: any) =>
-      setHk(h => ({ ...h, stockG: (data || []).reduce((s: number, r: any) => s + (r.quantity_g || 0), 0) })))
+    db.from('tobacco_stock').select('brand, flavor, flavor_name, quantity_g, min_quantity_g').then(({ data }: any) =>
+      setHk(h => ({ ...h, stockRows: data || [], stockG: (data || []).reduce((s: number, r: any) => s + (r.quantity_g || 0), 0) })))
     db.from('tobacco_movements').select('quantity_g, type').then(({ data }: any) =>
       setHk(h => ({ ...h, issuedG: (data || []).filter((r: any) => r.type === 'out').reduce((s: number, r: any) => s + (r.quantity_g || 0), 0) })))
     db.from('hookah_sales').select('quantity, portion_g').then(({ data }: any) =>
@@ -1239,6 +1240,39 @@ export default function AnalyticsApp() {
                   <div style={{ fontSize: 20, fontWeight: 800, color: t.orange }}>{fmtKg(venueG)}</div>
                 </div>
 
+                {/* Склад по брендам — read-only обзор для владельца (полное управление в Stash) */}
+                {hk.stockRows.length > 0 && (() => {
+                  const byBrand = new Map<string, { g: number; low: number }>()
+                  hk.stockRows.forEach((r: any) => {
+                    const b = r.brand || '—'
+                    const x = byBrand.get(b) || { g: 0, low: 0 }
+                    x.g += Number(r.quantity_g || 0)
+                    if (Number(r.quantity_g || 0) <= Number(r.min_quantity_g || 0)) x.low += 1
+                    byBrand.set(b, x)
+                  })
+                  const brands = [...byBrand.entries()].sort((a, b) => b[1].g - a[1].g)
+                  const lowTotal = brands.reduce((s, [, x]) => s + x.low, 0)
+                  return (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 8px' }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>Склад по брендам</div>
+                        {lowTotal > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: t.red, background: `${t.red}14`, padding: '2px 8px', borderRadius: 10 }}>{lowTotal} заканчив.</span>}
+                      </div>
+                      <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 12 }}>
+                        {brands.map(([b, x], i) => (
+                          <div key={b} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 16px', borderBottom: i < brands.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                            <span style={{ fontSize: 14, color: t.text, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 7 }}>
+                              {x.low > 0 && <span style={{ width: 7, height: 7, borderRadius: '50%', background: t.red, flexShrink: 0 }} />}
+                              {b}
+                            </span>
+                            <span style={{ fontSize: 14, fontWeight: 700, color: x.low > 0 ? t.red : t.text2 }}>{fmtKg(x.g)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )
+                })()}
+
                 {hookahRows.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '40px 20px', color: t.text3 }}>
                     <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Смен пока нет</div>
@@ -1291,16 +1325,47 @@ export default function AnalyticsApp() {
                     </div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>По дням</div>
                     <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
-                      {[...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([d, n], i, arr) => (
-                        <div key={d} style={{ display: 'flex', justifyContent: 'space-between', padding: '11px 16px', borderBottom: i < arr.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
-                          <span style={{ fontSize: 14, color: t.text }}>{dd(d)}</span>
-                          <span style={{ fontSize: 14 }}>
-                            <span style={{ fontWeight: 700, color: t.orange }}>{n.paid}</span>
-                            {n.total > n.paid && <span style={{ color: t.purple }}> +{n.total - n.paid} бесп.</span>}
-                            <span style={{ color: t.text3 }}> · {currency}{fv(n.paid * hk.price)}</span>
-                          </span>
-                        </div>
-                      ))}
+                      {[...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([d, n], i, arr) => {
+                        const open = expDay === d
+                        // Разбивка дня по подкатегориям (видам) — считаем при раскрытии
+                        const dayByType = new Map<string, { paid: number; free: number }>()
+                        hookahRows.forEach((r: any) => {
+                          if (r.date !== d || !r.hookah_type_id) return
+                          const x = dayByType.get(r.hookah_type_id) || { paid: 0, free: 0 }
+                          if (r.is_free) x.free += r.quantity || 0; else x.paid += r.quantity || 0
+                          dayByType.set(r.hookah_type_id, x)
+                        })
+                        const dayTypes = [...dayByType.entries()].sort((a, b) => (b[1].paid + b[1].free) - (a[1].paid + a[1].free))
+                        return (
+                          <div key={d} style={{ borderBottom: i < arr.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                            <button onClick={() => setExpDay(open ? null : d)} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 16px', background: 'transparent', border: 'none', fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}>
+                              <span style={{ fontSize: 14, color: t.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <svg width="8" height="13" fill="none" stroke={t.text3} strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 10 18" style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .25s ease' }}><path d="M2 1l7 8-7 8" /></svg>
+                                {dd(d)}
+                              </span>
+                              <span style={{ fontSize: 14 }}>
+                                <span style={{ fontWeight: 700, color: t.orange }}>{n.paid}</span>
+                                {n.total > n.paid && <span style={{ color: t.purple }}> +{n.total - n.paid} бесп.</span>}
+                                <span style={{ color: t.text3 }}> · {currency}{fv(n.paid * hk.price)}</span>
+                              </span>
+                            </button>
+                            <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .28s cubic-bezier(.32,.72,0,1)' }}>
+                              <div style={{ overflow: 'hidden' }}>
+                                <div style={{ padding: '0 16px 12px 36px' }}>
+                                  {dayTypes.length === 0
+                                    ? <div style={{ fontSize: 12, color: t.text3, paddingBottom: 4 }}>Без разбивки по видам</div>
+                                    : dayTypes.map(([id, x]) => (
+                                      <div key={id} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13 }}>
+                                        <span style={{ color: t.text2 }}>{hk.types.find((tp: any) => tp.id === id)?.name || '—'}</span>
+                                        <span><span style={{ fontWeight: 600, color: t.orange }}>{x.paid}</span>{x.free > 0 && <span style={{ color: t.purple }}> +{x.free} бесп.</span>}</span>
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </>
                 )}
