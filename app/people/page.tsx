@@ -1561,6 +1561,32 @@ function roleLabel(role?: string) {
   return role ? (m[role] || role) : '—'
 }
 
+// ── SHIFTS HUB (Смены/Расписание + Явка + Обмены в одной вкладке) ───────────────
+// IA: вместо трёх вкладок в баре — один раздел с внутренним сегментом. «Я пришёл»
+// (чек-ин) живёт в «Явке», обмены сменами — рядом, расписание/мои смены — основной вид.
+function ShiftsHub({ me, isManager, restaurantId, accent, t, toast }: { me: any; isManager: boolean; restaurantId: string; accent: string; t: any; toast: (m: string) => void }) {
+  const [view, setView] = useState<'shifts' | 'attendance' | 'swaps'>('shifts')
+  const views: [string, string][] = [
+    ['shifts', isManager ? 'Расписание' : 'Мои смены'],
+    ['attendance', 'Явка'],
+    ['swaps', 'Обмены'],
+  ]
+  return (
+    <div>
+      <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
+        {views.map(([id, label]) => (
+          <button key={id} onClick={() => setView(id as any)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: view === id ? 700 : 500, cursor: 'pointer', background: view === id ? t.surface : 'transparent', color: view === id ? accent : t.text3, boxShadow: view === id ? t.sh2 : 'none' }}>{label}</button>
+        ))}
+      </div>
+      {view === 'shifts' && (isManager
+        ? <ScheduleTab restaurantId={restaurantId} accent={accent} t={t} toast={toast} />
+        : <MyShiftsTab myId={me.id || ''} accent={accent} t={t} />)}
+      {view === 'attendance' && <AttendanceTab me={me} isManager={isManager} accent={accent} t={t} toast={toast} />}
+      {view === 'swaps' && <SwapsTab me={me} isManager={isManager} accent={accent} t={t} toast={toast} />}
+    </div>
+  )
+}
+
 // ── MAIN ─────────────────────────────────────────────────────────────────────────
 
 function PeopleApp({ restaurantId }: { restaurantId: string }) {
@@ -1569,7 +1595,7 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
   const accent = t.dark ? '#5e5ce6' : '#5856d6'
   const me = getMe(restaurantId)
   const isManager = !!me.is_owner || me.role === 'manager'
-  const [tab, setTab] = useState<string>(isManager ? 'schedule' : 'shifts')
+  const [tab, setTab] = useState<string>('shifts')
   const [toast, setToast] = useState('')
   const [showNotif, setShowNotif] = useState(false)
   const [unread, setUnread] = useState(0)
@@ -1601,13 +1627,9 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
   // Первый таб зависит от роли; «Зал» (стоп-лист/заказы/чек-листы/техкарты) — у всех.
   // Уведомления переехали в колокольчик хедера.
   const TABS = [
-    isManager
-      ? { id: 'schedule', label: 'Расписание', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18M8 14h2M14 14h2M8 18h2" /></svg> }
-      : { id: 'shifts', label: 'Смены', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },
+    { id: 'shifts', label: isManager ? 'Расписание' : 'Смены', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },
     { id: 'tasks', label: 'Задачи', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /><path d="M9 13l2 2 4-4" /></svg> },
     { id: 'ops', label: 'Зал', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M3 9l1.2-5h15.6L21 9" /><path d="M4 9v11a1 1 0 001 1h14a1 1 0 001-1V9" /><path d="M3 9h18" /><path d="M9 21v-6h6v6" /></svg> },
-    { id: 'swaps', label: 'Обмены', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 014-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 01-4 4H3" /></svg> },
-    { id: 'attendance', label: 'Явка', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0118 0z" /><circle cx="12" cy="10" r="3" /></svg> },
     { id: 'salary', label: 'Зарплата', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="2" y="6" width="20" height="13" rx="2.5" /><path d="M2 10h20" /><circle cx="17.5" cy="14.5" r="1.4" fill="currentColor" stroke="none" /></svg> },
   ]
 
@@ -1642,12 +1664,9 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
       {/* CONTENT */}
       <div style={{ position: 'fixed', top: 56, left: 0, right: 0, bottom: 82, overflowY: 'auto', background: t.bg }}>
         <div style={{ padding: '16px 16px 28px', maxWidth: 640, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
-          {tab === 'schedule' && isManager && <ScheduleTab restaurantId={restaurantId} accent={accent} t={t} toast={showToast} />}
-          {tab === 'shifts' && !isManager && <MyShiftsTab myId={me.id || ''} accent={accent} t={t} />}
+          {tab === 'shifts' && <ShiftsHub me={me} isManager={isManager} restaurantId={restaurantId} accent={accent} t={t} toast={showToast} />}
           {tab === 'tasks' && <TasksTab isManager={isManager} myId={me.id || ''} accent={accent} t={t} toast={showToast} />}
           {tab === 'ops' && <OpsTab me={me} isManager={isManager} accent={accent} t={t} toast={showToast} />}
-          {tab === 'swaps' && <SwapsTab me={me} isManager={isManager} accent={accent} t={t} toast={showToast} />}
-          {tab === 'attendance' && <AttendanceTab me={me} isManager={isManager} accent={accent} t={t} toast={showToast} />}
           {tab === 'salary' && <SalaryTab me={me} isManager={isManager} accent={accent} t={t} />}
         </div>
       </div>
