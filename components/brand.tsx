@@ -99,13 +99,15 @@ const BRAND_FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif
 
 // Словесный знак W2: «mise», акцентная «e». color — базовый цвет текста
 // (по умолчанию CSS-переменная дашборда; в экранах с собственной темой передавать явно).
-export function Wordmark({ size = 22, color = 'var(--tx)' }: { size?: number; color?: string }) {
+export function Wordmark({ size = 22, color = 'var(--tx)', accent = ACCENT }: { size?: number; color?: string; accent?: string }) {
+  // accent = цвет «e». По умолчанию серый (#8e8e93) = бренд «в покое»; внутри приложения
+  // передаём цвет приложения → «e» загорается, сигналя «ты сейчас в этом приложении».
   return (
     <span style={{
       fontWeight: 800, fontSize: size, letterSpacing: '-.05em', lineHeight: 1,
       color, whiteSpace: 'nowrap', fontFamily: BRAND_FONT,
     }}>
-      mis<span style={{ color: ACCENT }}>e</span>
+      mis<span style={{ color: accent }}>e</span>
     </span>
   )
 }

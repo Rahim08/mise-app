@@ -7,6 +7,7 @@ import { Segmented } from '@/components/Segmented'
 import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
 import { AppLoading } from '@/components/AppLoading'
+import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -568,10 +569,7 @@ export default function StashApp() {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-            <span style={{ fontWeight: 800, fontSize: 18, color: t.orange, letterSpacing: -0.8, fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif' }}>mise</span>
-            <span style={{ fontWeight: 400, fontSize: 17, color: t.text, letterSpacing: -0.3 }}>Stash</span>
-          </div>
+          <AppSwitchBrand name="Stash" accent={t.orange} color={t.text} muted={t.text3} size={18} />
         </div>
         <button
           onClick={() => { setEditBatch(null); setMovRows([newRow()]); setMovReason(''); setShowAddMov(true) }}

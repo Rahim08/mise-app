@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
+import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -1608,9 +1609,9 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
 
       {/* HEADER */}
       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 300, height: 56, background: t.hbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderBottom: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-          <span style={{ fontWeight: 800, fontSize: 18, color: accent, letterSpacing: -0.8 }}>mise</span>
-          <span style={{ fontWeight: 400, fontSize: 17, color: t.text, letterSpacing: -0.3 }}>People</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <AppSwitchBrand name="People" accent={accent} color={t.text} muted={t.text3} size={18} />
+          <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4, color: accent, background: `${accent}1a`, padding: '2px 6px', borderRadius: 6, textTransform: 'uppercase' }}>Beta</span>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {me.id && (
