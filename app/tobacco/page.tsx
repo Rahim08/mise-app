@@ -132,7 +132,7 @@ function fmtDay(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-function HookahShiftTab({ restaurantId, t, toast }: { restaurantId: string; t: ReturnType<typeof useTheme>; toast: (m: string) => void }) {
+function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId: string; t: ReturnType<typeof useTheme>; toast: (m: string) => void; canSeeMoney: boolean }) {
   const today = fmtDay(new Date())
   const [mode, setMode] = useState<'paid' | 'free'>('paid')
   const [types, setTypes] = useState<any[]>([])
@@ -212,12 +212,12 @@ function HookahShiftTab({ restaurantId, t, toast }: { restaurantId: string; t: R
 
   return (
     <div>
-      {/* Итог дня */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
+      {/* Итог дня. Выручку видит только владелец/менеджер (кальянщику деньги не показываем). */}
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${canSeeMoney ? 4 : 3}, 1fr)`, gap: 8, marginBottom: 10 }}>
         {[
           { l: 'Продано', v: String(paidTotal), c: t.orange },
           { l: 'Бесплатно', v: String(freeTotal), c: t.purple },
-          { l: 'Выручка', v: `€${revenue.toLocaleString('de-DE')}`, c: t.green },
+          ...(canSeeMoney ? [{ l: 'Выручка', v: `€${revenue.toLocaleString('de-DE')}`, c: t.green }] : []),
           { l: 'Табака', v: `${grams.toLocaleString('de-DE')} г`, c: t.blue },
         ].map(it => (
           <div key={it.l} style={{ background: t.surface, borderRadius: 14, padding: '12px 8px', boxShadow: t.sh, textAlign: 'center' }}>
@@ -253,7 +253,7 @@ function HookahShiftTab({ restaurantId, t, toast }: { restaurantId: string; t: R
             <div key={tp.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: i < types.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{tp.name}</div>
-                <div style={{ fontSize: 11, color: t.text3, marginTop: 1 }}>€{tp.price} · {tp.portion_g} г</div>
+                <div style={{ fontSize: 11, color: t.text3, marginTop: 1 }}>{canSeeMoney ? `€${tp.price} · ` : ''}{tp.portion_g} г</div>
               </div>
               <input
                 value={q} onChange={e => setQty(tp.id, e.target.value)}
@@ -293,6 +293,10 @@ export default function StashApp() {
   const [mounted, setMounted] = useState(false)
   const [search, setSearch] = useState('')
   const [showEmpty, setShowEmpty] = useState(false)
+  const [showLowOnly, setShowLowOnly] = useState(false)
+  // Кальянщик (роль hookah/waiter) не видит выручку — деньги только владельцу/менеджеру.
+  // Владелец входит по Supabase-сессии (без staff-объекта) → по умолчанию видит.
+  const [canSeeMoney, setCanSeeMoney] = useState(true)
   const [showAddMov, setShowAddMov] = useState(false)
   const [showInv, setShowInv] = useState(false)
   const [movRows, setMovRows] = useState<MovRow[]>([newRow()])
@@ -310,6 +314,13 @@ export default function StashApp() {
   useEffect(() => {
     if (!restaurantId) return
     loadAll(restaurantId)
+    // Роль вошедшего: владелец (нет staff-объекта) или менеджер видят деньги; кальянщик/официант — нет.
+    let role = 'owner'
+    try {
+      const raw = localStorage.getItem('mise_staff_' + restaurantId)
+      if (raw) { const s = JSON.parse(raw); role = s.is_owner ? 'owner' : (s.role || 'staff') }
+    } catch {}
+    setCanSeeMoney(role === 'owner' || role === 'manager')
   }, [restaurantId])
 
   const loadAll = async (rid: string) => {
@@ -332,7 +343,12 @@ export default function StashApp() {
   const outBrands = [...new Set(stock.filter(s => s.quantity_g > 0).map(s => s.brand))].sort()
   const inStockItems = stock.filter(s => s.quantity_g > 0)
   const emptyItems = stock.filter(s => s.quantity_g <= 0)
-  const filteredStock = inStockItems.filter(s => `${s.brand} ${s.flavor}`.toLowerCase().includes(search.toLowerCase()))
+  // Заканчивается = остаток ≤ минимума позиции (fallback 200 г, если минимум не задан)
+  const isLow = (s: any) => s.quantity_g > 0 && s.quantity_g <= (s.min_quantity_g || 200)
+  const lowItems = inStockItems.filter(isLow)
+  const filteredStock = inStockItems
+    .filter(s => `${s.brand} ${s.flavor}`.toLowerCase().includes(search.toLowerCase()))
+    .filter(s => !showLowOnly || isLow(s))
   const brandTotal = (brand: string) => stock.filter(s => s.brand === brand && s.quantity_g > 0).reduce((sum, s) => sum + s.quantity_g, 0)
 
   const updateMovRow = (id: string, field: keyof MovRow, val: string) => {
@@ -524,7 +540,7 @@ export default function StashApp() {
 
           {/* ══ HOOKAH SHIFT ══ */}
           {tab === 'shift' && !loading && (
-            <HookahShiftTab restaurantId={restaurantId} t={t} toast={showToastMsg} />
+            <HookahShiftTab restaurantId={restaurantId} t={t} toast={showToastMsg} canSeeMoney={canSeeMoney} />
           )}
 
           {/* ══ STOCK ══ */}
@@ -551,6 +567,19 @@ export default function StashApp() {
                     <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: t.fill, border: 'none', borderRadius: '50%', width: 20, height: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text3, fontSize: 12 }}>✕</button>
                   )}
                 </div>
+                {lowItems.length > 0 && (
+                  <button
+                    onClick={() => { setShowLowOnly(!showLowOnly); setShowEmpty(false) }}
+                    style={{
+                      padding: '0 14px', borderRadius: 14, flexShrink: 0,
+                      background: showLowOnly ? t.orange : `${t.orange}18`,
+                      border: 'none', color: showLowOnly ? '#fff' : t.orange,
+                      fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                      fontFamily: 'inherit', boxShadow: t.sh, whiteSpace: 'nowrap',
+                    }}>
+                    {lowItems.length} мало
+                  </button>
+                )}
                 {emptyItems.length > 0 && (
                   <button
                     onClick={() => setShowEmpty(!showEmpty)}
@@ -559,7 +588,7 @@ export default function StashApp() {
                       background: showEmpty ? t.red : `${t.red}18`,
                       border: 'none', color: showEmpty ? '#fff' : t.red,
                       fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                      fontFamily: 'inherit', boxShadow: t.sh,
+                      fontFamily: 'inherit', boxShadow: t.sh, whiteSpace: 'nowrap',
                     }}>
                     {emptyItems.length} пусто
                   </button>
@@ -570,7 +599,7 @@ export default function StashApp() {
               <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
                 <StatCard label="Позиций" value={String(stock.length)} color={t.text} t={t} />
                 <StatCard label="В наличии" value={String(inStockItems.length)} color={t.green} t={t} />
-                <StatCard label="Мало" value={String(inStockItems.filter(s => s.quantity_g <= 200).length)} color={t.orange} t={t} />
+                <StatCard label="Мало" value={String(lowItems.length)} color={t.orange} t={t} />
               </div>
 
               {/* Stock list */}
@@ -591,7 +620,7 @@ export default function StashApp() {
                     </div>
                     <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 8, boxShadow: t.sh }}>
                       {items.map((item, i) => {
-                        const low = item.quantity_g <= 200
+                        const low = isLow(item)
                         const pct = Math.min(item.quantity_g / 1000 * 100, 100)
                         return (
                           <div key={item.id} style={{
