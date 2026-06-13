@@ -679,23 +679,6 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
   const [geoErr, setGeoErr] = useState('')
   const [loading, setLoading] = useState(true)
   const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null)
-  // Мой расчёт зарплаты (HR-запись находится по имени — staff↔employees связаны именем)
-  const [pay, setPay] = useState<{ salary: number; absences: number; deduct: number; card: number } | null>(null)
-
-  const loadPay = async () => {
-    if (isManager || !me.name) return
-    const monthStart = today.slice(0, 7) + '-01'
-    const { data: emps } = await db.from('employees').select('id, name, salary, deduct_per_absence').eq('is_active', true)
-    const emp = (emps || []).find((e: any) => e.name === me.name)
-    if (!emp) return
-    const [{ data: abs }, { data: cards }] = await Promise.all([
-      db.from('shift_absences').select('id').eq('employee_id', emp.id).gte('date', monthStart),
-      db.from('monthly_card_amounts').select('amount, employee_id').eq('month', today.slice(0, 7)),
-    ])
-    const absences = (abs || []).length
-    const card = Number((cards || []).find((c: any) => c.employee_id === emp.id)?.amount || 0)
-    setPay({ salary: Number(emp.salary || 0), absences, deduct: absences * Number(emp.deduct_per_absence || 0), card })
-  }
 
   const load = async () => {
     const [{ data: rs }, { data: hist }, { data: sc }] = await Promise.all([
@@ -713,7 +696,7 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
     }
     setLoading(false)
   }
-  useEffect(() => { load(); loadPay() }, [])
+  useEffect(() => { load() }, [])
 
   const todayRec = history.find(r => r.staff_id === myId && r.date === today)
 
@@ -872,30 +855,141 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
         )
       })()}
 
-      {/* Мой расчёт зарплаты за текущий месяц */}
-      {pay && (
-        <>
-          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>Зарплата · {new Date().toLocaleDateString('ru-RU', { month: 'long' })}</div>
-          <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 8 }}>
-            {[
-              { l: 'Оклад', v: `€${pay.salary.toLocaleString('de-DE')}`, c: t.text },
-              ...(pay.absences > 0 ? [{ l: `Пропуски · ${pay.absences}`, v: `−€${pay.deduct.toLocaleString('de-DE')}`, c: t.red }] : []),
-              ...(pay.card > 0 ? [{ l: 'На карту', v: `€${pay.card.toLocaleString('de-DE')}`, c: t.blue }] : []),
-              { l: 'Наличными', v: `€${Math.max(0, pay.salary - pay.deduct - pay.card).toLocaleString('de-DE')}`, c: t.green },
-            ].map((r, i, arr) => (
-              <div key={r.l} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: i < arr.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
-                <span style={{ fontSize: 14, color: t.text2 }}>{r.l}</span>
-                <span style={{ fontSize: 15, fontWeight: 700, color: r.c }}>{r.v}</span>
-              </div>
-            ))}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', background: `${accent}0d` }}>
-              <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Итого к выплате</span>
-              <span style={{ fontSize: 18, fontWeight: 800, color: accent }}>€{Math.max(0, pay.salary - pay.deduct).toLocaleString('de-DE')}</span>
-            </div>
-          </div>
-        </>
-      )}
       <HistoryList records={history} t={t} accent={accent} />
+    </div>
+  )
+}
+
+// ── SALARY TAB ───────────────────────────────────────────────────────────────────
+// Сотрудник видит свой расчёт; менеджер — фонд ЗП и разбивку по каждому.
+// Источники: employees.salary/deduct_per_absence, shift_absences (даты пропусков),
+// monthly_card_amounts (на карту), attendance_records (отработанные часы).
+// Связь attendance(staff)↔employees — по имени (как в остальном коде; настоящий FK — в плане автоматизации).
+const eur = (n: number) => `€${Math.round(n).toLocaleString('de-DE')}`
+const absDate = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+
+function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: boolean; accent: string; t: any }) {
+  const today = fmtDate(new Date())
+  const ym = today.slice(0, 7)
+  const monthLabel = new Date().toLocaleDateString('ru-RU', { month: 'long' })
+  const [loading, setLoading] = useState(true)
+  const [rows, setRows] = useState<any[]>([])
+  const [open, setOpen] = useState<string | null>(null)
+
+  const load = async () => {
+    const monthStart = ym + '-01'
+    const [{ data: emps }, { data: abs }, { data: cards }, { data: att }, { data: dir }] = await Promise.all([
+      db.from('employees').select('id, name, salary, deduct_per_absence').eq('is_active', true).order('name'),
+      db.from('shift_absences').select('employee_id, date').gte('date', monthStart),
+      db.from('monthly_card_amounts').select('employee_id, amount').eq('month', ym),
+      db.from('attendance_records').select('staff_id, check_in_at, check_out_at, date').gte('date', monthStart),
+      db.from('staff_directory').select('id, name').eq('is_active', true),
+    ])
+    const staffName: Record<string, string> = {}; (dir || []).forEach((s: any) => { staffName[s.id] = s.name })
+    const hoursByName: Record<string, number> = {}
+    ;(att || []).forEach((r: any) => { const n = staffName[r.staff_id]; if (n) hoursByName[n] = (hoursByName[n] || 0) + hoursOf(r) })
+    const cardByEmp: Record<string, number> = {}; (cards || []).forEach((c: any) => { cardByEmp[c.employee_id] = Number(c.amount || 0) })
+    const absByEmp: Record<string, string[]> = {}; (abs || []).forEach((a: any) => { (absByEmp[a.employee_id] = absByEmp[a.employee_id] || []).push(a.date) })
+
+    let list = (emps || []).map((e: any) => {
+      const salary = Number(e.salary || 0)
+      const dates = (absByEmp[e.id] || []).sort()
+      const deduct = dates.length * Number(e.deduct_per_absence || 0)
+      const card = cardByEmp[e.id] || 0
+      const total = Math.max(0, salary - deduct)
+      return { id: e.id, name: e.name, salary, dates, absences: dates.length, deduct, card, total, cash: Math.max(0, total - card), hours: hoursByName[e.name] || 0 }
+    })
+    if (!isManager) list = list.filter((r: any) => r.name === me.name)
+    setRows(list); setLoading(false)
+  }
+  useEffect(() => { load() }, [])
+
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+  if (rows.length === 0) return (
+    <div style={{ textAlign: 'center', padding: '60px 20px', color: t.text3 }}>
+      <div style={{ width: 72, height: 72, borderRadius: 20, background: `${accent}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+        <svg width="34" height="34" fill="none" stroke={accent} strokeWidth="1.6" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="13" rx="2" /><path d="M2 10h20M6 15h4" /></svg>
+      </div>
+      <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Нет данных по зарплате</div>
+      <div style={{ fontSize: 13, marginTop: 4 }}>Оклад задаётся в дашборде → Команда</div>
+    </div>
+  )
+
+  // Детальная разбивка одного сотрудника (используется и у сотрудника, и в раскрытой карточке менеджера).
+  const Breakdown = ({ r }: { r: any }) => (
+    <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 8 }}>
+      {[
+        { _l: 'Оклад', v: eur(r.salary), c: t.text, hide: false },
+        { _l: 'Отработано', v: fmtHours(r.hours), c: t.text2, hide: r.hours <= 0 },
+        { _l: `Пропуски · ${r.absences}`, v: r.dates.map(absDate).join(', '), c: t.text2, small: true, hide: r.absences === 0 },
+        { _l: 'Вычет за пропуски', v: `−${eur(r.deduct)}`, c: t.red, hide: r.deduct === 0 },
+        { _l: 'На карту', v: eur(r.card), c: t.blue, hide: r.card === 0 },
+        { _l: 'Наличными', v: eur(r.cash), c: t.green, hide: false },
+      ].filter((x: any) => !x.hide).map((x: any, i, arr) => (
+        <div key={x._l} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 16px', borderBottom: i < arr.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+          <span style={{ fontSize: 14, color: t.text2, flexShrink: 0 }}>{x._l}</span>
+          <span style={{ fontSize: x.small ? 12 : 15, fontWeight: x.small ? 500 : 700, color: x.c, textAlign: 'right' }}>{x.v}</span>
+        </div>
+      ))}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', background: `${accent}0d` }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Итого к выплате</span>
+        <span style={{ fontSize: 18, fontWeight: 800, color: accent }}>{eur(r.total)}</span>
+      </div>
+    </div>
+  )
+
+  // ── Сотрудник: свой расчёт ──
+  if (!isManager) {
+    const r = rows[0]
+    return (
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>Зарплата · {monthLabel}</div>
+        <div style={{ background: `linear-gradient(135deg, ${accent}, ${accent}cc)`, borderRadius: 20, padding: '22px 20px', marginBottom: 12, color: '#fff', boxShadow: `0 8px 28px ${accent}3a` }}>
+          <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>К выплате</div>
+          <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: -1, marginTop: 2 }}>{eur(r.total)}</div>
+          <div style={{ display: 'flex', gap: 16, marginTop: 10, fontSize: 13, fontWeight: 600, opacity: 0.92 }}>
+            {r.card > 0 && <span>На карту {eur(r.card)}</span>}
+            <span>Наличными {eur(r.cash)}</span>
+          </div>
+        </div>
+        <Breakdown r={r} />
+        <div style={{ fontSize: 12, color: t.text4, textAlign: 'center', padding: '4px 16px' }}>Расчёт за {monthLabel}. Окончательная сумма подтверждается при закрытии смен менеджером.</div>
+      </div>
+    )
+  }
+
+  // ── Менеджер: фонд ЗП + разбивка по каждому ──
+  const fund = rows.reduce((s, r) => s + r.total, 0)
+  const cardTotal = rows.reduce((s, r) => s + r.card, 0)
+  return (
+    <div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>Фонд зарплаты · {monthLabel}</div>
+      <div style={{ background: `linear-gradient(135deg, ${accent}, ${accent}cc)`, borderRadius: 20, padding: '20px', marginBottom: 14, color: '#fff', boxShadow: `0 8px 28px ${accent}3a` }}>
+        <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>К выплате всего</div>
+        <div style={{ fontSize: 34, fontWeight: 800, letterSpacing: -1, marginTop: 2 }}>{eur(fund)}</div>
+        <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 13, fontWeight: 600, opacity: 0.92 }}>
+          <span>{rows.length} сотр.</span>
+          {cardTotal > 0 && <span>На карту {eur(cardTotal)}</span>}
+          <span>Наличными {eur(fund - cardTotal)}</span>
+        </div>
+      </div>
+      {rows.map(r => (
+        <div key={r.id} style={{ marginBottom: 8 }}>
+          <button onClick={() => setOpen(open === r.id ? null : r.id)} style={{ width: '100%', textAlign: 'left', background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh, border: 'none', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{r.name}</div>
+              <div style={{ fontSize: 12, color: t.text3, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                Оклад {eur(r.salary)}{r.absences > 0 ? ` · −${r.absences} проп.` : ''}{r.card > 0 ? ` · карта ${eur(r.card)}` : ''}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <span style={{ fontSize: 16, fontWeight: 800, color: accent }}>{eur(r.total)}</span>
+              <svg width="14" height="14" fill="none" stroke={t.text3} strokeWidth="2.2" viewBox="0 0 24 24" style={{ transform: open === r.id ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}><path d="M9 6l6 6-6 6" /></svg>
+            </div>
+          </button>
+          {open === r.id && <div style={{ marginTop: 8, animation: 'fadeUp .18s ease' }}><Breakdown r={r} /></div>}
+        </div>
+      ))}
     </div>
   )
 }
@@ -1471,6 +1565,7 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
     { id: 'ops', label: 'Зал', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M3 9l1.2-5h15.6L21 9" /><path d="M4 9v11a1 1 0 001 1h14a1 1 0 001-1V9" /><path d="M3 9h18" /><path d="M9 21v-6h6v6" /></svg> },
     { id: 'swaps', label: 'Обмены', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M17 1l4 4-4 4M3 11V9a4 4 0 014-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 01-4 4H3" /></svg> },
     { id: 'attendance', label: 'Явка', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0118 0z" /><circle cx="12" cy="10" r="3" /></svg> },
+    { id: 'salary', label: 'Зарплата', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="2" y="6" width="20" height="13" rx="2.5" /><path d="M2 10h20" /><circle cx="17.5" cy="14.5" r="1.4" fill="currentColor" stroke="none" /></svg> },
   ]
 
   return (
@@ -1510,6 +1605,7 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
           {tab === 'ops' && <OpsTab me={me} isManager={isManager} accent={accent} t={t} toast={showToast} />}
           {tab === 'swaps' && <SwapsTab me={me} isManager={isManager} accent={accent} t={t} toast={showToast} />}
           {tab === 'attendance' && <AttendanceTab me={me} isManager={isManager} accent={accent} t={t} toast={showToast} />}
+          {tab === 'salary' && <SalaryTab me={me} isManager={isManager} accent={accent} t={t} />}
         </div>
       </div>
 
