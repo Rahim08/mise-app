@@ -3,9 +3,11 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Wordmark } from '@/components/brand'
+import { useI18n, LanguageSwitcher } from '@/lib/i18n'
 
 export default function Login() {
   const router = useRouter()
+  const { t } = useI18n()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -20,12 +22,12 @@ export default function Login() {
   }, [])
 
   const handleLogin = async () => {
-    if (!email || !password) { setError('Заполните все поля'); return }
+    if (!email || !password) { setError(t('auth.login.errFill')); return }
     setLoading(true)
     setError('')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) {
-      if (error.message.includes('Invalid login')) setError('Неверный email или пароль')
+      if (error.message.includes('Invalid login')) setError(t('auth.login.errInvalid'))
       else setError(error.message)
     } else {
       router.push('/dashboard')
@@ -48,10 +50,13 @@ export default function Login() {
   return (
     <div style={S.bg}>
       <div style={S.card}>
+        {/* Language switcher */}
+        <div style={{ position: 'absolute', top: 16, right: 16 }}><LanguageSwitcher /></div>
+
         {/* Logo */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
           <Wordmark size={34} color="#1c1c1e" />
-          <div style={{ color: '#6d6d72', fontSize: '.88rem', marginTop: 4 }}>Войдите в свой аккаунт</div>
+          <div style={{ color: '#6d6d72', fontSize: '.88rem', marginTop: 4 }}>{t('auth.login.subtitle')}</div>
         </div>
 
         {/* Google */}
@@ -62,7 +67,7 @@ export default function Login() {
             <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
             <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
           </svg>
-          <span>{googleLoading ? 'Перенаправление...' : 'Войти через Google'}</span>
+          <span>{googleLoading ? t('auth.login.googleLoading') : t('auth.login.google')}</span>
         </button>
 
         {/* Apple — disabled until developer account */}
@@ -71,13 +76,13 @@ export default function Login() {
             <path d="M14.05 9.02c-.02-2.04 1.67-3.02 1.74-3.07-1.05-1.54-2.67-1.76-3.24-1.78-1.38-.14-2.7.81-3.4.81-.7 0-1.78-.79-2.93-.77-1.51.02-2.9.88-3.68 2.23-1.57 2.72-.4 6.74 1.13 8.94.75 1.08 1.64 2.29 2.81 2.25 1.13-.05 1.56-.73 2.93-.73 1.37 0 1.76.73 2.95.71 1.21-.02 1.98-1.1 2.73-2.18.86-1.25 1.21-2.46 1.23-2.52-.03-.01-2.35-.9-2.37-3.59z" fill="white"/>
             <path d="M11.62 2.67C12.23 1.93 12.64.93 12.52 0c-.87.04-1.92.58-2.54 1.31-.56.64-1.05 1.67-.92 2.65.97.07 1.96-.49 2.56-1.29z" fill="white"/>
           </svg>
-          <span>Войти через Apple — скоро</span>
+          <span>{t('auth.login.appleSoon')}</span>
         </button>
 
         {/* Divider */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '20px 0' }}>
           <div style={{ flex: 1, height: 1, background: 'rgba(60,60,67,.12)' }} />
-          <span style={{ fontSize: '.75rem', color: '#aeaeb2', fontWeight: 500 }}>или</span>
+          <span style={{ fontSize: '.75rem', color: '#aeaeb2', fontWeight: 500 }}>{t('common.or')}</span>
           <div style={{ flex: 1, height: 1, background: 'rgba(60,60,67,.12)' }} />
         </div>
 
@@ -103,8 +108,8 @@ export default function Login() {
         {/* Password */}
         <div style={{ marginBottom: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <label style={S.label}>Пароль</label>
-            <a href="/auth/forgot" style={{ fontSize: '.75rem', color: '#007aff', textDecoration: 'none' }}>Забыли пароль?</a>
+            <label style={S.label}>{t('auth.login.password')}</label>
+            <a href="/auth/forgot" style={{ fontSize: '.75rem', color: '#007aff', textDecoration: 'none' }}>{t('auth.login.forgot')}</a>
           </div>
           <div style={{ position: 'relative' }}>
             <input
@@ -116,19 +121,19 @@ export default function Login() {
               style={{ ...S.input, paddingRight: 44 }}
             />
             <button onClick={() => setShowPass(!showPass)} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#aeaeb2', fontSize: '.82rem', fontFamily: 'inherit', padding: 4 }}>
-              {showPass ? 'Скрыть' : 'Показать'}
+              {showPass ? t('common.hide') : t('common.show')}
             </button>
           </div>
         </div>
 
         {/* Submit */}
         <button onClick={handleLogin} disabled={loading} style={{ ...S.primaryBtn, opacity: loading ? .7 : 1 }}>
-          {loading ? 'Входим...' : 'Войти'}
+          {loading ? t('auth.login.submitting') : t('auth.login.submit')}
         </button>
 
         <div style={{ textAlign: 'center', marginTop: 20, fontSize: '.85rem', color: '#6d6d72' }}>
-          Нет аккаунта?{' '}
-          <a href="/auth/register" style={{ color: '#007aff', textDecoration: 'none', fontWeight: 600 }}>Зарегистрироваться</a>
+          {t('auth.login.noAccount')}{' '}
+          <a href="/auth/register" style={{ color: '#007aff', textDecoration: 'none', fontWeight: 600 }}>{t('auth.login.register')}</a>
         </div>
       </div>
     </div>
@@ -147,6 +152,7 @@ const S: any = {
     padding: '20px 16px',
   },
   card: {
+    position: 'relative',
     background: '#fff',
     borderRadius: 24,
     padding: '40px 36px',

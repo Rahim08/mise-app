@@ -7,6 +7,7 @@ import React from 'react'
 // Превью и история вариантов: docs/mise-brand-v2.html
 
 export const ACCENT = '#8e8e93'
+export const ACCENT_GLOW = 'rgba(142,142,147,.45)' // акцент для свечений (splash, hover)
 
 export const APP_META = {
   mise:      { color: '#8e8e93', name: 'Mise' },
@@ -94,15 +95,35 @@ export function AppIcon({ app, size = 64, glow = true }: { app: BrandApp; size?:
   )
 }
 
+const BRAND_FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif"
+
 // Словесный знак W2: «mise», акцентная «e». color — базовый цвет текста
 // (по умолчанию CSS-переменная дашборда; в экранах с собственной темой передавать явно).
 export function Wordmark({ size = 22, color = 'var(--tx)' }: { size?: number; color?: string }) {
   return (
     <span style={{
       fontWeight: 800, fontSize: size, letterSpacing: '-.05em', lineHeight: 1,
-      color, whiteSpace: 'nowrap', fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif",
+      color, whiteSpace: 'nowrap', fontFamily: BRAND_FONT,
     }}>
       mis<span style={{ color: ACCENT }}>e</span>
+    </span>
+  )
+}
+
+// Монограмма «m» — та же типографика, что и wordmark, с акцентной точкой над хвостом
+// (намёк на «i»/«e»). Для свёрнутых пространств: collapsed-сайдбар, фавиконы, аватар.
+// НЕ glyph-иконка (отклонена) — бренд mise остаётся типографическим.
+export function WordmarkMark({ size = 24, color = 'var(--tx)' }: { size?: number; color?: string }) {
+  return (
+    <span style={{
+      position: 'relative', display: 'inline-flex', alignItems: 'flex-end',
+      fontWeight: 800, fontSize: size, letterSpacing: '-.05em', lineHeight: 1,
+      color, fontFamily: BRAND_FONT,
+    }}>
+      m<span style={{
+        width: Math.max(3, size * 0.13), height: Math.max(3, size * 0.13), borderRadius: '50%',
+        background: ACCENT, marginLeft: size * 0.04, marginBottom: size * 0.06,
+      }} />
     </span>
   )
 }

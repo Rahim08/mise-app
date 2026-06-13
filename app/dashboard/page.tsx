@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
 import { useTheme } from '@/hooks/useTheme'
-import { AppIcon, Wordmark, type BrandApp } from '@/components/brand'
+import { AppIcon, Wordmark, WordmarkMark, ACCENT_GLOW, type BrandApp } from '@/components/brand'
 
 
 
@@ -84,56 +84,64 @@ function timeAgo(iso: string) {
 
 // ── SPLASH SCREEN ─────────────────────────────────────────────────────────────
 
+// Apple-style: типографический логотип «mise» собирается по буквам (blur→резкость,
+// подъём, проявление), акцентная «e» подсвечивается мягким свечением, затем весь
+// знак чуть приближается и экран растворяется. Никакой glyph-иконки — бренд типографический.
 function SplashScreen({ onDone }: { onDone: () => void }) {
-  const [phase, setPhase] = useState<'fill' | 'hold' | 'out'>('fill')
-  const [bar1, setBar1] = useState(0)
-  const [bar2, setBar2] = useState(0)
-  const [bar3, setBar3] = useState(0)
+  const [out, setOut] = useState(false)
+  const letters = ['m', 'i', 's', 'e']
 
   useEffect(() => {
-    // Staggered bar fill
-    const t1 = setTimeout(() => setBar1(1), 100)
-    const t2 = setTimeout(() => setBar2(1), 300)
-    const t3 = setTimeout(() => setBar3(1), 500)
-    const t4 = setTimeout(() => setPhase('hold'), 1200)
-    const t5 = setTimeout(() => setPhase('out'), 1700)
-    const t6 = setTimeout(() => onDone(), 2200)
-    return () => [t1,t2,t3,t4,t5,t6].forEach(clearTimeout)
+    const tOut = setTimeout(() => setOut(true), 1550)
+    const tDone = setTimeout(() => onDone(), 2050)
+    return () => { clearTimeout(tOut); clearTimeout(tDone) }
   }, [])
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, zIndex: 9999,
-      background: 'var(--bg)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      flexDirection: 'column', gap: 24,
-      transition: phase === 'out' ? 'opacity .45s ease, transform .45s ease' : 'none',
-      opacity: phase === 'out' ? 0 : 1,
-      transform: phase === 'out' ? 'scale(1.04)' : 'scale(1)',
-      pointerEvents: phase === 'out' ? 'none' : 'auto',
+      position: 'fixed', inset: 0, zIndex: 9999, background: 'var(--bg)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+      transition: 'opacity .5s cubic-bezier(.4,0,.2,1), transform .5s cubic-bezier(.4,0,.2,1)',
+      opacity: out ? 0 : 1, transform: out ? 'scale(1.08)' : 'scale(1)',
+      pointerEvents: out ? 'none' : 'auto',
     }}>
-      {/* Logo mark */}
-      <div style={{ position: 'relative' }}>
-        <svg width="80" height="80" viewBox="0 0 64 64" fill="none">
-          <rect width="64" height="64" rx="18" fill="#141414" stroke="rgba(142,142,147,.45)" strokeWidth="1.5"/>
-          {/* Bar 1 */}
-          <rect x="14" y="20" width="0" height="5" rx="2.5" fill="white"
-            style={{ width: bar1 ? 36 : 0, transition: 'width .4s cubic-bezier(.34,1.56,.64,1)' }}/>
-          {/* Bar 2 */}
-          <rect x="14" y="30" width="0" height="5" rx="2.5" fill="white" opacity=".7"
-            style={{ width: bar2 ? 26 : 0, transition: 'width .4s cubic-bezier(.34,1.56,.64,1)' }}/>
-          {/* Bar 3 */}
-          <rect x="14" y="40" width="0" height="5" rx="2.5" fill="white" opacity=".4"
-            style={{ width: bar3 ? 18 : 0, transition: 'width .4s cubic-bezier(.34,1.56,.64,1)' }}/>
-        </svg>
-      </div>
+      <style>{`
+        @keyframes splashLetter {
+          0%   { opacity: 0; transform: translateY(14px) scale(.94); filter: blur(10px); }
+          60%  { opacity: 1; filter: blur(0); }
+          100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+        }
+        @keyframes splashGlow {
+          0%   { opacity: 0; transform: translate(-50%,-50%) scale(.6); }
+          100% { opacity: .9; transform: translate(-50%,-50%) scale(1); }
+        }
+        @keyframes splashLift {
+          0%   { letter-spacing: .04em; }
+          100% { letter-spacing: -.05em; }
+        }
+      `}</style>
+
+      {/* Акцентное свечение за словом */}
       <div style={{
-        fontSize: '1.8rem', fontWeight: 800, color: 'var(--tx)',
-        letterSpacing: '-.04em', fontFamily: '-apple-system,sans-serif',
-        opacity: bar3 ? 1 : 0,
-        transform: bar3 ? 'translateY(0)' : 'translateY(6px)',
-        transition: 'opacity .35s ease, transform .35s ease',
-      }}>mis<span style={{ color: '#8e8e93' }}>e</span></div>
+        position: 'absolute', top: '50%', left: '50%', width: 320, height: 320, borderRadius: '50%',
+        background: `radial-gradient(circle, ${ACCENT_GLOW} 0%, transparent 65%)`,
+        animation: 'splashGlow 1.2s cubic-bezier(.22,1,.36,1) .35s both', pointerEvents: 'none',
+      }} />
+
+      <div style={{
+        position: 'relative', display: 'flex', fontWeight: 800, fontSize: 'clamp(2.4rem,9vw,3.4rem)',
+        fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif",
+        animation: 'splashLift 1.4s cubic-bezier(.22,1,.36,1) both',
+      }}>
+        {letters.map((ch, i) => (
+          <span key={i} style={{
+            color: ch === 'e' ? '#8e8e93' : 'var(--tx)',
+            display: 'inline-block',
+            animation: `splashLetter .7s cubic-bezier(.22,1,.36,1) ${i * 0.09}s both`,
+            textShadow: ch === 'e' ? `0 0 24px ${ACCENT_GLOW}` : 'none',
+          }}>{ch}</span>
+        ))}
+      </div>
     </div>
   )
 }
@@ -1567,8 +1575,8 @@ export default function Dashboard() {
         }}>
           {/* Заголовок: wordmark + кнопка свернуть / развернуть */}
           {sideCollapsed ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, marginBottom: 14 }}>
-              <AppIcon app="mise" size={28} glow={false} />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <WordmarkMark size={26} />
               <button onClick={toggleSide} title="Развернуть" style={{
                 width: 28, height: 28, borderRadius: 8, background: 'var(--fill)', border: 'none',
                 cursor: 'pointer', color: 'var(--tx2)', display: 'flex', alignItems: 'center', justifyContent: 'center',
