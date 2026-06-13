@@ -68,18 +68,30 @@ class Query<T = any> implements PromiseLike<Result<T>> {
     if (this.orderBy.length) payload.order = this.orderBy
     if (this.limitN) payload.limit = this.limitN
 
-    try {
-      const res = await fetch('/api/db', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        credentials: 'same-origin',
-      })
-      const json = await res.json()
-      if (!res.ok) return { data: null as any, error: { message: json?.error || `HTTP ${res.status}`, code: json?.code } }
-      return { data: json.data as T, error: null }
-    } catch (err: any) {
-      return { data: null as any, error: { message: err?.message || 'Network error' } }
+    // Сетевая устойчивость: короткие просадки wi-fi переживаем повтором.
+    // ВАЖНО: ретраим только идемпотентные операции (select/update/delete). insert/upsert НЕ ретраим —
+    // запрос мог дойти и выполниться, а ответ потеряться → повтор создал бы дубль (двойная запись денег).
+    const idempotent = this.op === 'select' || this.op === 'update' || this.op === 'delete'
+    const maxAttempts = idempotent ? 3 : 1
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const res = await fetch('/api/db', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          credentials: 'same-origin',
+        })
+        const json = await res.json()
+        if (!res.ok) return { data: null as any, error: { message: json?.error || `HTTP ${res.status}`, code: json?.code } }
+        return { data: json.data as T, error: null }
+      } catch (err: any) {
+        // Только сетевой сбой (fetch бросил). HTTP-ошибки выше не ретраятся.
+        if (attempt < maxAttempts) {
+          await new Promise(r => setTimeout(r, 500 * 2 ** (attempt - 1))) // 0.5s, 1s
+          continue
+        }
+        return { data: null as any, error: { message: err?.message || 'Network error' } }
+      }
     }
   }
 
