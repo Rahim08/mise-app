@@ -1,6 +1,7 @@
 'use client'
 export const dynamic = 'force-dynamic'
 import React, { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
@@ -42,13 +43,19 @@ function getMe(rid: string): { id?: string; name?: string; role?: string; is_own
 // ── ASSIGN SHIFT SHEET ──────────────────────────────────────────────────────────
 
 function Sheet({ children, onClose, t }: { children: React.ReactNode; onClose: () => void; t: any }) {
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
-      <div style={{ background: t.bg, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '85dvh', overflowY: 'auto', paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }} onClick={e => e.stopPropagation()}>
+  // Портал в body: шторка выходит из stacking-context контента (position:fixed + overflow
+  // + анимация родителя ловили её, и кнопки уезжали под нижний бар). Теперь — поверх всего.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+  if (!mounted) return null
+  return createPortal(
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
+      <div style={{ background: t.bg, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '88dvh', overflowY: 'auto', paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }} onClick={e => e.stopPropagation()}>
         <div style={{ width: 40, height: 4, background: t.fill, borderRadius: 2, margin: '14px auto 0' }} />
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -1509,11 +1516,12 @@ function OpsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boole
   }, [])
 
   const canStop = isManager || me.role === 'kitchen' // стоп ставят кухня и менеджер
+  const canTech = isManager || me.role === 'kitchen' || me.role === 'bar' // техкарты — кухне/бару (не официанту/кальянщику)
   const VIEWS = [
     { id: 'stop', label: 'Стоп-лист' },
     ...(ordersEnabled ? [{ id: 'orders', label: 'Заказы' }] : []),
     { id: 'check', label: 'Чек-листы' },
-    { id: 'tech', label: 'Техкарты' },
+    ...(canTech ? [{ id: 'tech', label: 'Техкарты' }] : []),
   ] as const
 
   return (
@@ -1526,7 +1534,7 @@ function OpsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boole
       {view === 'stop' && <StopListTab canEdit={canStop} currency={currency} accent={accent} t={t} toast={toast} />}
       {view === 'orders' && ordersEnabled && <OrdersInbox currency={currency} accent={accent} t={t} toast={toast} />}
       {view === 'check' && <ChecklistsView isManager={isManager} myId={me.id || ''} accent={accent} t={t} toast={toast} />}
-      {view === 'tech' && <TechCardsView isManager={isManager} accent={accent} t={t} toast={toast} />}
+      {view === 'tech' && canTech && <TechCardsView isManager={isManager} accent={accent} t={t} toast={toast} />}
     </div>
   )
 }
