@@ -85,30 +85,30 @@ BEGIN
   -- 0. ОЧИСТКА предыдущего демо (идемпотентность). Чистим строго по демо-ресторану
   --    и демо-владельцу — реальные данные не затрагиваются.
   -- ===========================================================================
-  DELETE FROM hookah_sales        WHERE restaurant_id = v_rid;
-  DELETE FROM tobacco_movements   WHERE restaurant_id = v_rid;
-  DELETE FROM tobacco_stock       WHERE restaurant_id = v_rid;
-  DELETE FROM shift_expenses      WHERE restaurant_id = v_rid;
-  DELETE FROM shift_absences      WHERE restaurant_id = v_rid;
-  DELETE FROM inkassations        WHERE restaurant_id = v_rid;
-  DELETE FROM monthly_card_amounts WHERE restaurant_id = v_rid;
-  DELETE FROM attendance_records  WHERE restaurant_id = v_rid;
-  DELETE FROM staff_schedules     WHERE restaurant_id = v_rid;
-  DELETE FROM notifications       WHERE restaurant_id = v_rid;
-  DELETE FROM menu_orders         WHERE restaurant_id = v_rid;
-  DELETE FROM menu_items          WHERE restaurant_id = v_rid;
-  DELETE FROM menu_categories     WHERE restaurant_id = v_rid;
-  DELETE FROM menu_settings       WHERE restaurant_id = v_rid;
-  DELETE FROM expense_categories  WHERE restaurant_id = v_rid;
-  DELETE FROM hookah_types        WHERE restaurant_id = v_rid;
-  DELETE FROM shifts              WHERE restaurant_id = v_rid;
-  DELETE FROM staff               WHERE restaurant_id = v_rid;
-  DELETE FROM employees           WHERE restaurant_id = v_rid;
-  DELETE FROM restaurant_settings WHERE restaurant_id = v_rid;
-
-  -- Любой ресторан, ранее созданный для демо-владельца (в т.ч. триггером регистрации)
-  DELETE FROM restaurant_settings WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  -- Чистим данные ВСЕХ ресторанов, когда-либо принадлежавших демо-владельцу
+  -- (id ресторана может отличаться между прогонами — его создаёт триггер регистрации).
+  DELETE FROM hookah_sales        WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM tobacco_movements   WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM tobacco_stock       WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM shift_expenses      WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM shift_absences      WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM inkassations        WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM monthly_card_amounts WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM attendance_records  WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM staff_schedules     WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM notifications       WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM menu_orders         WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM menu_items          WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM menu_categories     WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
   DELETE FROM menu_settings       WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM expense_categories  WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM hookah_types        WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM shifts              WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM staff               WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM employees           WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  DELETE FROM restaurant_settings WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
+  -- profiles.restaurant_id ссылается на ресторан (без каскада) → снимаем ссылку до удаления
+  DELETE FROM profiles            WHERE id = v_uid OR restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid);
   DELETE FROM restaurants         WHERE owner_id = v_uid;
   DELETE FROM auth.identities     WHERE user_id = v_uid;
   DELETE FROM auth.users          WHERE id = v_uid;
@@ -139,25 +139,40 @@ BEGIN
     'email', now(), now(), now()
   );
 
-  -- Триггер регистрации мог создать ресторан со случайным id → убираем, чтобы у
-  -- владельца был ровно ОДИН ресторан (AuthGate делает .single()).
+  -- ===========================================================================
+  -- 2. РЕСТОРАН — ПРИСВАИВАЕМ ресторан, созданный триггером регистрации, под демо.
+  --    (Не боремся с триггером: берём его ресторан и приводим к демо-виду — так
+  --     не зависим от того, какие дочерние строки триггер успел создать.)
+  -- ===========================================================================
+  SELECT id INTO v_rid FROM restaurants WHERE owner_id = v_uid ORDER BY created_at DESC LIMIT 1;
+  IF v_rid IS NULL THEN
+    -- триггера нет → создаём ресторан сами
+    v_rid := gen_random_uuid();
+    INSERT INTO restaurants (id, owner_id, name, created_at) VALUES (v_rid, v_uid, 'Mise Demo Lounge', now());
+  END IF;
+
+  -- Приводим к демо-виду: PRO, активная подписка, без owner_pin
+  UPDATE restaurants SET
+    name = 'Mise Demo Lounge', is_active = true,
+    subscription_status = 'active', subscription_plan = 'pro',
+    subscription_ends_at = now() + interval '1 year',
+    currency = '€', comp_apps = '{}', discount_pct = 0, owner_pin = NULL,
+    created_at = now() - interval '40 days'
+  WHERE id = v_rid;
+
+  -- Если триггер создал несколько ресторанов — оставляем один (чистим лишние и их ссылки)
+  DELETE FROM profiles            WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid AND id <> v_rid);
   DELETE FROM restaurant_settings WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid AND id <> v_rid);
   DELETE FROM menu_settings       WHERE restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = v_uid AND id <> v_rid);
   DELETE FROM restaurants         WHERE owner_id = v_uid AND id <> v_rid;
 
-  -- ===========================================================================
-  -- 2. РЕСТОРАН (PRO, активная подписка, без owner_pin)
-  -- ===========================================================================
-  INSERT INTO restaurants (
-    id, name, owner_id, is_active, created_at,
-    subscription_status, subscription_plan, subscription_ends_at,
-    currency, comp_apps, discount_pct, owner_pin
-  ) VALUES (
-    v_rid, 'Mise Demo Lounge', v_uid, true, now() - interval '40 days',
-    'active', 'pro', now() + interval '1 year',
-    '€', '{}', 0, NULL
-  );
+  -- Профиль владельца указывает на демо-ресторан
+  INSERT INTO profiles (id, full_name, role, restaurant_id)
+  VALUES (v_uid, 'Demo Owner', 'owner', v_rid)
+  ON CONFLICT (id) DO UPDATE SET restaurant_id = v_rid, role = 'owner';
 
+  -- Настройки заведения (перезаписываем — триггер мог их создать)
+  DELETE FROM restaurant_settings WHERE restaurant_id = v_rid;
   INSERT INTO restaurant_settings (
     restaurant_id, name, currency, timezone, working_days,
     latitude, longitude, geo_radius_m, attendance_enabled,
@@ -169,6 +184,28 @@ BEGIN
     'hours_before', 12, '18:00',
     true, 20, 20
   );
+
+  -- Защита: чистим дочерние данные присвоенного ресторана (вдруг триггер засеял
+  -- дефолты — категории и т.п.), FK-безопасный порядок. Делает демо детерминированным.
+  DELETE FROM hookah_sales        WHERE restaurant_id = v_rid;
+  DELETE FROM tobacco_movements   WHERE restaurant_id = v_rid;
+  DELETE FROM tobacco_stock       WHERE restaurant_id = v_rid;
+  DELETE FROM shift_expenses      WHERE restaurant_id = v_rid;
+  DELETE FROM shift_absences      WHERE restaurant_id = v_rid;
+  DELETE FROM inkassations        WHERE restaurant_id = v_rid;
+  DELETE FROM monthly_card_amounts WHERE restaurant_id = v_rid;
+  DELETE FROM attendance_records  WHERE restaurant_id = v_rid;
+  DELETE FROM staff_schedules     WHERE restaurant_id = v_rid;
+  DELETE FROM notifications       WHERE restaurant_id = v_rid;
+  DELETE FROM menu_orders         WHERE restaurant_id = v_rid;
+  DELETE FROM menu_items          WHERE restaurant_id = v_rid;
+  DELETE FROM menu_categories     WHERE restaurant_id = v_rid;
+  DELETE FROM menu_settings       WHERE restaurant_id = v_rid;
+  DELETE FROM expense_categories  WHERE restaurant_id = v_rid;
+  DELETE FROM hookah_types        WHERE restaurant_id = v_rid;
+  DELETE FROM shifts              WHERE restaurant_id = v_rid;
+  DELETE FROM staff               WHERE restaurant_id = v_rid;
+  DELETE FROM employees           WHERE restaurant_id = v_rid;
 
   -- ===========================================================================
   -- 3. СОТРУДНИКИ (employees) и STAFF (доступ к приложениям)
