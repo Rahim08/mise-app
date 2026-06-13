@@ -46,6 +46,14 @@ body{
 .nav-links{display:flex;list-style:none;}
 .nav-links a{font-size:.78rem;color:var(--text-2);text-decoration:none;padding:0 14px;transition:color .2s;letter-spacing:-.01em;font-weight:500;}
 .nav-links a:hover{color:#fff;}
+.nav-drop{position:relative;}
+.nav-drop::after{content:'';position:absolute;top:100%;left:0;right:0;height:16px;}
+.nav-drop-menu{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%) translateY(-7px) scale(.97);transform-origin:top center;min-width:200px;background:rgba(18,18,20,.86);backdrop-filter:blur(30px) saturate(160%);-webkit-backdrop-filter:blur(30px) saturate(160%);border:.5px solid var(--border);border-radius:16px;padding:7px;box-shadow:0 24px 60px rgba(0,0,0,.55),0 1px 0 rgba(255,255,255,.06) inset;opacity:0;pointer-events:none;transition:opacity .2s var(--ease),transform .2s var(--ease);z-index:1001;}
+.nav-drop:hover .nav-drop-menu{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0) scale(1);}
+.nav-drop-item{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:11px;text-decoration:none;transition:background .15s;}
+.nav-drop-item:hover{background:rgba(255,255,255,.07);}
+.nav-drop-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+.nav-drop-name{font-size:.84rem;font-weight:600;color:#fff;letter-spacing:-.01em;}
 .nav-right{display:flex;align-items:center;gap:12px;}
 .lang-tog{position:relative;}
 .lang-cur{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.07);border:none;border-radius:8px;padding:6px 11px;cursor:pointer;color:var(--text-2);font-family:inherit;font-size:.72rem;font-weight:700;letter-spacing:.04em;transition:all .2s;}
@@ -309,7 +317,16 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
 <nav class="nav">
   <a href="/" class="nav-logo">mis<span style="color:#8e8e93;margin-left:-.045em">e</span></a>
   <ul class="nav-links">
-    <li><a href="#apps" data-i18n="n.apps">Приложения</a></li>
+    <li class="nav-drop">
+      <a href="#apps" data-i18n="n.apps">Приложения</a>
+      <div class="nav-drop-menu">
+        <a class="nav-drop-item" href="#manager"><span class="nav-drop-dot" style="background:#007aff"></span><span class="nav-drop-name">Manager</span></a>
+        <a class="nav-drop-item" href="#analytics"><span class="nav-drop-dot" style="background:#34c759"></span><span class="nav-drop-name">Analytics</span></a>
+        <a class="nav-drop-item" href="#stash"><span class="nav-drop-dot" style="background:#ff9500"></span><span class="nav-drop-name">Stash</span></a>
+        <a class="nav-drop-item" href="#people"><span class="nav-drop-dot" style="background:#5856d6"></span><span class="nav-drop-name">People</span></a>
+        <a class="nav-drop-item" href="#menu"><span class="nav-drop-dot" style="background:#ff2d55"></span><span class="nav-drop-name">Menu</span></a>
+      </div>
+    </li>
     <li><a href="#team" data-i18n="n.team">Команда</a></li>
     <li><a href="#how" data-i18n="n.how">Как работает</a></li>
     <li><a href="#pricing" data-i18n="n.p">Цены</a></li>
