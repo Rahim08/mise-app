@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Wordmark } from '@/components/brand'
 import { useI18n, LanguageSwitcher } from '@/lib/i18n'
+import { track } from '@/lib/analytics'
 
 function PasswordRule({ ok, text }: { ok: boolean; text: string }) {
   return (
@@ -47,7 +48,7 @@ export default function Register() {
       options: { data: { full_name: name, restaurant_name: restaurant } }
     })
     if (error) setError(error.message)
-    else setSuccess(true)
+    else { setSuccess(true); track('signup_completed') }
     setLoading(false)
   }
 

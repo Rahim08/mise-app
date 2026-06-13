@@ -23,6 +23,11 @@
 # misc
 .DS_Store
 *.pem
+*.bak
+
+# internal notes (never commit — architecture/ops/diagnostic details)
+CLAUDE CONTEXT.md
+CLAUDE_CONTEXT.md
 
 # debug
 npm-debug.log*

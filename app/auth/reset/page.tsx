@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Wordmark } from '@/components/brand'
+import { useI18n, LanguageSwitcher } from '@/lib/i18n'
 
 function PasswordRule({ ok, text }: { ok: boolean; text: string }) {
   return (
@@ -17,6 +18,7 @@ function PasswordRule({ ok, text }: { ok: boolean; text: string }) {
 
 export default function ResetPassword() {
   const router = useRouter()
+  const { t } = useI18n()
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -41,7 +43,7 @@ export default function ResetPassword() {
   const passwordOk = rules.length && rules.upper && rules.number
 
   const handleUpdate = async () => {
-    if (!passwordOk) { setError('Пароль не соответствует требованиям'); return }
+    if (!passwordOk) { setError(t('auth.register.errPassword')); return }
     setLoading(true)
     setError('')
     const { error } = await supabase.auth.updateUser({ password })
@@ -55,9 +57,9 @@ export default function ResetPassword() {
       <div style={{ ...S.card, textAlign: 'center' }}>
         <div style={{ marginBottom: 24 }}><Wordmark size={34} color="#1c1c1e" /></div>
         <div style={{ fontSize: '2.5rem', marginBottom: 16 }}>✅</div>
-        <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 8 }}>Пароль изменён</div>
+        <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 8 }}>{t('auth.reset.doneTitle')}</div>
         <a href="/dashboard" style={{ display: 'block', padding: '12px', borderRadius: 12, background: '#007aff', color: '#fff', textDecoration: 'none', fontSize: '.92rem', fontWeight: 700, marginTop: 16 }}>
-          В личный кабинет
+          {t('auth.reset.toDashboard')}
         </a>
       </div>
     </div>
@@ -66,14 +68,15 @@ export default function ResetPassword() {
   return (
     <div style={S.bg}>
       <div style={S.card}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: -8 }}><LanguageSwitcher /></div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 28 }}>
           <Wordmark size={34} color="#1c1c1e" />
-          <div style={{ color: '#6d6d72', fontSize: '.88rem', marginTop: 4 }}>Новый пароль</div>
+          <div style={{ color: '#6d6d72', fontSize: '.88rem', marginTop: 4 }}>{t('auth.reset.subtitle')}</div>
         </div>
 
         {!ready && (
           <div style={{ background: 'rgba(255,149,0,.08)', border: '1px solid rgba(255,149,0,.2)', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: '.82rem', color: '#ff9500', fontWeight: 500 }}>
-            Откройте эту страницу по ссылке из письма для сброса пароля.
+            {t('auth.reset.openFromEmail')}
           </div>
         )}
 
@@ -84,31 +87,31 @@ export default function ResetPassword() {
         )}
 
         <div style={{ marginBottom: 12 }}>
-          <label style={S.label}>Пароль</label>
+          <label style={S.label}>{t('auth.login.password')}</label>
           <div style={{ position: 'relative' }}>
             <input
               type={showPass ? 'text' : 'password'}
               value={password}
               onChange={e => setPassword(e.target.value)}
-              placeholder="Минимум 8 символов"
+              placeholder={t('auth.register.ruleLength')}
               style={{ ...S.input, paddingRight: 44 }}
             />
             <button onClick={() => setShowPass(!showPass)} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#aeaeb2', fontSize: '.82rem', fontFamily: 'inherit', padding: 4 }}>
-              {showPass ? 'Скрыть' : 'Показать'}
+              {showPass ? t('common.hide') : t('common.show')}
             </button>
           </div>
         </div>
 
         {password.length > 0 && (
           <div style={{ background: '#f9f9f9', borderRadius: 10, padding: '10px 14px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <PasswordRule ok={rules.length} text="Минимум 8 символов" />
-            <PasswordRule ok={rules.upper} text="Хотя бы одна заглавная буква" />
-            <PasswordRule ok={rules.number} text="Хотя бы одна цифра" />
+            <PasswordRule ok={rules.length} text={t('auth.register.ruleLength')} />
+            <PasswordRule ok={rules.upper} text={t('auth.register.ruleUpper')} />
+            <PasswordRule ok={rules.number} text={t('auth.register.ruleNumber')} />
           </div>
         )}
 
         <button onClick={handleUpdate} disabled={loading || !ready} style={{ ...S.primaryBtn, opacity: loading || !ready ? .7 : 1 }}>
-          {loading ? 'Сохраняем...' : 'Сохранить пароль'}
+          {loading ? t('auth.reset.submitting') : t('auth.reset.submit')}
         </button>
       </div>
     </div>

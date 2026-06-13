@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
   const prompt = `${context}\n\nВопрос: ${messages[messages.length - 1].text}`
 
   const r = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -56,6 +56,9 @@ export async function POST(req: NextRequest) {
     }
   )
   const d = await r.json()
+  if (!r.ok) {
+    return NextResponse.json({ error: d?.error?.message || 'AI request failed' }, { status: 502 })
+  }
   const text = d.candidates?.[0]?.content?.parts?.[0]?.text || 'Нет ответа'
   return NextResponse.json({ text })
 }

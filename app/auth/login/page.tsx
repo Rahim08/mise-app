@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Wordmark } from '@/components/brand'
 import { useI18n, LanguageSwitcher } from '@/lib/i18n'
+import { track } from '@/lib/analytics'
 
 export default function Login() {
   const router = useRouter()
@@ -30,6 +31,7 @@ export default function Login() {
       if (error.message.includes('Invalid login')) setError(t('auth.login.errInvalid'))
       else setError(error.message)
     } else {
+      track('login')
       router.push('/dashboard')
     }
     setLoading(false)

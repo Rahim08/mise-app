@@ -2,15 +2,17 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Wordmark } from '@/components/brand'
+import { useI18n, LanguageSwitcher } from '@/lib/i18n'
 
 export default function ForgotPassword() {
+  const { t } = useI18n()
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [sent, setSent] = useState(false)
 
   const handleReset = async () => {
-    if (!email.trim()) { setError('Введите email'); return }
+    if (!email.trim()) { setError(t('auth.register.errEmail')); return }
     setLoading(true)
     setError('')
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -26,13 +28,13 @@ export default function ForgotPassword() {
       <div style={{ ...S.card, textAlign: 'center' }}>
         <div style={{ marginBottom: 24 }}><Wordmark size={34} color="#1c1c1e" /></div>
         <div style={{ fontSize: '2.5rem', marginBottom: 16 }}>📬</div>
-        <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 8 }}>Проверьте email</div>
+        <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 8 }}>{t('auth.register.checkEmail')}</div>
         <div style={{ color: '#6d6d72', fontSize: '.88rem', marginBottom: 24, lineHeight: 1.6 }}>
-          Мы отправили ссылку для сброса пароля на<br/>
+          {t('auth.forgot.sentBody')}<br/>
           <strong style={{ color: '#1c1c1e' }}>{email}</strong>
         </div>
         <a href="/auth/login" style={{ display: 'block', padding: '12px', borderRadius: 12, background: '#007aff', color: '#fff', textDecoration: 'none', fontSize: '.92rem', fontWeight: 700 }}>
-          Вернуться ко входу
+          {t('auth.forgot.backToLogin')}
         </a>
       </div>
     </div>
@@ -41,9 +43,10 @@ export default function ForgotPassword() {
   return (
     <div style={S.bg}>
       <div style={S.card}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: -8 }}><LanguageSwitcher /></div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 28 }}>
           <Wordmark size={34} color="#1c1c1e" />
-          <div style={{ color: '#6d6d72', fontSize: '.88rem', marginTop: 4 }}>Восстановление пароля</div>
+          <div style={{ color: '#6d6d72', fontSize: '.88rem', marginTop: 4 }}>{t('auth.forgot.subtitle')}</div>
         </div>
 
         {error && (
@@ -53,7 +56,7 @@ export default function ForgotPassword() {
         )}
 
         <div style={{ marginBottom: 16 }}>
-          <label style={S.label}>Email</label>
+          <label style={S.label}>{t('auth.register.email')}</label>
           <input
             type="email" value={email}
             onChange={e => setEmail(e.target.value)}
@@ -64,12 +67,12 @@ export default function ForgotPassword() {
         </div>
 
         <button onClick={handleReset} disabled={loading} style={{ ...S.primaryBtn, opacity: loading ? .7 : 1 }}>
-          {loading ? 'Отправляем...' : 'Отправить ссылку'}
+          {loading ? t('auth.forgot.submitting') : t('auth.forgot.submit')}
         </button>
 
         <div style={{ textAlign: 'center', marginTop: 20, fontSize: '.85rem', color: '#6d6d72' }}>
-          Вспомнили пароль?{' '}
-          <a href="/auth/login" style={{ color: '#007aff', textDecoration: 'none', fontWeight: 600 }}>Войти</a>
+          {t('auth.forgot.remembered')}{' '}
+          <a href="/auth/login" style={{ color: '#007aff', textDecoration: 'none', fontWeight: 600 }}>{t('auth.login.submit')}</a>
         </div>
       </div>
     </div>

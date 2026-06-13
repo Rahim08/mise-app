@@ -125,6 +125,12 @@ const STRINGS: Record<string, Row> = {
   'common.hide':    { en: 'Hide', ru: 'Скрыть', it: 'Nascondi', fr: 'Masquer', az: 'Gizlət', tr: 'Gizle', uk: 'Сховати', kk: 'Жасыру' },
   'common.loading': { en: 'Loading…', ru: 'Загрузка…', it: 'Caricamento…', fr: 'Chargement…', az: 'Yüklənir…', tr: 'Yükleniyor…', uk: 'Завантаження…', kk: 'Жүктелуде…' },
 
+  // ── cookie consent (GDPR) ──
+  'cookie.text':   { en: 'We use cookies to keep you signed in and improve the product.', ru: 'Мы используем cookie, чтобы вы оставались в аккаунте и для улучшения продукта.', it: 'Usiamo i cookie per mantenerti connesso e migliorare il prodotto.', fr: 'Nous utilisons des cookies pour vous garder connecté et améliorer le produit.', az: 'Sizi hesabda saxlamaq və məhsulu yaxşılaşdırmaq üçün kukilərdən istifadə edirik.', tr: 'Oturumunuzu açık tutmak ve ürünü geliştirmek için çerez kullanıyoruz.', uk: 'Ми використовуємо cookie, щоб ви залишались в акаунті та для покращення продукту.', kk: 'Сізді аккаунтта сақтау және өнімді жақсарту үшін cookie қолданамыз.' },
+  'cookie.accept': { en: 'Accept', ru: 'Принять', it: 'Accetta', fr: 'Accepter', az: 'Qəbul et', tr: 'Kabul et', uk: 'Прийняти', kk: 'Қабылдау' },
+  'cookie.decline':{ en: 'Essential only', ru: 'Только необходимые', it: 'Solo essenziali', fr: 'Essentiels uniquement', az: 'Yalnız zəruri', tr: 'Yalnızca gerekli', uk: 'Лише необхідні', kk: 'Тек қажеттілер' },
+  'cookie.privacy':{ en: 'Privacy', ru: 'Конфиденциальность', it: 'Privacy', fr: 'Confidentialité', az: 'Məxfilik', tr: 'Gizlilik', uk: 'Конфіденційність', kk: 'Құпиялылық' },
+
   // ── auth: login ──
   'auth.login.subtitle':      { en: 'Sign in to your account', ru: 'Войдите в свой аккаунт', it: 'Accedi al tuo account', fr: 'Connectez-vous à votre compte', az: 'Hesabınıza daxil olun', tr: 'Hesabınıza giriş yapın', uk: 'Увійдіть у свій акаунт', kk: 'Аккаунтыңызға кіріңіз' },
   'auth.login.google':        { en: 'Sign in with Google', ru: 'Войти через Google', it: 'Accedi con Google', fr: 'Se connecter avec Google', az: 'Google ilə daxil ol', tr: 'Google ile giriş yap', uk: 'Увійти через Google', kk: 'Google арқылы кіру' },
@@ -160,4 +166,20 @@ const STRINGS: Record<string, Row> = {
   'auth.register.ruleLength':    { en: 'At least 8 characters', ru: 'Минимум 8 символов', it: 'Almeno 8 caratteri', fr: 'Au moins 8 caractères', az: 'Ən azı 8 simvol', tr: 'En az 8 karakter', uk: 'Щонайменше 8 символів', kk: 'Кемінде 8 таңба' },
   'auth.register.ruleUpper':     { en: 'One uppercase letter', ru: 'Заглавная буква', it: 'Una lettera maiuscola', fr: 'Une lettre majuscule', az: 'Bir böyük hərf', tr: 'Bir büyük harf', uk: 'Велика літера', kk: 'Бір бас әріп' },
   'auth.register.ruleNumber':    { en: 'One number', ru: 'Цифра', it: 'Un numero', fr: 'Un chiffre', az: 'Bir rəqəm', tr: 'Bir rakam', uk: 'Одна цифра', kk: 'Бір сан' },
+
+  // ── auth: forgot password ──
+  'auth.forgot.subtitle':   { en: 'Password recovery', ru: 'Восстановление пароля', it: 'Recupero password', fr: 'Récupération du mot de passe', az: 'Şifrənin bərpası', tr: 'Şifre kurtarma', uk: 'Відновлення пароля', kk: 'Құпиясөзді қалпына келтіру' },
+  'auth.forgot.submit':     { en: 'Send link', ru: 'Отправить ссылку', it: 'Invia link', fr: 'Envoyer le lien', az: 'Link göndər', tr: 'Bağlantı gönder', uk: 'Надіслати посилання', kk: 'Сілтеме жіберу' },
+  'auth.forgot.submitting': { en: 'Sending…', ru: 'Отправляем…', it: 'Invio…', fr: 'Envoi…', az: 'Göndərilir…', tr: 'Gönderiliyor…', uk: 'Надсилання…', kk: 'Жіберілуде…' },
+  'auth.forgot.remembered': { en: 'Remembered your password?', ru: 'Вспомнили пароль?', it: 'Ricordi la password?', fr: 'Vous vous souvenez du mot de passe ?', az: 'Şifrəni xatırladınız?', tr: 'Şifrenizi hatırladınız mı?', uk: "Згадали пароль?", kk: 'Құпиясөзді есіңізге түсірдіңіз бе?' },
+  'auth.forgot.sentBody':   { en: 'We sent a password reset link to', ru: 'Мы отправили ссылку для сброса пароля на', it: 'Abbiamo inviato un link per reimpostare la password a', fr: 'Nous avons envoyé un lien de réinitialisation à', az: 'Şifrə sıfırlama linkini göndərdik:', tr: 'Şifre sıfırlama bağlantısını gönderdik:', uk: 'Ми надіслали посилання для скидання пароля на', kk: 'Құпиясөзді қалпына келтіру сілтемесін жібердік:' },
+  'auth.forgot.backToLogin':{ en: 'Back to sign in', ru: 'Вернуться ко входу', it: "Torna all'accesso", fr: 'Retour à la connexion', az: 'Girişə qayıt', tr: 'Girişe dön', uk: 'Повернутися до входу', kk: 'Кіруге оралу' },
+
+  // ── auth: reset password ──
+  'auth.reset.subtitle':     { en: 'New password', ru: 'Новый пароль', it: 'Nuova password', fr: 'Nouveau mot de passe', az: 'Yeni şifrə', tr: 'Yeni şifre', uk: 'Новий пароль', kk: 'Жаңа құпиясөз' },
+  'auth.reset.openFromEmail':{ en: 'Open this page from the password reset link in your email.', ru: 'Откройте эту страницу по ссылке из письма для сброса пароля.', it: "Apri questa pagina dal link di reimpostazione nella tua email.", fr: "Ouvrez cette page via le lien de réinitialisation reçu par e-mail.", az: 'Bu səhifəni e-poçtdakı sıfırlama linki ilə açın.', tr: "Bu sayfayı e-postanızdaki sıfırlama bağlantısından açın.", uk: 'Відкрийте цю сторінку за посиланням зі скидання пароля в листі.', kk: 'Бұл бетті email-дегі қалпына келтіру сілтемесі арқылы ашыңыз.' },
+  'auth.reset.submit':       { en: 'Save password', ru: 'Сохранить пароль', it: 'Salva password', fr: 'Enregistrer le mot de passe', az: 'Şifrəni yadda saxla', tr: 'Şifreyi kaydet', uk: 'Зберегти пароль', kk: 'Құпиясөзді сақтау' },
+  'auth.reset.submitting':   { en: 'Saving…', ru: 'Сохраняем…', it: 'Salvataggio…', fr: 'Enregistrement…', az: 'Yadda saxlanılır…', tr: 'Kaydediliyor…', uk: 'Збереження…', kk: 'Сақталуда…' },
+  'auth.reset.doneTitle':    { en: 'Password changed', ru: 'Пароль изменён', it: 'Password modificata', fr: 'Mot de passe modifié', az: 'Şifrə dəyişdirildi', tr: 'Şifre değiştirildi', uk: 'Пароль змінено', kk: 'Құпиясөз өзгертілді' },
+  'auth.reset.toDashboard':  { en: 'Go to dashboard', ru: 'В личный кабинет', it: 'Vai alla dashboard', fr: 'Aller au tableau de bord', az: 'İdarə panelinə keç', tr: "Panele git", uk: 'До кабінету', kk: 'Басқару тақтасына өту' },
 }

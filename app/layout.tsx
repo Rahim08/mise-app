@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Geist } from "next/font/google";
 import { ErrorReporter } from "@/components/ErrorReporter";
+import { CookieConsent } from "@/components/CookieConsent";
+import { Analytics } from "@/components/Analytics";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -42,7 +45,12 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="theme-color" content="#f2f2f7" />
       </head>
-      <body className="min-h-full flex flex-col"><ErrorReporter />{children}</body>
+      <body className="min-h-full flex flex-col">
+        <ErrorReporter />
+        {children}
+        <CookieConsent />
+        <Suspense fallback={null}><Analytics /></Suspense>
+      </body>
     </html>
   );
 }

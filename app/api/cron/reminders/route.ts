@@ -10,11 +10,55 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { sendTrialEndingEmail } from '@/lib/email'
 
 export const dynamic = 'force-dynamic'
 
 function fmtDate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Email owners whose trial ends within 3 days, once per day per restaurant.
+// Fully guarded — any failure here must not affect shift reminders. No-op until
+// RESEND_API_KEY is set (sendTrialEndingEmail skips silently).
+async function sendTrialReminders(admin: any, now: Date): Promise<number> {
+  try {
+    const cutoff = new Date(now.getTime() + 3 * 86400000).toISOString()
+    const { data: rests } = await admin
+      .from('restaurants')
+      .select('id, owner_id, subscription_status, subscription_ends_at')
+      .eq('subscription_status', 'trialing')
+      .not('subscription_ends_at', 'is', null)
+      .lte('subscription_ends_at', cutoff)
+    if (!rests?.length) return 0
+
+    const today = fmtDate(now)
+    // Dedup: one trial email per restaurant per day, tracked as a notification row.
+    const { data: sentRows } = await admin.from('notifications')
+      .select('restaurant_id, data').eq('type', 'trial_ending').gte('created_at', `${today}T00:00:00Z`)
+    const sentToday = new Set((sentRows || []).map((n: any) => n.restaurant_id))
+
+    let sent = 0
+    for (const r of rests) {
+      if (sentToday.has(r.id)) continue
+      const ends = new Date(r.subscription_ends_at)
+      const daysLeft = Math.max(0, Math.ceil((ends.getTime() - now.getTime()) / 86400000))
+      const { data: u } = await admin.auth.admin.getUserById(r.owner_id)
+      const email = u?.user?.email
+      if (!email) continue
+      const res = await sendTrialEndingEmail(email, daysLeft)
+      // Record the attempt even when skipped (no key) to avoid re-querying every run.
+      await admin.from('notifications').insert({
+        restaurant_id: r.id, type: 'trial_ending',
+        title: 'Окончание пробного периода', body: `Триал заканчивается через ${daysLeft} дн.`,
+        data: { days_left: daysLeft, email_ok: !!res.ok }, sent_at: now.toISOString(),
+      })
+      if (res.ok) sent++
+    }
+    return sent
+  } catch {
+    return 0
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -31,7 +75,10 @@ export async function GET(req: NextRequest) {
   const { data: schedules } = await admin
     .from('staff_schedules').select('id, restaurant_id, staff_id, date, shift_start, shift_end')
     .eq('published', true).in('date', [today, tomorrow])
-  if (!schedules?.length) return NextResponse.json({ ok: true, sent: 0 })
+  if (!schedules?.length) {
+    const trialEmails = await sendTrialReminders(admin, now)
+    return NextResponse.json({ ok: true, sent: 0, trialEmails })
+  }
 
   // Уже отправленные напоминания за последние 2 дня → set(schedule_id)
   const since = new Date(now.getTime() - 2 * 86400000).toISOString()
@@ -63,5 +110,7 @@ export async function GET(req: NextRequest) {
     const { error } = await admin.from('notifications').insert(inserts)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   }
-  return NextResponse.json({ ok: true, sent: inserts.length })
+
+  const trialEmails = await sendTrialReminders(admin, now)
+  return NextResponse.json({ ok: true, sent: inserts.length, trialEmails })
 }

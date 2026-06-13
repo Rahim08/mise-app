@@ -47,9 +47,17 @@ body{
 .nav-links a{font-size:.78rem;color:var(--text-2);text-decoration:none;padding:0 14px;transition:color .2s;letter-spacing:-.01em;font-weight:500;}
 .nav-links a:hover{color:#fff;}
 .nav-right{display:flex;align-items:center;gap:12px;}
-.lang-tog{display:flex;gap:2px;background:rgba(255,255,255,.07);border-radius:8px;padding:3px;}
-.lang-btn{font-size:.68rem;padding:4px 10px;border-radius:6px;border:none;background:transparent;cursor:pointer;color:var(--text-3);font-family:inherit;transition:all .2s;font-weight:700;letter-spacing:.03em;}
-.lang-btn.active{background:rgba(255,255,255,.13);color:#fff;}
+.lang-tog{position:relative;}
+.lang-cur{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.07);border:none;border-radius:8px;padding:6px 11px;cursor:pointer;color:var(--text-2);font-family:inherit;font-size:.72rem;font-weight:700;letter-spacing:.04em;transition:all .2s;}
+.lang-cur:hover{color:#fff;background:rgba(255,255,255,.12);}
+.lang-cur svg{opacity:.66;}
+.lang-menu{position:absolute;top:calc(100% + 9px);right:0;min-width:168px;background:rgba(18,18,20,.82);backdrop-filter:blur(30px) saturate(160%);-webkit-backdrop-filter:blur(30px) saturate(160%);border:.5px solid var(--border);border-radius:15px;padding:6px;box-shadow:0 24px 60px rgba(0,0,0,.55),0 1px 0 rgba(255,255,255,.06) inset;opacity:0;transform:translateY(-7px) scale(.97);transform-origin:top right;pointer-events:none;transition:opacity .2s var(--ease),transform .2s var(--ease);z-index:1001;}
+.lang-menu.open{opacity:1;transform:translateY(0) scale(1);pointer-events:auto;}
+.lang-opt{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;background:transparent;border:none;border-radius:10px;padding:9px 13px;cursor:pointer;color:var(--text-2);font-family:inherit;font-size:.84rem;font-weight:500;text-align:left;letter-spacing:-.01em;transition:background .15s,color .15s;}
+.lang-opt:hover{background:rgba(255,255,255,.08);color:#fff;}
+.lang-opt.active{color:#fff;}
+.lang-opt .lo-code{font-size:.62rem;font-weight:700;letter-spacing:.06em;color:var(--text-4);}
+.lang-opt.active .lo-code{color:var(--blue);}
 .nav-cta{font-size:.78rem;color:#fff;text-decoration:none;font-weight:600;padding:7px 17px;border-radius:980px;background:var(--blue);transition:all .2s;letter-spacing:-.01em;}
 .nav-cta:hover{background:#0a84ff;transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,122,255,.4);}
 .progress-bar{position:fixed;top:52px;left:0;right:0;z-index:998;height:1px;}
@@ -305,9 +313,12 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
     <li><a href="#pricing" data-i18n="n.p">Цены</a></li>
   </ul>
   <div class="nav-right">
-    <div class="lang-tog">
-      <button class="lang-btn active" onclick="setLang('ru')">RU</button>
-      <button class="lang-btn" onclick="setLang('en')">EN</button>
+    <div class="lang-tog" id="langTog">
+      <button class="lang-cur" onclick="toggleLangMenu(event)" aria-haspopup="true" aria-label="Language">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18" stroke-linecap="round"/><path d="M12 3c2.6 2.8 2.6 15.2 0 18M12 3c-2.6 2.8-2.6 15.2 0 18" stroke-linecap="round"/></svg>
+        <span id="langCurLabel">RU</span>
+      </button>
+      <div class="lang-menu" id="langMenu"></div>
     </div>
     <a href="/auth/login" class="nav-cta" data-i18n="n.cta">Войти</a>
   </div>
@@ -775,31 +786,32 @@ const ctaObserver = new IntersectionObserver(entries => {
 const ctaEl = document.querySelector('.big-cta'); if (ctaEl) ctaObserver.observe(ctaEl);
 
 // ─ i18n ─
+const LANGS = [['en','English','EN'],['ru','Русский','RU'],['it','Italiano','IT'],['fr','Français','FR'],['az','Azərbaycan','AZ'],['tr','Türkçe','TR'],['uk','Українська','UK'],['kk','Қазақша','KK']];
 const T = {
   ru:{
     'n.apps':'Приложения','n.team':'Команда','n.how':'Как работает','n.p':'Цены','n.cta':'Войти',
     'h.label':'Платформа управления рестораном',
     'h.l1':'Весь ресторан.','h.l2':'Одна платформа.','h.l3':'Полный контроль.',
-    'h.sub':'Пять приложений — смены и касса, аналитика, склад, команда и QR-меню. Один аккаунт, синхронизация в реальном времени, прямо с iPhone.',
+    'h.sub':'Касса, аналитика, склад, команда и QR-меню. Пять приложений в одном аккаунте — синхронизация в реальном времени, прямо с iPhone.',
     'h.b1':'Начать бесплатно','h.b2':'Смотреть приложения',
     'st.l1':'Пять приложений.','st.l2':'Один аккаунт.','st.l3a':'Полный','st.l3b':'контроль.',
     'st1.n':'12 сек','st1.l':'среднее время\nоткрытия смены',
     'st2.n':'5-в-1','st2.l':'приложений в\nодном аккаунте',
     'st3.n':'€0','st3.l':'потерянных смен\nв базе данных',
-    'apps.t':'Пять приложений.\nПод каждую роль.','apps.s':'Владельцу — аналитика. Менеджеру — касса. Кальянщику — склад. Команде — расписание. Гостю — меню.',
-    'mg.h':'Смена под контролем —\nот открытия до отчёта.','mg.p':'Менеджер открывает смену одним нажатием. Выручка, расходы и баланс кассы считаются в реальном времени. В конце дня владелец получает полный отчёт автоматически.','mg.f1':'Открытие и закрытие смены, баланс кассы','mg.f2':'Расходы по категориям с лимитами','mg.f3':'Инкассации и отчёт смены владельцу',
-    'an.h':'Цифры, которые\nпринимают решения.','an.p':'Финансы по дням, неделям и месяцам. Сравнение периодов, динамика выручки, зарплатная ведомость без Excel. А в тарифе Pro — AI-ассистент, который отвечает на вопросы о бизнесе человеческим языком.','an.f1':'Аналитика и сравнение периодов','an.f2':'Зарплаты: оклады, вычеты, нал и карта','an.f3':'AI-ассистент на естественном языке · Pro',
-    'sh.h':'Склад табака,\nсмена кальянщика.','sh.p':'Остатки по каждому бренду и вкусу с цветными индикаторами уровня. Приход и инвентаризация в пару нажатий. Смена кальянщика считает продажи, расход табака и выручку — а аналитика показывает картину по видам.','sh.f1':'Остатки по брендам и вкусам','sh.f2':'Приход и инвентаризация с историей','sh.f3':'Смена кальянщика: продажи и расход',
-    'pe.h':'Команда, которая\nработает сама.','pe.p':'Расписание с обменом сменами, задачи и отчёты о поломках, явка по геолокации с учётом часов, чек-листы открытия и закрытия, стоп-лист кухни. Каждый видит ровно то, что нужно для его роли.','pe.f1':'Расписание и обмен сменами','pe.f2':'Гео-явка, опоздания и учёт часов','pe.f3':'Задачи, чек-листы и стоп-лист',
-    'mn.h':'QR-меню и заказ\nпрямо за столом.','mn.p':'Гость сканирует QR на столе, листает меню с фото, отправляет заказ или зовёт официанта — а команда видит всё мгновенно. Стоп-лист обновляется автоматически, оплата за столом — по желанию. Без скачивания приложений.','mn.f1':'Меню с фото — без установки приложения','mn.f2':'Заказ и оплата за столом','mn.f3':'Номер стола в заказе, вызов официанта',
+    'apps.t':'Пять приложений.\nПод каждую роль.','apps.s':'Владельцу — аналитика. Менеджеру — касса. Бару — склад. Команде — расписание. Гостю — меню.',
+    'mg.h':'Смена под контролем —\nот открытия до отчёта.','mg.p':'Менеджер открывает смену одним касанием. Выручка, расходы и касса считаются в реальном времени. В конце дня владелец получает полный отчёт — автоматически.','mg.f1':'Открытие и закрытие смены, баланс кассы','mg.f2':'Расходы по категориям с лимитами','mg.f3':'Инкассация и отчёт смены владельцу',
+    'an.h':'Цифры, которые\nпринимают решения.','an.p':'Финансы по дням, неделям и месяцам. Сравнение периодов, динамика выручки, зарплаты без Excel. На тарифе Pro — AI-ассистент, который отвечает о бизнесе понятным языком.','an.f1':'Аналитика и сравнение периодов','an.f2':'Зарплаты: оклады, вычеты, нал и карта','an.f3':'AI-ассистент на естественном языке · Pro',
+    'sh.h':'Склад табака,\nсмена кальянщика.','sh.p':'Остатки по каждому бренду и вкусу — с цветными индикаторами уровня. Приход и инвентаризация в пару касаний. Смена кальянщика считает продажи, расход табака и выручку.','sh.f1':'Остатки по брендам и вкусам','sh.f2':'Приход и инвентаризация с историей','sh.f3':'Смена кальянщика: продажи и расход',
+    'pe.h':'Команда, которая\nработает сама.','pe.p':'Расписание с обменом сменами, задачи и отчёты о поломках, гео-явка с учётом часов, чек-листы открытия и закрытия, стоп-лист кухни. Каждый видит ровно то, что нужно для его роли.','pe.f1':'Расписание и обмен сменами','pe.f2':'Гео-явка, опоздания и учёт часов','pe.f3':'Задачи, чек-листы и стоп-лист',
+    'mn.h':'QR-меню и заказ\nпрямо за столом.','mn.p':'Гость сканирует QR, листает меню с фото, отправляет заказ или зовёт официанта — команда видит всё мгновенно. Стоп-лист обновляется сам, оплата за столом — по желанию. Без установки приложений.','mn.f1':'Меню с фото — без установки приложения','mn.f2':'Заказ и оплата за столом','mn.f3':'Номер стола в заказе, вызов официанта',
     'mock.rev':'Выручка','mock.exp':'Расходы','mock.profit':'Прибыль','mock.cash':'Касса','mock.of500':'из €500','mock.net':'чистая','mock.coll':'инкасс.','mock.lastops':'Последние операции','mock.revcash':'Выручка · Наличные','mock.expfood':'Расход · Продукты','mock.revcard':'Выручка · Карта','mock.collection':'Инкассация','mock.addop':'+ Добавить операцию','mock.payroll':'ФОТ','mock.cashshort':'Нал','mock.card':'Карта','mock.revbyday':'Выручка по дням','mock.bestday':'Лучший день','mock.friday':'Пятница','mock.flavors':'12 вкусов','mock.today':'Сегодня','mock.shift':'Смена · явка','mock.p1':'Александр · Бар','mock.p2':'Мария · Зал','mock.p3':'Дмитрий · Кухня','mock.ontime':'10:02 ✓','mock.ontime2':'09:58 ✓','mock.late':'+14 мин','mock.opening':'Чек-лист открытия','mock.c1':'Включить оборудование','mock.c2':'Проверить заготовки','mock.c3':'Обновить стоп-лист','mock.cart':'Корзина · 2','mock.hot':'Горячее','mock.dish1':'Рибай стейк','mock.dish1d':'300 г · средняя прожарка','mock.dish2':'Том-ям','mock.dish2d':'с морепродуктами','mock.dish3':'Тирамису','mock.dish3d':'классический','mock.order':'Заказать · €46',
     'cc.label':'Доступ для команды','cc.title':'Вход без паролей.','cc.sub':'Каждый сотрудник входит в своё приложение через QR и PIN. Без регистрации, без email, без забытых паролей.',
-    'cc1.t':'QR-вход','cc1.d':'Владелец показывает QR. Сотрудник сканирует — и устройство привязывается к заведению навсегда.',
-    'cc2.t':'PIN-доступ','cc2.d':'4-значный PIN задаёт владелец. Каждому сотруднику — свой код и свой набор приложений.',
-    'cc3.t':'Face ID','cc3.d':'После первого входа — предложение включить Face ID. Следующие входы мгновенны.',
+    'cc1.t':'QR-вход','cc1.d':'Владелец показывает QR. Сотрудник сканирует — устройство привязано к заведению.',
+    'cc2.t':'PIN-доступ','cc2.d':'4-значный PIN задаёт владелец. Каждому — свой код и свой набор приложений.',
+    'cc3.t':'Face ID','cc3.d':'После первого входа — Face ID. Следующие входы мгновенны.',
     'hw.l':'Как это работает','hw.t':'Запуск за минуты.','hw.s':'Четыре шага — и весь ресторан под контролем.',
-    'step1.t':'Регистрация','step1.d':'Создайте аккаунт за 30 секунд.','step2.t':'Подписка','step2.d':'7 дней бесплатно, карта не нужна.','step3.t':'Команда','step3.d':'Доступ через QR-код и PIN.','step4.t':'Контроль','step4.d':'Аналитика и отчёты в любое время.',
-    'pr.l':'Тарифы','pr.t':'Прозрачные цены.','pr.s':'Отменить или сменить тариф можно в любой момент.',
+    'step1.t':'Регистрация','step1.d':'Аккаунт за 30 секунд.','step2.t':'Подписка','step2.d':'7 дней бесплатно, карта не нужна.','step3.t':'Команда','step3.d':'Доступ по QR и PIN.','step4.t':'Контроль','step4.d':'Аналитика и отчёты в любое время.',
+    'pr.l':'Тарифы','pr.t':'Прозрачные цены.','pr.s':'Сменить или отменить тариф — в любой момент.',
     'p1.d':'€0.47 в день','p1.f1':'До 2 пользователей','p1.f2':'AI-аналитика','p1.btn':'Выбрать',
     'p2.d':'€0.79 в день','p2.f1':'Все пять приложений','p2.f2':'До 5 пользователей','p2.f3':'QR-меню для гостей','p2.f4':'Приоритетная поддержка','p2.f5':'AI-аналитика','p2.btn':'Начать бесплатно',
     'p3.d':'€1.29 в день','p3.f1':'Всё из Business','p3.f2':'До 10 пользователей','p3.f3':'AI-аналитика','p3.f4':'Интеграции: касса · банк','p3.btn':'Выбрать',
@@ -811,67 +823,283 @@ const T = {
     'n.apps':'Apps','n.team':'Team','n.how':'How it works','n.p':'Pricing','n.cta':'Sign in',
     'h.label':'Restaurant management platform',
     'h.l1':'Your whole restaurant.','h.l2':'One platform.','h.l3':'Total control.',
-    'h.sub':'Five apps — shifts and cash, analytics, inventory, team, and a QR menu. One account, real-time sync, right from your iPhone.',
+    'h.sub':'Cash, analytics, inventory, team, and a QR menu. Five apps in one account — synced in real time, right from your iPhone.',
     'h.b1':'Start for free','h.b2':'Explore the apps',
     'st.l1':'Five apps.','st.l2':'One account.','st.l3a':'Total','st.l3b':'control.',
     'st1.n':'12 sec','st1.l':'average shift\nopen time',
     'st2.n':'5-in-1','st2.l':'apps in\none account',
     'st3.n':'€0','st3.l':'lost shifts\nin the database',
     'apps.t':'Five apps.\nOne for every role.','apps.s':'Analytics for the owner. Cash for the manager. Inventory for the bar. Scheduling for the team. A menu for the guest.',
-    'mg.h':'The shift, under control —\nfrom open to report.','mg.p':'The manager opens a shift with one tap. Revenue, expenses, and register balance update in real time. At the end of the day the owner gets a full report automatically.','mg.f1':'Open and close shifts, register balance','mg.f2':'Expenses by category with limits','mg.f3':'Cash collections and shift report to owner',
-    'an.h':'Numbers that\nmake decisions.','an.p':'Finances by day, week, and month. Period comparisons, revenue trends, payroll without Excel. And on Pro — an AI assistant that answers questions about your business in plain language.','an.f1':'Analytics and period comparison','an.f2':'Payroll: salaries, deductions, cash & card','an.f3':'AI assistant in natural language · Pro',
-    'sh.h':'Tobacco stock,\nhookah shifts.','sh.p':'Stock by brand and flavor with color level indicators. Deliveries and inventory in a couple of taps. The hookah shift tracks sales, tobacco usage, and revenue — and analytics shows the picture by type.','sh.f1':'Stock by brand and flavor','sh.f2':'Deliveries and inventory with history','sh.f3':'Hookah shift: sales and usage',
+    'mg.h':'The shift, under control —\nfrom open to report.','mg.p':'One tap opens the shift. Revenue, expenses, and the register update in real time. At close, the owner gets the full report — automatically.','mg.f1':'Open and close shifts, register balance','mg.f2':'Expenses by category, with limits','mg.f3':'Cash collection and shift report to the owner',
+    'an.h':'Numbers that\nmake decisions.','an.p':'Finances by day, week, and month. Period comparisons, revenue trends, payroll without Excel. On Pro, an AI assistant answers questions about your business in plain language.','an.f1':'Analytics and period comparison','an.f2':'Payroll: salaries, deductions, cash & card','an.f3':'AI assistant in natural language · Pro',
+    'sh.h':'Tobacco stock,\nhookah shifts.','sh.p':'Stock by every brand and flavor, with color level indicators. Deliveries and inventory in a couple of taps. The hookah shift counts sales, tobacco usage, and revenue.','sh.f1':'Stock by brand and flavor','sh.f2':'Deliveries and inventory, with history','sh.f3':'Hookah shift: sales and usage',
     'pe.h':'A team that\nruns itself.','pe.p':'Scheduling with shift swaps, tasks and breakage reports, geo check-in with hour tracking, opening and closing checklists, kitchen stop-list. Everyone sees exactly what their role needs.','pe.f1':'Scheduling and shift swaps','pe.f2':'Geo check-in, lateness, hour tracking','pe.f3':'Tasks, checklists, and stop-list',
-    'mn.h':'A QR menu, ordered\nright at the table.','mn.p':'The guest scans a QR at the table, browses the menu with photos, sends an order or calls a waiter — and the team sees it instantly. The stop-list updates automatically, pay-at-table is optional. No app download.','mn.f1':'Menu with photos — no app install','mn.f2':'Order and pay at the table','mn.f3':'Table number on the order, call waiter',
+    'mn.h':'A QR menu, ordered\nright at the table.','mn.p':'The guest scans a QR, browses the photo menu, sends an order or calls a waiter — the team sees it instantly. The stop-list updates itself, pay-at-table is optional. No app to install.','mn.f1':'Photo menu — no app to install','mn.f2':'Order and pay at the table','mn.f3':'Table number on the order, call waiter',
     'mock.rev':'Revenue','mock.exp':'Expenses','mock.profit':'Profit','mock.cash':'Register','mock.of500':'of €500','mock.net':'net','mock.coll':'collected','mock.lastops':'Recent operations','mock.revcash':'Revenue · Cash','mock.expfood':'Expense · Food','mock.revcard':'Revenue · Card','mock.collection':'Collection','mock.addop':'+ Add operation','mock.payroll':'Payroll','mock.cashshort':'Cash','mock.card':'Card','mock.revbyday':'Revenue by day','mock.bestday':'Best day','mock.friday':'Friday','mock.flavors':'12 flavors','mock.today':'Today','mock.shift':'Shift · check-in','mock.p1':'Alexander · Bar','mock.p2':'Maria · Floor','mock.p3':'Dmitry · Kitchen','mock.ontime':'10:02 ✓','mock.ontime2':'09:58 ✓','mock.late':'+14 min','mock.opening':'Opening checklist','mock.c1':'Turn on equipment','mock.c2':'Check prep','mock.c3':'Update stop-list','mock.cart':'Cart · 2','mock.hot':'Mains','mock.dish1':'Ribeye steak','mock.dish1d':'300 g · medium','mock.dish2':'Tom yum','mock.dish2d':'with seafood','mock.dish3':'Tiramisu','mock.dish3d':'classic','mock.order':'Order · €46',
     'cc.label':'Team access','cc.title':'No passwords.','cc.sub':'Every staff member signs into their app via QR and PIN. No registration, no email, no forgotten passwords.',
-    'cc1.t':'QR sign-in','cc1.d':'The owner shows a QR. Staff scans — and the device is linked to the venue forever.',
-    'cc2.t':'PIN access','cc2.d':'A 4-digit PIN set by the owner. Each person gets their own code and their own set of apps.',
-    'cc3.t':'Face ID','cc3.d':'After the first sign-in — an option to enable Face ID. Next logins are instant.',
-    'hw.l':'How it works','hw.t':'Live in minutes.','hw.s':'Four steps — your entire restaurant under control.',
-    'step1.t':'Register','step1.d':'Create an account in 30 seconds.','step2.t':'Subscribe','step2.d':'7 days free, no card required.','step3.t':'Team','step3.d':'Access via QR code and PIN.','step4.t':'Control','step4.d':'Analytics and reports anytime.',
-    'pr.l':'Pricing','pr.t':'Transparent pricing.','pr.s':'Cancel or switch plans anytime.',
+    'cc1.t':'QR sign-in','cc1.d':'The owner shows a QR. Staff scan it — and the device is linked to the venue.',
+    'cc2.t':'PIN access','cc2.d':'A 4-digit PIN, set by the owner. Each person gets their own code and their own apps.',
+    'cc3.t':'Face ID','cc3.d':'After the first sign-in, enable Face ID. Every login after is instant.',
+    'hw.l':'How it works','hw.t':'Live in minutes.','hw.s':'Four steps, and your whole restaurant is under control.',
+    'step1.t':'Register','step1.d':'An account in 30 seconds.','step2.t':'Subscribe','step2.d':'7 days free, no card required.','step3.t':'Team','step3.d':'Access by QR and PIN.','step4.t':'Control','step4.d':'Analytics and reports, anytime.',
+    'pr.l':'Pricing','pr.t':'Transparent pricing.','pr.s':'Switch or cancel anytime.',
     'p1.d':'€0.47 per day','p1.f1':'Up to 2 users','p1.f2':'AI analytics','p1.btn':'Choose',
     'p2.d':'€0.79 per day','p2.f1':'All five apps','p2.f2':'Up to 5 users','p2.f3':'Guest QR menu','p2.f4':'Priority support','p2.f5':'AI analytics','p2.btn':'Start free',
     'p3.d':'€1.29 per day','p3.f1':'Everything in Business','p3.f2':'Up to 10 users','p3.f3':'AI analytics','p3.f4':'Integrations: POS · bank','p3.btn':'Choose',
     'pop':'Most popular','pay.free':'7 days free',
-    'cta.w':'Ready?','cta.s':'First 7 days free. No card required.','cta.b':'Create account',
+    'cta.w':'Ready?','cta.s':'Your first 7 days are free. No card required.','cta.b':'Create account',
     'ft.tag':'Restaurant management platform. Five apps in one account.','ft.p':'Apps','ft.c':'Company','ft.l':'Legal','ft.about':'About','ft.sup':'Support','ft.cont':'Contact','ft.priv':'Privacy','ft.terms':'Terms',
+  },
+  it:{
+    'n.apps':"App",'n.team':"Team",'n.how':"Come funziona",'n.p':"Prezzi",'n.cta':"Accedi",
+    'h.label':"La piattaforma per gestire il ristorante",
+    'h.l1':"Tutto il ristorante.",'h.l2':"Una piattaforma.",'h.l3':"Controllo totale.",
+    'h.sub':"Cassa, analisi, magazzino, team e menu QR. Cinque app in un solo account — sincronizzate in tempo reale, direttamente dal tuo iPhone.",
+    'h.b1':"Inizia gratis",'h.b2':"Esplora le app",
+    'st.l1':"Cinque app.",'st.l2':"Un account.",'st.l3a':"Controllo",'st.l3b':"totale.",
+    'st1.n':"12 sec",'st1.l':"tempo medio di\napertura turno",
+    'st2.n':"5-in-1",'st2.l':"app in\nun solo account",
+    'st3.n':"€0",'st3.l':"turni persi\nnel database",
+    'apps.t':"Cinque app.\nUna per ogni ruolo.",'apps.s':"Analisi per il titolare. Cassa per il manager. Magazzino per il bar. Turni per il team. Menu per l'ospite.",
+    'mg.h':"Il turno, sotto controllo —\ndall'apertura al report.",'mg.p':"Il manager apre il turno con un tocco. Incassi, spese e cassa si aggiornano in tempo reale. A fine giornata il titolare riceve il report completo — in automatico.",'mg.f1':"Apertura e chiusura turno, saldo cassa",'mg.f2':"Spese per categoria, con limiti",'mg.f3':"Versamenti e report del turno al titolare",
+    'an.h':"Numeri che\ndecidono.",'an.p':"Finanze per giorno, settimana e mese. Confronto tra periodi, andamento degli incassi, buste paga senza Excel. Con Pro, un assistente AI risponde sul tuo business in linguaggio naturale.",'an.f1':"Analisi e confronto tra periodi",'an.f2':"Buste paga: stipendi, trattenute, contanti e carta",'an.f3':"Assistente AI in linguaggio naturale · Pro",
+    'sh.h':"Scorte di tabacco,\nturno narghilè.",'sh.p':"Scorte per ogni marca e gusto, con indicatori di livello a colori. Carichi e inventario in pochi tocchi. Il turno narghilè conta vendite, consumo di tabacco e incassi.",'sh.f1':"Scorte per marca e gusto",'sh.f2':"Carichi e inventario, con storico",'sh.f3':"Turno narghilè: vendite e consumo",
+    'pe.h':"Un team che\nsi gestisce da solo.",'pe.p':"Turni con scambi, attività e segnalazioni guasti, timbratura geo con conteggio ore, checklist di apertura e chiusura, stop-list della cucina. Ognuno vede esattamente ciò che serve al suo ruolo.",'pe.f1':"Turni e scambi di turno",'pe.f2':"Timbratura geo, ritardi e conteggio ore",'pe.f3':"Attività, checklist e stop-list",
+    'mn.h':"Menu QR, ordini\ndirettamente al tavolo.",'mn.p':"L'ospite scansiona il QR, sfoglia il menu con foto, invia l'ordine o chiama il cameriere — il team vede tutto all'istante. La stop-list si aggiorna da sola, il pagamento al tavolo è opzionale. Senza installare app.",'mn.f1':"Menu con foto — senza installare app",'mn.f2':"Ordine e pagamento al tavolo",'mn.f3':"Numero tavolo nell'ordine, chiamata cameriere",
+    'mock.rev':"Incassi",'mock.exp':"Spese",'mock.profit':"Utile",'mock.cash':"Cassa",'mock.of500':"di €500",'mock.net':"netto",'mock.coll':"versato",'mock.lastops':"Operazioni recenti",'mock.revcash':"Incasso · Contanti",'mock.expfood':"Spesa · Cibo",'mock.revcard':"Incasso · Carta",'mock.collection':"Versamento",'mock.addop':"+ Aggiungi operazione",'mock.payroll':"Personale",'mock.cashshort':"Contanti",'mock.card':"Carta",'mock.revbyday':"Incassi per giorno",'mock.bestday':"Giorno migliore",'mock.friday':"Venerdì",'mock.flavors':"12 gusti",'mock.today':"Oggi",'mock.shift':"Turno · presenze",'mock.p1':"Alessandro · Bar",'mock.p2':"Maria · Sala",'mock.p3':"Dmitri · Cucina",'mock.ontime':"10:02 ✓",'mock.ontime2':"09:58 ✓",'mock.late':"+14 min",'mock.opening':"Checklist apertura",'mock.c1':"Accendere le attrezzature",'mock.c2':"Controllare le preparazioni",'mock.c3':"Aggiornare la stop-list",'mock.cart':"Carrello · 2",'mock.hot':"Secondi",'mock.dish1':"Bistecca ribeye",'mock.dish1d':"300 g · media cottura",'mock.dish2':"Tom yum",'mock.dish2d':"con frutti di mare",'mock.dish3':"Tiramisù",'mock.dish3d':"classico",'mock.order':"Ordina · €46",
+    'cc.label':"Accesso per il team",'cc.title':"Niente password.",'cc.sub':"Ogni membro del team accede alla sua app con QR e PIN. Nessuna registrazione, nessuna email, nessuna password dimenticata.",
+    'cc1.t':"Accesso QR",'cc1.d':"Il titolare mostra un QR. Il personale lo scansiona — e il dispositivo resta legato al locale.",
+    'cc2.t':"Accesso PIN",'cc2.d':"Un PIN di 4 cifre, impostato dal titolare. A ciascuno il proprio codice e le proprie app.",
+    'cc3.t':"Face ID",'cc3.d':"Dopo il primo accesso, attivi Face ID. Ogni accesso successivo è istantaneo.",
+    'hw.l':"Come funziona",'hw.t':"Operativo in pochi minuti.",'hw.s':"Quattro passi, e tutto il ristorante è sotto controllo.",
+    'step1.t':"Registrazione",'step1.d':"Un account in 30 secondi.",'step2.t':"Abbonamento",'step2.d':"7 giorni gratis, senza carta.",'step3.t':"Team",'step3.d':"Accesso con QR e PIN.",'step4.t':"Controllo",'step4.d':"Analisi e report, sempre.",
+    'pr.l':"Prezzi",'pr.t':"Prezzi trasparenti.",'pr.s':"Cambia o annulla quando vuoi.",
+    'p1.d':"€0.47 al giorno",'p1.f1':"Fino a 2 utenti",'p1.f2':"Analisi AI",'p1.btn':"Scegli",
+    'p2.d':"€0.79 al giorno",'p2.f1':"Tutte e cinque le app",'p2.f2':"Fino a 5 utenti",'p2.f3':"Menu QR per gli ospiti",'p2.f4':"Supporto prioritario",'p2.f5':"Analisi AI",'p2.btn':"Inizia gratis",
+    'p3.d':"€1.29 al giorno",'p3.f1':"Tutto di Business",'p3.f2':"Fino a 10 utenti",'p3.f3':"Analisi AI",'p3.f4':"Integrazioni: cassa · banca",'p3.btn':"Scegli",
+    'pop':"Più scelto",'pay.free':"7 giorni gratis",
+    'cta.w':"Pronto?",'cta.s':"I primi 7 giorni sono gratis. Senza carta.",'cta.b':"Crea un account",
+    'ft.tag':"La piattaforma per gestire il ristorante. Cinque app in un solo account.",'ft.p':"App",'ft.c':"Azienda",'ft.l':"Note legali",'ft.about':"Chi siamo",'ft.sup':"Supporto",'ft.cont':"Contatti",'ft.priv':"Privacy",'ft.terms':"Termini",
+  },
+  fr:{
+    'n.apps':"Apps",'n.team':"Équipe",'n.how':"Fonctionnement",'n.p':"Tarifs",'n.cta':"Se connecter",
+    'h.label':"La plateforme de gestion de restaurant",
+    'h.l1':"Tout le restaurant.",'h.l2':"Une plateforme.",'h.l3':"Contrôle total.",
+    'h.sub':"Caisse, analyses, stock, équipe et menu QR. Cinq apps dans un seul compte — synchronisées en temps réel, directement depuis votre iPhone.",
+    'h.b1':"Commencer gratuitement",'h.b2':"Découvrir les apps",
+    'st.l1':"Cinq apps.",'st.l2':"Un compte.",'st.l3a':"Contrôle",'st.l3b':"total.",
+    'st1.n':"12 s",'st1.l':"temps moyen\nd'ouverture du service",
+    'st2.n':"5-en-1",'st2.l':"apps dans\nun seul compte",
+    'st3.n':"€0",'st3.l':"services perdus\ndans la base",
+    'apps.t':"Cinq apps.\nUne pour chaque rôle.",'apps.s':"Les analyses pour le gérant. La caisse pour le manager. Le stock pour le bar. Les plannings pour l'équipe. Le menu pour le client.",
+    'mg.h':"Le service, sous contrôle —\nde l'ouverture au rapport.",'mg.p':"Le manager ouvre le service d'un geste. Recettes, dépenses et caisse se mettent à jour en temps réel. En fin de journée, le gérant reçoit le rapport complet — automatiquement.",'mg.f1':"Ouverture et clôture du service, solde de caisse",'mg.f2':"Dépenses par catégorie, avec limites",'mg.f3':"Encaissements et rapport de service au gérant",
+    'an.h':"Des chiffres qui\ndécident.",'an.p':"Finances par jour, semaine et mois. Comparaison de périodes, évolution des recettes, paie sans Excel. Avec Pro, un assistant IA répond sur votre activité en langage naturel.",'an.f1':"Analyses et comparaison de périodes",'an.f2':"Paie : salaires, retenues, espèces et carte",'an.f3':"Assistant IA en langage naturel · Pro",
+    'sh.h':"Stock de tabac,\nservice chicha.",'sh.p':"Stock par marque et par parfum, avec indicateurs de niveau colorés. Réceptions et inventaire en quelques gestes. Le service chicha compte les ventes, la consommation de tabac et les recettes.",'sh.f1':"Stock par marque et parfum",'sh.f2':"Réceptions et inventaire, avec historique",'sh.f3':"Service chicha : ventes et consommation",
+    'pe.h':"Une équipe qui\nse gère seule.",'pe.p':"Plannings avec échange de créneaux, tâches et signalements de pannes, pointage géo avec suivi des heures, checklists d'ouverture et de fermeture, stop-list de cuisine. Chacun voit exactement ce dont son rôle a besoin.",'pe.f1':"Plannings et échange de créneaux",'pe.f2':"Pointage géo, retards et suivi des heures",'pe.f3':"Tâches, checklists et stop-list",
+    'mn.h':"Menu QR, commande\ndirectement à table.",'mn.p':"Le client scanne le QR, parcourt le menu en photos, envoie une commande ou appelle un serveur — l'équipe voit tout instantanément. La stop-list se met à jour seule, le paiement à table est optionnel. Sans installer d'app.",'mn.f1':"Menu en photos — sans installer d'app",'mn.f2':"Commande et paiement à table",'mn.f3':"Numéro de table sur la commande, appel serveur",
+    'mock.rev':"Recettes",'mock.exp':"Dépenses",'mock.profit':"Bénéfice",'mock.cash':"Caisse",'mock.of500':"sur €500",'mock.net':"net",'mock.coll':"encaissé",'mock.lastops':"Opérations récentes",'mock.revcash':"Recette · Espèces",'mock.expfood':"Dépense · Aliments",'mock.revcard':"Recette · Carte",'mock.collection':"Encaissement",'mock.addop':"+ Ajouter une opération",'mock.payroll':"Masse salariale",'mock.cashshort':"Espèces",'mock.card':"Carte",'mock.revbyday':"Recettes par jour",'mock.bestday':"Meilleur jour",'mock.friday':"Vendredi",'mock.flavors':"12 parfums",'mock.today':"Aujourd'hui",'mock.shift':"Service · pointage",'mock.p1':"Alexandre · Bar",'mock.p2':"Marie · Salle",'mock.p3':"Dmitri · Cuisine",'mock.ontime':"10:02 ✓",'mock.ontime2':"09:58 ✓",'mock.late':"+14 min",'mock.opening':"Checklist d'ouverture",'mock.c1':"Allumer les équipements",'mock.c2':"Vérifier les préparations",'mock.c3':"Mettre à jour la stop-list",'mock.cart':"Panier · 2",'mock.hot':"Plats",'mock.dish1':"Steak ribeye",'mock.dish1d':"300 g · à point",'mock.dish2':"Tom yam",'mock.dish2d':"aux fruits de mer",'mock.dish3':"Tiramisu",'mock.dish3d':"classique",'mock.order':"Commander · €46",
+    'cc.label':"Accès équipe",'cc.title':"Sans mot de passe.",'cc.sub':"Chaque membre accède à son app par QR et PIN. Pas d'inscription, pas d'email, pas de mot de passe oublié.",
+    'cc1.t':"Connexion QR",'cc1.d':"Le gérant montre un QR. L'employé le scanne — et l'appareil reste lié à l'établissement.",
+    'cc2.t':"Accès PIN",'cc2.d':"Un PIN à 4 chiffres, défini par le gérant. À chacun son code et ses apps.",
+    'cc3.t':"Face ID",'cc3.d':"Après la première connexion, activez Face ID. Les suivantes sont instantanées.",
+    'hw.l':"Fonctionnement",'hw.t':"Opérationnel en minutes.",'hw.s':"Quatre étapes, et tout le restaurant est sous contrôle.",
+    'step1.t':"Inscription",'step1.d':"Un compte en 30 secondes.",'step2.t':"Abonnement",'step2.d':"7 jours gratuits, sans carte.",'step3.t':"Équipe",'step3.d':"Accès par QR et PIN.",'step4.t':"Contrôle",'step4.d':"Analyses et rapports, à tout moment.",
+    'pr.l':"Tarifs",'pr.t':"Des tarifs transparents.",'pr.s':"Changez ou annulez à tout moment.",
+    'p1.d':"€0.47 par jour",'p1.f1':"Jusqu'à 2 utilisateurs",'p1.f2':"Analyses IA",'p1.btn':"Choisir",
+    'p2.d':"€0.79 par jour",'p2.f1':"Les cinq apps",'p2.f2':"Jusqu'à 5 utilisateurs",'p2.f3':"Menu QR pour les clients",'p2.f4':"Support prioritaire",'p2.f5':"Analyses IA",'p2.btn':"Commencer gratuitement",
+    'p3.d':"€1.29 par jour",'p3.f1':"Tout Business",'p3.f2':"Jusqu'à 10 utilisateurs",'p3.f3':"Analyses IA",'p3.f4':"Intégrations : caisse · banque",'p3.btn':"Choisir",
+    'pop':"Le plus choisi",'pay.free':"7 jours gratuits",
+    'cta.w':"Prêt ?",'cta.s':"Vos 7 premiers jours sont gratuits. Sans carte.",'cta.b':"Créer un compte",
+    'ft.tag':"La plateforme de gestion de restaurant. Cinq apps dans un seul compte.",'ft.p':"Apps",'ft.c':"Entreprise",'ft.l':"Mentions légales",'ft.about':"À propos",'ft.sup':"Support",'ft.cont':"Contact",'ft.priv':"Confidentialité",'ft.terms':"Conditions",
+  },
+  az:{
+    'n.apps':"Tətbiqlər",'n.team':"Komanda",'n.how':"Necə işləyir",'n.p':"Qiymətlər",'n.cta':"Daxil ol",
+    'h.label':"Restoran idarəetmə platforması",
+    'h.l1':"Bütün restoran.",'h.l2':"Bir platforma.",'h.l3':"Tam nəzarət.",
+    'h.sub':"Kassa, analitika, anbar, komanda və QR-menyu. Bir hesabda beş tətbiq — real vaxtda sinxron, birbaşa iPhone-dan.",
+    'h.b1':"Pulsuz başla",'h.b2':"Tətbiqlərə bax",
+    'st.l1':"Beş tətbiq.",'st.l2':"Bir hesab.",'st.l3a':"Tam",'st.l3b':"nəzarət.",
+    'st1.n':"12 san",'st1.l':"növbənin açılması üçün\norta vaxt",
+    'st2.n':"5-i-1-də",'st2.l':"bir hesabda\ntətbiq",
+    'st3.n':"€0",'st3.l':"bazada itirilən\nnövbə",
+    'apps.t':"Beş tətbiq.\nHər rol üçün biri.",'apps.s':"Sahibə — analitika. Menecerə — kassa. Bara — anbar. Komandaya — qrafik. Qonağa — menyu.",
+    'mg.h':"Növbə nəzarətdə —\naçılışdan hesabata qədər.",'mg.p':"Menecer növbəni bir toxunuşla açır. Gəlir, xərc və kassa real vaxtda yenilənir. Günün sonunda sahib tam hesabatı avtomatik alır.",'mg.f1':"Növbənin açılışı və bağlanışı, kassa balansı",'mg.f2':"Kateqoriyalar üzrə xərclər, limitlərlə",'mg.f3':"İnkassasiya və növbə hesabatı sahibə",
+    'an.h':"Qərar verən\nrəqəmlər.",'an.p':"Gün, həftə və ay üzrə maliyyə. Dövrlərin müqayisəsi, gəlir dinamikası, Excelsiz əməkhaqqı. Pro tarifində — biznesinizə aydın dildə cavab verən AI-köməkçi.",'an.f1':"Analitika və dövrlərin müqayisəsi",'an.f2':"Əməkhaqqı: maaş, tutulmalar, nağd və kart",'an.f3':"Təbii dildə AI-köməkçi · Pro",
+    'sh.h':"Tütün anbarı,\nkalyan növbəsi.",'sh.p':"Hər brend və dad üzrə qalıqlar — rəngli səviyyə göstəriciləri ilə. Mədaxil və inventarizasiya bir neçə toxunuşla. Kalyan növbəsi satışı, tütün sərfini və gəliri sayır.",'sh.f1':"Brend və dad üzrə qalıqlar",'sh.f2':"Mədaxil və inventarizasiya, tarixçə ilə",'sh.f3':"Kalyan növbəsi: satış və sərf",
+    'pe.h':"Özü işləyən\nkomanda.",'pe.p':"Növbə dəyişimi ilə qrafik, tapşırıqlar və nasazlıq bildirişləri, saat hesabı ilə geo-qeydiyyat, açılış və bağlanış yoxlama siyahıları, mətbəx stop-list. Hər kəs roluna uyğun olanı görür.",'pe.f1':"Qrafik və növbə dəyişimi",'pe.f2':"Geo-qeydiyyat, gecikmə və saat hesabı",'pe.f3':"Tapşırıqlar, yoxlama siyahıları və stop-list",
+    'mn.h':"QR-menyu və sifariş\nbirbaşa masada.",'mn.p':"Qonaq masadakı QR-ı skan edir, şəkilli menyunu vərəqləyir, sifariş göndərir və ya ofisiantı çağırır — komanda hər şeyi dərhal görür. Stop-list özü yenilənir, masada ödəniş — istəyə görə. Tətbiq quraşdırmadan.",'mn.f1':"Şəkilli menyu — tətbiq quraşdırmadan",'mn.f2':"Masada sifariş və ödəniş",'mn.f3':"Sifarişdə masa nömrəsi, ofisiant çağırışı",
+    'mock.rev':"Gəlir",'mock.exp':"Xərclər",'mock.profit':"Mənfəət",'mock.cash':"Kassa",'mock.of500':"€500-dən",'mock.net':"xalis",'mock.coll':"inkas.",'mock.lastops':"Son əməliyyatlar",'mock.revcash':"Gəlir · Nağd",'mock.expfood':"Xərc · Ərzaq",'mock.revcard':"Gəlir · Kart",'mock.collection':"İnkassasiya",'mock.addop':"+ Əməliyyat əlavə et",'mock.payroll':"Əməkhaqqı",'mock.cashshort':"Nağd",'mock.card':"Kart",'mock.revbyday':"Günlər üzrə gəlir",'mock.bestday':"Ən yaxşı gün",'mock.friday':"Cümə",'mock.flavors':"12 dad",'mock.today':"Bu gün",'mock.shift':"Növbə · qeydiyyat",'mock.p1':"Aleksandr · Bar",'mock.p2':"Mariya · Zal",'mock.p3':"Dmitri · Mətbəx",'mock.ontime':"10:02 ✓",'mock.ontime2':"09:58 ✓",'mock.late':"+14 dəq",'mock.opening':"Açılış yoxlama siyahısı",'mock.c1':"Avadanlığı yandır",'mock.c2':"Hazırlıqları yoxla",'mock.c3':"Stop-listi yenilə",'mock.cart':"Səbət · 2",'mock.hot':"İsti yeməklər",'mock.dish1':"Ribay steyk",'mock.dish1d':"300 q · orta bişmiş",'mock.dish2':"Tom-yam",'mock.dish2d':"dəniz məhsulları ilə",'mock.dish3':"Tiramisu",'mock.dish3d':"klassik",'mock.order':"Sifariş et · €46",
+    'cc.label':"Komanda girişi",'cc.title':"Parolsuz giriş.",'cc.sub':"Hər işçi öz tətbiqinə QR və PIN ilə daxil olur. Qeydiyyatsız, e-poçtsuz, unudulan parolsuz.",
+    'cc1.t':"QR-giriş",'cc1.d':"Sahib QR göstərir. İşçi skan edir — və cihaz müəssisəyə bağlanır.",
+    'cc2.t':"PIN-giriş",'cc2.d':"4 rəqəmli PIN sahib tərəfindən təyin olunur. Hər kəsə öz kodu və öz tətbiqləri.",
+    'cc3.t':"Face ID",'cc3.d':"İlk girişdən sonra Face ID-ni aktiv edin. Sonrakı girişlər ani olur.",
+    'hw.l':"Necə işləyir",'hw.t':"Dəqiqələrdə işə hazır.",'hw.s':"Dörd addım — və bütün restoran nəzarətdədir.",
+    'step1.t':"Qeydiyyat",'step1.d':"30 saniyəyə hesab.",'step2.t':"Abunəlik",'step2.d':"7 gün pulsuz, kart lazım deyil.",'step3.t':"Komanda",'step3.d':"QR və PIN ilə giriş.",'step4.t':"Nəzarət",'step4.d':"Analitika və hesabatlar istənilən vaxt.",
+    'pr.l':"Qiymətlər",'pr.t':"Şəffaf qiymətlər.",'pr.s':"İstənilən vaxt dəyiş və ya ləğv et.",
+    'p1.d':"gündə €0.47",'p1.f1':"2 istifadəçiyə qədər",'p1.f2':"AI-analitika",'p1.btn':"Seç",
+    'p2.d':"gündə €0.79",'p2.f1':"Beş tətbiqin hamısı",'p2.f2':"5 istifadəçiyə qədər",'p2.f3':"Qonaqlar üçün QR-menyu",'p2.f4':"Prioritet dəstək",'p2.f5':"AI-analitika",'p2.btn':"Pulsuz başla",
+    'p3.d':"gündə €1.29",'p3.f1':"Business-in hamısı",'p3.f2':"10 istifadəçiyə qədər",'p3.f3':"AI-analitika",'p3.f4':"İnteqrasiyalar: kassa · bank",'p3.btn':"Seç",
+    'pop':"Populyar",'pay.free':"7 gün pulsuz",
+    'cta.w':"Hazırsınız?",'cta.s':"İlk 7 gün pulsuz. Kart lazım deyil.",'cta.b':"Hesab yarat",
+    'ft.tag':"Restoran idarəetmə platforması. Bir hesabda beş tətbiq.",'ft.p':"Tətbiqlər",'ft.c':"Şirkət",'ft.l':"Hüquqi",'ft.about':"Haqqımızda",'ft.sup':"Dəstək",'ft.cont':"Əlaqə",'ft.priv':"Məxfilik",'ft.terms':"Şərtlər",
+  },
+  tr:{
+    'n.apps':"Uygulamalar",'n.team':"Ekip",'n.how':"Nasıl çalışır",'n.p':"Fiyatlar",'n.cta':"Giriş yap",
+    'h.label':"Restoran yönetim platformu",
+    'h.l1':"Tüm restoran.",'h.l2':"Tek platform.",'h.l3':"Tam kontrol.",
+    'h.sub':"Kasa, analiz, depo, ekip ve QR menü. Tek hesapta beş uygulama — gerçek zamanlı senkron, doğrudan iPhone'unuzdan.",
+    'h.b1':"Ücretsiz başla",'h.b2':"Uygulamaları keşfet",
+    'st.l1':"Beş uygulama.",'st.l2':"Tek hesap.",'st.l3a':"Tam",'st.l3b':"kontrol.",
+    'st1.n':"12 sn",'st1.l':"ortalama vardiya\naçma süresi",
+    'st2.n':"5'i 1'de",'st2.l':"tek hesapta\nuygulama",
+    'st3.n':"€0",'st3.l':"veritabanında\nkaybolan vardiya",
+    'apps.t':"Beş uygulama.\nHer rol için biri.",'apps.s':"Sahibe analiz. Müdüre kasa. Bara depo. Ekibe vardiya planı. Misafire menü.",
+    'mg.h':"Vardiya kontrol altında —\naçılıştan rapora.",'mg.p':"Müdür vardiyayı tek dokunuşla açar. Gelir, gider ve kasa gerçek zamanlı güncellenir. Gün sonunda sahip tam raporu otomatik alır.",'mg.f1':"Vardiya açma ve kapama, kasa bakiyesi",'mg.f2':"Kategoriye göre giderler, limitlerle",'mg.f3':"Tahsilat ve vardiya raporu sahibe",
+    'an.h':"Karar veren\nrakamlar.",'an.p':"Günlük, haftalık ve aylık finans. Dönem karşılaştırma, gelir trendi, Excel'siz bordro. Pro'da, işiniz hakkında doğal dilde yanıt veren bir AI asistanı.",'an.f1':"Analiz ve dönem karşılaştırma",'an.f2':"Bordro: maaş, kesinti, nakit ve kart",'an.f3':"Doğal dilde AI asistanı · Pro",
+    'sh.h':"Tütün deposu,\nnargile vardiyası.",'sh.p':"Her marka ve aromaya göre stok — renkli seviye göstergeleriyle. Giriş ve sayım birkaç dokunuşla. Nargile vardiyası satışı, tütün tüketimini ve geliri sayar.",'sh.f1':"Marka ve aromaya göre stok",'sh.f2':"Giriş ve sayım, geçmişiyle",'sh.f3':"Nargile vardiyası: satış ve tüketim",
+    'pe.h':"Kendini yöneten\nbir ekip.",'pe.p':"Vardiya değişimli plan, görevler ve arıza bildirimleri, saat takipli geo-giriş, açılış ve kapanış kontrol listeleri, mutfak stop-list. Herkes rolüne tam olarak ne gerekiyorsa onu görür.",'pe.f1':"Vardiya planı ve değişimi",'pe.f2':"Geo-giriş, gecikme ve saat takibi",'pe.f3':"Görevler, kontrol listeleri ve stop-list",
+    'mn.h':"QR menü, sipariş\ndoğrudan masada.",'mn.p':"Misafir masadaki QR'ı okutur, fotoğraflı menüyü gezer, sipariş gönderir ya da garson çağırır — ekip her şeyi anında görür. Stop-list kendi güncellenir, masada ödeme isteğe bağlı. Uygulama kurmadan.",'mn.f1':"Fotoğraflı menü — uygulama kurmadan",'mn.f2':"Masada sipariş ve ödeme",'mn.f3':"Siparişte masa numarası, garson çağrısı",
+    'mock.rev':"Gelir",'mock.exp':"Gider",'mock.profit':"Kâr",'mock.cash':"Kasa",'mock.of500':"€500'den",'mock.net':"net",'mock.coll':"tahsil",'mock.lastops':"Son işlemler",'mock.revcash':"Gelir · Nakit",'mock.expfood':"Gider · Gıda",'mock.revcard':"Gelir · Kart",'mock.collection':"Tahsilat",'mock.addop':"+ İşlem ekle",'mock.payroll':"Bordro",'mock.cashshort':"Nakit",'mock.card':"Kart",'mock.revbyday':"Güne göre gelir",'mock.bestday':"En iyi gün",'mock.friday':"Cuma",'mock.flavors':"12 aroma",'mock.today':"Bugün",'mock.shift':"Vardiya · giriş",'mock.p1':"Aleksandr · Bar",'mock.p2':"Maria · Salon",'mock.p3':"Dmitri · Mutfak",'mock.ontime':"10:02 ✓",'mock.ontime2':"09:58 ✓",'mock.late':"+14 dk",'mock.opening':"Açılış kontrol listesi",'mock.c1':"Ekipmanı aç",'mock.c2':"Hazırlıkları kontrol et",'mock.c3':"Stop-list'i güncelle",'mock.cart':"Sepet · 2",'mock.hot':"Ana yemekler",'mock.dish1':"Ribeye biftek",'mock.dish1d':"300 g · orta",'mock.dish2':"Tom yum",'mock.dish2d':"deniz ürünlü",'mock.dish3':"Tiramisu",'mock.dish3d':"klasik",'mock.order':"Sipariş ver · €46",
+    'cc.label':"Ekip erişimi",'cc.title':"Şifre yok.",'cc.sub':"Her ekip üyesi kendi uygulamasına QR ve PIN ile girer. Kayıt yok, e-posta yok, unutulan şifre yok.",
+    'cc1.t':"QR ile giriş",'cc1.d':"Sahip bir QR gösterir. Personel okutur — ve cihaz mekâna bağlanır.",
+    'cc2.t':"PIN erişimi",'cc2.d':"Sahibin belirlediği 4 haneli PIN. Herkese kendi kodu ve kendi uygulamaları.",
+    'cc3.t':"Face ID",'cc3.d':"İlk girişten sonra Face ID'yi açın. Sonraki girişler anında.",
+    'hw.l':"Nasıl çalışır",'hw.t':"Dakikalar içinde hazır.",'hw.s':"Dört adım — ve tüm restoran kontrol altında.",
+    'step1.t':"Kayıt",'step1.d':"30 saniyede hesap.",'step2.t':"Abonelik",'step2.d':"7 gün ücretsiz, kart gerekmez.",'step3.t':"Ekip",'step3.d':"QR ve PIN ile erişim.",'step4.t':"Kontrol",'step4.d':"Her an analiz ve rapor.",
+    'pr.l':"Fiyatlar",'pr.t':"Şeffaf fiyatlar.",'pr.s':"İstediğin zaman değiştir ya da iptal et.",
+    'p1.d':"günde €0.47",'p1.f1':"2 kullanıcıya kadar",'p1.f2':"AI analizi",'p1.btn':"Seç",
+    'p2.d':"günde €0.79",'p2.f1':"Beş uygulamanın tümü",'p2.f2':"5 kullanıcıya kadar",'p2.f3':"Misafirler için QR menü",'p2.f4':"Öncelikli destek",'p2.f5':"AI analizi",'p2.btn':"Ücretsiz başla",
+    'p3.d':"günde €1.29",'p3.f1':"Business'taki her şey",'p3.f2':"10 kullanıcıya kadar",'p3.f3':"AI analizi",'p3.f4':"Entegrasyonlar: kasa · banka",'p3.btn':"Seç",
+    'pop':"En popüler",'pay.free':"7 gün ücretsiz",
+    'cta.w':"Hazır mısınız?",'cta.s':"İlk 7 gün ücretsiz. Kart gerekmez.",'cta.b':"Hesap oluştur",
+    'ft.tag':"Restoran yönetim platformu. Tek hesapta beş uygulama.",'ft.p':"Uygulamalar",'ft.c':"Şirket",'ft.l':"Yasal",'ft.about':"Hakkımızda",'ft.sup':"Destek",'ft.cont':"İletişim",'ft.priv':"Gizlilik",'ft.terms':"Koşullar",
+  },
+  uk:{
+    'n.apps':"Застосунки",'n.team':"Команда",'n.how':"Як працює",'n.p':"Ціни",'n.cta':"Увійти",
+    'h.label':"Платформа керування рестораном",
+    'h.l1':"Весь ресторан.",'h.l2':"Одна платформа.",'h.l3':"Повний контроль.",
+    'h.sub':"Каса, аналітика, склад, команда та QR-меню. П'ять застосунків в одному акаунті — синхронізація в реальному часі, просто з iPhone.",
+    'h.b1':"Почати безкоштовно",'h.b2':"Переглянути застосунки",
+    'st.l1':"П'ять застосунків.",'st.l2':"Один акаунт.",'st.l3a':"Повний",'st.l3b':"контроль.",
+    'st1.n':"12 сек",'st1.l':"середній час\nвідкриття зміни",
+    'st2.n':"5-в-1",'st2.l':"застосунків в\nодному акаунті",
+    'st3.n':"€0",'st3.l':"втрачених змін\nу базі даних",
+    'apps.t':"П'ять застосунків.\nПід кожну роль.",'apps.s':"Власнику — аналітика. Менеджеру — каса. Бару — склад. Команді — розклад. Гостю — меню.",
+    'mg.h':"Зміна під контролем —\nвід відкриття до звіту.",'mg.p':"Менеджер відкриває зміну одним дотиком. Виручка, витрати й каса рахуються в реальному часі. Наприкінці дня власник отримує повний звіт — автоматично.",'mg.f1':"Відкриття та закриття зміни, баланс каси",'mg.f2':"Витрати за категоріями, з лімітами",'mg.f3':"Інкасація та звіт зміни власнику",
+    'an.h':"Цифри, які\nприймають рішення.",'an.p':"Фінанси за днями, тижнями й місяцями. Порівняння періодів, динаміка виручки, зарплати без Excel. У тарифі Pro — AI-асистент, що відповідає про бізнес зрозумілою мовою.",'an.f1':"Аналітика та порівняння періодів",'an.f2':"Зарплати: оклади, утримання, готівка й картка",'an.f3':"AI-асистент природною мовою · Pro",
+    'sh.h':"Склад тютюну,\nзміна кальянника.",'sh.p':"Залишки за кожним брендом і смаком — з кольоровими індикаторами рівня. Прихід та інвентаризація за пару дотиків. Зміна кальянника рахує продажі, витрату тютюну й виручку.",'sh.f1':"Залишки за брендами та смаками",'sh.f2':"Прихід та інвентаризація з історією",'sh.f3':"Зміна кальянника: продажі та витрата",
+    'pe.h':"Команда, яка\nпрацює сама.",'pe.p':"Розклад з обміном змінами, задачі та звіти про поломки, гео-явка з обліком годин, чек-листи відкриття й закриття, стоп-лист кухні. Кожен бачить рівно те, що потрібно для його ролі.",'pe.f1':"Розклад та обмін змінами",'pe.f2':"Гео-явка, запізнення та облік годин",'pe.f3':"Задачі, чек-листи та стоп-лист",
+    'mn.h':"QR-меню та замовлення\nпрямо за столом.",'mn.p':"Гість сканує QR, гортає меню з фото, надсилає замовлення або кличе офіціанта — команда бачить усе миттєво. Стоп-лист оновлюється сам, оплата за столом — за бажанням. Без встановлення застосунків.",'mn.f1':"Меню з фото — без встановлення застосунку",'mn.f2':"Замовлення та оплата за столом",'mn.f3':"Номер столу в замовленні, виклик офіціанта",
+    'mock.rev':"Виручка",'mock.exp':"Витрати",'mock.profit':"Прибуток",'mock.cash':"Каса",'mock.of500':"з €500",'mock.net':"чистий",'mock.coll':"інкас.",'mock.lastops':"Останні операції",'mock.revcash':"Виручка · Готівка",'mock.expfood':"Витрата · Продукти",'mock.revcard':"Виручка · Картка",'mock.collection':"Інкасація",'mock.addop':"+ Додати операцію",'mock.payroll':"ФОП",'mock.cashshort':"Готівка",'mock.card':"Картка",'mock.revbyday':"Виручка за днями",'mock.bestday':"Найкращий день",'mock.friday':"П'ятниця",'mock.flavors':"12 смаків",'mock.today':"Сьогодні",'mock.shift':"Зміна · явка",'mock.p1':"Олександр · Бар",'mock.p2':"Марія · Зал",'mock.p3':"Дмитро · Кухня",'mock.ontime':"10:02 ✓",'mock.ontime2':"09:58 ✓",'mock.late':"+14 хв",'mock.opening':"Чек-лист відкриття",'mock.c1':"Увімкнути обладнання",'mock.c2':"Перевірити заготовки",'mock.c3':"Оновити стоп-лист",'mock.cart':"Кошик · 2",'mock.hot':"Гаряче",'mock.dish1':"Рибай стейк",'mock.dish1d':"300 г · середня прожарка",'mock.dish2':"Том-ям",'mock.dish2d':"з морепродуктами",'mock.dish3':"Тірамісу",'mock.dish3d':"класичний",'mock.order':"Замовити · €46",
+    'cc.label':"Доступ для команди",'cc.title':"Вхід без паролів.",'cc.sub':"Кожен співробітник входить у свій застосунок через QR і PIN. Без реєстрації, без email, без забутих паролів.",
+    'cc1.t':"QR-вхід",'cc1.d':"Власник показує QR. Співробітник сканує — і пристрій прив'язується до закладу.",
+    'cc2.t':"PIN-доступ",'cc2.d':"4-значний PIN задає власник. Кожному — свій код і свій набір застосунків.",
+    'cc3.t':"Face ID",'cc3.d':"Після першого входу — увімкніть Face ID. Наступні входи миттєві.",
+    'hw.l':"Як це працює",'hw.t':"Запуск за хвилини.",'hw.s':"Чотири кроки — і весь ресторан під контролем.",
+    'step1.t':"Реєстрація",'step1.d':"Акаунт за 30 секунд.",'step2.t':"Підписка",'step2.d':"7 днів безкоштовно, без картки.",'step3.t':"Команда",'step3.d':"Доступ через QR і PIN.",'step4.t':"Контроль",'step4.d':"Аналітика та звіти будь-коли.",
+    'pr.l':"Ціни",'pr.t':"Прозорі ціни.",'pr.s':"Змінити чи скасувати тариф — будь-коли.",
+    'p1.d':"€0.47 на день",'p1.f1':"До 2 користувачів",'p1.f2':"AI-аналітика",'p1.btn':"Обрати",
+    'p2.d':"€0.79 на день",'p2.f1':"Усі п'ять застосунків",'p2.f2':"До 5 користувачів",'p2.f3':"QR-меню для гостей",'p2.f4':"Пріоритетна підтримка",'p2.f5':"AI-аналітика",'p2.btn':"Почати безкоштовно",
+    'p3.d':"€1.29 на день",'p3.f1':"Усе з Business",'p3.f2':"До 10 користувачів",'p3.f3':"AI-аналітика",'p3.f4':"Інтеграції: каса · банк",'p3.btn':"Обрати",
+    'pop':"Популярний",'pay.free':"7 днів безкоштовно",
+    'cta.w':"Готові?",'cta.s':"Перші 7 днів безкоштовно. Картка не потрібна.",'cta.b':"Створити акаунт",
+    'ft.tag':"Платформа керування рестораном. П'ять застосунків в одному акаунті.",'ft.p':"Застосунки",'ft.c':"Компанія",'ft.l':"Правове",'ft.about':"Про нас",'ft.sup':"Підтримка",'ft.cont':"Контакти",'ft.priv':"Конфіденційність",'ft.terms':"Умови",
+  },
+  kk:{
+    'n.apps':"Қолданбалар",'n.team':"Команда",'n.how':"Қалай жұмыс істейді",'n.p':"Бағалар",'n.cta':"Кіру",
+    'h.label':"Мейрамхананы басқару платформасы",
+    'h.l1':"Бүкіл мейрамхана.",'h.l2':"Бір платформа.",'h.l3':"Толық бақылау.",
+    'h.sub':"Касса, аналитика, қойма, команда және QR-мәзір. Бір аккаунтта бес қолданба — нақты уақытта синхрондалады, тікелей iPhone-нан.",
+    'h.b1':"Тегін бастау",'h.b2':"Қолданбаларды көру",
+    'st.l1':"Бес қолданба.",'st.l2':"Бір аккаунт.",'st.l3a':"Толық",'st.l3b':"бақылау.",
+    'st1.n':"12 сек",'st1.l':"ауысымды ашудың\nорташа уақыты",
+    'st2.n':"5-і-1-де",'st2.l':"бір аккаунттағы\nқолданба",
+    'st3.n':"€0",'st3.l':"дерекқорда жоғалған\nауысым",
+    'apps.t':"Бес қолданба.\nӘр рөлге арналған.",'apps.s':"Иесіне — аналитика. Менеджерге — касса. Барға — қойма. Командаға — кесте. Қонаққа — мәзір.",
+    'mg.h':"Ауысым бақылауда —\nашудан есепке дейін.",'mg.p':"Менеджер ауысымды бір рет түртіп ашады. Түсім, шығын және касса нақты уақытта есептеледі. Күн соңында иесі толық есепті автоматты түрде алады.",'mg.f1':"Ауысымды ашу мен жабу, касса балансы",'mg.f2':"Санаттар бойынша шығындар, лимиттермен",'mg.f3':"Инкассация және ауысым есебі иесіне",
+    'an.h':"Шешім қабылдайтын\nсандар.",'an.p':"Күн, апта және ай бойынша қаржы. Кезеңдерді салыстыру, түсім динамикасы, Excelсіз жалақы. Pro тарифінде — бизнес туралы түсінікті тілде жауап беретін AI-көмекші.",'an.f1':"Аналитика және кезеңдерді салыстыру",'an.f2':"Жалақы: оклад, ұстамдар, қолма-қол және карта",'an.f3':"Табиғи тілдегі AI-көмекші · Pro",
+    'sh.h':"Темекі қоймасы,\nкальянші ауысымы.",'sh.p':"Әр бренд пен дәм бойынша қалдықтар — түрлі-түсті деңгей көрсеткіштерімен. Кіріс пен түгендеу бірнеше түртумен. Кальянші ауысымы сатылымды, темекі шығынын және түсімді санайды.",'sh.f1':"Бренд пен дәм бойынша қалдықтар",'sh.f2':"Кіріс пен түгендеу, тарихымен",'sh.f3':"Кальянші ауысымы: сатылым мен шығын",
+    'pe.h':"Өзі жұмыс істейтін\nкоманда.",'pe.p':"Ауысым алмасуы бар кесте, тапсырмалар мен ақаулық туралы есептер, сағат есебімен гео-белгілеу, ашу мен жабу тексеру тізімдері, ас үй стоп-парағы. Әркім өз рөліне қажеттіні ғана көреді.",'pe.f1':"Кесте және ауысым алмасу",'pe.f2':"Гео-белгілеу, кешігу және сағат есебі",'pe.f3':"Тапсырмалар, тексеру тізімдері және стоп-парақ",
+    'mn.h':"QR-мәзір және тапсырыс\nтікелей үстелде.",'mn.p':"Қонақ үстелдегі QR-ды сканерлейді, фотолы мәзірді ақтарады, тапсырыс жібереді немесе даяшыны шақырады — команда бәрін бірден көреді. Стоп-парақ өзі жаңарады, үстелде төлеу — қалауыңызша. Қолданба орнатпай.",'mn.f1':"Фотолы мәзір — қолданба орнатпай",'mn.f2':"Үстелде тапсырыс пен төлем",'mn.f3':"Тапсырыстағы үстел нөмірі, даяшыны шақыру",
+    'mock.rev':"Түсім",'mock.exp':"Шығындар",'mock.profit':"Пайда",'mock.cash':"Касса",'mock.of500':"€500-ден",'mock.net':"таза",'mock.coll':"инкас.",'mock.lastops':"Соңғы операциялар",'mock.revcash':"Түсім · Қолма-қол",'mock.expfood':"Шығын · Азық-түлік",'mock.revcard':"Түсім · Карта",'mock.collection':"Инкассация",'mock.addop':"+ Операция қосу",'mock.payroll':"Жалақы қоры",'mock.cashshort':"Қолма-қол",'mock.card':"Карта",'mock.revbyday':"Күндер бойынша түсім",'mock.bestday':"Үздік күн",'mock.friday':"Жұма",'mock.flavors':"12 дәм",'mock.today':"Бүгін",'mock.shift':"Ауысым · белгілеу",'mock.p1':"Александр · Бар",'mock.p2':"Мария · Зал",'mock.p3':"Дмитрий · Ас үй",'mock.ontime':"10:02 ✓",'mock.ontime2':"09:58 ✓",'mock.late':"+14 мин",'mock.opening':"Ашу тексеру тізімі",'mock.c1':"Жабдықты қосу",'mock.c2':"Дайындықтарды тексеру",'mock.c3':"Стоп-парақты жаңарту",'mock.cart':"Себет · 2",'mock.hot':"Ыстық тағамдар",'mock.dish1':"Рибай стейк",'mock.dish1d':"300 г · орташа қуыру",'mock.dish2':"Том-ям",'mock.dish2d':"теңіз өнімдерімен",'mock.dish3':"Тирамису",'mock.dish3d':"классикалық",'mock.order':"Тапсырыс беру · €46",
+    'cc.label':"Команда қолжетімі",'cc.title':"Парольсіз кіру.",'cc.sub':"Әр қызметкер өз қолданбасына QR және PIN арқылы кіреді. Тіркеусіз, email-сіз, ұмытылған парольсіз.",
+    'cc1.t':"QR-кіру",'cc1.d':"Иесі QR көрсетеді. Қызметкер сканерлейді — құрылғы мекемеге байланады.",
+    'cc2.t':"PIN-қолжетім",'cc2.d':"4 таңбалы PIN-ді иесі белгілейді. Әрқайсысына — өз коды мен өз қолданбалары.",
+    'cc3.t':"Face ID",'cc3.d':"Алғашқы кіруден кейін Face ID-ді қосыңыз. Келесі кірулер лезде.",
+    'hw.l':"Қалай жұмыс істейді",'hw.t':"Минут ішінде іске қосу.",'hw.s':"Төрт қадам — және бүкіл мейрамхана бақылауда.",
+    'step1.t':"Тіркелу",'step1.d':"30 секундта аккаунт.",'step2.t':"Жазылым",'step2.d':"7 күн тегін, карта қажет емес.",'step3.t':"Команда",'step3.d':"QR және PIN арқылы қолжетім.",'step4.t':"Бақылау",'step4.d':"Аналитика мен есептер кез келген уақытта.",
+    'pr.l':"Бағалар",'pr.t':"Айқын бағалар.",'pr.s':"Кез келген уақытта ауыстыр немесе бас тарт.",
+    'p1.d':"күніне €0.47",'p1.f1':"2 пайдаланушыға дейін",'p1.f2':"AI-аналитика",'p1.btn':"Таңдау",
+    'p2.d':"күніне €0.79",'p2.f1':"Бес қолданбаның бәрі",'p2.f2':"5 пайдаланушыға дейін",'p2.f3':"Қонақтарға арналған QR-мәзір",'p2.f4':"Басым қолдау",'p2.f5':"AI-аналитика",'p2.btn':"Тегін бастау",
+    'p3.d':"күніне €1.29",'p3.f1':"Business-тегі бәрі",'p3.f2':"10 пайдаланушыға дейін",'p3.f3':"AI-аналитика",'p3.f4':"Интеграциялар: касса · банк",'p3.btn':"Таңдау",
+    'pop':"Танымал",'pay.free':"7 күн тегін",
+    'cta.w':"Дайынсыз ба?",'cta.s':"Алғашқы 7 күн тегін. Карта қажет емес.",'cta.b':"Аккаунт жасау",
+    'ft.tag':"Мейрамхананы басқару платформасы. Бір аккаунтта бес қолданба.",'ft.p':"Қолданбалар",'ft.c':"Компания",'ft.l':"Құқықтық",'ft.about':"Біз туралы",'ft.sup':"Қолдау",'ft.cont':"Байланыс",'ft.priv':"Құпиялылық",'ft.terms':"Шарттар",
   }
 };
+// ─ MARQUEE TRUST SIGNALS (per language) ─
+const MARQUEE = {
+  ru:['7 дней бесплатно','PWA · Без App Store','Данные зашифрованы','iPhone и Android','QR-вход для команды','Оплата через Stripe','Европа и СНГ','Face ID'],
+  en:['7 days free','PWA · No App Store','Encrypted data','iPhone & Android','QR sign-in for team','Stripe payments','Europe & beyond','Face ID'],
+  it:['7 giorni gratis','PWA · Senza App Store','Dati crittografati','iPhone e Android','Accesso QR per il team','Pagamenti Stripe','Europa e oltre','Face ID'],
+  fr:['7 jours gratuits','PWA · Sans App Store','Données chiffrées','iPhone et Android','Connexion QR pour l\'équipe','Paiements Stripe','Europe et au-delà','Face ID'],
+  az:['7 gün pulsuz','PWA · App Store-suz','Şifrələnmiş data','iPhone və Android','Komanda üçün QR-giriş','Stripe ödənişləri','Avropa və ötəsi','Face ID'],
+  tr:['7 gün ücretsiz','PWA · App Store yok','Şifreli veri','iPhone ve Android','Ekip için QR giriş','Stripe ödemeleri','Avrupa ve ötesi','Face ID'],
+  uk:['7 днів безкоштовно','PWA · Без App Store','Дані зашифровані','iPhone та Android','QR-вхід для команди','Оплата через Stripe','Європа та світ','Face ID'],
+  kk:['7 күн тегін','PWA · App Store-сыз','Шифрланған дерек','iPhone және Android','Команда үшін QR-кіру','Stripe төлемдері','Еуропа және әлем','Face ID']
+};
+function renderMarquee(lang){
+  const track = document.getElementById('marquee');
+  const list = MARQUEE[lang] || MARQUEE.en;
+  const one = list.map(t => `<div class="marquee-item"><span class="marquee-sep"></span>${t}</div>`).join('');
+  track.innerHTML = one + one;
+}
+
+// ─ LANGUAGE DROPDOWN ─
+function renderLangMenu(active){
+  document.getElementById('langMenu').innerHTML = LANGS.map(([code,name,short]) =>
+    `<button class="lang-opt${code===active?' active':''}" onclick="setLang('${code}')"><span>${name}</span><span class="lo-code">${short}</span></button>`).join('');
+}
+function toggleLangMenu(e){
+  e.stopPropagation();
+  document.getElementById('langMenu').classList.toggle('open');
+}
+document.addEventListener('click', () => {
+  const m = document.getElementById('langMenu');
+  if (m) m.classList.remove('open');
+});
+
 function setLang(lang) {
+  if (!T[lang]) lang = 'en';
   document.documentElement.lang = lang;
-  document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b.textContent === lang.toUpperCase()));
+  const dict = T[lang], fb = T.en;
   document.querySelectorAll('[data-i18n]').forEach(el => {
-    const v = T[lang][el.getAttribute('data-i18n')];
+    const k = el.getAttribute('data-i18n');
+    const v = dict[k] !== undefined ? dict[k] : fb[k];
     if (v !== undefined) el.innerHTML = v.replace(/\n/g, '<br>');
   });
+  const cur = LANGS.find(l => l[0] === lang);
+  const label = document.getElementById('langCurLabel');
+  if (label) label.textContent = cur ? cur[2] : lang.toUpperCase();
+  renderLangMenu(lang);
+  renderMarquee(lang);
+  const m = document.getElementById('langMenu');
+  if (m) m.classList.remove('open');
   try { localStorage.setItem('mise_lang', lang); } catch {}
 }
 
-// ─ MARQUEE (built from i18n-independent trust signals) ─
+// ─ INIT: detect language across 8 supported locales ─
 (function(){
-  const items = {
-    ru:['7 дней бесплатно','PWA · Без App Store','Данные зашифрованы','iPhone и Android','QR-вход для команды','Оплата через Stripe','Европа и СНГ','Face ID'],
-    en:['7 days free','PWA · No App Store','Encrypted data','iPhone & Android','QR sign-in for team','Stripe payments','Europe & CIS','Face ID']
-  };
-  window.__renderMarquee = (lang) => {
-    const track = document.getElementById('marquee');
-    const list = items[lang] || items.ru;
-    const one = list.map(t => `<div class="marquee-item"><span class="marquee-sep"></span>${t}</div>`).join('');
-    track.innerHTML = one + one;
-  };
-})();
-
-// ─ INIT: detect language (RU/EN) ─
-(function(){
-  let lang = 'ru';
+  const supported = LANGS.map(l => l[0]);
+  let lang = 'en';
   try {
     const saved = localStorage.getItem('mise_lang');
-    if (saved === 'en' || saved === 'ru') lang = saved;
-    else if ((navigator.language || '').slice(0,2).toLowerCase() !== 'ru') lang = 'en';
+    if (saved && supported.includes(saved)) lang = saved;
+    else {
+      const navs = navigator.languages || [navigator.language || 'en'];
+      for (const n of navs){ const c = (n || '').slice(0,2).toLowerCase(); if (supported.includes(c)){ lang = c; break; } }
+    }
   } catch {}
-  window.__renderMarquee(lang);
   setLang(lang);
 })();
 </script>

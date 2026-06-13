@@ -6,6 +6,8 @@ import { db } from '@/lib/db'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
 import { useTheme } from '@/hooks/useTheme'
 import { AppIcon, Wordmark, WordmarkMark, ACCENT_GLOW, type BrandApp } from '@/components/brand'
+import { track } from '@/lib/analytics'
+import { openCookieSettings } from '@/components/CookieConsent'
 
 
 
@@ -147,6 +149,21 @@ function SplashScreen({ onDone }: { onDone: () => void }) {
 }
 
 // ── UI PRIMITIVES ─────────────────────────────────────────────────────────────
+
+// Branded loading spinner — replaces plain "Загрузка..." text for a calmer, Apple-like wait.
+function Spinner({ label, compact }: { label?: string; compact?: boolean }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: compact ? 0 : 32 }}>
+      <style>{`@keyframes miseSpin{to{transform:rotate(360deg)}}`}</style>
+      <div style={{
+        width: compact ? 20 : 26, height: compact ? 20 : 26, borderRadius: '50%',
+        border: '2.5px solid rgba(120,120,128,.16)', borderTopColor: '#007aff',
+        animation: 'miseSpin .7s linear infinite',
+      }} />
+      {label && <div style={{ fontSize: '.82rem', color: 'var(--tx2)' }}>{label}</div>}
+    </div>
+  )
+}
 
 function Card({ children, style = {}, onClick }: any) {
   return (
@@ -314,7 +331,7 @@ function CategoriesCard({ restaurantId }: { restaurantId: string }) {
           style={{ ...inputStyle, flex: 1 }} />
         <Btn onClick={add}>Добавить</Btn>
       </div>
-      {loading ? <div style={{ color: 'var(--tx2)', fontSize: '.88rem' }}>Загрузка...</div>
+      {loading ? <Spinner />
         : cats.length === 0
           ? <div style={{ color: 'var(--tx2)', fontSize: '.85rem' }}>Нет категорий</div>
           : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -399,7 +416,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
       const sp: any = { restaurant_id: restaurantId, name, apps: form.apps, role: form.role, is_active: true }
       if (pinHash) sp.pin_hash = pinHash
       if (existing) await db.from('staff').update(sp).eq('id', existing.id)
-      else await db.from('staff').insert(sp)
+      else { await db.from('staff').insert(sp); track('team_member_invited', { apps_count: form.apps.length }) }
     } else if (existing) {
       await db.from('staff').update({ is_active: false }).eq('id', existing.id) // access revoked
     }
@@ -570,7 +587,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
 
       {/* ─ СПИСОК ─ */}
       {loading ? (
-        <div style={{ color: 'var(--tx2)', textAlign: 'center', padding: 32 }}>Загрузка...</div>
+        <Spinner />
       ) : employees.length === 0 ? (
         <Card><div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>Добавьте первого сотрудника</div></Card>
       ) : (
@@ -978,6 +995,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
     if (!restaurant || !user || pendingPlan) return
     setPendingPlan(planId)
     setLoading(true)
+    track('checkout_started', { plan: planId })
     try {
       const res = await fetch('/api/stripe/checkout', {
         method: 'POST',
@@ -1394,6 +1412,15 @@ function AccountTab({ restaurant, user }: { restaurant: Restaurant | null; user:
         </button>
       </Card>
 
+      <Card style={{ marginBottom: 14, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
+        <button onClick={openCookieSettings}
+          style={{ background: 'none', border: 'none', color: 'var(--tx2)', fontSize: '.84rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
+          Настройки cookie
+        </button>
+        <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--tx2)', fontSize: '.84rem', fontWeight: 600, textDecoration: 'none' }}>Конфиденциальность</a>
+        <a href="/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--tx2)', fontSize: '.84rem', fontWeight: 600, textDecoration: 'none' }}>Условия</a>
+      </Card>
+
       <Card style={{ border: '1px solid rgba(255,59,48,.15)' }}>
         <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 4, color: 'var(--tx)' }}>Опасная зона</div>
         <div style={{ fontSize: '.82rem', color: 'var(--tx2)', marginBottom: 14 }}>Удаление аккаунта необратимо. Все данные заведения, сотрудники и подписка будут удалены.</div>
@@ -1501,7 +1528,7 @@ export default function Dashboard() {
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system,sans-serif', color: 'var(--tx2)', fontSize: '.9rem', background: 'var(--bg)' }}>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
         <Wordmark size={34} />
-        <div style={{ fontSize: '.85rem', color: 'var(--tx3)' }}>Загрузка...</div>
+        <Spinner compact />
       </div>
     </div>
   )
