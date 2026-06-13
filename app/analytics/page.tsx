@@ -411,11 +411,13 @@ export default function AnalyticsApp() {
   const [restaurantId, setRestaurantId] = useState('')
   const [currency, setCurrency] = useState('€')
   const [isPro, setIsPro] = useState(false)
-  const [tab, setTab] = useState<'period' | 'kassa' | 'sales' | 'salary' | 'hookah'>('period')
+  const [tab, setTab] = useState<'period' | 'kassa' | 'forecast' | 'salary' | 'hookah'>('period')
   const [periodMode, setPeriodMode] = useState<'day' | 'week' | 'month'>('month')
   const [kassaMode, setKassaMode] = useState<'kassa' | 'inkass'>('kassa')
   const [currentDate, setCurrentDate] = useState(new Date())
   const [includeCard, setIncludeCard] = useState(false) // restaurant_settings.include_card_in_analytics
+  const [revGoal, setRevGoal] = useState(0)             // restaurant_settings.monthly_revenue_goal (цель выручки на месяц)
+  const [expSalary, setExpSalary] = useState<string | null>(null) // раскрытая карточка ЗП (сворачиваемые)
   // Кальян: настройки + остатки (all-time) + строки смен кальянщика за месяц
   const [hk, setHk] = useState<{ price: number; portion: number; stockG: number; issuedG: number; allRows: any[]; types: any[] }>({ price: 0, portion: 20, stockG: 0, issuedG: 0, allRows: [], types: [] })
   const [hookahRows, setHookahRows] = useState<any[]>([])
@@ -454,6 +456,7 @@ export default function AnalyticsApp() {
     db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
       const r = Array.isArray(data) ? data[0] : data
       setIncludeCard(!!r?.include_card_in_analytics)
+      setRevGoal(Number(r?.monthly_revenue_goal || 0))
       setHk(h => ({ ...h, price: Number(r?.hookah_price || 0), portion: Number(r?.hookah_portion_g || 20) }))
     })
     // Кальян: склад, выдано в зал (all-time) и продано (all-time) — для остатка «в заведении»
@@ -972,32 +975,45 @@ export default function AnalyticsApp() {
             const card = cardOf(emp)
             const cash = emp.salary - deduct - card
 
+            const open = expSalary === emp.id
+
             return (
-              <div key={emp.id} style={{ padding: '14px 16px', borderBottom: i < employees.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div key={emp.id} style={{ borderBottom: i < employees.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                {/* Шапка — тап раскрывает/сворачивает */}
+                <button onClick={() => setExpSalary(open ? null : emp.id)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: 'transparent', border: 'none', fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}>
                   <div>
                     <div style={{ fontSize: 15, color: t.text, fontWeight: 600 }}>{emp.name}</div>
                     <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>
-                      ЗП: {currency}{fv(emp.salary)}{deduct > 0 ? ` · −${currency}${fv(deduct)}` : ''}{abs > 0 ? ` · ${abs} пропусков` : ''}
+                      {abs > 0 ? `${abs} пропусков · −${currency}${fv(deduct)}` : 'оклад полностью'}
                     </div>
                   </div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: t.blue }}>{currency}{fv(cash + card)}</div>
-                </div>
-                {/* Нал vs Карта бар */}
-                {abs > 0 && <div style={{ marginTop: 6, height: 3, background: t.fill2, borderRadius: 2, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${Math.min(abs / 22 * 100, 100).toFixed(1)}%`, background: t.red, borderRadius: 2, transition: 'width 0.8s cubic-bezier(.16,1,.3,1)' }} />
-                </div>}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 7 }}>
-                  <span style={{ fontSize: 12, color: t.orange, fontWeight: 600 }}>Нал {currency}{fv(cash)}</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 11, color: t.text3 }}>На карту {currency}</span>
-                    <input
-                      key={`card-${emp.id}-${monthKey}`} type="number" inputMode="decimal"
-                      defaultValue={card || ''} placeholder="0"
-                      onBlur={e => saveCard(emp, e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                      style={{ width: 76, textAlign: 'right', padding: '6px 9px', borderRadius: 9, border: `1px solid ${t.sep2}`, background: t.fill, color: t.purple, fontWeight: 700, fontSize: 13, fontFamily: 'inherit', outline: 'none' }}
-                    />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: t.blue }}>{currency}{fv(cash + card)}</div>
+                    <svg width="9" height="15" fill="none" stroke={t.text3} strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 10 18" style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .25s ease', flexShrink: 0 }}><path d="M2 1l7 8-7 8" /></svg>
+                  </div>
+                </button>
+                {/* Тело — плавно выезжает (grid-rows 0fr↔1fr, без замера высоты) */}
+                <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .28s cubic-bezier(.32,.72,0,1)' }}>
+                  <div style={{ overflow: 'hidden' }}>
+                    <div style={{ padding: '0 16px 14px' }}>
+                      <div style={{ fontSize: 12, color: t.text3, marginBottom: 8 }}>ЗП: {currency}{fv(emp.salary)}{deduct > 0 ? ` · вычет −${currency}${fv(deduct)}` : ''}</div>
+                      {abs > 0 && <div style={{ marginBottom: 8, height: 3, background: t.fill2, borderRadius: 2, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${Math.min(abs / 22 * 100, 100).toFixed(1)}%`, background: t.red, borderRadius: 2 }} />
+                      </div>}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 13, color: t.orange, fontWeight: 600 }}>Нал {currency}{fv(cash)}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 12, color: t.text3 }}>На карту {currency}</span>
+                          <input
+                            key={`card-${emp.id}-${monthKey}`} type="number" inputMode="decimal"
+                            defaultValue={card || ''} placeholder="0"
+                            onBlur={e => saveCard(emp, e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                            style={{ width: 84, textAlign: 'right', padding: '7px 10px', borderRadius: 9, border: `1px solid ${t.sep2}`, background: t.fill, color: t.purple, fontWeight: 700, fontSize: 14, fontFamily: 'inherit', outline: 'none' }}
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1015,7 +1031,7 @@ export default function AnalyticsApp() {
   const TABS = [
     { id: 'period', label: 'Период', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },
     { id: 'kassa', label: 'Касса', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 3H8L2 7h20z" /></svg> },
-    { id: 'sales', label: 'Продажи', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" /><line x1="3" y1="6" x2="21" y2="6" /><path d="M16 10a4 4 0 01-8 0" /></svg> },
+    { id: 'forecast', label: 'Прогноз', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M3 17l6-6 4 4 7-7" strokeLinecap="round" strokeLinejoin="round" /><path d="M14 8h6v6" strokeLinecap="round" strokeLinejoin="round" /></svg> },
     { id: 'salary', label: 'Зарплаты', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" /></svg> },
     { id: 'hookah', label: 'Кальян', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M8 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M12 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M16 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M5 14h14" strokeLinecap="round"/><path d="M5 17c1 1.5 2 2 3.5 2s2.5-1 4-1 2.5 1 4 1 2.5-.5 3.5-2" strokeLinecap="round"/></svg> },
   ] as const
@@ -1102,19 +1118,78 @@ export default function AnalyticsApp() {
             </>
           )}
 
-          {tab === 'sales' && (
-            <div style={{ padding: '60px 20px', textAlign: 'center' as const }}>
-              <div style={{ width: 72, height: 72, borderRadius: 20, background: `${t.blue}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
-                <svg fill="none" stroke={t.blue} strokeWidth="1.5" viewBox="0 0 24 24" width="36" height="36"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" /><line x1="3" y1="6" x2="21" y2="6" /><path d="M16 10a4 4 0 01-8 0" /></svg>
+          {tab === 'forecast' && (() => {
+            const now = new Date()
+            const dim = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
+            const isCur = currentDate.getMonth() === now.getMonth() && currentDate.getFullYear() === now.getFullYear()
+            const dpass = isCur ? now.getDate() : dim
+            const mtd = totalIncome
+            const dailyAvg = dpass > 0 ? mtd / dpass : 0
+            const projected = Math.round(dailyAvg * dim)
+            const projPct = pct(projected, prevIncome)
+            const goalPct = revGoal > 0 ? Math.min(100, mtd / revGoal * 100) : 0
+            const daysLeft = Math.max(0, dim - dpass)
+            const needPerDay = revGoal > mtd && daysLeft > 0 ? (revGoal - mtd) / daysLeft : 0
+            const onTrack = revGoal > 0 && projected >= revGoal
+
+            const saveGoal = async (value: string) => {
+              const amt = Math.max(0, parseFloat(value) || 0)
+              if (amt === revGoal) return
+              setRevGoal(amt)
+              await db.from('restaurant_settings').update({ monthly_revenue_goal: amt }).eq('restaurant_id', restaurantId)
+            }
+
+            return (
+              <div>
+                {/* Прогноз на месяц */}
+                <div style={{ background: t.surface, borderRadius: 18, padding: '20px 18px', boxShadow: t.sh, marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{isCur ? 'Прогноз на месяц' : 'Выручка за месяц'}</div>
+                  <div style={{ fontSize: 34, fontWeight: 800, color: t.text, letterSpacing: -1, marginTop: 6 }}>{currency}{fv(isCur ? projected : mtd)}</div>
+                  <div style={{ fontSize: 13, color: t.text3, marginTop: 4 }}>
+                    {isCur ? `при текущем темпе ${currency}${fv(Math.round(dailyAvg))}/день` : 'итог месяца'}
+                    {projPct !== null && <span style={{ color: projPct >= 0 ? t.green : t.red, fontWeight: 600 }}> · {projPct >= 0 ? '+' : ''}{projPct.toFixed(0)}% к прошлому</span>}
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+                  <StatCard label="С начала месяца" rawValue={mtd} value={`${currency}${fv(mtd)}`} color={t.blue} sm t={t} />
+                  <StatCard label="В среднем/день" rawValue={dailyAvg} value={`${currency}${fv(Math.round(dailyAvg))}`} color={t.orange} sm t={t} />
+                  <StatCard label="Прошлый месяц" rawValue={prevIncome} value={`${currency}${fv(prevIncome)}`} color={t.purple} sm t={t} />
+                </div>
+
+                {/* Цель на месяц */}
+                <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>Цель на месяц</div>
+                <div style={{ background: t.surface, borderRadius: 16, padding: '16px', boxShadow: t.sh }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: revGoal > 0 ? 12 : 0 }}>
+                    <span style={{ fontSize: 14, color: t.text, fontWeight: 500 }}>Цель выручки</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 14, color: t.text3 }}>{currency}</span>
+                      <input
+                        key={`goal-${fmtDate(currentDate).slice(0, 7)}`} type="number" inputMode="decimal"
+                        defaultValue={revGoal || ''} placeholder="0"
+                        onBlur={e => saveGoal(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                        style={{ width: 110, textAlign: 'right', padding: '7px 10px', borderRadius: 10, border: `1px solid ${t.sep2}`, background: t.fill, color: t.text, fontWeight: 700, fontSize: 15, fontFamily: 'inherit', outline: 'none' }}
+                      />
+                    </div>
+                  </div>
+                  {revGoal > 0 && (
+                    <>
+                      <div style={{ height: 8, borderRadius: 4, background: t.fill, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${goalPct}%`, borderRadius: 4, background: onTrack ? t.green : t.orange, transition: 'width 0.8s cubic-bezier(.16,1,.3,1)' }} />
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 12 }}>
+                        <span style={{ color: t.text3 }}>{goalPct.toFixed(0)}% · {currency}{fv(mtd)} из {currency}{fv(revGoal)}</span>
+                        {isCur && daysLeft > 0
+                          ? <span style={{ color: onTrack ? t.green : t.orange, fontWeight: 600 }}>{onTrack ? 'в графике' : `нужно ${currency}${fv(Math.round(needPerDay))}/день`}</span>
+                          : <span style={{ color: mtd >= revGoal ? t.green : t.red, fontWeight: 600 }}>{mtd >= revGoal ? 'цель достигнута' : `не хватило ${currency}${fv(revGoal - mtd)}`}</span>}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
-              <div style={{ fontWeight: 700, fontSize: 20, color: t.text, marginBottom: 8, letterSpacing: -0.3 }}>Доступно в Pro</div>
-              <div style={{ fontSize: 14, color: t.text3, maxWidth: 240, margin: '0 auto', lineHeight: 1.5 }}>Подключите Syrve для просмотра статистики продаж</div>
-              <div style={{ marginTop: 20, display: 'inline-flex', alignItems: 'center', gap: 6, background: `${t.blue}14`, padding: '8px 16px', borderRadius: 20 }}>
-                <div style={{ width: 6, height: 6, borderRadius: '50%', background: t.blue }} />
-                <span style={{ fontSize: 12, color: t.blue, fontWeight: 600 }}>Pro</span>
-              </div>
-            </div>
-          )}
+            )
+          })()}
 
           {tab === 'salary' && renderSalary()}
 
