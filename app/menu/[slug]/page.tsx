@@ -1,6 +1,7 @@
 'use client'
 export const dynamic = 'force-dynamic'
 import React, { useEffect, useState, useRef, use } from 'react'
+import { useI18n } from '@/lib/i18n'
 
 // ── TYPES ─────────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,7 @@ function fv(v: number, currency = '€') {
 
 export default function MenuPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params)
+  const { t } = useI18n() // язык телефона гостя
   const [settings, setSettings] = useState<MenuSettings | null>(null)
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
@@ -255,8 +257,8 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
       <div style={{ fontSize: 48, marginBottom: 8, opacity: 0.3 }}>
         <svg width="64" height="64" fill="none" stroke="white" strokeWidth="1.5" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
       </div>
-      <div style={{ fontWeight: 700, fontSize: 20, color: '#fff' }}>Меню не найдено</div>
-      <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: 260 }}>Проверьте ссылку или обратитесь к персоналу</div>
+      <div style={{ fontWeight: 700, fontSize: 20, color: '#fff' }}>{t('menu.notFound')}</div>
+      <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: 260 }}>{t('menu.notFoundHint')}</div>
     </div>
   )
 
@@ -306,7 +308,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
           <div style={{ background: T.hbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', padding: '8px 16px', borderBottom: `0.5px solid ${T.sep}` }}>
             <div style={{ position: 'relative' }}>
               <svg style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} width="16" height="16" fill="none" stroke={T.text3} strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по меню..." style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: 12, border: `1px solid ${T.sep}`, fontSize: 15, color: T.text, background: T.surface, fontFamily: 'inherit', outline: 'none' }} />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('menu.search')} style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: 12, border: `1px solid ${T.sep}`, fontSize: 15, color: T.text, background: T.surface, fontFamily: 'inherit', outline: 'none' }} />
               {search && <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: T.fill, border: 'none', borderRadius: '50%', width: 20, height: 20, cursor: 'pointer', color: T.text2, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>}
             </div>
           </div>
@@ -380,8 +382,8 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
                           {item.description && <div style={{ fontSize: 13, color: T.text2, lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{item.description}</div>}
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
                             {item.price && <div style={{ fontWeight: 700, fontSize: 16, color: accent }}>{money(item.price)}</div>}
-                            {settings.show_calories && item.calories && <div style={{ fontSize: 12, color: T.text3, background: T.fill, padding: '2px 8px', borderRadius: 8 }}>{item.calories} ккал</div>}
-                            {!item.is_available && <div style={{ fontSize: 12, color: '#ff3b30', background: 'rgba(255,59,48,0.1)', padding: '2px 8px', borderRadius: 8 }}>Нет в наличии</div>}
+                            {settings.show_calories && item.calories && <div style={{ fontSize: 12, color: T.text3, background: T.fill, padding: '2px 8px', borderRadius: 8 }}>{item.calories} {t('menu.kcal')}</div>}
+                            {!item.is_available && <div style={{ fontSize: 12, color: '#ff3b30', background: 'rgba(255,59,48,0.1)', padding: '2px 8px', borderRadius: 8 }}>{t('menu.unavailable')}</div>}
                           </div>
                           {settings.show_allergens && item.allergens && item.allergens.length > 0 && (
                             <div style={{ fontSize: 11, color: T.text3, marginTop: 4 }}>{item.allergens.join(', ')}</div>
@@ -420,8 +422,8 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
           {search && visibleCats.every(c => filteredItems(c.id).length === 0) && (
             <div style={{ textAlign: 'center', padding: '60px 20px', color: T.text2 }}>
               <svg width="48" height="48" fill="none" stroke={T.text3} strokeWidth="1.5" viewBox="0 0 24 24" style={{ marginBottom: 16, opacity: 0.5 }}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
-              <div style={{ fontWeight: 600, fontSize: 17, color: T.text, marginBottom: 6 }}>Ничего не найдено</div>
-              <div style={{ fontSize: 14 }}>Попробуйте другой запрос</div>
+              <div style={{ fontWeight: 600, fontSize: 17, color: T.text, marginBottom: 6 }}>{t('menu.nothingFound')}</div>
+              <div style={{ fontSize: 14 }}>{t('menu.tryAnother')}</div>
             </div>
           )}
 
@@ -460,7 +462,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
                 addToCart(modItem, opts)
                 setModItem(null)
               }} style={{ width: '100%', padding: '16px', borderRadius: 16, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 20px ${accent}55` }}>
-                Добавить · {money((modItem.price || 0) + (modItem.modifiers || []).reduce((s, g, gi) => s + (g.options[modSel[gi] || 0]?.price || 0), 0))}
+                {t('menu.add')} · {money((modItem.price || 0) + (modItem.modifiers || []).reduce((s, g, gi) => s + (g.options[modSel[gi] || 0]?.price || 0), 0))}
               </button>
             </div>
           </div>
@@ -479,12 +481,12 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
         <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setShowBill(false)}>
           <div style={{ background: T.surface, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '80vh', display: 'flex', flexDirection: 'column', animation: 'slideUp .3s ease' }} onClick={e => e.stopPropagation()}>
             <div style={{ width: 40, height: 4, background: T.fill, borderRadius: 2, margin: '14px auto 0' }} />
-            <div style={{ fontWeight: 700, fontSize: 18, textAlign: 'center', padding: '14px 20px 0', color: T.text }}>Ваш счёт{tableN ? ` · стол ${tableN}` : ''}</div>
+            <div style={{ fontWeight: 700, fontSize: 18, textAlign: 'center', padding: '14px 20px 0', color: T.text }}>{t('menu.yourBill')}{tableN ? ` · ${t('menu.table')} ${tableN}` : ''}</div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
               {bill.map((o, oi) => (
                 <div key={oi} style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 12, color: T.text3, fontWeight: 600, marginBottom: 6 }}>
-                    Заказ {oi + 1} · {new Date(o.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                    {t('menu.order')} {oi + 1} · {new Date(o.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                   </div>
                   {o.items.map((it: any, i: number) => (
                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 14, color: T.text }}>
@@ -497,11 +499,11 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
             </div>
             <div style={{ padding: '12px 16px 20px', borderTop: `0.5px solid ${T.sep}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
-                <span style={{ fontSize: 16, color: T.text2 }}>Итого за стол</span>
+                <span style={{ fontSize: 16, color: T.text2 }}>{t('menu.totalTable')}</span>
                 <span style={{ fontSize: 20, fontWeight: 800, color: T.text }}>{money(bill.reduce((s, o) => s + (o.total || 0), 0))}</span>
               </div>
               <button onClick={callWaiter} disabled={waiterCalled} style={{ width: '100%', padding: '16px', borderRadius: 16, background: waiterCalled ? T.fill : accent, color: waiterCalled ? T.text2 : '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: waiterCalled ? 'default' : 'pointer', boxShadow: waiterCalled ? 'none' : `0 4px 20px ${accent}55` }}>
-                {waiterCalled ? '✓ Официант скоро подойдёт' : 'Позвать официанта'}
+                {waiterCalled ? t('menu.waiterComing') : t('menu.callWaiter')}
               </button>
             </div>
           </div>
@@ -513,7 +515,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
         <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 300, padding: '12px 16px', paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))', background: T.hbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderTop: `0.5px solid ${T.sep}` }}>
           <button onClick={() => setShowCart(true)} style={{ width: '100%', padding: '16px', borderRadius: 16, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: `0 4px 20px ${accent}55` }}>
             <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14 }}>{cartCount}</div>
-            <span>Корзина{tableN ? ` · стол ${tableN}` : ''}</span>
+            <span>{t('menu.cart')}{tableN ? ` · ${t('menu.table')} ${tableN}` : ''}</span>
             <span style={{ fontWeight: 700 }}>{money(cartTotal)}</span>
           </button>
         </div>
@@ -524,7 +526,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
         <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setShowCart(false)}>
           <div style={{ background: T.surface, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '80vh', display: 'flex', flexDirection: 'column', animation: 'slideUp .3s ease' }} onClick={e => e.stopPropagation()}>
             <div style={{ width: 40, height: 4, background: T.fill, borderRadius: 2, margin: '14px auto 0' }} />
-            <div style={{ fontWeight: 700, fontSize: 18, textAlign: 'center', padding: '14px 20px 0', color: T.text }}>Ваш заказ</div>
+            <div style={{ fontWeight: 700, fontSize: 18, textAlign: 'center', padding: '14px 20px 0', color: T.text }}>{t('menu.yourOrder')}</div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
               {cart.map((c, i) => (
                 <div key={entryKey(c)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: i < cart.length - 1 ? `0.5px solid ${T.sep}` : 'none' }}>
@@ -550,22 +552,22 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
             <div style={{ padding: '12px 16px 20px', borderTop: `0.5px solid ${T.sep}` }}>
               {tableN && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <span style={{ fontSize: 14, color: T.text2 }}>Стол</span>
+                  <span style={{ fontSize: 14, color: T.text2 }}>{t('menu.tableCap')}</span>
                   <span style={{ fontSize: 14, fontWeight: 700, color: accent }}>{tableN}</span>
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: settings.allow_pay_at_table ? 8 : 16 }}>
-                <span style={{ fontSize: 16, color: T.text2 }}>Итого</span>
+                <span style={{ fontSize: 16, color: T.text2 }}>{t('menu.total')}</span>
                 <span style={{ fontSize: 20, fontWeight: 800, color: T.text }}>{money(cartTotal)}</span>
               </div>
               {settings.allow_pay_at_table && (
                 <div style={{ fontSize: 13, color: T.text2, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="3" /><path d="M1 10h22" /></svg>
-                  Оплата за столом — официант примет оплату при подаче
+                  {t('menu.payAtTable')}
                 </div>
               )}
               <button onClick={sendOrder} style={{ width: '100%', padding: '16px', borderRadius: 16, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 20px ${accent}55` }}>
-                Отправить заказ
+                {t('menu.sendOrder')}
               </button>
             </div>
           </div>
@@ -574,7 +576,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
 
       {orderSent && (
         <div style={{ position: 'fixed', bottom: 100, left: '50%', transform: 'translateX(-50%)', background: '#1c1c1e', color: '#fff', padding: '14px 24px', borderRadius: 14, fontSize: 15, fontWeight: 600, zIndex: 600, boxShadow: '0 4px 20px rgba(0,0,0,0.4)', whiteSpace: 'nowrap' }}>
-          ✓ Заказ отправлен
+          {t('menu.orderSent')}
         </div>
       )}
     </div>
