@@ -1215,8 +1215,11 @@ export default function AnalyticsApp() {
               d.total += r.quantity || 0
               if (!r.is_free) d.paid += r.quantity || 0
               byDay.set(r.date, d)
-              const key = `${r.brand || ''} ${r.flavor || ''}`.trim() || '—'
-              byFlavor.set(key, (byFlavor.get(key) || 0) + (r.quantity || 0))
+              // У бесплатных flavor = категория («Сотрудники» и т.п.) — в «Топ вкусов» не включаем
+              if (!r.is_free) {
+                const key = `${r.brand || ''} ${r.flavor || ''}`.trim() || '—'
+                byFlavor.set(key, (byFlavor.get(key) || 0) + (r.quantity || 0))
+              }
             })
             const flavors = [...byFlavor.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)
             const maxFlavor = flavors[0]?.[1] || 1

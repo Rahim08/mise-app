@@ -132,29 +132,40 @@ function fmtDay(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+// Категории бесплатных кальянов (для кого/повод). Храним в hookah_sales.flavor — без миграции.
+const FREE_CATS = ['Сотрудники', 'Владелец', 'Менеджер', 'Гость', 'Дегустация'] as const
+
 function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId: string; t: ReturnType<typeof useTheme>; toast: (m: string) => void; canSeeMoney: boolean }) {
-  const today = fmtDay(new Date())
+  const [currentDate, setCurrentDate] = useState(new Date())
+  const dateStr = fmtDay(currentDate)
   const [mode, setMode] = useState<'paid' | 'free'>('paid')
+  const [freeCat, setFreeCat] = useState<string>(FREE_CATS[0])
   const [types, setTypes] = useState<any[]>([])
-  const [vals, setVals] = useState<Record<string, { paid: string; free: string }>>({})
-  const [venueBase, setVenueBase] = useState(0) // выдано в зал − расход прошлых дней
+  // vals[typeId] = { paid: число, free: { категория → число } }
+  const [vals, setVals] = useState<Record<string, { paid: string; free: Record<string, string> }>>({})
+  const [venueBase, setVenueBase] = useState(0) // выдано в зал − расход прочих дней
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
+    setLoading(true)
     Promise.all([
       db.from('hookah_types').select('*').eq('is_active', true).order('created_at'),
-      db.from('hookah_sales').select('hookah_type_id, quantity, portion_g, is_free, date'),
+      db.from('hookah_sales').select('hookah_type_id, quantity, portion_g, is_free, date, flavor'),
       db.from('tobacco_movements').select('quantity_g').eq('restaurant_id', restaurantId).eq('type', 'out'),
     ]).then(([{ data: tps }, { data: sales }, { data: outs }]: any[]) => {
       setTypes(tps || [])
-      const v: Record<string, { paid: string; free: string }> = {}
+      const v: Record<string, { paid: string; free: Record<string, string> }> = {}
       let pastGrams = 0
       ;(sales || []).forEach((r: any) => {
-        if (r.date === today && r.hookah_type_id) {
-          const cur = v[r.hookah_type_id] || { paid: '', free: '' }
-          const key = r.is_free ? 'free' : 'paid'
-          cur[key] = String((Number(cur[key]) || 0) + (r.quantity || 0))
+        if (r.date === dateStr && r.hookah_type_id) {
+          const cur = v[r.hookah_type_id] || { paid: '', free: {} }
+          if (r.is_free) {
+            const cat = r.flavor || FREE_CATS[0]
+            cur.free[cat] = String((Number(cur.free[cat]) || 0) + (r.quantity || 0))
+          } else {
+            cur.paid = String((Number(cur.paid) || 0) + (r.quantity || 0))
+          }
           v[r.hookah_type_id] = cur
         } else {
           pastGrams += (r.quantity || 0) * Number(r.portion_g || 0)
@@ -164,30 +175,45 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
       setVenueBase((outs || []).reduce((s: number, m: any) => s + (m.quantity_g || 0), 0) - pastGrams)
       setLoading(false)
     })
-  }, [])
+  }, [dateStr])
 
-  const qtyOf = (typeId: string, m: 'paid' | 'free') => Number(vals[typeId]?.[m]) || 0
-  const setQty = (typeId: string, val: string) =>
-    setVals(vs => ({ ...vs, [typeId]: { ...(vs[typeId] || { paid: '', free: '' }), [mode]: val.replace(/[^\d]/g, '') } }))
+  const paidOf = (typeId: string) => Number(vals[typeId]?.paid) || 0
+  const freeOf = (typeId: string, cat: string) => Number(vals[typeId]?.free?.[cat]) || 0
+  const freeTotalOf = (typeId: string) => FREE_CATS.reduce((s, c) => s + freeOf(typeId, c), 0)
+  const inputVal = (typeId: string) => mode === 'paid' ? (vals[typeId]?.paid || '') : (vals[typeId]?.free?.[freeCat] || '')
+  const setQty = (typeId: string, val: string) => {
+    const clean = val.replace(/[^\d]/g, '')
+    setVals(vs => {
+      const cur = vs[typeId] || { paid: '', free: {} }
+      if (mode === 'paid') return { ...vs, [typeId]: { ...cur, paid: clean } }
+      return { ...vs, [typeId]: { ...cur, free: { ...cur.free, [freeCat]: clean } } }
+    })
+  }
 
-  const paidTotal = types.reduce((s, tp) => s + qtyOf(tp.id, 'paid'), 0)
-  const freeTotal = types.reduce((s, tp) => s + qtyOf(tp.id, 'free'), 0)
-  const revenue = types.reduce((s, tp) => s + qtyOf(tp.id, 'paid') * Number(tp.price || 0), 0)
-  const grams = types.reduce((s, tp) => s + (qtyOf(tp.id, 'paid') + qtyOf(tp.id, 'free')) * Number(tp.portion_g || 0), 0)
+  const paidTotal = types.reduce((s, tp) => s + paidOf(tp.id), 0)
+  const freeTotal = types.reduce((s, tp) => s + freeTotalOf(tp.id), 0)
+  const revenue = types.reduce((s, tp) => s + paidOf(tp.id) * Number(tp.price || 0), 0)
+  const grams = types.reduce((s, tp) => s + (paidOf(tp.id) + freeTotalOf(tp.id)) * Number(tp.portion_g || 0), 0)
   const venueLeft = venueBase - grams
 
   const save = async () => {
     setSaving(true)
-    const { error: delErr } = await db.from('hookah_sales').delete().eq('date', today)
+    const { error: delErr } = await db.from('hookah_sales').delete().eq('date', dateStr)
     if (delErr) { toast('Ошибка: ' + delErr.message); setSaving(false); return }
     const rows: any[] = []
     types.forEach(tp => {
-      ;(['paid', 'free'] as const).forEach(m => {
-        const q = qtyOf(tp.id, m)
-        if (q > 0) rows.push({
-          hookah_type_id: tp.id, quantity: q, date: today,
-          price: m === 'free' ? 0 : Number(tp.price || 0), portion_g: Number(tp.portion_g || 0),
-          is_free: m === 'free', brand: null, flavor: null, flavor_id: null,
+      const p = paidOf(tp.id)
+      if (p > 0) rows.push({
+        hookah_type_id: tp.id, quantity: p, date: dateStr,
+        price: Number(tp.price || 0), portion_g: Number(tp.portion_g || 0),
+        is_free: false, brand: null, flavor: null, flavor_id: null,
+      })
+      FREE_CATS.forEach(cat => {
+        const f = freeOf(tp.id, cat)
+        if (f > 0) rows.push({
+          hookah_type_id: tp.id, quantity: f, date: dateStr,
+          price: 0, portion_g: Number(tp.portion_g || 0),
+          is_free: true, brand: null, flavor: cat, flavor_id: null, // flavor = категория бесплатного
         })
       })
     })
@@ -209,9 +235,26 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
   )
 
   const accent = mode === 'paid' ? t.orange : t.purple
+  const isToday = dateStr === fmtDay(new Date())
+  const dDisp = currentDate.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })
+  const shiftDay = (delta: number) => setCurrentDate(d => { const n = new Date(d); n.setDate(n.getDate() + delta); return n })
 
   return (
     <div>
+      {/* Навигация по дням (как в Manager) */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <button onClick={() => shiftDay(-1)} style={{ width: 36, height: 36, borderRadius: 10, background: t.surface, border: `0.5px solid ${t.sep2}`, color: t.text2, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: t.sh, fontFamily: 'inherit' }}>
+          <svg width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" viewBox="0 0 10 18"><path d="M8 1L1 9l7 8" /></svg>
+        </button>
+        <button onClick={() => setCurrentDate(new Date())} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'center' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: t.text, textTransform: 'capitalize' }}>{dDisp}</div>
+          {!isToday && <div style={{ fontSize: 11, color: t.blue, fontWeight: 600, marginTop: 1 }}>вернуться к сегодня</div>}
+        </button>
+        <button onClick={() => shiftDay(1)} disabled={isToday} style={{ width: 36, height: 36, borderRadius: 10, background: t.surface, border: `0.5px solid ${t.sep2}`, color: isToday ? t.text3 : t.text2, opacity: isToday ? 0.4 : 1, cursor: isToday ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: t.sh, fontFamily: 'inherit' }}>
+          <svg width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" viewBox="0 0 10 18"><path d="M2 1l7 8-7 8" /></svg>
+        </button>
+      </div>
+
       {/* Итог дня. Выручку видит только владелец/менеджер (кальянщику деньги не показываем). */}
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${canSeeMoney ? 4 : 3}, 1fr)`, gap: 8, marginBottom: 10 }}>
         {[
@@ -240,15 +283,27 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
         ))}
       </div>
       {mode === 'free' && (
-        <div style={{ background: `${t.purple}12`, borderRadius: 12, padding: '9px 14px', marginBottom: 12, fontSize: 12.5, color: t.purple }}>
-          Кальяны для владельца и сотрудников: не входят в выручку, табак списывается
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: t.text3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, padding: '0 2px 7px' }}>Для кого</div>
+          <div style={{ display: 'flex', gap: 7, overflowX: 'auto', paddingBottom: 2, WebkitOverflowScrolling: 'touch' }}>
+            {FREE_CATS.map(cat => {
+              const on = freeCat === cat
+              const n = types.reduce((s, tp) => s + freeOf(tp.id, cat), 0)
+              return (
+                <button key={cat} onClick={() => setFreeCat(cat)} style={{ flexShrink: 0, padding: '7px 14px', borderRadius: 20, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: on ? 700 : 500, cursor: 'pointer', background: on ? t.purple : `${t.purple}14`, color: on ? '#fff' : t.purple, whiteSpace: 'nowrap' }}>
+                  {cat}{n > 0 ? ` · ${n}` : ''}
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ fontSize: 11.5, color: t.text3, marginTop: 8, padding: '0 2px' }}>Не входят в выручку, табак списывается</div>
         </div>
       )}
 
       {/* Виды кальянов: число за смену */}
       <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 14 }}>
         {types.map((tp, i) => {
-          const q = vals[tp.id]?.[mode] || ''
+          const q = inputVal(tp.id)
           return (
             <div key={tp.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: i < types.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
