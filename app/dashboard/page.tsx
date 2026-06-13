@@ -8,6 +8,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { AppIcon, Wordmark, WordmarkMark, ACCENT_GLOW, type BrandApp } from '@/components/brand'
 import { track } from '@/lib/analytics'
 import { openCookieSettings } from '@/components/CookieConsent'
+import { useIsNative } from '@/lib/native'
 
 
 
@@ -953,6 +954,9 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
   const [loading, setLoading] = useState(false)
   const [cancelConfirm, setCancelConfirm] = useState(false)
   const [portalLoading, setPortalLoading] = useState(false)
+  // App Store (Guideline 3.1.1): в нативной iOS-сборке НЕ показываем цены/оплату/портал —
+  // подписка оформляется в веб-версии. Внутри приложения — только статус (read-only).
+  const native = useIsNative()
 
   const currentPlan = PLANS.find(p => p.id === restaurant?.subscription_plan)
   const status = restaurant?.subscription_status
@@ -1047,8 +1051,16 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
         </Card>
       )}
 
+      {/* App Store: подписка управляется в вебе (нативная сборка) */}
+      {native && (
+        <Card style={{ marginBottom: 16, background: 'var(--fill2)', boxShadow: 'none' }}>
+          <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)', marginBottom: 4 }}>Управление подпиской</div>
+          <div style={{ fontSize: '.82rem', color: 'var(--tx2)', lineHeight: 1.5 }}>Оформить или изменить тариф можно в веб-версии mise на сайте. Здесь показан ваш текущий статус.</div>
+        </Card>
+      )}
+
       {/* Баннер: триал заканчивается */}
-      {trialDaysLeft !== null && trialDaysLeft <= 3 && (
+      {!native && trialDaysLeft !== null && trialDaysLeft <= 3 && (
         <Card style={{ marginBottom: 16, border: '1px solid rgba(255,149,0,.35)', background: 'rgba(255,149,0,.06)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div>
@@ -1079,7 +1091,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
               <div style={{ color: 'var(--tx2)', fontSize: '.78rem' }}>в месяц</div>
             </div>
           </div>
-          {isActive && status !== 'canceling' && (
+          {!native && isActive && status !== 'canceling' && (
             <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(var(--seprgb),.08)' }}>
               {!cancelConfirm ? (
                 <button onClick={() => setCancelConfirm(true)} style={{ background: 'none', border: 'none', color: '#ff3b30', fontSize: '.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
@@ -1098,7 +1110,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
       )}
 
       {/* Stripe Customer Portal: обновить карту, посмотреть инвойсы */}
-      {isActive && (restaurant as any)?.stripe_customer_id && (
+      {!native && isActive && (restaurant as any)?.stripe_customer_id && (
         <Card style={{ marginBottom: 16, background: 'var(--fill2)', boxShadow: 'none' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
             <div>
@@ -1112,6 +1124,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
         </Card>
       )}
 
+      {!native && <>
       <div style={{ fontWeight: 600, fontSize: '.78rem', color: 'var(--tx2)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '.06em' }}>
         {currentPlan ? 'Сменить тариф' : 'Выберите тариф'}
       </div>
@@ -1150,6 +1163,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
       <div style={{ textAlign: 'center', fontSize: '.75rem', color: 'var(--tx3)' }}>
         Платежи защищены через Stripe · 7 дней бесплатно при первой оплате
       </div>
+      </>}
     </div>
   )
 }
