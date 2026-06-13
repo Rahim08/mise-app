@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
+import { AppLoading } from '@/components/AppLoading'
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -1009,16 +1010,7 @@ export default function AnalyticsApp() {
 
   if (!restaurantId) return <AuthGate appId="analytics" appName="Mise Analytics" onAuth={setRestaurantId} />
 
-  if (!t.mounted || loading) return (
-    <div style={{ minHeight: '100vh', background: '#f2f2f7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-        <span style={{ fontWeight: 800, fontSize: 24, color: '#34c759', letterSpacing: -0.8 }}>mise</span>
-        <span style={{ fontWeight: 400, fontSize: 22, color: '#1c1c1e', letterSpacing: -0.3 }}>Analytics</span>
-      </div>
-      <div style={{ width: 24, height: 24, border: '2.5px solid rgba(52,199,89,0.2)', borderTopColor: '#34c759', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-    </div>
-  )
+  if (!t.mounted || loading) return <AppLoading app="analytics" bg={t.bg} fill={t.fill} accent={t.blue} />
 
   const TABS = [
     { id: 'period', label: 'Период', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },

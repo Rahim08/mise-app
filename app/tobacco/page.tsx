@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import { Segmented } from '@/components/Segmented'
 import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
+import { AppLoading } from '@/components/AppLoading'
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -433,13 +434,7 @@ export default function StashApp() {
 
   if (!restaurantId) return <AuthGate appId="stash" appName="Mise Stash" onAuth={setRestaurantId} />
 
-  if (!mounted || loading) return (
-    <div style={{ minHeight: '100vh', background: t.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
-      <IconStash color={t.orange} />
-      <div style={{ width: 24, height: 24, border: `2.5px solid ${t.fill}`, borderTopColor: t.orange, borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}} @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}`}</style>
-    </div>
-  )
+  if (!mounted || loading) return <AppLoading app="stash" bg={t.bg} fill={t.fill} accent={t.orange} />
 
   const batches = groupedMovements()
 

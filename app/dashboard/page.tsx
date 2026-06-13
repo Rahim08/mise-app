@@ -1571,10 +1571,15 @@ export default function Dashboard() {
 
   if (!authChecked || !user) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system,sans-serif', color: 'var(--tx2)', fontSize: '.9rem', background: 'var(--bg)' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-        <Wordmark size={34} />
-        <Spinner compact />
-      </div>
+      {/* На первом (холодном) заходе бренд-момент — это SplashScreen ниже; пред-индикатор
+          не показываем, чтобы не было «надпись+спиннер → потом анимация». На перезаходе
+          (сплэш уже был в сессии) показываем аккуратный вордмарк+спиннер. */}
+      {!showSplash && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          <Wordmark size={34} />
+          <Spinner compact />
+        </div>
+      )}
     </div>
   )
 
@@ -1601,7 +1606,7 @@ export default function Dashboard() {
         color: active ? 'var(--tx)' : 'var(--tx2)', cursor: 'pointer',
       }}>
         <TabIcon id={id} size={16} />
-        <span style={{ flex: 1 }}>{label}</span>
+        <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden' }}>{label}</span>
         {badge > 0 && <span style={{ fontSize: '.65rem', fontWeight: 700, color: '#fff', background: '#ff3b30', borderRadius: 980, padding: '1px 7px' }}>{badge}</span>}
       </button>
     )
@@ -1632,7 +1637,7 @@ export default function Dashboard() {
           @media (min-width: 900px) {
             .dash-side { display: flex; }
             .dash-mobilebar, .dash-pills { display: none !important; }
-            .dash-content { margin-left: var(--dash-side-w, 232px); transition: margin-left .22s cubic-bezier(.25,0,.25,1); }
+            .dash-content { margin-left: var(--dash-side-w, 232px); transition: margin-left .28s cubic-bezier(.32,.72,0,1); will-change: margin-left; }
           }
         `}</style>
 
@@ -1643,7 +1648,7 @@ export default function Dashboard() {
           flexDirection: 'column', padding: '20px 12px 16px',
           borderRight: '1px solid rgba(var(--seprgb),.1)',
           background: 'var(--surface)', zIndex: 100, boxSizing: 'border-box',
-          overflow: 'hidden', transition: 'width .22s cubic-bezier(.25,0,.25,1)',
+          overflow: 'hidden', transition: 'width .28s cubic-bezier(.32,.72,0,1)', willChange: 'width', whiteSpace: 'nowrap',
         }}>
           {/* Заголовок: wordmark + кнопка свернуть / развернуть */}
           {sideCollapsed ? (

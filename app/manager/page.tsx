@@ -7,6 +7,7 @@ import { db } from '@/lib/db'
 import { Segmented } from '@/components/Segmented'
 import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
+import { AppLoading } from '@/components/AppLoading'
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -279,13 +280,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const { inc, card, ink, totalExp, balance, opening, salary, inkNet } = calc()
   const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
 
-  if (!mounted || (loading && employees.length === 0)) return (
-    <div style={{ minHeight: '100vh', background: t.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
-      <IconManager color={t.blue} size={64} />
-      <div style={{ width: 24, height: 24, border: `2.5px solid ${t.fill}`, borderTopColor: t.blue, borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-    </div>
-  )
+  if (!mounted || (loading && employees.length === 0)) return <AppLoading app="manager" bg={t.bg} fill={t.fill} accent={t.blue} />
 
   return (
     <div style={{ height: '100vh', overflow: 'hidden', background: t.bg, fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased' }}>

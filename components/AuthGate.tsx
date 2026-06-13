@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { useTheme } from '@/hooks/useTheme'
 import { AppIcon, Wordmark, type BrandApp } from '@/components/brand'
+import { AppLoading } from '@/components/AppLoading'
 
 function QRScanner({ onResult, onClose, t }: { onResult: (data: string) => void; onClose: () => void; t: any }) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -255,13 +256,7 @@ export function AuthGate({ appId, appName, onAuth }: {
     WebkitFontSmoothing: 'antialiased', position: 'relative', userSelect: 'none',
   }
 
-  if (phase === 'loading') return (
-    <div style={screenStyle}>
-      <AppIcon app={appId as BrandApp} size={64} />
-      <div style={{ width: 24, height: 24, border: `2.5px solid ${t.fill}`, borderTopColor: t.blue, borderRadius: '50%', animation: 'spin .7s linear infinite', marginTop: 20 }} />
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-    </div>
-  )
+  if (phase === 'loading') return <AppLoading app={appId as BrandApp} bg={t.bg} fill={t.fill} accent={t.blue} />
 
   if (phase === 'error') return (
     <div style={screenStyle}>

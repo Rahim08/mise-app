@@ -237,16 +237,8 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
 
   // ── LOADING ──
   if (loading) return (
-    <div style={{ minHeight: '100vh', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 20 }}>
-      <div style={{ width: 56, height: 56, borderRadius: 14, background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <svg width="28" height="28" viewBox="0 0 64 64" fill="none">
-          <rect width="64" height="64" rx="14" fill="#007aff" />
-          <rect x="14" y="20" width="36" height="5" rx="2.5" fill="white" />
-          <rect x="14" y="30" width="26" height="5" rx="2.5" fill="white" opacity=".7" />
-          <rect x="14" y="40" width="18" height="5" rx="2.5" fill="white" opacity=".4" />
-        </svg>
-      </div>
-      <div style={{ width: 28, height: 28, border: '2.5px solid rgba(255,255,255,0.1)', borderTopColor: '#007aff', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
+    <div style={{ minHeight: '100vh', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: 30, height: 30, border: '2.5px solid rgba(255,255,255,0.14)', borderTopColor: 'rgba(255,255,255,0.85)', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   )
