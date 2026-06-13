@@ -390,7 +390,7 @@ BEGIN
     v_date := CURRENT_DATE - i;
     INSERT INTO attendance_records (restaurant_id, staff_id, date, check_in_at, check_in_lat, check_in_lng, check_in_distance_m, late_minutes, status, source) VALUES
       (v_rid, s_sara,  v_date, (v_date + time '10:55') AT TIME ZONE 'Europe/Rome', 41.9028, 12.4964, 18, 0, 'present', 'manual'),
-      (v_rid, s_marco, v_date, (v_date + time '12:08') AT TIME ZONE 'Europe/Rome', 41.9029, 12.4963, 30, 8, 'present', 'manual'),
+      (v_rid, s_marco, v_date, (v_date + time '12:08') AT TIME ZONE 'Europe/Rome', 41.9029, 12.4963, 30, 8, 'late', 'manual'),
       (v_rid, s_anton, v_date, (v_date + time '17:02') AT TIME ZONE 'Europe/Rome', 41.9027, 12.4965, 22, 2, 'present', 'manual');
   END LOOP;
 
@@ -405,10 +405,11 @@ BEGIN
   INSERT INTO menu_orders (restaurant_id, table_number, items, total, status, created_at) VALUES
     (v_rid, '7', '[{"call":"waiter"}]'::jsonb, 0, 'new', now() - interval '5 minutes');
 
-  -- Уведомления для колокольчика
+  -- Уведомления для колокольчика. type ограничен check-constraint'ом —
+  -- используем значения, которые реально пишет приложение ('task', 'shift_reminder').
   INSERT INTO notifications (restaurant_id, staff_id, type, title, body, created_at) VALUES
-    (v_rid, s_sara, 'order',   'Новый заказ',  'Стол 4 · Premium Hookah, Mint Tea', now() - interval '12 minutes'),
-    (v_rid, s_sara, 'low_stock','Табак заканчивается', 'Adalya — Lady Killer: 140 г', now() - interval '2 hours');
+    (v_rid, s_sara, 'task',           'Новый заказ',  'Стол 4 · Premium Hookah, Mint Tea', now() - interval '12 minutes'),
+    (v_rid, s_sara, 'shift_reminder', 'Смена сегодня', 'Открытие в 11:00 · не забудьте чек-лист', now() - interval '2 hours');
 
 END $$;
 
