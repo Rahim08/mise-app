@@ -14,6 +14,7 @@ interface MenuSettings {
   slug: string
   is_published: boolean
   theme: 'light' | 'dark' | 'auto'
+  layout: 'list' | 'grid'
   accent_color: string
   cover_url: string | null
   show_photos: boolean
@@ -90,6 +91,7 @@ export default function MenuEditor() {
     slug: '',
     is_published: false,
     theme: 'light',
+    layout: 'list',
     accent_color: '#007aff',
     cover_url: null,
     show_photos: true,
@@ -157,7 +159,7 @@ export default function MenuEditor() {
       db.from('menu_items').select('*').eq('restaurant_id', rid).order('position'),
     ])
 
-    if (sRes.data) setSettings(sRes.data)
+    if (sRes.data) setSettings(s => ({ ...s, ...sRes.data, layout: sRes.data.layout || 'list' }))
     else setSettings(s => ({ ...s, restaurant_id: rid }))
     setCategories(cRes.data || [])
     setItems(iRes.data || [])
@@ -171,12 +173,16 @@ export default function MenuEditor() {
     // Slug uniqueness is enforced by the DB unique index (cross-restaurant), so we just
     // catch the violation — the gateway is restaurant-scoped and can't pre-check globally.
     if (settings.id) {
-      const { error } = await db.from('menu_settings').update({ ...settings, updated_at: new Date().toISOString() }).eq('id', settings.id)
+      const payload: any = { ...settings, updated_at: new Date().toISOString() }
+      let { error } = await db.from('menu_settings').update(payload).eq('id', settings.id)
+      if (error?.code === '42703') { delete payload.layout; ({ error } = await db.from('menu_settings').update(payload).eq('id', settings.id)) } // колонка layout ещё не мигрирована — сохраняем без неё
       if (error) { setSlugError(error.code === '23505' ? 'Этот адрес уже занят' : error.message); setSaving(false); return }
     } else {
-      const { data, error } = await db.from('menu_settings').insert({ ...settings, restaurant_id: restaurantId }).select().single()
-      if (error) { setSlugError(error.code === '23505' ? 'Этот адрес уже занят' : error.message); setSaving(false); return }
-      if (data) setSettings(data)
+      const payload: any = { ...settings, restaurant_id: restaurantId }
+      let res = await db.from('menu_settings').insert(payload).select().single()
+      if (res.error?.code === '42703') { delete payload.layout; res = await db.from('menu_settings').insert(payload).select().single() }
+      if (res.error) { setSlugError(res.error.code === '23505' ? 'Этот адрес уже занят' : res.error.message); setSaving(false); return }
+      if (res.data) setSettings(res.data)
     }
     setSaving(false)
     showToast('Настройки сохранены')
@@ -313,6 +319,7 @@ export default function MenuEditor() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <IconMenu color={t.purple} size={28} />
           <span style={{ fontWeight: 700, fontSize: 17, color: t.text, letterSpacing: -0.3 }}>Mise Menu</span>
+          <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4, color: t.purple, background: `${t.purple}1a`, padding: '2px 6px', borderRadius: 6, textTransform: 'uppercase' }}>Beta</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 20, background: settings.is_published ? `${t.green}22` : t.fill, color: settings.is_published ? t.green : t.text3 }}>
@@ -478,6 +485,23 @@ export default function MenuEditor() {
                     {settings.theme === th.id && <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="10" fill={t.purple} /><path d="m6 10 2.5 2.5L14 7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>}
                   </div>
                 ))}
+              </div>
+
+              {/* Layout */}
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Раскладка</div>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+                {([
+                  { id: 'list', label: 'Список', icon: <><rect x="3" y="5" width="18" height="4" rx="1.5" /><rect x="3" y="13" width="18" height="4" rx="1.5" /></> },
+                  { id: 'grid', label: 'Сетка', icon: <><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" /></> },
+                ] as const).map(opt => {
+                  const on = settings.layout === opt.id
+                  return (
+                    <button key={opt.id} onClick={() => setSettings(s => ({ ...s, layout: opt.id }))} style={{ flex: 1, background: t.surface, borderRadius: 16, padding: '18px 12px', boxShadow: t.sh, border: `2px solid ${on ? t.purple : 'transparent'}`, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, transition: 'border .18s' }}>
+                      <svg width="26" height="26" fill={on ? t.purple : t.text3} viewBox="0 0 24 24">{opt.icon}</svg>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: on ? t.purple : t.text }}>{opt.label}</span>
+                    </button>
+                  )
+                })}
               </div>
 
               {/* Accent color */}

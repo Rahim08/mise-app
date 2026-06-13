@@ -11,6 +11,7 @@ interface MenuSettings {
   slug: string
   is_published: boolean
   theme: 'light' | 'dark' | 'auto'
+  layout?: 'list' | 'grid'
   accent_color: string
   cover_url: string | null
   show_photos: boolean
@@ -218,6 +219,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
     ))
 
   const accent = settings?.accent_color || '#007aff'
+  const layout = settings?.layout || 'list'
   const currency = restaurant?.currency || '€'
   const money = (v: number) => fv(v, currency)
 
@@ -348,7 +350,58 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
                   {cat.description && <div style={{ fontSize: 14, color: T.text2, marginTop: 4 }}>{cat.description}</div>}
                 </div>
 
-                {/* Items */}
+                {/* Items — grid layout */}
+                {layout === 'grid' ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 32 }}>
+                  {catItems.map(item => {
+                    const qty = cartQty(item.id)
+                    return (
+                      <div key={item.id} style={{ background: T.surface, borderRadius: 18, overflow: 'hidden', boxShadow: T.sh, opacity: item.is_available ? 1 : 0.45, display: 'flex', flexDirection: 'column' }}>
+                        {settings.show_photos && (
+                          <div style={{ width: '100%', aspectRatio: '1 / 1', background: T.fill, flexShrink: 0 }}>
+                            {item.image_url
+                              ? <img src={item.image_url} alt={item.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <svg width="28" height="28" fill="none" stroke={T.text3} strokeWidth="1.5" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg>
+                                </div>}
+                          </div>
+                        )}
+                        <div style={{ padding: '12px 12px 13px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                          <div style={{ fontWeight: 600, fontSize: 15, color: T.text, marginBottom: 3, lineHeight: 1.25 }}>{item.name}</div>
+                          {item.description && <div style={{ fontSize: 12, color: T.text2, lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{item.description}</div>}
+                          {settings.show_allergens && item.allergens && item.allergens.length > 0 && <div style={{ fontSize: 11, color: T.text3, marginTop: 4 }}>{item.allergens.join(', ')}</div>}
+                          <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              {item.price && <div style={{ fontWeight: 700, fontSize: 16, color: accent }}>{money(item.price)}</div>}
+                              {settings.show_calories && item.calories && <div style={{ fontSize: 11, color: T.text3, background: T.fill, padding: '2px 6px', borderRadius: 7 }}>{item.calories} {t('menu.kcal')}</div>}
+                            </div>
+                            {!item.is_available
+                              ? <div style={{ fontSize: 11, color: '#ff3b30', background: 'rgba(255,59,48,0.1)', padding: '2px 8px', borderRadius: 8 }}>{t('menu.unavailable')}</div>
+                              : settings.allow_orders && (
+                                qty === 0 ? (
+                                  <button onClick={() => addToCart(item)} style={{ width: 34, height: 34, borderRadius: '50%', background: accent, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 2px 10px ${accent}44`, flexShrink: 0 }}>
+                                    <svg width="15" height="15" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 16 16"><path d="M8 1v14M1 8h14" /></svg>
+                                  </button>
+                                ) : (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                                    <button onClick={() => removeFromCart(item.id)} style={{ width: 28, height: 28, borderRadius: '50%', background: T.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.text }}>
+                                      <svg width="11" height="2" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 12 2"><path d="M1 1h10" /></svg>
+                                    </button>
+                                    <span style={{ fontWeight: 700, fontSize: 15, color: accent, minWidth: 16, textAlign: 'center' }}>{qty}</span>
+                                    <button onClick={() => addToCart(item)} style={{ width: 28, height: 28, borderRadius: '50%', background: accent, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                      <svg width="11" height="11" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 12 12"><path d="M6 1v10M1 6h10" /></svg>
+                                    </button>
+                                  </div>
+                                )
+                              )}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                ) : (
+                /* Items — list layout */
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, background: T.surface, borderRadius: 20, overflow: 'hidden', marginBottom: 32, boxShadow: T.sh }}>
                   {catItems.map((item, i) => {
                     const qty = cartQty(item.id)
@@ -406,6 +459,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
                     )
                   })}
                 </div>
+                )}
               </div>
             )
           })}
