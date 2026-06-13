@@ -315,7 +315,7 @@ BEGIN
       gen_random_uuid(), v_rid, v_uid, v_uid,   -- opened_by/manager_id → auth.users (демо-владелец)
       (v_date + time '11:00') AT TIME ZONE 'Europe/Rome', v_closed, v_status,
       v_date, v_open_bal, v_cash, v_card,
-      CASE WHEN i = 0 THEN 0 ELSE v_cash END,           -- инкассация = собранный нал (кроме открытой смены)
+      0,                                                -- инкассация проставляется ниже (после расчёта расхода)
       v_cash + v_card, 0, v_open_bal, NULL
     ) RETURNING id INTO v_shift;
 
@@ -336,7 +336,14 @@ BEGIN
       v_exp := v_exp + 20;
     END IF;
 
-    UPDATE shifts SET total_expense = v_exp, closing_balance = v_open_bal + v_cash - v_exp WHERE id = v_shift;
+    -- Касса сходится: итог = старт + нал − расход − инкассация.
+    -- Закрытые дни банкуют чистый нал (нал−расход) → остаётся флоат €200.
+    -- Открытая (сегодня) ещё не инкассирована → в кассе старт + нал − расход.
+    UPDATE shifts SET
+      total_expense = v_exp,
+      inkassation = CASE WHEN i = 0 THEN 0 ELSE v_cash - v_exp END,
+      closing_balance = CASE WHEN i = 0 THEN v_open_bal + v_cash - v_exp ELSE v_open_bal END
+    WHERE id = v_shift;
 
     -- Инкассация дня (нал минус расход; по пятницам — выплата ЗП)
     IF i <> 0 THEN

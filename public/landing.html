@@ -32,7 +32,7 @@ body{
 
 /* ── APP ICONS (brand v2 glow) ───────────────────── */
 .app-icon{border-radius:23%;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;flex-shrink:0;}
-.app-icon::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 40% 16%,rgba(255,255,255,.16) 0,transparent 55%);}
+.app-icon::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(255,255,255,.10) 0,transparent 60%);}
 .app-icon svg{position:relative;z-index:1;}
 .ai-manager{background:linear-gradient(145deg,#0e0e0e,#141414 55%,rgba(0,122,255,.12));border:1.5px solid rgba(0,122,255,.47);box-shadow:0 0 22px rgba(0,122,255,.34),0 0 56px rgba(0,122,255,.16),0 8px 24px rgba(0,0,0,.4);}
 .ai-analytics{background:linear-gradient(145deg,#0e0e0e,#141414 55%,rgba(52,199,89,.12));border:1.5px solid rgba(52,199,89,.47);box-shadow:0 0 22px rgba(52,199,89,.34),0 0 56px rgba(52,199,89,.16),0 8px 24px rgba(0,0,0,.4);}
@@ -88,9 +88,11 @@ body{
 .btn-ghost{background:rgba(255,255,255,.06);color:#fff;border:.5px solid rgba(255,255,255,.16);padding:15px 30px;border-radius:980px;font-family:inherit;font-size:.92rem;cursor:pointer;transition:all .2s;letter-spacing:-.01em;backdrop-filter:blur(10px);}
 .btn-ghost:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.3);}
 .hero-apps{display:flex;gap:14px;margin-top:64px;flex-wrap:wrap;justify-content:center;opacity:0;animation:fadeUp .8s .8s var(--ease) forwards;}
-.hero-app{display:flex;flex-direction:column;align-items:center;gap:10px;transition:transform .3s var(--ease);}
-.hero-app:hover{transform:translateY(-6px);}
-.hero-app span{font-size:.68rem;color:var(--text-3);font-weight:600;letter-spacing:-.01em;}
+.hero-app{display:flex;flex-direction:column;align-items:center;gap:10px;}
+.hero-app .app-icon{transition:transform .3s var(--ease);}
+.hero-app:hover .app-icon{transform:translateY(-6px);}
+.hero-app span{font-size:.68rem;color:var(--text-3);font-weight:600;letter-spacing:-.01em;transition:color .2s;}
+.hero-app:hover span{color:#fff;}
 
 /* ── MARQUEE ─────────────────────────────────────── */
 .marquee-wrap{padding:18px 0;overflow:hidden;border-top:.5px solid var(--border);border-bottom:.5px solid var(--border);background:rgba(255,255,255,.015);}
@@ -101,7 +103,7 @@ body{
 /* ── SCALE TEXT ──────────────────────────────────── */
 .scale-section{height:280vh;position:relative;}
 .scale-sticky{position:sticky;top:0;height:100vh;width:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;}
-.scale-text{font-size:clamp(5rem,16vw,20rem);font-weight:700;letter-spacing:-.06em;line-height:1;text-align:center;background:linear-gradient(135deg,#fff 0%,rgba(255,255,255,.18) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;will-change:transform,opacity;transform:scale(.42);opacity:0;}
+.scale-text{font-size:clamp(4.5rem,13vw,15rem);font-weight:700;letter-spacing:-.06em;line-height:1;text-align:center;background:linear-gradient(135deg,#fff 0%,rgba(255,255,255,.18) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;will-change:transform,opacity;transform:scale(.62);opacity:.35;}
 
 /* ── STATEMENT ───────────────────────────────────── */
 .statement{padding:170px 24px;text-align:center;position:relative;overflow:hidden;}
@@ -243,7 +245,7 @@ body{
 .big-cta{min-height:96vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:80px 24px;position:relative;overflow:hidden;}
 .big-cta-aurora{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 64% 52% at 50% 50%,rgba(0,122,255,.16),transparent 64%),radial-gradient(ellipse 40% 40% at 24% 70%,rgba(88,86,214,.12),transparent 60%),radial-gradient(ellipse 40% 40% at 78% 32%,rgba(255,45,85,.1),transparent 60%);animation:auroraDrift 20s ease-in-out infinite alternate;}
 .big-cta>*{position:relative;z-index:1;}
-.big-cta-word{font-size:clamp(5rem,17vw,17rem);font-weight:700;letter-spacing:-.06em;line-height:.92;background:linear-gradient(168deg,#fff 0%,rgba(255,255,255,.14) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;opacity:0;transform:translateY(32px);transition:opacity 1s var(--ease),transform 1s var(--ease);}
+.big-cta-word{font-size:clamp(3.4rem,12vw,11rem);font-weight:700;letter-spacing:-.04em;line-height:.95;padding:0 .12em;background:linear-gradient(168deg,#fff 0%,rgba(255,255,255,.14) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;opacity:0;transform:translateY(32px);transition:opacity 1s var(--ease),transform 1s var(--ease);}
 .big-cta-word.in{opacity:1;transform:translateY(0);}
 .big-cta-sub{font-size:1.02rem;color:var(--text-2);margin:26px 0 42px;letter-spacing:-.01em;opacity:0;transition:opacity .8s .2s ease;}
 .big-cta-sub.in{opacity:1;}
@@ -305,7 +307,7 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
 
 <!-- NAV -->
 <nav class="nav">
-  <a href="/" class="nav-logo">mis<span style="color:#8e8e93">e</span></a>
+  <a href="/" class="nav-logo">mis<span style="color:#8e8e93;margin-left:-.045em">e</span></a>
   <ul class="nav-links">
     <li><a href="#apps" data-i18n="n.apps">Приложения</a></li>
     <li><a href="#team" data-i18n="n.team">Команда</a></li>
@@ -376,23 +378,7 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
 <!-- SCALE TEXT -->
 <div class="scale-section" id="scale-wrap">
   <div class="scale-sticky">
-    <div class="scale-text" id="scale-text">mis<span style="color:#8e8e93">e</span></div>
-  </div>
-</div>
-
-<!-- STATEMENT -->
-<section class="statement">
-  <span class="statement-line d1" data-i18n="st.l1">Пять приложений.</span>
-  <span class="statement-line d2" data-i18n="st.l2">Один аккаунт.</span>
-  <span class="statement-line d3"><span class="dim" data-i18n="st.l3a">Полный</span> <span data-i18n="st.l3b">контроль.</span></span>
-</section>
-
-<!-- STATS -->
-<div class="stats">
-  <div class="stats-inner">
-    <div class="stat-item"><div class="stat-num" data-i18n="st1.n">12 сек</div><div class="stat-label" data-i18n="st1.l">среднее время<br>открытия смены</div></div>
-    <div class="stat-item"><div class="stat-num" data-i18n="st2.n">5-в-1</div><div class="stat-label" data-i18n="st2.l">приложений в<br>одном аккаунте</div></div>
-    <div class="stat-item"><div class="stat-num" data-i18n="st3.n">€0</div><div class="stat-label" data-i18n="st3.l">потерянных смен<br>в базе данных</div></div>
+    <div class="scale-text" id="scale-text">mis<span style="color:#8e8e93;margin-left:-.045em">e</span></div>
   </div>
 </div>
 
@@ -707,7 +693,7 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
   <div class="ft-inner">
     <div class="ft-body">
       <div class="ft-brand-col">
-        <div class="ft-brand">mis<span style="color:#8e8e93">e</span></div>
+        <div class="ft-brand">mis<span style="color:#8e8e93;margin-left:-.045em">e</span></div>
         <div class="ft-tagline" data-i18n="ft.tag">Платформа управления рестораном. Пять приложений в одном аккаунте.</div>
       </div>
       <div class="ft-nav">
@@ -757,8 +743,8 @@ window.addEventListener('scroll', () => {
     const rect = wrap.getBoundingClientRect();
     const total = wrap.offsetHeight - window.innerHeight;
     const progress = Math.max(0, Math.min(1, -rect.top / total));
-    const scale = 0.42 + progress * 1.9;
-    const opacity = progress < 0.1 ? progress * 10 : progress > 0.75 ? 1 - (progress - 0.75) * 4 : 1;
+    const scale = 0.62 + progress * 1.05;
+    const opacity = progress < 0.08 ? 0.35 + progress / 0.08 * 0.65 : progress > 0.82 ? Math.max(0, 1 - (progress - 0.82) / 0.18) : 1;
     text.style.transform = `scale(${scale})`;
     text.style.opacity = opacity;
   }, { passive: true });
@@ -1039,14 +1025,14 @@ const T = {
 };
 // ─ MARQUEE TRUST SIGNALS (per language) ─
 const MARQUEE = {
-  ru:['7 дней бесплатно','PWA · Без App Store','Данные зашифрованы','iPhone и Android','QR-вход для команды','Оплата через Stripe','Европа и СНГ','Face ID'],
-  en:['7 days free','PWA · No App Store','Encrypted data','iPhone & Android','QR sign-in for team','Stripe payments','Europe & beyond','Face ID'],
-  it:['7 giorni gratis','PWA · Senza App Store','Dati crittografati','iPhone e Android','Accesso QR per il team','Pagamenti Stripe','Europa e oltre','Face ID'],
-  fr:['7 jours gratuits','PWA · Sans App Store','Données chiffrées','iPhone et Android','Connexion QR pour l\'équipe','Paiements Stripe','Europe et au-delà','Face ID'],
-  az:['7 gün pulsuz','PWA · App Store-suz','Şifrələnmiş data','iPhone və Android','Komanda üçün QR-giriş','Stripe ödənişləri','Avropa və ötəsi','Face ID'],
-  tr:['7 gün ücretsiz','PWA · App Store yok','Şifreli veri','iPhone ve Android','Ekip için QR giriş','Stripe ödemeleri','Avrupa ve ötesi','Face ID'],
-  uk:['7 днів безкоштовно','PWA · Без App Store','Дані зашифровані','iPhone та Android','QR-вхід для команди','Оплата через Stripe','Європа та світ','Face ID'],
-  kk:['7 күн тегін','PWA · App Store-сыз','Шифрланған дерек','iPhone және Android','Команда үшін QR-кіру','Stripe төлемдері','Еуропа және әлем','Face ID']
+  ru:['7 дней бесплатно','Смены и касса','Аналитика в реальном времени','Склад и кальянная смена','Расписание команды','QR-меню для гостей','Вход по QR и PIN','Данные зашифрованы','Оплата через Stripe'],
+  en:['7 days free','Shifts & register','Real-time analytics','Inventory & hookah shift','Team scheduling','Guest QR menu','QR + PIN sign-in','Encrypted data','Stripe payments'],
+  it:['7 giorni gratis','Turni e cassa','Analisi in tempo reale','Magazzino e turno narghilè','Turni del team','Menu QR per gli ospiti','Accesso con QR e PIN','Dati crittografati','Pagamenti Stripe'],
+  fr:['7 jours gratuits','Services et caisse','Analyses en temps réel','Stock et service chicha','Planning d\'équipe','Menu QR pour les clients','Connexion QR et PIN','Données chiffrées','Paiements Stripe'],
+  az:['7 gün pulsuz','Növbələr və kassa','Real-vaxt analitika','Anbar və qəlyan növbəsi','Komanda cədvəli','Qonaqlar üçün QR-menyu','QR və PIN ilə giriş','Şifrələnmiş data','Stripe ödənişləri'],
+  tr:['7 gün ücretsiz','Vardiya ve kasa','Gerçek zamanlı analiz','Stok ve nargile vardiyası','Ekip planlaması','Misafir QR menüsü','QR ve PIN ile giriş','Şifreli veri','Stripe ödemeleri'],
+  uk:['7 днів безкоштовно','Зміни та каса','Аналітика в реальному часі','Склад і кальянна зміна','Розклад команди','QR-меню для гостей','Вхід за QR і PIN','Дані зашифровані','Оплата через Stripe'],
+  kk:['7 күн тегін','Ауысымдар мен касса','Нақты уақыттағы аналитика','Қойма және қалян ауысымы','Команда кестесі','Қонаққа арналған QR-мәзір','QR және PIN арқылы кіру','Шифрланған дерек','Stripe төлемдері']
 };
 function renderMarquee(lang){
   const track = document.getElementById('marquee');

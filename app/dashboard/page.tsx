@@ -279,15 +279,6 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
         })}
       </div>
 
-      <Card style={{ background: 'var(--fill2)', boxShadow: 'none', border: '1px solid rgba(0,0,0,.06)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 2, color: 'var(--tx)' }}>Установить на iPhone</div>
-            <div style={{ color: 'var(--tx2)', fontSize: '.8rem' }}>Safari → «Поделиться» → «На экран Домой»</div>
-          </div>
-          <div style={{ background: '#34c75915', color: '#34c759', fontSize: '.72rem', fontWeight: 700, padding: '4px 12px', borderRadius: 980 }}>PWA · Без App Store</div>
-        </div>
-      </Card>
     </div>
   )
 }
