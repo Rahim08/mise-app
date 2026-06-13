@@ -695,7 +695,10 @@ function GeoSettingsCard() {
     <Card style={{ marginBottom: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <div>
-          <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Геолокация и явка</div>
+          <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)', display: 'flex', alignItems: 'center', gap: 7 }}>
+            Геолокация и явка
+            <span style={{ fontSize: '.6rem', fontWeight: 800, letterSpacing: '.4px', color: '#5856d6', background: 'rgba(88,86,214,.12)', padding: '2px 6px', borderRadius: 6, textTransform: 'uppercase' }}>Beta</span>
+          </div>
           <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2 }}>Mise People — авто-отметка прихода по гео</div>
         </div>
         <MiniToggle value={f.attendance_enabled} onChange={v => setF({ ...f, attendance_enabled: v })} />

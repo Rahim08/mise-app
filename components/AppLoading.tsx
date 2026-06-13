@@ -10,11 +10,15 @@ export function AppLoading({ app, bg, fill, accent }: {
   fill: string
   accent: string
 }) {
+  // Вместо крутящегося кружка — «дышащий» бренд-значок: мягкий пульс масштаба и
+  // свечения (по-эппловски). fill больше не нужен, но оставлен в сигнатуре для совместимости.
+  void fill
   return (
-    <div style={{ minHeight: '100vh', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
-      <AppIcon app={app} size={64} />
-      <div style={{ width: 24, height: 24, border: `2.5px solid ${fill}`, borderTopColor: accent, borderRadius: '50%', animation: 'spin .7s linear infinite', marginTop: 20 }} />
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    <div style={{ minHeight: '100vh', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ animation: 'brandBreathe 1.7s cubic-bezier(.4,0,.6,1) infinite', willChange: 'transform, filter' }}>
+        <AppIcon app={app} size={68} />
+      </div>
+      <style>{`@keyframes brandBreathe{0%,100%{transform:scale(1);filter:drop-shadow(0 0 5px ${accent}33)}50%{transform:scale(1.08);filter:drop-shadow(0 0 18px ${accent}88)}}`}</style>
     </div>
   )
 }
