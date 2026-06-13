@@ -24,6 +24,12 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Mise uses the camera to scan the QR code that links your device to your restaurant and to sign team members in.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Mise uses your location only when you tap “I’m here” to confirm you’ve arrived at the restaurant for your shift check-in.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Mise uses Face ID for fast, secure sign-in to your apps after the first PIN entry.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
