@@ -140,10 +140,11 @@ export default function MenuEditor() {
   const init = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.replace('/auth/login'); return }
-    const { data: rest } = await db.from('restaurants').select('id, currency, subscription_plan, comp_apps').eq('owner_id', user.id).single()
+    const { data: rest } = await db.from('restaurants').select('id, currency, subscription_plan, subscription_status, comp_apps').eq('owner_id', user.id).single()
     if (!rest?.id) { setLoading(false); return }
-    // QR-меню доступно с Business (или выдано админом)
-    if (!['business', 'pro'].includes(rest.subscription_plan) && !(rest.comp_apps || []).includes('menu')) {
+    // QR-меню доступно с Business + активная подписка (или выдано админом)
+    const subActive = ['active', 'trialing', 'canceling'].includes((rest as any).subscription_status || '')
+    if (!subActive || (!['business', 'pro'].includes(rest.subscription_plan) && !(rest.comp_apps || []).includes('menu'))) {
       router.replace('/dashboard?tab=billing'); return
     }
     const rid = rest.id

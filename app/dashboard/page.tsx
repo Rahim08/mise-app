@@ -1340,6 +1340,15 @@ export default function Dashboard() {
   const [user, setUser] = useState<any>(null)
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null)
   const [tab, setTab] = useState('overview')
+  const [sideCollapsed, setSideCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return localStorage.getItem('mise_dash_side_collapsed') === '1'
+  })
+  const toggleSide = () => setSideCollapsed(c => {
+    const next = !c
+    localStorage.setItem('mise_dash_side_collapsed', next ? '1' : '0')
+    return next
+  })
   const [authChecked, setAuthChecked] = useState(false)
   const [unseen, setUnseen] = useState(0)
 
@@ -1404,19 +1413,34 @@ export default function Dashboard() {
     </div>
   )
 
-  const SideItem = ({ id, label, badge = 0 }: { id: string; label: string; badge?: number }) => (
-    <button onClick={() => { go(id); if (id === 'notifications') markSeen() }} style={{
-      display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-      padding: '9px 12px', borderRadius: 10, border: 'none', fontFamily: 'inherit',
-      fontSize: '.85rem', fontWeight: tab === id ? 600 : 500, textAlign: 'left',
-      background: tab === id ? 'var(--fill)' : 'transparent',
-      color: tab === id ? 'var(--tx)' : 'var(--tx2)', cursor: 'pointer',
-    }}>
-      <TabIcon id={id} size={16} />
-      <span style={{ flex: 1 }}>{label}</span>
-      {badge > 0 && <span style={{ fontSize: '.65rem', fontWeight: 700, color: '#fff', background: '#ff3b30', borderRadius: 980, padding: '1px 7px' }}>{badge}</span>}
-    </button>
-  )
+  const SideItem = ({ id, label, badge = 0 }: { id: string; label: string; badge?: number }) => {
+    const active = tab === id
+    const handle = () => { go(id); if (id === 'notifications') markSeen() }
+    if (sideCollapsed) return (
+      <button onClick={handle} title={label} style={{
+        position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 40, height: 40, borderRadius: 10, border: 'none', fontFamily: 'inherit',
+        background: active ? 'var(--fill)' : 'transparent', color: active ? 'var(--tx)' : 'var(--tx2)',
+        cursor: 'pointer', margin: '0 auto',
+      }}>
+        <TabIcon id={id} size={17} />
+        {badge > 0 && <span style={{ position: 'absolute', top: 7, right: 7, width: 7, height: 7, borderRadius: '50%', background: '#ff3b30', border: '2px solid var(--surface)' }} />}
+      </button>
+    )
+    return (
+      <button onClick={handle} style={{
+        display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+        padding: '9px 12px', borderRadius: 10, border: 'none', fontFamily: 'inherit',
+        fontSize: '.85rem', fontWeight: active ? 600 : 500, textAlign: 'left',
+        background: active ? 'var(--fill)' : 'transparent',
+        color: active ? 'var(--tx)' : 'var(--tx2)', cursor: 'pointer',
+      }}>
+        <TabIcon id={id} size={16} />
+        <span style={{ flex: 1 }}>{label}</span>
+        {badge > 0 && <span style={{ fontSize: '.65rem', fontWeight: 700, color: '#fff', background: '#ff3b30', borderRadius: 980, padding: '1px 7px' }}>{badge}</span>}
+      </button>
+    )
+  }
 
   const avatar = (size: number) => (
     <div style={{ width: size, height: size, borderRadius: size * 0.3, background: 'var(--fill)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: size * 0.42, fontWeight: 700, color: 'var(--tx2)' }}>
@@ -1430,7 +1454,7 @@ export default function Dashboard() {
     <>
       {showSplash && <SplashScreen onDone={() => { sessionStorage.setItem('mise_splash_shown', '1'); setShowSplash(false) }} />}
 
-      <div style={{ minHeight: '100vh', background: 'var(--bg)', fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif', WebkitFontSmoothing: 'antialiased' }}>
+      <div style={{ minHeight: '100vh', background: 'var(--bg)', fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif', WebkitFontSmoothing: 'antialiased', '--dash-side-w': sideCollapsed ? '64px' : '232px' } as any}>
         <style>{`
           /* Тактильный отклик: на iPhone без :active кнопки выглядят «мёртвыми» */
           button { -webkit-tap-highlight-color: transparent; transition: transform .1s ease, opacity .15s ease, background .15s ease; }
@@ -1443,34 +1467,73 @@ export default function Dashboard() {
           @media (min-width: 900px) {
             .dash-side { display: flex; }
             .dash-mobilebar, .dash-pills { display: none !important; }
-            .dash-content { margin-left: 232px; }
+            .dash-content { margin-left: var(--dash-side-w, 232px); transition: margin-left .22s cubic-bezier(.25,0,.25,1); }
           }
         `}</style>
 
         {/* Сайдбар (desktop): два этажа — работа / обслуживание, аккаунт внизу */}
-        <aside className="dash-side" style={{ position: 'fixed', top: 0, left: 0, bottom: 0, width: 232, flexDirection: 'column', padding: '22px 12px 16px', borderRight: '1px solid rgba(var(--seprgb),.1)', background: 'var(--surface)', zIndex: 100, boxSizing: 'border-box' }}>
-          <div style={{ padding: '2px 12px', marginBottom: 24 }}>
-            <Wordmark size={24} />
-          </div>
+        <aside className="dash-side" style={{
+          position: 'fixed', top: 0, left: 0, bottom: 0,
+          width: sideCollapsed ? 64 : 232,
+          flexDirection: 'column', padding: '20px 12px 16px',
+          borderRight: '1px solid rgba(var(--seprgb),.1)',
+          background: 'var(--surface)', zIndex: 100, boxSizing: 'border-box',
+          overflow: 'hidden', transition: 'width .22s cubic-bezier(.25,0,.25,1)',
+        }}>
+          {/* Заголовок: wordmark + кнопка свернуть / развернуть */}
+          {sideCollapsed ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, marginBottom: 14 }}>
+              <AppIcon app="mise" size={28} glow={false} />
+              <button onClick={toggleSide} title="Развернуть" style={{
+                width: 28, height: 28, borderRadius: 8, background: 'var(--fill)', border: 'none',
+                cursor: 'pointer', color: 'var(--tx2)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 12 12"><path d="M4 2l4 4-4 4" /></svg>
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 0 12px', marginBottom: 24 }}>
+              <Wordmark size={24} />
+              <button onClick={toggleSide} title="Свернуть" style={{
+                width: 28, height: 28, borderRadius: 8, background: 'var(--fill)', border: 'none',
+                cursor: 'pointer', color: 'var(--tx2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              }}>
+                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 12 12"><path d="M8 2L4 6l4 4" /></svg>
+              </button>
+            </div>
+          )}
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {NAV_MAIN.map(t => <SideItem key={t.id} id={t.id} label={t.label} />)}
           </div>
-          <div style={{ height: 1, background: 'rgba(var(--seprgb),.1)', margin: '14px 12px' }} />
+          <div style={{ height: 1, background: 'rgba(var(--seprgb),.1)', margin: sideCollapsed ? '10px 8px' : '14px 12px' }} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {NAV_SERVICE.map(t => <SideItem key={t.id} id={t.id} label={t.label} badge={t.id === 'notifications' ? unseen : 0} />)}
           </div>
           <div style={{ flex: 1 }} />
-          <button onClick={() => go('account')} style={{
-            display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px',
-            borderRadius: 12, border: 'none', fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
-            background: tab === 'account' ? 'var(--fill)' : 'transparent',
-          }}>
-            {avatar(32)}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: '.82rem', fontWeight: 600, color: 'var(--tx)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{restaurant?.name || 'Мой ресторан'}</div>
-              <div style={{ fontSize: '.68rem', color: 'var(--tx3)' }}>Аккаунт</div>
-            </div>
-          </button>
+
+          {/* Аккаунт */}
+          {sideCollapsed ? (
+            <button onClick={() => go('account')} title="Аккаунт" style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 40, height: 40, borderRadius: 10, border: 'none', cursor: 'pointer',
+              background: tab === 'account' ? 'var(--fill)' : 'transparent', margin: '0 auto',
+            }}>
+              {avatar(32)}
+            </button>
+          ) : (
+            <button onClick={() => go('account')} style={{
+              display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px',
+              borderRadius: 12, border: 'none', fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
+              background: tab === 'account' ? 'var(--fill)' : 'transparent',
+            }}>
+              {avatar(32)}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '.82rem', fontWeight: 600, color: 'var(--tx)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{restaurant?.name || 'Мой ресторан'}</div>
+                <div style={{ fontSize: '.68rem', color: 'var(--tx3)' }}>Аккаунт</div>
+              </div>
+            </button>
+          )}
         </aside>
 
         {/* Шапка (mobile): логотип + колокольчик + аватар */}
