@@ -323,6 +323,7 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
   }
   useEffect(() => { load() }, [])
   const staffName = (id: string) => staff.find(s => s.id === id)?.name || '—'
+  const roles = Array.from(new Set(staff.map(s => s.role).filter(Boolean)))
 
   // Everyone sees tasks assigned to them OR created by them; managers see all.
   const visibleTasks = isManager ? tasks : tasks.filter(x => x.assigned_to === myId || x.created_by === myId)
@@ -330,14 +331,26 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
   const createTask = async () => {
     if (!form.title.trim() || !form.assigned_to) { toast('Укажите задачу и исполнителя'); return }
     setSaving(true)
-    await db.from('staff_tasks').insert({
+    // Назначение на роль (assigned_to = "role:<role>") → отдельная задача каждому сотруднику цеха.
+    let targets: string[]
+    if (form.assigned_to.startsWith('role:')) {
+      const role = form.assigned_to.slice(5)
+      targets = staff.filter(s => s.role === role).map(s => s.id)
+      if (targets.length === 0) { toast('Нет активных сотрудников с этой ролью'); setSaving(false); return }
+    } else {
+      targets = [form.assigned_to]
+    }
+    const base = {
       title: form.title.trim(), description: form.description.trim() || null,
-      assigned_to: form.assigned_to, created_by: myId === 'owner' ? null : myId,
+      created_by: myId === 'owner' ? null : myId,
       priority: form.priority, due_date: form.due_date || null, status: 'todo',
-    })
-    if (form.assigned_to !== myId) await db.from('notifications').insert({ staff_id: form.assigned_to, type: 'task', title: 'Новая задача', body: form.title.trim() })
+    }
+    await Promise.all(targets.map(async tid => {
+      await db.from('staff_tasks').insert({ ...base, assigned_to: tid })
+      if (tid !== myId) await db.from('notifications').insert({ staff_id: tid, type: 'task', title: 'Новая задача', body: form.title.trim() })
+    }))
     setSaving(false); setShowForm(false); setForm({ title: '', description: '', assigned_to: '', priority: 'medium', due_date: '' })
-    toast('Задача создана'); await load()
+    toast(targets.length > 1 ? `Задача создана для ${targets.length}` : 'Задача создана'); await load()
   }
   const setStatus = async (task: any, status: string) => {
     setTasks(ts => ts.map(x => x.id === task.id ? { ...x, status } : x))
@@ -455,7 +468,14 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
             <label style={lbl(t)}>Исполнитель</label>
             <select value={form.assigned_to} onChange={e => setForm({ ...form, assigned_to: e.target.value })} style={inp(t)}>
               <option value="">Выберите сотрудника</option>
-              {staff.map(s => <option key={s.id} value={s.id}>{s.name}{s.id === myId ? ' (я)' : ''}</option>)}
+              {isManager && roles.length > 0 && (
+                <optgroup label="Всему цеху">
+                  {roles.map(r => <option key={'role:' + r} value={'role:' + r}>Все: {roleLabel(r)}</option>)}
+                </optgroup>
+              )}
+              <optgroup label="Сотрудники">
+                {staff.map(s => <option key={s.id} value={s.id}>{s.name}{s.id === myId ? ' (я)' : ''}</option>)}
+              </optgroup>
             </select>
             <div style={{ display: 'flex', gap: 10 }}>
               <div style={{ flex: 1 }}>
@@ -1276,13 +1296,24 @@ function OrdersInbox({ currency, accent, t, toast }: { currency: string; accent:
 
 // ── CHECKLISTS (открытие/закрытие зала) ─────────────────────────────────────────
 
-function ChecklistsView({ isManager, myId, accent, t, toast }: { isManager: boolean; myId: string; accent: string; t: any; toast: (m: string) => void }) {
+// Цеха для чек-листов (role=null → общий, виден всем).
+const CHECKLIST_ROLES: { val: string | null; label: string }[] = [
+  { val: null, label: 'Общий (все)' },
+  { val: 'kitchen', label: 'Кухня' },
+  { val: 'bar', label: 'Бар' },
+  { val: 'hookah', label: 'Кальянная' },
+  { val: 'waiter', label: 'Официанты' },
+  { val: 'host', label: 'Хостес' },
+  { val: 'cleaner', label: 'Уборка' },
+]
+
+function ChecklistsView({ isManager, myId, myRole, accent, t, toast }: { isManager: boolean; myId: string; myRole?: string; accent: string; t: any; toast: (m: string) => void }) {
   const today = fmtDate(new Date())
   const [type, setType] = useState<'open' | 'close'>('open')
-  const [lists, setLists] = useState<any[]>([])         // shift_checklists (шаблоны open/close)
+  const [lists, setLists] = useState<any[]>([])         // shift_checklists (шаблоны open/close × цех)
   const [completions, setCompletions] = useState<any[]>([]) // выполнение за сегодня
   const [loading, setLoading] = useState(true)
-  const [editItems, setEditItems] = useState<string[] | null>(null)
+  const [editing, setEditing] = useState<{ id?: string; role: string | null; items: string[] } | null>(null)
   const [saving, setSaving] = useState(false)
 
   const load = async () => {
@@ -1294,13 +1325,13 @@ function ChecklistsView({ isManager, myId, accent, t, toast }: { isManager: bool
   }
   useEffect(() => { load() }, [])
 
-  const list = lists.find(l => l.type === type)
-  const items: string[] = Array.isArray(list?.items) ? list.items : []
-  const completion = list ? completions.find(c => c.checklist_id === list.id) : null
-  const state: boolean[] = Array.isArray(completion?.items_state) ? completion.items_state : []
+  // Сотрудник видит общие (role=null) + по своей роли; менеджер — все цеха.
+  const relevant = lists.filter(l => l.type === type && (isManager || !l.role || l.role === myRole))
 
-  const toggleItem = async (idx: number) => {
-    if (!list) return
+  const toggleItem = async (list: any, idx: number) => {
+    const items: string[] = Array.isArray(list.items) ? list.items : []
+    const completion = completions.find(c => c.checklist_id === list.id)
+    const state: boolean[] = Array.isArray(completion?.items_state) ? completion.items_state : []
     const next = items.map((_, i) => (i === idx ? !state[i] : !!state[i]))
     const allDone = next.every(Boolean)
     setCompletions(cs => {
@@ -1318,17 +1349,20 @@ function ChecklistsView({ isManager, myId, accent, t, toast }: { isManager: bool
   }
 
   const saveTemplate = async () => {
-    if (editItems == null) return
-    const clean = editItems.map(s => s.trim()).filter(Boolean)
+    if (!editing) return
+    const clean = editing.items.map(s => s.trim()).filter(Boolean)
+    if (clean.length === 0) { toast('Добавьте хотя бы один пункт'); return }
     setSaving(true)
-    if (list?.id) await db.from('shift_checklists').update({ items: clean }).eq('id', list.id)
-    else await db.from('shift_checklists').insert({ type, items: clean })
-    setSaving(false); setEditItems(null); toast('Чек-лист сохранён'); await load()
+    if (editing.id) await db.from('shift_checklists').update({ items: clean, role: editing.role }).eq('id', editing.id)
+    else await db.from('shift_checklists').insert({ type, items: clean, role: editing.role })
+    setSaving(false); setEditing(null); toast('Чек-лист сохранён'); await load()
+  }
+  const removeList = async (id: string) => {
+    setLists(ls => ls.filter(l => l.id !== id))
+    await db.from('shift_checklists').delete().eq('id', id)
   }
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
-
-  const doneCount = items.filter((_, i) => state[i]).length
 
   return (
     <div>
@@ -1338,47 +1372,67 @@ function ChecklistsView({ isManager, myId, accent, t, toast }: { isManager: bool
         ))}
       </div>
 
-      {items.length === 0 ? (
+      {relevant.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
           <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Чек-лист не настроен</div>
           <div style={{ fontSize: 13, marginTop: 4 }}>{isManager ? 'Добавьте пункты — команда будет отмечать их каждый день' : 'Менеджер ещё не добавил пункты'}</div>
         </div>
-      ) : (
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 10px' }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>Сегодня · {doneCount}/{items.length}</span>
-            {doneCount === items.length && <span style={{ fontSize: 11, fontWeight: 700, color: t.green, background: `${t.green}1a`, padding: '3px 9px', borderRadius: 8 }}>ГОТОВО</span>}
+      ) : relevant.map(list => {
+        const items: string[] = Array.isArray(list.items) ? list.items : []
+        const completion = completions.find(c => c.checklist_id === list.id)
+        const state: boolean[] = Array.isArray(completion?.items_state) ? completion.items_state : []
+        const doneCount = items.filter((_, i) => state[i]).length
+        return (
+          <div key={list.id} style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 10px', gap: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: list.role ? accent : t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{list.role ? roleLabel(list.role) : 'Общий'} · {doneCount}/{items.length}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {doneCount === items.length && items.length > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: t.green, background: `${t.green}1a`, padding: '3px 9px', borderRadius: 8 }}>ГОТОВО</span>}
+                {isManager && (
+                  <>
+                    <button onClick={() => setEditing({ id: list.id, role: list.role ?? null, items: items.length ? [...items] : [''] })} style={{ background: 'none', border: 'none', color: accent, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, padding: 0 }}>Изменить</button>
+                    <button onClick={() => removeList(list.id)} style={{ background: 'none', border: 'none', color: t.text4, cursor: 'pointer', padding: 0, display: 'flex' }}>
+                      <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /></svg>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+            <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
+              {items.map((text, i) => (
+                <button key={i} onClick={() => toggleItem(list, i)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', borderBottom: i < items.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                  <span style={{ width: 22, height: 22, borderRadius: '50%', border: `2px solid ${state[i] ? accent : t.sep}`, background: state[i] ? accent : 'transparent', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {state[i] && <svg width="11" height="11" fill="none" stroke="#fff" strokeWidth="3" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" /></svg>}
+                  </span>
+                  <span style={{ fontSize: 15, color: t.text, textDecoration: state[i] ? 'line-through' : 'none', opacity: state[i] ? 0.55 : 1 }}>{text}</span>
+                </button>
+              ))}
+            </div>
           </div>
-          <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 14 }}>
-            {items.map((text, i) => (
-              <button key={i} onClick={() => toggleItem(i)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', borderBottom: i < items.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
-                <span style={{ width: 22, height: 22, borderRadius: '50%', border: `2px solid ${state[i] ? accent : t.sep}`, background: state[i] ? accent : 'transparent', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {state[i] && <svg width="11" height="11" fill="none" stroke="#fff" strokeWidth="3" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" /></svg>}
-                </span>
-                <span style={{ fontSize: 15, color: t.text, textDecoration: state[i] ? 'line-through' : 'none', opacity: state[i] ? 0.55 : 1 }}>{text}</span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+        )
+      })}
 
       {isManager && (
-        <button onClick={() => setEditItems(items.length ? [...items] : [''])} style={{ width: '100%', padding: '13px', borderRadius: 14, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: accent, fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
-          {items.length ? 'Изменить пункты' : '+ Создать чек-лист'}
+        <button onClick={() => setEditing({ role: null, items: [''] })} style={{ width: '100%', padding: '13px', borderRadius: 14, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: accent, fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer', marginTop: 4 }}>
+          + Чек-лист для цеха
         </button>
       )}
 
-      {editItems != null && (
-        <Sheet onClose={() => setEditItems(null)} t={t}>
+      {editing != null && (
+        <Sheet onClose={() => setEditing(null)} t={t}>
           <div style={{ padding: '14px 20px 32px' }}>
             <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 18 }}>{type === 'open' ? 'Чек-лист открытия' : 'Чек-лист закрытия'}</div>
-            {editItems.map((v, i) => (
+            <label style={lbl(t)}>Цех</label>
+            <select value={editing.role ?? ''} onChange={e => setEditing(ed => ({ ...ed!, role: e.target.value || null }))} style={inp(t)}>
+              {CHECKLIST_ROLES.map(r => <option key={r.val ?? 'all'} value={r.val ?? ''}>{r.label}</option>)}
+            </select>
+            {editing.items.map((v, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                <input value={v} onChange={e => setEditItems(es => es!.map((x, j) => j === i ? e.target.value : x))} placeholder={`Пункт ${i + 1}`} style={{ ...inp(t), marginBottom: 0, flex: 1 }} />
-                <button onClick={() => setEditItems(es => es!.filter((_, j) => j !== i))} style={{ width: 44, borderRadius: 12, border: 'none', background: `${t.red}14`, color: t.red, cursor: 'pointer', fontSize: 18, fontFamily: 'inherit' }}>−</button>
+                <input value={v} onChange={e => setEditing(ed => ({ ...ed!, items: ed!.items.map((x, j) => j === i ? e.target.value : x) }))} placeholder={`Пункт ${i + 1}`} style={{ ...inp(t), marginBottom: 0, flex: 1 }} />
+                <button onClick={() => setEditing(ed => ({ ...ed!, items: ed!.items.filter((_, j) => j !== i) }))} style={{ width: 44, borderRadius: 12, border: 'none', background: `${t.red}14`, color: t.red, cursor: 'pointer', fontSize: 18, fontFamily: 'inherit' }}>−</button>
               </div>
             ))}
-            <button onClick={() => setEditItems(es => [...es!, ''])} style={{ width: '100%', padding: '11px', borderRadius: 12, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: t.text3, fontFamily: 'inherit', fontSize: 14, cursor: 'pointer', marginBottom: 14 }}>+ Добавить пункт</button>
+            <button onClick={() => setEditing(ed => ({ ...ed!, items: [...ed!.items, ''] }))} style={{ width: '100%', padding: '11px', borderRadius: 12, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: t.text3, fontFamily: 'inherit', fontSize: 14, cursor: 'pointer', marginBottom: 14 }}>+ Добавить пункт</button>
             <button onClick={saveTemplate} disabled={saving} style={{ width: '100%', padding: '15px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${accent}44` }}>
               {saving ? '...' : 'Сохранить'}
             </button>
@@ -1533,7 +1587,7 @@ function OpsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boole
       </div>
       {view === 'stop' && <StopListTab canEdit={canStop} currency={currency} accent={accent} t={t} toast={toast} />}
       {view === 'orders' && ordersEnabled && <OrdersInbox currency={currency} accent={accent} t={t} toast={toast} />}
-      {view === 'check' && <ChecklistsView isManager={isManager} myId={me.id || ''} accent={accent} t={t} toast={toast} />}
+      {view === 'check' && <ChecklistsView isManager={isManager} myId={me.id || ''} myRole={me.role} accent={accent} t={t} toast={toast} />}
       {view === 'tech' && canTech && <TechCardsView isManager={isManager} accent={accent} t={t} toast={toast} />}
     </div>
   )
