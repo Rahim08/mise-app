@@ -8,12 +8,13 @@ import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
 import { AppLoading } from '@/components/AppLoading'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
+import { useI18n, tCurrent } from '@/lib/i18n'
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
 function fg(g: number) {
-  if (!g) return '0 г'
-  return g >= 1000 ? `${(g / 1000).toFixed(2).replace('.', ',')} кг` : `${g} г`
+  if (!g) return `0 ${tCurrent('st.gramsPh')}`
+  return g >= 1000 ? `${(g / 1000).toFixed(2).replace('.', ',')} ${tCurrent('st.kg')}` : `${g} ${tCurrent('st.gramsPh')}`
 }
 function timeStr(iso: string) {
   return new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', ' ')
@@ -135,8 +136,10 @@ function fmtDay(d: Date) {
 
 // Категории бесплатных кальянов (для кого/повод). Храним в hookah_sales.flavor — без миграции.
 const FREE_CATS = ['Сотрудники', 'Владелец', 'Менеджер', 'Гость', 'Дегустация'] as const
+const FREE_CAT_KEYS: Record<string, string> = { 'Сотрудники': 'st.fcStaff', 'Владелец': 'st.fcOwner', 'Менеджер': 'st.fcManager', 'Гость': 'st.fcGuest', 'Дегустация': 'st.fcTasting' }
 
 function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId: string; t: ReturnType<typeof useTheme>; toast: (m: string) => void; canSeeMoney: boolean }) {
+  const { t: tr, locale } = useI18n()
   const [currentDate, setCurrentDate] = useState(new Date())
   const dateStr = fmtDay(currentDate)
   const [mode, setMode] = useState<'paid' | 'free'>('paid')
@@ -200,7 +203,7 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
   const save = async () => {
     setSaving(true)
     const { error: delErr } = await db.from('hookah_sales').delete().eq('date', dateStr)
-    if (delErr) { toast('Ошибка: ' + delErr.message); setSaving(false); return }
+    if (delErr) { toast(tr('st.err') + ': ' + delErr.message); setSaving(false); return }
     const rows: any[] = []
     types.forEach(tp => {
       const p = paidOf(tp.id)
@@ -220,24 +223,24 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
     })
     if (rows.length) {
       const { error } = await db.from('hookah_sales').insert(rows)
-      if (error) { toast('Ошибка: ' + error.message); setSaving(false); return }
+      if (error) { toast(tr('st.err') + ': ' + error.message); setSaving(false); return }
     }
     setSaving(false)
-    toast(`Смена сохранена · ${paidTotal} продано${freeTotal ? ` · ${freeTotal} бесплатно` : ''}`)
+    toast(`${tr('st.shiftSaved')} · ${paidTotal} ${tr('st.soldWord')}${freeTotal ? ` · ${freeTotal} ${tr('st.freeWord')}` : ''}`)
   }
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('st.loading')}</div>
 
   if (types.length === 0) return (
     <div style={{ textAlign: 'center', padding: '60px 20px', color: t.text3 }}>
-      <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Виды кальянов не настроены</div>
-      <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.5 }}>Владелец добавляет их в дашборде:<br />Настройки → Виды кальянов</div>
+      <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('st.typesEmpty')}</div>
+      <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.5 }} dangerouslySetInnerHTML={{ __html: tr('st.typesEmptySub') }} />
     </div>
   )
 
   const accent = mode === 'paid' ? t.orange : t.purple
   const isToday = dateStr === fmtDay(new Date())
-  const dDisp = currentDate.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })
+  const dDisp = currentDate.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'long' })
   const shiftDay = (delta: number) => setCurrentDate(d => { const n = new Date(d); n.setDate(n.getDate() + delta); return n })
 
   return (
@@ -249,7 +252,7 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
         </button>
         <button onClick={() => setCurrentDate(new Date())} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'center' }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: t.text, textTransform: 'capitalize' }}>{dDisp}</div>
-          {!isToday && <div style={{ fontSize: 11, color: t.blue, fontWeight: 600, marginTop: 1 }}>вернуться к сегодня</div>}
+          {!isToday && <div style={{ fontSize: 11, color: t.blue, fontWeight: 600, marginTop: 1 }}>{tr('st.backToday')}</div>}
         </button>
         <button onClick={() => shiftDay(1)} disabled={isToday} style={{ width: 36, height: 36, borderRadius: 10, background: t.surface, border: `0.5px solid ${t.sep2}`, color: isToday ? t.text3 : t.text2, opacity: isToday ? 0.4 : 1, cursor: isToday ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: t.sh, fontFamily: 'inherit' }}>
           <svg width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" viewBox="0 0 10 18"><path d="M2 1l7 8-7 8" /></svg>
@@ -259,10 +262,10 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
       {/* Итог дня. Выручку видит только владелец/менеджер (кальянщику деньги не показываем). */}
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${canSeeMoney ? 4 : 3}, 1fr)`, gap: 8, marginBottom: 10 }}>
         {[
-          { l: 'Продано', v: String(paidTotal), c: t.orange },
-          { l: 'Бесплатно', v: String(freeTotal), c: t.purple },
-          ...(canSeeMoney ? [{ l: 'Выручка', v: `€${revenue.toLocaleString('de-DE')}`, c: t.green }] : []),
-          { l: 'Табака', v: `${grams.toLocaleString('de-DE')} г`, c: t.blue },
+          { l: tr('st.statSold'), v: String(paidTotal), c: t.orange },
+          { l: tr('st.statFree'), v: String(freeTotal), c: t.purple },
+          ...(canSeeMoney ? [{ l: tr('st.statRevenue'), v: `€${revenue.toLocaleString('de-DE')}`, c: t.green }] : []),
+          { l: tr('st.statTobacco'), v: `${grams.toLocaleString('de-DE')} ${tr('st.gramsPh')}`, c: t.blue },
         ].map(it => (
           <div key={it.l} style={{ background: t.surface, borderRadius: 14, padding: '12px 8px', boxShadow: t.sh, textAlign: 'center' }}>
             <div style={{ fontSize: 16, fontWeight: 800, color: it.c }}>{it.v}</div>
@@ -273,31 +276,31 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
 
       {/* Масса табака в заведении (выдано в зал − расход кальянов) */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: `${venueLeft < 0 ? t.red : t.blue}12`, borderRadius: 12, padding: '9px 14px', marginBottom: 12 }}>
-        <span style={{ fontSize: 12.5, color: venueLeft < 0 ? t.red : t.blue, fontWeight: 600 }}>Табака в заведении</span>
+        <span style={{ fontSize: 12.5, color: venueLeft < 0 ? t.red : t.blue, fontWeight: 600 }}>{tr('st.venueLeft')}</span>
         <span style={{ fontSize: 13, color: venueLeft < 0 ? t.red : t.blue, fontWeight: 800 }}>{fg(Math.round(venueLeft))}</span>
       </div>
 
       {/* Продажа | Бесплатно */}
       <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 12, gap: 2 }}>
-        {([['paid', 'Продажа'], ['free', 'Бесплатно']] as const).map(([id, label]) => (
+        {([['paid', tr('st.segPaid')], ['free', tr('st.statFree')]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setMode(id)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: mode === id ? 700 : 500, cursor: 'pointer', background: mode === id ? t.surface : 'transparent', color: mode === id ? (id === 'paid' ? t.orange : t.purple) : t.text3 }}>{label}</button>
         ))}
       </div>
       {mode === 'free' && (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 11, color: t.text3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, padding: '0 2px 7px' }}>Для кого</div>
+          <div style={{ fontSize: 11, color: t.text3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, padding: '0 2px 7px' }}>{tr('st.forWhom')}</div>
           <div style={{ display: 'flex', gap: 7, overflowX: 'auto', paddingBottom: 2, WebkitOverflowScrolling: 'touch' }}>
             {FREE_CATS.map(cat => {
               const on = freeCat === cat
               const n = types.reduce((s, tp) => s + freeOf(tp.id, cat), 0)
               return (
                 <button key={cat} onClick={() => setFreeCat(cat)} style={{ flexShrink: 0, padding: '7px 14px', borderRadius: 20, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: on ? 700 : 500, cursor: 'pointer', background: on ? t.purple : `${t.purple}14`, color: on ? '#fff' : t.purple, whiteSpace: 'nowrap' }}>
-                  {cat}{n > 0 ? ` · ${n}` : ''}
+                  {FREE_CAT_KEYS[cat] ? tr(FREE_CAT_KEYS[cat]) : cat}{n > 0 ? ` · ${n}` : ''}
                 </button>
               )
             })}
           </div>
-          <div style={{ fontSize: 11.5, color: t.text3, marginTop: 8, padding: '0 2px' }}>Не входят в выручку, табак списывается</div>
+          <div style={{ fontSize: 11.5, color: t.text3, marginTop: 8, padding: '0 2px' }}>{tr('st.freeNote')}</div>
         </div>
       )}
 
@@ -309,7 +312,7 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
             <div key={tp.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: i < types.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{tp.name}</div>
-                <div style={{ fontSize: 11, color: t.text3, marginTop: 1 }}>{canSeeMoney ? `€${tp.price} · ` : ''}{tp.portion_g} г</div>
+                <div style={{ fontSize: 11, color: t.text3, marginTop: 1 }}>{canSeeMoney ? `€${tp.price} · ` : ''}{tp.portion_g} {tr('st.gramsPh')}</div>
               </div>
               <input
                 value={q} onChange={e => setQty(tp.id, e.target.value)}
@@ -327,7 +330,7 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
       </div>
 
       <button onClick={save} disabled={saving} style={{ width: '100%', padding: '15px', borderRadius: 16, background: t.orange, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${t.orange}44` }}>
-        {saving ? 'Сохраняем...' : 'Сохранить смену'}
+        {saving ? tr('st.savingShort') : tr('st.saveShift')}
       </button>
     </div>
   )
@@ -336,6 +339,7 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
 
 export default function StashApp() {
   const t = useTheme()
+  const { t: tr, locale } = useI18n()
 
   const [restaurantId, setRestaurantId] = useState('')
   const [tab, setTab] = useState<'shift' | 'stock' | 'movements' | 'inventory'>('shift')
@@ -427,16 +431,16 @@ export default function StashApp() {
 
   const saveMov = async () => {
     const filled = movRows.filter(r => r.brand && r.flavor && parseFloat(r.quantity_g) > 0)
-    if (!filled.length) { showToastMsg('Добавьте хотя бы одну позицию'); return }
+    if (!filled.length) { showToastMsg(tr('st.addAtLeastOne')); return }
     for (const r of filled) {
       const qty = parseFloat(r.quantity_g)
       if (movMode !== 'in') {
         const item = stock.find(s => s.brand === r.brand && s.flavor === r.flavor)
-        if (!item) { showToastMsg(`${r.brand} · ${r.flavor} не найден`); return }
-        if (qty > item.quantity_g) { showToastMsg(`${r.brand} · ${r.flavor}: только ${fg(item.quantity_g)}`); return }
+        if (!item) { showToastMsg(`${r.brand} · ${r.flavor} ${tr('st.notFoundSuffix')}`); return }
+        if (qty > item.quantity_g) { showToastMsg(`${r.brand} · ${r.flavor}: ${tr('st.onlyWord')} ${fg(item.quantity_g)}`); return }
       }
     }
-    if (movMode === 'writeoff' && !movReason.trim()) { showToastMsg('Укажите причину списания'); return }
+    if (movMode === 'writeoff' && !movReason.trim()) { showToastMsg(tr('st.enterWriteoffReason')); return }
     setSaving(true)
     const batchId = editBatch || crypto.randomUUID()
     if (editBatch) {
@@ -466,7 +470,7 @@ export default function StashApp() {
     }
     await loadAll(restaurantId)
     setMovRows([newRow()]); setMovReason(''); setShowAddMov(false); setEditBatch(null); setSaving(false)
-    showToastMsg(`Сохранено (${filled.length} поз.)`)
+    showToastMsg(tr('st.savedItems', { n: filled.length }))
   }
 
   const openEdit = (batchId: string, items: Movement[]) => {
@@ -484,7 +488,7 @@ export default function StashApp() {
 
   const saveInv = async () => {
     const filled = invRows.filter(r => r.actual_g !== '' && parseFloat(r.actual_g) !== r.expected_g)
-    if (!filled.length) { showToastMsg('Нет расхождений — всё совпадает'); return }
+    if (!filled.length) { showToastMsg(tr('st.noDiff')); return }
     setSaving(true)
     const items = filled.map(r => ({ brand: r.brand, flavor: r.flavor, expected_g: r.expected_g, actual_g: parseFloat(r.actual_g), diff_g: parseFloat(r.actual_g) - r.expected_g }))
     await db.from('tobacco_inventories').insert({ restaurant_id: restaurantId, type: 'warehouse', items })
@@ -494,7 +498,7 @@ export default function StashApp() {
     }
     await loadAll(restaurantId)
     setSaving(false); setShowInv(false)
-    showToastMsg(`Инвентаризация сохранена. Расхождений: ${filled.length}`)
+    showToastMsg(tr('st.invSaved', { n: filled.length }))
   }
 
   const groupedMovements = () => {
@@ -512,7 +516,7 @@ export default function StashApp() {
 
   const NAV_TABS = [
     {
-      id: 'shift', label: 'Смена',
+      id: 'shift', label: tr('st.navShift'),
       icon: (active: boolean) => (
         <svg fill="none" stroke="currentColor" strokeWidth={active ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26">
           <path d="M8 8c0-2.5 3-4 3-6" strokeLinecap="round" /><path d="M12 8c0-2.5 3-4 3-6" strokeLinecap="round" /><path d="M16 8c0-2.5 3-4 3-6" strokeLinecap="round" />
@@ -521,7 +525,7 @@ export default function StashApp() {
       )
     },
     {
-      id: 'stock', label: 'Наличие',
+      id: 'stock', label: tr('st.navStock'),
       icon: (active: boolean) => (
         <svg fill="none" stroke="currentColor" strokeWidth={active ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26">
           <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
@@ -530,7 +534,7 @@ export default function StashApp() {
       )
     },
     {
-      id: 'movements', label: 'Движения',
+      id: 'movements', label: tr('st.navMoves'),
       icon: (active: boolean) => (
         <svg fill="none" stroke="currentColor" strokeWidth={active ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26">
           <path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 014-4h14" />
@@ -539,7 +543,7 @@ export default function StashApp() {
       )
     },
     {
-      id: 'inventory', label: 'Инвентарь',
+      id: 'inventory', label: tr('st.navInv'),
       icon: (active: boolean) => (
         <svg fill="none" stroke="currentColor" strokeWidth={active ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26">
           <path d="M9 11l3 3L22 4" />
@@ -583,7 +587,7 @@ export default function StashApp() {
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <path d="M7 1v12M1 7h12" />
           </svg>
-          Добавить
+          {tr('st.addBtn')}
         </button>
       </div>
 
@@ -604,7 +608,7 @@ export default function StashApp() {
                 <div style={{ position: 'relative', flex: 1 }}>
                   <input
                     value={search} onChange={e => setSearch(e.target.value)}
-                    placeholder="Поиск бренда или вкуса..."
+                    placeholder={tr('st.searchPh')}
                     style={{
                       width: '100%', padding: '12px 16px 12px 42px',
                       borderRadius: 14, border: `1px solid ${t.sep2}`,
@@ -630,7 +634,7 @@ export default function StashApp() {
                       fontSize: 13, fontWeight: 600, cursor: 'pointer',
                       fontFamily: 'inherit', boxShadow: t.sh, whiteSpace: 'nowrap',
                     }}>
-                    {lowItems.length} мало
+                    {tr('st.lowCount', { n: lowItems.length })}
                   </button>
                 )}
                 {emptyItems.length > 0 && (
@@ -643,24 +647,24 @@ export default function StashApp() {
                       fontSize: 13, fontWeight: 600, cursor: 'pointer',
                       fontFamily: 'inherit', boxShadow: t.sh, whiteSpace: 'nowrap',
                     }}>
-                    {emptyItems.length} пусто
+                    {tr('st.emptyCount', { n: emptyItems.length })}
                   </button>
                 )}
               </div>
 
               {/* Stats */}
               <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
-                <StatCard label="Позиций" value={String(stock.length)} color={t.text} t={t} />
-                <StatCard label="В наличии" value={String(inStockItems.length)} color={t.green} t={t} />
-                <StatCard label="Мало" value={String(lowItems.length)} color={t.orange} t={t} />
+                <StatCard label={tr('st.statPositions')} value={String(stock.length)} color={t.text} t={t} />
+                <StatCard label={tr('st.statInStock')} value={String(inStockItems.length)} color={t.green} t={t} />
+                <StatCard label={tr('st.statLow')} value={String(lowItems.length)} color={t.orange} t={t} />
               </div>
 
               {/* Stock list */}
               {filteredStock.length === 0 ? (
                 <div style={{ padding: '60px 20px', textAlign: 'center', color: t.text3 }}>
                   <div style={{ fontSize: 44, marginBottom: 12, opacity: 0.3 }}>📦</div>
-                  <div style={{ fontSize: 16, fontWeight: 600, color: t.text2, marginBottom: 6 }}>{search ? 'Ничего не найдено' : 'Склад пуст'}</div>
-                  <div style={{ fontSize: 14, color: t.text3 }}>{search ? 'Попробуйте другой запрос' : 'Добавьте первую поставку'}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600, color: t.text2, marginBottom: 6 }}>{search ? tr('st.notFound') : tr('st.stockEmpty')}</div>
+                  <div style={{ fontSize: 14, color: t.text3 }}>{search ? tr('st.tryAnother') : tr('st.addFirstSupply')}</div>
                 </div>
               ) : (() => {
                 const grouped: Record<string, StockItem[]> = {}
@@ -699,7 +703,7 @@ export default function StashApp() {
               {/* Empty items */}
               {showEmpty && emptyItems.length > 0 && (
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: t.red, textTransform: 'uppercase', letterSpacing: 0.6, padding: '14px 4px 8px' }}>Нет в наличии</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: t.red, textTransform: 'uppercase', letterSpacing: 0.6, padding: '14px 4px 8px' }}>{tr('st.outOfStockSec')}</div>
                   <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
                     {emptyItems.map((item, i) => (
                       <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', borderBottom: i < emptyItems.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
@@ -707,7 +711,7 @@ export default function StashApp() {
                           <div style={{ fontSize: 16, color: t.text3 }}>{item.flavor}</div>
                           <div style={{ fontSize: 12, color: t.text4, marginTop: 2 }}>{item.brand}</div>
                         </div>
-                        <div style={{ fontSize: 13, color: t.red, fontWeight: 600, background: `${t.red}18`, padding: '4px 10px', borderRadius: 8 }}>0 г</div>
+                        <div style={{ fontSize: 13, color: t.red, fontWeight: 600, background: `${t.red}18`, padding: '4px 10px', borderRadius: 8 }}>{fg(0)}</div>
                       </div>
                     ))}
                   </div>
@@ -721,14 +725,14 @@ export default function StashApp() {
             <div>
               <div style={{ marginBottom: 16 }}>
                 <Segmented
-                  options={[{ id: 'in', label: 'Поставка' }, { id: 'out', label: 'Выдача' }, { id: 'writeoff', label: 'Списание' }]}
+                  options={[{ id: 'in', label: tr('st.movIn') }, { id: 'out', label: tr('st.movOut') }, { id: 'writeoff', label: tr('st.movWriteoff') }]}
                   value={movMode} onChange={v => setMovMode(v as any)} t={t}
                 />
               </div>
               {batches.length === 0 ? (
                 <div style={{ padding: '60px 20px', textAlign: 'center', color: t.text3 }}>
                   <div style={{ fontSize: 44, marginBottom: 12, opacity: 0.3 }}>{movMode === 'in' ? '📥' : movMode === 'out' ? '📤' : '🗑️'}</div>
-                  <div style={{ fontSize: 16, fontWeight: 600, color: t.text2, marginBottom: 6 }}>{movMode === 'in' ? 'Поставок пока нет' : movMode === 'out' ? 'Выдач пока нет' : 'Списаний пока нет'}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600, color: t.text2, marginBottom: 6 }}>{movMode === 'in' ? tr('st.suppliesEmpty') : movMode === 'out' ? tr('st.issuesEmpty') : tr('st.writeoffsEmpty')}</div>
                 </div>
               ) : batches.map(([batchId, items], bi) => {
                 const isExpanded = expandedBatch === batchId
@@ -744,10 +748,10 @@ export default function StashApp() {
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                           <div style={{ fontSize: 16, color: t.text, fontWeight: 600 }}>
-                            {items.length} {items.length === 1 ? 'позиция' : items.length < 5 ? 'позиции' : 'позиций'}
+                            {locale === 'ru' ? `${items.length} ${items.length === 1 ? 'позиция' : items.length < 5 ? 'позиции' : 'позиций'}` : tr('st.itemsCount', { n: items.length })}
                           </div>
                           {isFirst && (
-                            <span style={{ fontSize: 11, color: t.blue, background: `${t.blue}18`, padding: '3px 8px', borderRadius: 8, fontWeight: 600 }}>Последняя</span>
+                            <span style={{ fontSize: 11, color: t.blue, background: `${t.blue}18`, padding: '3px 8px', borderRadius: 8, fontWeight: 600 }}>{tr('st.last')}</span>
                           )}
                         </div>
                         <div style={{ fontSize: 13, color: t.text3 }}>{timeStr(items[0].created_at)}</div>
@@ -760,7 +764,7 @@ export default function StashApp() {
                           <button
                             onClick={e => { e.stopPropagation(); openEdit(batchId, items) }}
                             style={{ padding: '6px 12px', borderRadius: 10, background: t.fill, border: 'none', fontSize: 13, color: t.text, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>
-                            Изменить
+                            {tr('st.changeBtn')}
                           </button>
                         )}
                         <svg width="16" height="16" fill="none" stroke={t.text3} strokeWidth="2" viewBox="0 0 24 24" style={{ transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform .2s', flexShrink: 0 }}>
@@ -790,7 +794,7 @@ export default function StashApp() {
             <div>
               <div style={{ marginBottom: 16 }}>
                 <Segmented
-                  options={[{ id: 'warehouse', label: 'Склад' }, { id: 'venue', label: 'Заведение' }]}
+                  options={[{ id: 'warehouse', label: tr('st.invWarehouse') }, { id: 'venue', label: tr('st.invVenue') }]}
                   value={invType} onChange={v => setInvType(v as 'warehouse' | 'venue')} t={t}
                 />
               </div>
@@ -806,12 +810,12 @@ export default function StashApp() {
                       cursor: 'pointer', marginBottom: 20,
                       boxShadow: `0 4px 16px ${t.orange}44`,
                     }}>
-                    Начать инвентаризацию
+                    {tr('st.startInv')}
                   </button>
 
                   {inventories.filter(inv => inv.items && inv.items.length > 0).length === 0 ? (
                     <div style={{ padding: '40px 20px', textAlign: 'center', color: t.text3 }}>
-                      <div style={{ fontSize: 14, color: t.text3 }}>Инвентаризаций пока нет</div>
+                      <div style={{ fontSize: 14, color: t.text3 }}>{tr('st.invEmpty')}</div>
                     </div>
                   ) : inventories.filter(inv => inv.items && inv.items.length > 0).map((inv, bi) => {
                     const isExpanded = expandedInv === inv.id
@@ -826,8 +830,8 @@ export default function StashApp() {
                         >
                           <div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                              <div style={{ fontSize: 16, color: t.text, fontWeight: 600 }}>{diffs.length} расхождений</div>
-                              {isFirst && <span style={{ fontSize: 11, color: t.blue, background: `${t.blue}18`, padding: '3px 8px', borderRadius: 8, fontWeight: 600 }}>Последняя</span>}
+                              <div style={{ fontSize: 16, color: t.text, fontWeight: 600 }}>{tr('st.discrepCount', { n: diffs.length })}</div>
+                              {isFirst && <span style={{ fontSize: 11, color: t.blue, background: `${t.blue}18`, padding: '3px 8px', borderRadius: 8, fontWeight: 600 }}>{tr('st.last')}</span>}
                             </div>
                             <div style={{ fontSize: 13, color: t.text3 }}>{timeStr(inv.created_at)}</div>
                           </div>
@@ -865,11 +869,11 @@ export default function StashApp() {
               {invType === 'venue' && (
                 <div>
                   <div style={{ background: `${t.blue}14`, borderRadius: 16, padding: '20px', textAlign: 'center', marginBottom: 14, border: `1px solid ${t.blue}22` }}>
-                    <div style={{ fontSize: 16, fontWeight: 600, color: t.blue, marginBottom: 6 }}>Инвентаризация заведения</div>
-                    <div style={{ fontSize: 14, color: t.text3 }}>Будет доступно в следующих обновлениях</div>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: t.blue, marginBottom: 6 }}>{tr('st.venueInvTitle')}</div>
+                    <div style={{ fontSize: 14, color: t.text3 }}>{tr('st.soon')}</div>
                   </div>
                   <div style={{ background: t.surface, borderRadius: 16, padding: '20px', boxShadow: t.sh }}>
-                    <div style={{ fontSize: 12, color: t.text3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Выдано в зал всего</div>
+                    <div style={{ fontSize: 12, color: t.text3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>{tr('st.issuedTotal')}</div>
                     <div style={{ fontSize: 32, fontWeight: 700, color: t.text, letterSpacing: -0.5 }}>
                       {fg(movements.filter(m => m.type === 'out').reduce((s, m) => s + m.quantity_g, 0))}
                     </div>
@@ -925,13 +929,13 @@ export default function StashApp() {
           >
             <div style={{ width: 40, height: 4, background: t.fill, borderRadius: 2, margin: '14px auto 0' }} />
             <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', padding: '14px 20px 0', color: t.text }}>
-              {editBatch ? 'Редактировать' : 'Новая запись'}
+              {editBatch ? tr('st.edit') : tr('st.newRecord')}
             </div>
 
             <div style={{ padding: '12px 16px 4px' }}>
               <div style={{ marginBottom: 16 }}>
                 <Segmented
-                  options={[{ id: 'in', label: 'Поставка' }, { id: 'out', label: 'Выдача' }, { id: 'writeoff', label: 'Списание' }]}
+                  options={[{ id: 'in', label: tr('st.movIn') }, { id: 'out', label: tr('st.movOut') }, { id: 'writeoff', label: tr('st.movWriteoff') }]}
                   value={movMode}
                   onChange={v => { setMovMode(v as any); if (!editBatch) setMovRows([newRow()]) }}
                   t={t}
@@ -943,7 +947,7 @@ export default function StashApp() {
               {movMode === 'writeoff' && (
                 <input
                   value={movReason} onChange={e => setMovReason(e.target.value)}
-                  placeholder="Причина списания (бой, просрочка, брак...)"
+                  placeholder={tr('st.writeoffReasonPh')}
                   style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: `1px solid ${movReason.trim() ? t.sep2 : t.red}`, fontSize: 16, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', marginBottom: 12 }}
                 />
               )}
@@ -954,7 +958,7 @@ export default function StashApp() {
                 return (
                   <div key={row.id} style={{ background: t.surface, borderRadius: 16, padding: '14px', marginBottom: 10, boxShadow: t.sh2 }}>
                     <div style={{ display: 'flex', gap: 10, marginBottom: 10, alignItems: 'center' }}>
-                      <AutoInput value={row.brand} onChange={v => updateMovRow(row.id, 'brand', v)} suggestions={brandsForMode} placeholder="Бренд" t={t} />
+                      <AutoInput value={row.brand} onChange={v => updateMovRow(row.id, 'brand', v)} suggestions={brandsForMode} placeholder={tr('st.brandPh')} t={t} />
                       {movRows.length > 1 && (
                         <button onClick={() => removeMovRow(row.id)} style={{ width: 34, height: 34, borderRadius: '50%', background: `${t.red}18`, border: 'none', color: t.red, fontSize: 18, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
                       )}
@@ -964,14 +968,14 @@ export default function StashApp() {
                         value={row.flavor}
                         onChange={v => updateMovRow(row.id, 'flavor', v)}
                         suggestions={flavors.length > 0 ? flavors : (row.brand ? [] : allFlavors)}
-                        placeholder="Вкус"
+                        placeholder={tr('st.flavorPh')}
                         disabled={movMode !== 'in' && !row.brand}
                         t={t}
                       />
                       <input
                         value={row.quantity_g}
                         onChange={e => updateMovRow(row.id, 'quantity_g', e.target.value)}
-                        placeholder="г"
+                        placeholder={tr('st.gramsPh')}
                         type="number" min={1} max={maxQty}
                         style={{
                           width: 80, padding: '12px 10px', borderRadius: 12,
@@ -982,7 +986,7 @@ export default function StashApp() {
                       />
                     </div>
                     {maxQty !== undefined && row.flavor && (
-                      <div style={{ fontSize: 12, color: t.text3, marginTop: 8 }}>Доступно: {fg(maxQty)}</div>
+                      <div style={{ fontSize: 12, color: t.text3, marginTop: 8 }}>{tr('st.available')}: {fg(maxQty)}</div>
                     )}
                   </div>
                 )
@@ -995,7 +999,7 @@ export default function StashApp() {
                   background: t.fill, border: 'none', fontFamily: 'inherit',
                   fontSize: 15, fontWeight: 600, cursor: 'pointer', color: t.text, marginBottom: 12,
                 }}>
-                + Добавить позицию
+                {tr('st.addPosition')}
               </button>
 
               <button
@@ -1007,7 +1011,7 @@ export default function StashApp() {
                   boxShadow: saving ? 'none' : `0 4px 16px ${t.orange}44`,
                   transition: 'all .18s',
                 }}>
-                {saving ? 'Сохранение...' : editBatch ? 'Сохранить изменения' : movMode === 'in' ? 'Сохранить поставку' : movMode === 'out' ? 'Сохранить выдачу' : 'Списать'}
+                {saving ? tr('st.savingFull') : editBatch ? tr('st.saveChanges') : movMode === 'in' ? tr('st.saveSupply') : movMode === 'out' ? tr('st.saveIssue') : tr('st.writeoffBtn')}
               </button>
             </div>
           </div>
@@ -1025,8 +1029,8 @@ export default function StashApp() {
             onClick={e => e.stopPropagation()}
           >
             <div style={{ width: 40, height: 4, background: t.fill, borderRadius: 2, margin: '14px auto 0' }} />
-            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', padding: '14px 20px 4px', color: t.text }}>Инвентаризация склада</div>
-            <div style={{ fontSize: 14, color: t.text3, textAlign: 'center', paddingBottom: 16 }}>Введите фактический вес</div>
+            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', padding: '14px 20px 4px', color: t.text }}>{tr('st.invStockTitle')}</div>
+            <div style={{ fontSize: 14, color: t.text3, textAlign: 'center', paddingBottom: 16 }}>{tr('st.enterActual')}</div>
 
             <div style={{ padding: '0 16px 36px' }}>
               {invRows.map((row, i) => {
@@ -1053,7 +1057,7 @@ export default function StashApp() {
                       <input
                         value={row.actual_g}
                         onChange={e => { const r = [...invRows]; r[i] = { ...r[i], actual_g: e.target.value }; setInvRows(r) }}
-                        placeholder="Фактически (г)"
+                        placeholder={tr('st.actualPh')}
                         type="number" min={0}
                         style={{
                           flex: 1, padding: '12px 14px', borderRadius: 12,
@@ -1085,7 +1089,7 @@ export default function StashApp() {
                   cursor: 'pointer', marginTop: 8,
                   boxShadow: saving ? 'none' : `0 4px 16px ${t.orange}44`,
                 }}>
-                {saving ? 'Сохранение...' : 'Сохранить инвентаризацию'}
+                {saving ? tr('st.savingFull') : tr('st.saveInv')}
               </button>
             </div>
           </div>

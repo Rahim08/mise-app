@@ -66,6 +66,13 @@ function translate(locale: Locale, key: string, vars?: Record<string, string | n
   return s
 }
 
+// Перевод по текущей локали вне React-хука (для модульных функций-форматтеров).
+// Безопасно: компонент-вызыватель подписан на useI18n и ререндерится при смене языка,
+// а current обновляется синхронно в setLocale до уведомления слушателей.
+export function tCurrent(key: string, vars?: Record<string, string | number>): string {
+  return translate(getSnapshot(), key, vars)
+}
+
 // ── Language switcher (глобус) ───────────────────────────────────────────────────
 import { useState, useRef, useEffect } from 'react'
 
@@ -329,6 +336,16 @@ const STRINGS: Record<string, Row> = {
   'st.noDiff':       { en: 'No discrepancies — everything matches', ru: 'Нет расхождений — всё совпадает', it: 'Nessuna discrepanza — tutto corrisponde', fr: 'Aucun écart — tout correspond', az: 'Fərq yoxdur — hər şey uyğundur', tr: 'Fark yok — her şey uyuşuyor', uk: 'Розбіжностей немає — все збігається', kk: 'Айырмашылық жоқ — бәрі сәйкес' },
   'st.addAtLeastOne':{ en: 'Add at least one item', ru: 'Добавьте хотя бы одну позицию', it: 'Aggiungi almeno un articolo', fr: 'Ajoutez au moins un article', az: 'Ən azı bir mövqe əlavə edin', tr: 'En az bir kalem ekleyin', uk: 'Додайте хоча б одну позицію', kk: 'Кемінде бір позиция қосыңыз' },
   'st.enterWriteoffReason':{ en: 'Specify the write-off reason', ru: 'Укажите причину списания', it: 'Indica il motivo dello scarico', fr: 'Indiquez le motif du décompte', az: 'Silinmə səbəbini göstərin', tr: 'Düşüm nedenini belirtin', uk: 'Вкажіть причину списання', kk: 'Есептен шығару себебін көрсетіңіз' },
+  'st.addBtn':       { en: 'Add', ru: 'Добавить', it: 'Aggiungi', fr: 'Ajouter', az: 'Əlavə et', tr: 'Ekle', uk: 'Додати', kk: 'Қосу' },
+  'st.kg':           { en: 'kg', ru: 'кг', it: 'kg', fr: 'kg', az: 'kq', tr: 'kg', uk: 'кг', kk: 'кг' },
+  'st.lowCount':     { en: '{n} low', ru: '{n} мало', it: '{n} pochi', fr: '{n} faibles', az: '{n} az', tr: '{n} az', uk: '{n} мало', kk: '{n} аз' },
+  'st.changeBtn':    { en: 'Edit', ru: 'Изменить', it: 'Modifica', fr: 'Modifier', az: 'Dəyiş', tr: 'Değiştir', uk: 'Змінити', kk: 'Өзгерту' },
+  'st.startInv':     { en: 'Start stocktake', ru: 'Начать инвентаризацию', it: 'Avvia inventario', fr: 'Démarrer l’inventaire', az: 'İnventarizasiyaya başla', tr: 'Sayımı başlat', uk: 'Почати інвентаризацію', kk: 'Түгендеуді бастау' },
+  'st.discrepCount': { en: '{n} discrepancies', ru: '{n} расхождений', it: '{n} discrepanze', fr: '{n} écarts', az: '{n} fərq', tr: '{n} fark', uk: '{n} розбіжностей', kk: '{n} айырмашылық' },
+  'st.notFoundSuffix':{ en: 'not found', ru: 'не найден', it: 'non trovato', fr: 'introuvable', az: 'tapılmadı', tr: 'bulunamadı', uk: 'не знайдено', kk: 'табылмады' },
+  'st.onlyWord':     { en: 'only', ru: 'только', it: 'solo', fr: 'seulement', az: 'yalnız', tr: 'yalnızca', uk: 'лише', kk: 'тек' },
+  'st.savedItems':   { en: 'Saved ({n} items)', ru: 'Сохранено ({n} поз.)', it: 'Salvato ({n} art.)', fr: 'Enregistré ({n} art.)', az: 'Saxlanıldı ({n} mövqe)', tr: 'Kaydedildi ({n} kalem)', uk: 'Збережено ({n} поз.)', kk: 'Сақталды ({n} позиция)' },
+  'st.invSaved':     { en: 'Stocktake saved. Discrepancies: {n}', ru: 'Инвентаризация сохранена. Расхождений: {n}', it: 'Inventario salvato. Discrepanze: {n}', fr: 'Inventaire enregistré. Écarts : {n}', az: 'İnventarizasiya saxlanıldı. Fərqlər: {n}', tr: 'Sayım kaydedildi. Farklar: {n}', uk: 'Інвентаризацію збережено. Розбіжностей: {n}', kk: 'Түгендеу сақталды. Айырмашылықтар: {n}' },
 
   // ── common ──
   'common.or':      { en: 'or', ru: 'или', it: 'oppure', fr: 'ou', az: 'və ya', tr: 'veya', uk: 'або', kk: 'немесе' },
