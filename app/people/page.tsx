@@ -8,6 +8,7 @@ import { db } from '@/lib/db'
 import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
+import { useI18n } from '@/lib/i18n'
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ function Sheet({ children, onClose, t }: { children: React.ReactNode; onClose: (
 // ── SCHEDULE TAB (manager) ──────────────────────────────────────────────────────
 
 function ScheduleTab({ restaurantId, accent, t, toast }: { restaurantId: string; accent: string; t: any; toast: (m: string) => void }) {
+  const { t: tr, locale } = useI18n()
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
   const [selected, setSelected] = useState(() => fmtDate(new Date()))
   const [staff, setStaff] = useState<any[]>([])
@@ -100,17 +102,17 @@ function ScheduleTab({ restaurantId, accent, t, toast }: { restaurantId: string;
       { staff_id: edit.staff.id, date: edit.date, shift_start: start || null, shift_end: end || null, note: note || null, published: false },
       { onConflict: 'restaurant_id,staff_id,date' }
     )
-    setSaving(false); setEdit(null); toast('Смена назначена'); await load()
+    setSaving(false); setEdit(null); toast(tr('pe.shiftAssigned')); await load()
   }
   const clearShift = async () => {
     if (!edit) return
     setSaving(true)
     await db.from('staff_schedules').delete().eq('staff_id', edit.staff.id).eq('date', edit.date)
-    setSaving(false); setEdit(null); toast('Смена убрана'); await load()
+    setSaving(false); setEdit(null); toast(tr('pe.shiftRemoved')); await load()
   }
   const publishWeek = async () => {
     await db.from('staff_schedules').update({ published: true }).gte('date', weekStartStr).lte('date', weekEndStr)
-    toast('Неделя опубликована'); await load()
+    toast(tr('pe.weekPublished')); await load()
   }
 
   const unpublishedCount = schedules.filter(s => !s.published).length
@@ -157,9 +159,9 @@ function ScheduleTab({ restaurantId, accent, t, toast }: { restaurantId: string;
         {DOW_FULL[new Date(selected + 'T00:00:00').getDay()]}, {dayLabel(selected)}
       </div>
       {loading ? (
-        <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+        <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
       ) : staff.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '40px 20px', color: t.text3 }}>Нет сотрудников. Добавьте доступы в дашборде.</div>
+        <div style={{ textAlign: 'center', padding: '40px 20px', color: t.text3 }}>{tr('pe.noStaffAddAccess')}</div>
       ) : (
         <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 16 }}>
           {staff.map((s, i) => {
@@ -168,15 +170,15 @@ function ScheduleTab({ restaurantId, accent, t, toast }: { restaurantId: string;
               <button key={s.id} onClick={() => openEdit(s, selected)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', borderBottom: i < staff.length - 1 ? `0.5px solid ${t.sep2}` : 'none', textAlign: 'left' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 15, color: t.text, fontWeight: 500 }}>{s.name}</div>
-                  <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{roleLabel(s.role)}</div>
+                  <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{tr(roleLabel(s.role))}</div>
                 </div>
                 {sc ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: accent }}>{timeRange(sc.shift_start, sc.shift_end) || 'Смена'}</span>
-                    {!sc.published && <span style={{ fontSize: 9, fontWeight: 700, color: t.orange, background: `${t.orange}1a`, padding: '2px 6px', borderRadius: 6 }}>ЧЕРНОВИК</span>}
+                    <span style={{ fontSize: 14, fontWeight: 700, color: accent }}>{timeRange(sc.shift_start, sc.shift_end) || tr('pe.shiftWord')}</span>
+                    {!sc.published && <span style={{ fontSize: 9, fontWeight: 700, color: t.orange, background: `${t.orange}1a`, padding: '2px 6px', borderRadius: 6 }}>{tr('pe.draft')}</span>}
                   </div>
                 ) : (
-                  <span style={{ fontSize: 13, color: t.text4 }}>Выходной</span>
+                  <span style={{ fontSize: 13, color: t.text4 }}>{tr('pe.dayOff')}</span>
                 )}
               </button>
             )
@@ -186,7 +188,7 @@ function ScheduleTab({ restaurantId, accent, t, toast }: { restaurantId: string;
 
       {unpublishedCount > 0 && (
         <button onClick={publishWeek} style={{ width: '100%', padding: '15px', borderRadius: 16, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${accent}44` }}>
-          Опубликовать неделю · {unpublishedCount} {unpublishedCount === 1 ? 'смена' : 'смен'}
+          {tr('pe.publishWeek')} · {unpublishedCount} {locale === 'ru' ? (unpublishedCount === 1 ? 'смена' : 'смен') : tr('pe.shiftsWord')}
         </button>
       )}
 
@@ -212,20 +214,20 @@ function ScheduleTab({ restaurantId, accent, t, toast }: { restaurantId: string;
             )}
 
             <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-              {[{ l: 'Начало', v: start, set: setStart }, { l: 'Конец', v: end, set: setEnd }].map(f => (
+              {[{ l: tr('pe.start'), v: start, set: setStart }, { l: tr('pe.end'), v: end, set: setEnd }].map(f => (
                 <div key={f.l} style={{ flex: 1 }}>
                   <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: .4, marginBottom: 6 }}>{f.l}</label>
                   <input type="time" value={f.v} onChange={e => f.set(e.target.value)} style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 16, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none' }} />
                 </div>
               ))}
             </div>
-            <input value={note} onChange={e => setNote(e.target.value)} placeholder="Заметка (необязательно)" style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 15, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', marginBottom: 16 }} />
+            <input value={note} onChange={e => setNote(e.target.value)} placeholder={tr('pe.notePh')} style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 15, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', marginBottom: 16 }} />
             <div style={{ display: 'flex', gap: 10 }}>
               {schedFor(edit.staff.id, edit.date) && (
-                <button onClick={clearShift} disabled={saving} style={{ padding: '14px 18px', borderRadius: 14, border: 'none', background: `${t.red}18`, color: t.red, fontFamily: 'inherit', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>Убрать</button>
+                <button onClick={clearShift} disabled={saving} style={{ padding: '14px 18px', borderRadius: 14, border: 'none', background: `${t.red}18`, color: t.red, fontFamily: 'inherit', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>{tr('pe.remove')}</button>
               )}
               <button onClick={saveShiftAssign} disabled={saving} style={{ flex: 1, padding: '14px', borderRadius: 14, border: 'none', background: accent, color: '#fff', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${accent}44` }}>
-                {saving ? '...' : 'Сохранить'}
+                {saving ? '...' : tr('pe.save')}
               </button>
             </div>
           </div>
@@ -238,6 +240,7 @@ function ScheduleTab({ restaurantId, accent, t, toast }: { restaurantId: string;
 // ── MY SHIFTS TAB (staff) ────────────────────────────────────────────────────────
 
 function MyShiftsTab({ myId, accent, t }: { myId: string; accent: string; t: any }) {
+  const { t: tr } = useI18n()
   const [shifts, setShifts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -247,14 +250,14 @@ function MyShiftsTab({ myId, accent, t }: { myId: string; accent: string; t: any
       .then(({ data }: any) => { setShifts(data || []); setLoading(false) })
   }, [myId])
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
   if (shifts.length === 0) return (
     <div style={{ textAlign: 'center', padding: '60px 20px', color: t.text3 }}>
       <div style={{ width: 72, height: 72, borderRadius: 20, background: `${accent}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
         <svg width="34" height="34" fill="none" stroke={accent} strokeWidth="1.6" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
       </div>
-      <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Смен пока нет</div>
-      <div style={{ fontSize: 13, marginTop: 4 }}>Менеджер опубликует расписание</div>
+      <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.noShiftsYet')}</div>
+      <div style={{ fontSize: 13, marginTop: 4 }}>{tr('pe.managerWillPublish')}</div>
     </div>
   )
 
@@ -262,7 +265,7 @@ function MyShiftsTab({ myId, accent, t }: { myId: string; accent: string; t: any
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {shifts.map(s => {
-        const when = s.date === today ? 'Сегодня' : s.date === tomorrow ? 'Завтра' : null
+        const when = s.date === today ? tr('pe.today') : s.date === tomorrow ? tr('pe.tomorrow') : null
         return (
           <div key={s.id} style={{ background: t.surface, borderRadius: 16, padding: '16px', boxShadow: t.sh, display: 'flex', alignItems: 'center', gap: 14 }}>
             <div style={{ width: 52, textAlign: 'center', flexShrink: 0 }}>
@@ -271,7 +274,7 @@ function MyShiftsTab({ myId, accent, t }: { myId: string; accent: string; t: any
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 16, fontWeight: 700, color: t.text }}>{timeRange(s.shift_start, s.shift_end) || 'Смена'}</span>
+                <span style={{ fontSize: 16, fontWeight: 700, color: t.text }}>{timeRange(s.shift_start, s.shift_end) || tr('pe.shiftWord')}</span>
                 {when && <span style={{ fontSize: 10, fontWeight: 700, color: accent, background: `${accent}1a`, padding: '2px 8px', borderRadius: 8 }}>{when.toUpperCase()}</span>}
               </div>
               <div style={{ fontSize: 12, color: t.text3, marginTop: 3 }}>{DOW_FULL[new Date(s.date + 'T00:00:00').getDay()]}{s.note ? ` · ${s.note}` : ''}</div>
@@ -286,22 +289,23 @@ function MyShiftsTab({ myId, accent, t }: { myId: string; accent: string; t: any
 // ── TASKS TAB ────────────────────────────────────────────────────────────────────
 
 const PRIO: Record<string, { label: string; color: (t: any) => string }> = {
-  low: { label: 'Низкий', color: t => t.text3 },
-  medium: { label: 'Средний', color: t => t.blue },
-  high: { label: 'Высокий', color: t => t.red },
+  low: { label: 'pe.prioLow', color: t => t.text3 },
+  medium: { label: 'pe.prioMed', color: t => t.blue },
+  high: { label: 'pe.prioHigh', color: t => t.red },
 }
 const STATUS_ORDER = ['todo', 'in_progress', 'done']
-const STATUS_LABEL: Record<string, string> = { todo: 'К выполнению', in_progress: 'В работе', done: 'Готово' }
+const STATUS_LABEL: Record<string, string> = { todo: 'pe.stTodo', in_progress: 'pe.stInProgress', done: 'pe.stDone' }
 
 const REPORT_TYPE: Record<string, { label: string; color: (t: any) => string }> = {
-  breakdown: { label: 'Поломка', color: t => t.red },
-  notice: { label: 'Замечание', color: t => t.orange },
-  suggestion: { label: 'Предложение', color: t => t.blue },
-  other: { label: 'Другое', color: t => t.text3 },
+  breakdown: { label: 'pe.rtBreakdown', color: t => t.red },
+  notice: { label: 'pe.rtNotice', color: t => t.orange },
+  suggestion: { label: 'pe.rtSuggestion', color: t => t.blue },
+  other: { label: 'pe.rtOther', color: t => t.text3 },
 }
-const REPORT_STATUS: Record<string, string> = { new: 'Новый', reviewed: 'Просмотрен', resolved: 'Решён' }
+const REPORT_STATUS: Record<string, string> = { new: 'pe.rsNew', reviewed: 'pe.rsReviewed', resolved: 'pe.rsResolved' }
 
 function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; myId: string; accent: string; t: any; toast: (m: string) => void }) {
+  const { t: tr } = useI18n()
   const [view, setView] = useState<'tasks' | 'reports'>('tasks')
   const [tasks, setTasks] = useState<any[]>([])
   const [reports, setReports] = useState<any[]>([])
@@ -329,14 +333,14 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
   const visibleTasks = isManager ? tasks : tasks.filter(x => x.assigned_to === myId || x.created_by === myId)
 
   const createTask = async () => {
-    if (!form.title.trim() || !form.assigned_to) { toast('Укажите задачу и исполнителя'); return }
+    if (!form.title.trim() || !form.assigned_to) { toast(tr('pe.taskNeedTitleAssignee')); return }
     setSaving(true)
     // Назначение на роль (assigned_to = "role:<role>") → отдельная задача каждому сотруднику цеха.
     let targets: string[]
     if (form.assigned_to.startsWith('role:')) {
       const role = form.assigned_to.slice(5)
       targets = staff.filter(s => s.role === role).map(s => s.id)
-      if (targets.length === 0) { toast('Нет активных сотрудников с этой ролью'); setSaving(false); return }
+      if (targets.length === 0) { toast(tr('pe.noActiveStaffRole')); setSaving(false); return }
     } else {
       targets = [form.assigned_to]
     }
@@ -350,7 +354,7 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
       if (tid !== myId) await db.from('notifications').insert({ staff_id: tid, type: 'task', title: 'Новая задача', body: form.title.trim() })
     }))
     setSaving(false); setShowForm(false); setForm({ title: '', description: '', assigned_to: '', priority: 'medium', due_date: '' })
-    toast(targets.length > 1 ? `Задача создана для ${targets.length}` : 'Задача создана'); await load()
+    toast(targets.length > 1 ? tr('pe.taskCreatedFor', { n: targets.length }) : tr('pe.taskCreated')); await load()
   }
   const setStatus = async (task: any, status: string) => {
     setTasks(ts => ts.map(x => x.id === task.id ? { ...x, status } : x))
@@ -363,43 +367,43 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
   const canDelete = (task: any) => isManager || task.created_by === myId
 
   const createReport = async () => {
-    if (!rform.title.trim()) { toast('Опишите проблему'); return }
+    if (!rform.title.trim()) { toast(tr('pe.describeProblem')); return }
     setSaving(true)
     await db.from('staff_reports').insert({ type: rform.type, title: rform.title.trim(), description: rform.description.trim() || null, author_id: myId === 'owner' ? null : myId, status: 'new' })
     setSaving(false); setShowForm(false); setRform({ type: 'breakdown', title: '', description: '' })
-    toast('Отчёт отправлен'); await load()
+    toast(tr('pe.reportSent')); await load()
   }
   const setReportStatus = async (r: any, status: string) => {
     setReports(rs => rs.map(x => x.id === r.id ? { ...x, status } : x))
     await db.from('staff_reports').update({ status, resolved_at: status === 'resolved' ? new Date().toISOString() : null }).eq('id', r.id)
   }
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
 
   return (
     <div>
       <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
-        {([['tasks', 'Задачи'], ['reports', 'Отчёты']] as const).map(([id, label]) => (
+        {([['tasks', tr('pe.tasks')], ['reports', tr('pe.reports')]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setView(id)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: view === id ? 700 : 500, cursor: 'pointer', background: view === id ? t.surface : 'transparent', color: view === id ? accent : t.text3, boxShadow: view === id ? t.sh2 : 'none' }}>{label}</button>
         ))}
       </div>
 
       <button onClick={() => setShowForm(true)} style={{ width: '100%', padding: '14px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', marginBottom: 16, boxShadow: `0 4px 16px ${accent}44` }}>
-        {view === 'tasks' ? '+ Новая задача' : '+ Сообщить о проблеме'}
+        {view === 'tasks' ? tr('pe.newTask') : tr('pe.reportProblem')}
       </button>
 
       {view === 'tasks' ? (
         visibleTasks.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
-            <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Задач нет</div>
-            <div style={{ fontSize: 13, marginTop: 4 }}>Поставьте задачу себе или коллеге</div>
+            <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.noTasks')}</div>
+            <div style={{ fontSize: 13, marginTop: 4 }}>{tr('pe.assignTaskHint')}</div>
           </div>
         ) : STATUS_ORDER.map(st => {
           const group = visibleTasks.filter(x => x.status === st)
           if (group.length === 0) return null
           return (
             <div key={st} style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>{STATUS_LABEL[st]} · {group.length}</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>{tr(STATUS_LABEL[st])} · {group.length}</div>
               <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
                 {group.map((task, i) => (
                   <div key={task.id} style={{ padding: '14px 16px', borderBottom: i < group.length - 1 ? `0.5px solid ${t.sep2}` : 'none', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
@@ -410,10 +414,10 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
                       <div style={{ fontSize: 15, color: t.text, fontWeight: 500, textDecoration: task.status === 'done' ? 'line-through' : 'none', opacity: task.status === 'done' ? 0.55 : 1 }}>{task.title}</div>
                       {task.description && <div style={{ fontSize: 13, color: t.text3, marginTop: 2 }}>{task.description}</div>}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: PRIO[task.priority]?.color(t) }}>{PRIO[task.priority]?.label}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: PRIO[task.priority]?.color(t) }}>{tr(PRIO[task.priority]?.label)}</span>
                         <span style={{ fontSize: 11, color: t.text3 }}>· {staffName(task.assigned_to)}</span>
-                        {task.due_date && <span style={{ fontSize: 11, color: t.orange }}>· до {dayLabel(task.due_date)}</span>}
-                        {task.status !== 'done' && <button onClick={() => setStatus(task, task.status === 'todo' ? 'in_progress' : 'todo')} style={{ fontSize: 11, fontWeight: 600, color: accent, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>{task.status === 'todo' ? 'Взять в работу' : 'Вернуть'}</button>}
+                        {task.due_date && <span style={{ fontSize: 11, color: t.orange }}>· {tr('pe.dueBy')} {dayLabel(task.due_date)}</span>}
+                        {task.status !== 'done' && <button onClick={() => setStatus(task, task.status === 'todo' ? 'in_progress' : 'todo')} style={{ fontSize: 11, fontWeight: 600, color: accent, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>{task.status === 'todo' ? tr('pe.takeInWork') : tr('pe.return')}</button>}
                       </div>
                     </div>
                     {canDelete(task) && (
@@ -430,8 +434,8 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
       ) : (
         reports.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
-            <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Отчётов нет</div>
-            <div style={{ fontSize: 13, marginTop: 4 }}>Сообщите о поломке или предложении</div>
+            <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.noReports')}</div>
+            <div style={{ fontSize: 13, marginTop: 4 }}>{tr('pe.reportHint')}</div>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -440,16 +444,16 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
               return (
                 <div key={r.id} style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: rt.color(t), background: `${rt.color(t)}1a`, padding: '3px 9px', borderRadius: 8 }}>{rt.label}</span>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: r.status === 'resolved' ? t.green : r.status === 'reviewed' ? t.blue : t.orange }}>{REPORT_STATUS[r.status]}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: rt.color(t), background: `${rt.color(t)}1a`, padding: '3px 9px', borderRadius: 8 }}>{tr(rt.label)}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: r.status === 'resolved' ? t.green : r.status === 'reviewed' ? t.blue : t.orange }}>{tr(REPORT_STATUS[r.status])}</span>
                   </div>
                   <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{r.title}</div>
                   {r.description && <div style={{ fontSize: 13, color: t.text3, marginTop: 2 }}>{r.description}</div>}
                   <div style={{ fontSize: 11, color: t.text4, marginTop: 6 }}>{staffName(r.author_id)} · {new Date(r.created_at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}</div>
                   {isManager && r.status !== 'resolved' && (
                     <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                      {r.status === 'new' && <button onClick={() => setReportStatus(r, 'reviewed')} style={btnB2(t)}>Просмотрено</button>}
-                      <button onClick={() => setReportStatus(r, 'resolved')} style={{ ...btnB2(t), color: '#fff', background: accent }}>Решено</button>
+                      {r.status === 'new' && <button onClick={() => setReportStatus(r, 'reviewed')} style={btnB2(t)}>{tr('pe.markReviewed')}</button>}
+                      <button onClick={() => setReportStatus(r, 'resolved')} style={{ ...btnB2(t), color: '#fff', background: accent }}>{tr('pe.markResolved')}</button>
                     </div>
                   )}
                 </div>
@@ -462,35 +466,35 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
       {showForm && view === 'tasks' && (
         <Sheet onClose={() => setShowForm(false)} t={t}>
           <div style={{ padding: '14px 20px 32px' }}>
-            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 18 }}>Новая задача</div>
-            <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Что нужно сделать" autoFocus style={inp(t)} />
-            <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Описание (необязательно)" style={inp(t)} />
-            <label style={lbl(t)}>Исполнитель</label>
+            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 18 }}>{tr('pe.newTaskTitle')}</div>
+            <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder={tr('pe.taskTitlePh')} autoFocus style={inp(t)} />
+            <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder={tr('pe.descPh')} style={inp(t)} />
+            <label style={lbl(t)}>{tr('pe.assignee')}</label>
             <select value={form.assigned_to} onChange={e => setForm({ ...form, assigned_to: e.target.value })} style={inp(t)}>
-              <option value="">Выберите сотрудника</option>
+              <option value="">{tr('pe.selectStaff')}</option>
               {isManager && roles.length > 0 && (
-                <optgroup label="Всему цеху">
-                  {roles.map(r => <option key={'role:' + r} value={'role:' + r}>Все: {roleLabel(r)}</option>)}
+                <optgroup label={tr('pe.wholeRole')}>
+                  {roles.map(r => <option key={'role:' + r} value={'role:' + r}>{tr('pe.allColon')} {tr(roleLabel(r))}</option>)}
                 </optgroup>
               )}
-              <optgroup label="Сотрудники">
-                {staff.map(s => <option key={s.id} value={s.id}>{s.name}{s.id === myId ? ' (я)' : ''}</option>)}
+              <optgroup label={tr('pe.staffGroup')}>
+                {staff.map(s => <option key={s.id} value={s.id}>{s.name}{s.id === myId ? ` ${tr('pe.meSuffix')}` : ''}</option>)}
               </optgroup>
             </select>
             <div style={{ display: 'flex', gap: 10 }}>
               <div style={{ flex: 1 }}>
-                <label style={lbl(t)}>Приоритет</label>
+                <label style={lbl(t)}>{tr('pe.priority')}</label>
                 <select value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })} style={inp(t)}>
-                  <option value="low">Низкий</option><option value="medium">Средний</option><option value="high">Высокий</option>
+                  <option value="low">{tr('pe.prioLow')}</option><option value="medium">{tr('pe.prioMed')}</option><option value="high">{tr('pe.prioHigh')}</option>
                 </select>
               </div>
               <div style={{ flex: 1 }}>
-                <label style={lbl(t)}>Срок</label>
+                <label style={lbl(t)}>{tr('pe.dueDate')}</label>
                 <input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} style={inp(t)} />
               </div>
             </div>
             <button onClick={createTask} disabled={saving} style={{ width: '100%', padding: '15px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', marginTop: 8, boxShadow: `0 4px 16px ${accent}44` }}>
-              {saving ? '...' : 'Создать задачу'}
+              {saving ? '...' : tr('pe.createTask')}
             </button>
           </div>
         </Sheet>
@@ -499,15 +503,15 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
       {showForm && view === 'reports' && (
         <Sheet onClose={() => setShowForm(false)} t={t}>
           <div style={{ padding: '14px 20px 32px' }}>
-            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 18 }}>Сообщить о проблеме</div>
-            <label style={lbl(t)}>Тип</label>
+            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 18 }}>{tr('pe.reportProblemTitle')}</div>
+            <label style={lbl(t)}>{tr('pe.type')}</label>
             <select value={rform.type} onChange={e => setRform({ ...rform, type: e.target.value })} style={inp(t)}>
-              {Object.entries(REPORT_TYPE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              {Object.entries(REPORT_TYPE).map(([k, v]) => <option key={k} value={k}>{tr(v.label)}</option>)}
             </select>
-            <input value={rform.title} onChange={e => setRform({ ...rform, title: e.target.value })} placeholder="Коротко: что случилось" autoFocus style={inp(t)} />
-            <input value={rform.description} onChange={e => setRform({ ...rform, description: e.target.value })} placeholder="Подробнее (необязательно)" style={inp(t)} />
+            <input value={rform.title} onChange={e => setRform({ ...rform, title: e.target.value })} placeholder={tr('pe.reportTitlePh')} autoFocus style={inp(t)} />
+            <input value={rform.description} onChange={e => setRform({ ...rform, description: e.target.value })} placeholder={tr('pe.reportDescPh')} style={inp(t)} />
             <button onClick={createReport} disabled={saving} style={{ width: '100%', padding: '15px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', marginTop: 8, boxShadow: `0 4px 16px ${accent}44` }}>
-              {saving ? '...' : 'Отправить'}
+              {saving ? '...' : tr('pe.send')}
             </button>
           </div>
         </Sheet>
@@ -530,15 +534,16 @@ function lbl(t: any): React.CSSProperties {
 // ── SWAPS TAB ────────────────────────────────────────────────────────────────────
 
 const SWAP_STATUS: Record<string, { label: string; color: (t: any) => string }> = {
-  pending_peer: { label: 'Ждёт коллегу', color: t => t.orange },
-  peer_accepted: { label: 'Ждёт менеджера', color: t => t.blue },
-  approved: { label: 'Одобрено', color: t => t.green },
-  peer_declined: { label: 'Коллега отклонил', color: t => t.red },
-  rejected: { label: 'Менеджер отклонил', color: t => t.red },
-  cancelled: { label: 'Отменено', color: t => t.text3 },
+  pending_peer: { label: 'pe.swPendingPeer', color: t => t.orange },
+  peer_accepted: { label: 'pe.swPeerAccepted', color: t => t.blue },
+  approved: { label: 'pe.swApproved', color: t => t.green },
+  peer_declined: { label: 'pe.swPeerDeclined', color: t => t.red },
+  rejected: { label: 'pe.swRejected', color: t => t.red },
+  cancelled: { label: 'pe.swCancelled', color: t => t.text3 },
 }
 
 function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boolean; accent: string; t: any; toast: (m: string) => void }) {
+  const { t: tr } = useI18n()
   const myId = me.id || ''
   const [requests, setRequests] = useState<any[]>([])
   const [staff, setStaff] = useState<any[]>([])
@@ -571,7 +576,7 @@ function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boo
   const now = () => new Date().toISOString()
 
   const create = async () => {
-    if (!form.schedule_id || !form.target_id) { toast('Выберите смену и коллегу'); return }
+    if (!form.schedule_id || !form.target_id) { toast(tr('pe.selectShiftColleague')); return }
     setSaving(true)
     const sc = sched(form.schedule_id)
     await db.from('shift_swap_requests').insert({
@@ -580,7 +585,7 @@ function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boo
     })
     await notify(form.target_id, 'swap_request', 'Запрос на обмен', `${me.name || 'Коллега'} предлагает обмен сменой ${sc ? dayLabel(sc.date) : ''}`)
     setSaving(false); setShowForm(false); setForm({ schedule_id: '', target_id: '', note: '' })
-    toast('Запрос отправлен'); await load()
+    toast(tr('pe.reportSent')); await load()
   }
 
   const setStatus = async (r: any, patch: any) => {
@@ -602,10 +607,10 @@ function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boo
     await db.from('staff_schedules').update({ staff_id: r.target_id }).eq('id', r.schedule_id)
     await db.from('shift_swap_requests').update({ status: 'approved', manager_id: me.is_owner ? null : myId, manager_responded_at: now() }).eq('id', r.id)
     await notify(r.requester_id, 'swap_result', 'Обмен одобрен', 'Смена переназначена коллеге')
-    toast('Обмен одобрен · смена переназначена'); await load()
+    toast(tr('pe.swapApprovedToast')); await load()
   }
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
 
   const incoming = requests.filter(r => r.target_id === myId)
   const outgoing = requests.filter(r => r.requester_id === myId)
@@ -620,8 +625,8 @@ function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boo
     return (
       <div key={r.id} style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh, marginBottom: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>{sc ? `${dayLabel(sc.date)} · ${timeRange(sc.shift_start, sc.shift_end) || 'Смена'}` : 'Смена'}</div>
-          <span style={{ fontSize: 11, fontWeight: 700, color: stt?.color(t), background: `${stt?.color(t)}1a`, padding: '3px 9px', borderRadius: 8 }}>{stt?.label}</span>
+          <div style={{ fontSize: 15, fontWeight: 700, color: t.text }}>{sc ? `${dayLabel(sc.date)} · ${timeRange(sc.shift_start, sc.shift_end) || tr('pe.shiftWord')}` : tr('pe.shiftWord')}</div>
+          <span style={{ fontSize: 11, fontWeight: 700, color: stt?.color(t), background: `${stt?.color(t)}1a`, padding: '3px 9px', borderRadius: 8 }}>{tr(stt?.label)}</span>
         </div>
         <div style={{ fontSize: 13, color: t.text3, marginBottom: r.note ? 4 : 0 }}>
           {name(r.requester_id)} → {name(r.target_id)}
@@ -631,17 +636,17 @@ function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boo
         {/* Actions */}
         {r.status === 'pending_peer' && iAmTarget && (
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <button onClick={() => setStatus(r, { status: 'peer_accepted', peer_responded_at: now() })} style={btnA(accent)}>Принять</button>
-            <button onClick={() => peerDecline(r)} style={btnB(t)}>Отклонить</button>
+            <button onClick={() => setStatus(r, { status: 'peer_accepted', peer_responded_at: now() })} style={btnA(accent)}>{tr('pe.accept')}</button>
+            <button onClick={() => peerDecline(r)} style={btnB(t)}>{tr('pe.decline')}</button>
           </div>
         )}
         {r.status === 'pending_peer' && iAmRequester && (
-          <button onClick={() => setStatus(r, { status: 'cancelled' })} style={{ ...btnB(t), marginTop: 10, width: '100%' }}>Отменить запрос</button>
+          <button onClick={() => setStatus(r, { status: 'cancelled' })} style={{ ...btnB(t), marginTop: 10, width: '100%' }}>{tr('pe.cancelRequest')}</button>
         )}
         {r.status === 'peer_accepted' && isManager && (
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <button onClick={() => approve(r)} style={btnA(accent)}>Одобрить</button>
-            <button onClick={() => managerReject(r)} style={btnB(t)}>Отклонить</button>
+            <button onClick={() => approve(r)} style={btnA(accent)}>{tr('pe.approve')}</button>
+            <button onClick={() => managerReject(r)} style={btnB(t)}>{tr('pe.decline')}</button>
           </div>
         )}
       </div>
@@ -652,40 +657,40 @@ function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boo
     <div>
       {!isManager && (
         <button onClick={() => setShowForm(true)} disabled={myUpcoming.length === 0} style={{ width: '100%', padding: '14px', borderRadius: 14, background: myUpcoming.length ? accent : t.fill, color: myUpcoming.length ? '#fff' : t.text3, border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: myUpcoming.length ? 'pointer' : 'default', marginBottom: 16, boxShadow: myUpcoming.length ? `0 4px 16px ${accent}44` : 'none' }}>
-          {myUpcoming.length ? '+ Предложить обмен' : 'Нет смен для обмена'}
+          {myUpcoming.length ? tr('pe.proposeSwap') : tr('pe.noShiftsToSwap')}
         </button>
       )}
 
       <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
-        {(isManager ? [['incoming', 'На одобрении'], ['outgoing', 'Все']] : [['incoming', 'Входящие'], ['outgoing', 'Исходящие']]).map(([id, label]) => (
+        {(isManager ? [['incoming', tr('pe.forApproval')], ['outgoing', tr('pe.all')]] : [['incoming', tr('pe.incoming')], ['outgoing', tr('pe.outgoing')]]).map(([id, label]) => (
           <button key={id} onClick={() => setSeg(id as any)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: seg === id ? 700 : 500, cursor: 'pointer', background: seg === id ? t.surface : 'transparent', color: seg === id ? accent : t.text3, boxShadow: seg === id ? t.sh2 : 'none' }}>{label}</button>
         ))}
       </div>
 
       {list.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
-          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Пусто</div>
-          <div style={{ fontSize: 13, marginTop: 4 }}>{isManager ? 'Нет запросов на одобрение' : 'Запросов на обмен нет'}</div>
+          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.empty')}</div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>{isManager ? tr('pe.noApprovalReqs') : tr('pe.noSwapReqs')}</div>
         </div>
       ) : list.map(card)}
 
       {showForm && (
         <Sheet onClose={() => setShowForm(false)} t={t}>
           <div style={{ padding: '14px 20px 32px' }}>
-            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 18 }}>Предложить обмен</div>
-            <label style={lbl(t)}>Моя смена</label>
+            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 18 }}>{tr('pe.proposeSwapTitle')}</div>
+            <label style={lbl(t)}>{tr('pe.myShift')}</label>
             <select value={form.schedule_id} onChange={e => setForm({ ...form, schedule_id: e.target.value })} style={inp(t)}>
-              <option value="">Выберите смену</option>
-              {myUpcoming.map(s => <option key={s.id} value={s.id}>{dayLabel(s.date)} · {timeRange(s.shift_start, s.shift_end) || 'Смена'}</option>)}
+              <option value="">{tr('pe.selectShift')}</option>
+              {myUpcoming.map(s => <option key={s.id} value={s.id}>{dayLabel(s.date)} · {timeRange(s.shift_start, s.shift_end) || tr('pe.shiftWord')}</option>)}
             </select>
-            <label style={lbl(t)}>Кому предложить</label>
+            <label style={lbl(t)}>{tr('pe.toWhom')}</label>
             <select value={form.target_id} onChange={e => setForm({ ...form, target_id: e.target.value })} style={inp(t)}>
-              <option value="">Выберите коллегу</option>
+              <option value="">{tr('pe.selectColleague')}</option>
               {staff.filter(s => s.id !== myId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
-            <input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} placeholder="Сообщение (необязательно)" style={inp(t)} />
+            <input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} placeholder={tr('pe.msgPh')} style={inp(t)} />
             <button onClick={create} disabled={saving} style={{ width: '100%', padding: '15px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', marginTop: 8, boxShadow: `0 4px 16px ${accent}44` }}>
-              {saving ? '...' : 'Отправить запрос'}
+              {saving ? '...' : tr('pe.sendRequest')}
             </button>
           </div>
         </Sheet>
@@ -721,6 +726,7 @@ function distMeters(la1: number, lo1: number, la2: number, lo2: number) {
 function clock(iso: string | null) { return iso ? new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '' }
 
 function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager: boolean; accent: string; t: any; toast: (m: string) => void }) {
+  const { t: tr } = useI18n()
   const myId = me.id || ''
   const today = fmtDate(new Date())
   const [settings, setSettings] = useState<any>(null)
@@ -757,13 +763,13 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
   useEffect(() => {
     if (isManager || loading) return
     if (!settings?.attendance_enabled || settings?.latitude == null || settings?.longitude == null) return
-    if (!navigator.geolocation) { setGeoErr('Геолокация недоступна'); return }
+    if (!navigator.geolocation) { setGeoErr(tr('pe.geoUnavailable')); return }
     const watchId = navigator.geolocation.watchPosition(
       p => {
         const d = distMeters(p.coords.latitude, p.coords.longitude, Number(settings.latitude), Number(settings.longitude))
         setPos({ lat: p.coords.latitude, lng: p.coords.longitude }); setDist(d); setGeoErr('')
       },
-      () => setGeoErr('Нет доступа к геолокации'),
+      () => setGeoErr(tr('pe.geoNoAccess')),
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
     )
     return () => navigator.geolocation.clearWatch(watchId)
@@ -772,7 +778,7 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
   // Явный приход: доступен только в радиусе заведения, фиксирует точное время и опоздание.
   const checkIn = async () => {
     if (!pos || dist == null || todayRec) return
-    if (dist > (settings?.geo_radius_m || 150)) { toast('Вы вне зоны заведения'); return }
+    if (dist > (settings?.geo_radius_m || 150)) { toast(tr('pe.outsideZone')); return }
     let late: number | null = null, status = 'present'
     if (mySched?.shift_start) {
       const [h, m] = mySched.shift_start.split(':').map(Number)
@@ -783,25 +789,25 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
       { staff_id: myId, date: today, check_in_at: new Date().toISOString(), check_in_lat: pos.lat, check_in_lng: pos.lng, check_in_distance_m: Math.round(dist), late_minutes: late, status, source: 'geo' },
       { onConflict: 'restaurant_id,staff_id,date' }
     )
-    toast(status === 'late' ? `Отмечено · опоздание ${late} мин` : 'Приход отмечен'); await load()
+    toast(status === 'late' ? tr('pe.checkedLate', { n: late! }) : tr('pe.checkedIn')); await load()
   }
 
   const checkOut = async () => {
     if (!pos) return
     await db.from('attendance_records').update({ check_out_at: new Date().toISOString(), check_out_lat: pos.lat, check_out_lng: pos.lng }).eq('staff_id', myId).eq('date', today)
-    toast('Уход отмечен'); await load()
+    toast(tr('pe.checkedOut')); await load()
   }
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
 
   // ── Manager view ──
   if (isManager) {
     const name = (id: string) => staff.find(s => s.id === id)?.name || '—'
     return (
       <div>
-        <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>Сегодня</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>{tr('pe.today')}</div>
         <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 16 }}>
-          {staff.length === 0 ? <div style={{ padding: 24, textAlign: 'center', color: t.text3 }}>Нет сотрудников</div> : staff.map((s, i) => {
+          {staff.length === 0 ? <div style={{ padding: 24, textAlign: 'center', color: t.text3 }}>{tr('pe.noStaff')}</div> : staff.map((s, i) => {
             const rec = todayAll.find(r => r.staff_id === s.id)
             return (
               <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: i < staff.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
@@ -811,17 +817,17 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
                     <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{clock(rec.check_in_at)}{rec.check_out_at ? `–${clock(rec.check_out_at)}` : ''}</span>
                     {rec.status === 'late' && <span style={{ fontSize: 10, fontWeight: 700, color: t.orange, background: `${t.orange}1a`, padding: '2px 7px', borderRadius: 6 }}>+{rec.late_minutes}м</span>}
                   </div>
-                ) : <span style={{ fontSize: 13, color: t.text4 }}>Не пришёл</span>}
+                ) : <span style={{ fontSize: 13, color: t.text4 }}>{tr('pe.notArrived')}</span>}
               </div>
             )
           })}
         </div>
-        {!settings?.attendance_enabled && <div style={{ background: `${t.orange}14`, borderRadius: 12, padding: '12px 14px', fontSize: 13, color: t.orange }}>Геоявка выключена. Включите и задайте координаты в дашборде → Настройки.</div>}
+        {!settings?.attendance_enabled && <div style={{ background: `${t.orange}14`, borderRadius: 12, padding: '12px 14px', fontSize: 13, color: t.orange }}>{tr('pe.geoOffManager')}</div>}
 
         {/* Часы и опоздания по каждому сотруднику за текущий месяц */}
         {history.length > 0 && (
           <>
-            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Статистика за месяц</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('pe.monthStats')}</div>
             <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 16 }}>
               {staff.map((s, i) => {
                 const recs = history.filter(r => r.staff_id === s.id)
@@ -832,11 +838,11 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
                   <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: i < staff.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
                     <div>
                       <div style={{ fontSize: 14, color: t.text, fontWeight: 500 }}>{s.name}</div>
-                      <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{recs.length} смен · {fmtHours(hours)}</div>
+                      <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{recs.length} {tr('pe.shiftsWord')} · {fmtHours(hours)}</div>
                     </div>
                     {lates.length > 0
-                      ? <span style={{ fontSize: 11, fontWeight: 700, color: t.orange, background: `${t.orange}1a`, padding: '3px 9px', borderRadius: 8 }}>{lates.length} опозд. · {lates.reduce((s2, r) => s2 + (r.late_minutes || 0), 0)} мин</span>
-                      : <span style={{ fontSize: 11, fontWeight: 700, color: t.green, background: `${t.green}1a`, padding: '3px 9px', borderRadius: 8 }}>без опозданий</span>}
+                      ? <span style={{ fontSize: 11, fontWeight: 700, color: t.orange, background: `${t.orange}1a`, padding: '3px 9px', borderRadius: 8 }}>{lates.length} {tr('pe.lateShort')} · {lates.reduce((s2, r) => s2 + (r.late_minutes || 0), 0)} {tr('pe.minShort')}</span>
+                      : <span style={{ fontSize: 11, fontWeight: 700, color: t.green, background: `${t.green}1a`, padding: '3px 9px', borderRadius: 8 }}>{tr('pe.noLates')}</span>}
                   </div>
                 )
               })}
@@ -856,8 +862,8 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
     <div>
       {!configured ? (
         <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
-          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Геоявка не настроена</div>
-          <div style={{ fontSize: 13, marginTop: 4 }}>Менеджер задаёт адрес заведения в настройках</div>
+          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.geoNotConfigured')}</div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>{tr('pe.geoManagerSetsAddress')}</div>
         </div>
       ) : (
         <div style={{ background: t.surface, borderRadius: 20, padding: '28px 20px', boxShadow: t.sh, textAlign: 'center', marginBottom: 16 }}>
@@ -866,25 +872,25 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
           </div>
           {todayRec ? (
             <>
-              <div style={{ fontSize: 18, fontWeight: 700, color: t.text }}>Вы на смене</div>
-              <div style={{ fontSize: 14, color: t.text3, marginTop: 4 }}>Приход в {clock(todayRec.check_in_at)}{todayRec.status === 'late' ? ` · опоздание ${todayRec.late_minutes} мин` : ''}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: t.text }}>{tr('pe.onShift')}</div>
+              <div style={{ fontSize: 14, color: t.text3, marginTop: 4 }}>{tr('pe.arrivedAt')} {clock(todayRec.check_in_at)}{todayRec.status === 'late' ? ` · ${tr('pe.lateBy')} ${todayRec.late_minutes} ${tr('pe.minShort')}` : ''}</div>
               {!todayRec.check_out_at
-                ? <button onClick={checkOut} style={{ marginTop: 16, padding: '12px 28px', borderRadius: 14, border: 'none', background: t.fill, color: t.text, fontFamily: 'inherit', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>Отметить уход</button>
-                : <div style={{ marginTop: 12, fontSize: 14, color: t.green, fontWeight: 600 }}>Смена закрыта в {clock(todayRec.check_out_at)}</div>}
+                ? <button onClick={checkOut} style={{ marginTop: 16, padding: '12px 28px', borderRadius: 14, border: 'none', background: t.fill, color: t.text, fontFamily: 'inherit', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>{tr('pe.checkOut')}</button>
+                : <div style={{ marginTop: 12, fontSize: 14, color: t.green, fontWeight: 600 }}>{tr('pe.shiftClosedAt')} {clock(todayRec.check_out_at)}</div>}
             </>
           ) : geoErr ? (
             <div style={{ fontSize: 15, color: t.red, fontWeight: 600 }}>{geoErr}</div>
           ) : dist == null ? (
-            <div style={{ fontSize: 15, color: t.text3 }}>Определяем местоположение…</div>
+            <div style={{ fontSize: 15, color: t.text3 }}>{tr('pe.locating')}</div>
           ) : inRange ? (
             <>
-              <div style={{ fontSize: 15, color: t.text3, marginBottom: 2 }}>Вы на месте</div>
-              <button onClick={checkIn} style={{ marginTop: 12, padding: '13px 36px', borderRadius: 14, border: 'none', background: accent, color: '#fff', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${accent}55` }}>Я пришёл</button>
+              <div style={{ fontSize: 15, color: t.text3, marginBottom: 2 }}>{tr('pe.youreHere')}</div>
+              <button onClick={checkIn} style={{ marginTop: 12, padding: '13px 36px', borderRadius: 14, border: 'none', background: accent, color: '#fff', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${accent}55` }}>{tr('pe.imHere')}</button>
             </>
           ) : (
             <>
-              <div style={{ fontSize: 18, fontWeight: 700, color: t.text }}>Подойдите ближе</div>
-              <div style={{ fontSize: 14, color: t.text3, marginTop: 4 }}>До заведения ~{Math.round(dist)} м (нужно ≤ {radius} м)</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: t.text }}>{tr('pe.comeCloser')}</div>
+              <div style={{ fontSize: 14, color: t.text3, marginTop: 4 }}>{tr('pe.distanceTo', { d: Math.round(dist), r: radius })}</div>
             </>
           )}
         </div>
@@ -899,12 +905,12 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
         const lates = recs.filter(r => r.status === 'late')
         return (
           <>
-            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>Мой месяц</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>{tr('pe.myMonth')}</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
               {[
-                { l: 'Смен', v: String(recs.length), c: accent },
-                { l: 'Часов', v: fmtHours(hours), c: t.green },
-                { l: 'Опозданий', v: lates.length ? `${lates.length} · ${lates.reduce((s2, r) => s2 + (r.late_minutes || 0), 0)}м` : '0', c: lates.length ? t.orange : t.green },
+                { l: tr('pe.shifts'), v: String(recs.length), c: accent },
+                { l: tr('pe.hours'), v: fmtHours(hours), c: t.green },
+                { l: tr('pe.lates'), v: lates.length ? `${lates.length} · ${lates.reduce((s2, r) => s2 + (r.late_minutes || 0), 0)}м` : '0', c: lates.length ? t.orange : t.green },
               ].map(it => (
                 <div key={it.l} style={{ background: t.surface, borderRadius: 14, padding: '12px 10px', boxShadow: t.sh, textAlign: 'center' }}>
                   <div style={{ fontSize: 15, fontWeight: 800, color: it.c }}>{it.v}</div>
@@ -930,6 +936,7 @@ const eur = (n: number) => `€${Math.round(n).toLocaleString('de-DE')}`
 const absDate = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
 
 function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: boolean; accent: string; t: any }) {
+  const { t: tr } = useI18n()
   const today = fmtDate(new Date())
   const ym = today.slice(0, 7)
   const monthLabel = new Date().toLocaleDateString('ru-RU', { month: 'long' })
@@ -966,14 +973,14 @@ function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: boolean; 
   }
   useEffect(() => { load() }, [])
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
   if (rows.length === 0) return (
     <div style={{ textAlign: 'center', padding: '60px 20px', color: t.text3 }}>
       <div style={{ width: 72, height: 72, borderRadius: 20, background: `${accent}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
         <svg width="34" height="34" fill="none" stroke={accent} strokeWidth="1.6" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="13" rx="2" /><path d="M2 10h20M6 15h4" /></svg>
       </div>
-      <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Нет данных по зарплате</div>
-      <div style={{ fontSize: 13, marginTop: 4 }}>Оклад задаётся в дашборде → Команда</div>
+      <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.noSalaryData')}</div>
+      <div style={{ fontSize: 13, marginTop: 4 }}>{tr('pe.salarySetInDash')}</div>
     </div>
   )
 
@@ -981,12 +988,12 @@ function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: boolean; 
   const Breakdown = ({ r }: { r: any }) => (
     <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 8 }}>
       {[
-        { _l: 'Оклад', v: eur(r.salary), c: t.text, hide: false },
-        { _l: 'Отработано', v: fmtHours(r.hours), c: t.text2, hide: r.hours <= 0 },
-        { _l: `Пропуски · ${r.absences}`, v: r.dates.map(absDate).join(', '), c: t.text2, small: true, hide: r.absences === 0 },
-        { _l: 'Вычет за пропуски', v: `−${eur(r.deduct)}`, c: t.red, hide: r.deduct === 0 },
-        { _l: 'На карту', v: eur(r.card), c: t.blue, hide: r.card === 0 },
-        { _l: 'Наличными', v: eur(r.cash), c: t.green, hide: false },
+        { _l: tr('pe.salaryBase'), v: eur(r.salary), c: t.text, hide: false },
+        { _l: tr('pe.worked'), v: fmtHours(r.hours), c: t.text2, hide: r.hours <= 0 },
+        { _l: tr('pe.absencesN', { n: r.absences }), v: r.dates.map(absDate).join(', '), c: t.text2, small: true, hide: r.absences === 0 },
+        { _l: tr('pe.absenceDeduct'), v: `−${eur(r.deduct)}`, c: t.red, hide: r.deduct === 0 },
+        { _l: tr('pe.toCard'), v: eur(r.card), c: t.blue, hide: r.card === 0 },
+        { _l: tr('pe.inCash'), v: eur(r.cash), c: t.green, hide: false },
       ].filter((x: any) => !x.hide).map((x: any, i, arr) => (
         <div key={x._l} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 16px', borderBottom: i < arr.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
           <span style={{ fontSize: 14, color: t.text2, flexShrink: 0 }}>{x._l}</span>
@@ -994,7 +1001,7 @@ function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: boolean; 
         </div>
       ))}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', background: `${accent}0d` }}>
-        <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Итого к выплате</span>
+        <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{tr('pe.totalPayout')}</span>
         <span style={{ fontSize: 18, fontWeight: 800, color: accent }}>{eur(r.total)}</span>
       </div>
     </div>
@@ -1005,17 +1012,17 @@ function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: boolean; 
     const r = rows[0]
     return (
       <div>
-        <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>Зарплата · {monthLabel}</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>{tr('pe.salary')} · {monthLabel}</div>
         <div style={{ background: `linear-gradient(135deg, ${accent}, ${accent}cc)`, borderRadius: 20, padding: '22px 20px', marginBottom: 12, color: '#fff', boxShadow: `0 8px 28px ${accent}3a` }}>
-          <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>К выплате</div>
+          <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>{tr('pe.toPayout')}</div>
           <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: -1, marginTop: 2 }}>{eur(r.total)}</div>
           <div style={{ display: 'flex', gap: 16, marginTop: 10, fontSize: 13, fontWeight: 600, opacity: 0.92 }}>
-            {r.card > 0 && <span>На карту {eur(r.card)}</span>}
-            <span>Наличными {eur(r.cash)}</span>
+            {r.card > 0 && <span>{tr('pe.toCard')} {eur(r.card)}</span>}
+            <span>{tr('pe.inCash')} {eur(r.cash)}</span>
           </div>
         </div>
         <Breakdown r={r} />
-        <div style={{ fontSize: 12, color: t.text4, textAlign: 'center', padding: '4px 16px' }}>Расчёт за {monthLabel}. Окончательная сумма подтверждается при закрытии смен менеджером.</div>
+        <div style={{ fontSize: 12, color: t.text4, textAlign: 'center', padding: '4px 16px' }}>{tr('pe.salaryCalcNote', { month: monthLabel })}</div>
       </div>
     )
   }
@@ -1025,14 +1032,14 @@ function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: boolean; 
   const cardTotal = rows.reduce((s, r) => s + r.card, 0)
   return (
     <div>
-      <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>Фонд зарплаты · {monthLabel}</div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>{tr('pe.salaryFund')} · {monthLabel}</div>
       <div style={{ background: `linear-gradient(135deg, ${accent}, ${accent}cc)`, borderRadius: 20, padding: '20px', marginBottom: 14, color: '#fff', boxShadow: `0 8px 28px ${accent}3a` }}>
-        <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>К выплате всего</div>
+        <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>{tr('pe.toPayoutTotal')}</div>
         <div style={{ fontSize: 34, fontWeight: 800, letterSpacing: -1, marginTop: 2 }}>{eur(fund)}</div>
         <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 13, fontWeight: 600, opacity: 0.92 }}>
-          <span>{rows.length} сотр.</span>
-          {cardTotal > 0 && <span>На карту {eur(cardTotal)}</span>}
-          <span>Наличными {eur(fund - cardTotal)}</span>
+          <span>{tr('pe.staffCountShort', { n: rows.length })}</span>
+          {cardTotal > 0 && <span>{tr('pe.toCard')} {eur(cardTotal)}</span>}
+          <span>{tr('pe.inCash')} {eur(fund - cardTotal)}</span>
         </div>
       </div>
       {rows.map(r => (
@@ -1041,7 +1048,7 @@ function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: boolean; 
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{r.name}</div>
               <div style={{ fontSize: 12, color: t.text3, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                Оклад {eur(r.salary)}{r.absences > 0 ? ` · −${r.absences} проп.` : ''}{r.card > 0 ? ` · карта ${eur(r.card)}` : ''}
+                {tr('pe.salaryBase')} {eur(r.salary)}{r.absences > 0 ? ` · −${r.absences} ${tr('pe.absShort')}` : ''}{r.card > 0 ? ` · ${tr('pe.cardWord')} ${eur(r.card)}` : ''}
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
@@ -1057,10 +1064,11 @@ function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: boolean; 
 }
 
 function HistoryList({ records, withName, name, t, accent }: { records: any[]; withName?: boolean; name?: (id: string) => string; t: any; accent: string }) {
+  const { t: tr } = useI18n()
   if (records.length === 0) return null
   return (
     <>
-      <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>История</div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>{tr('pe.history')}</div>
       <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
         {records.map((r, i) => (
           <div key={r.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: i < records.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
@@ -1069,8 +1077,8 @@ function HistoryList({ records, withName, name, t, accent }: { records: any[]; w
               <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{clock(r.check_in_at)}{r.check_out_at ? `–${clock(r.check_out_at)}` : ''}</div>
             </div>
             {r.status === 'late'
-              ? <span style={{ fontSize: 11, fontWeight: 700, color: t.orange, background: `${t.orange}1a`, padding: '3px 9px', borderRadius: 8 }}>опоздание {r.late_minutes}м</span>
-              : <span style={{ fontSize: 11, fontWeight: 700, color: t.green, background: `${t.green}1a`, padding: '3px 9px', borderRadius: 8 }}>вовремя</span>}
+              ? <span style={{ fontSize: 11, fontWeight: 700, color: t.orange, background: `${t.orange}1a`, padding: '3px 9px', borderRadius: 8 }}>{tr('pe.lateBadge', { n: r.late_minutes })}</span>
+              : <span style={{ fontSize: 11, fontWeight: 700, color: t.green, background: `${t.green}1a`, padding: '3px 9px', borderRadius: 8 }}>{tr('pe.onTime')}</span>}
           </div>
         ))}
       </div>
@@ -1081,6 +1089,7 @@ function HistoryList({ records, withName, name, t, accent }: { records: any[]; w
 // ── NOTIFICATIONS TAB ────────────────────────────────────────────────────────────
 
 function NotificationsTab({ myId, accent, t }: { myId: string; accent: string; t: any }) {
+  const { t: tr } = useI18n()
   const [items, setItems] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -1093,13 +1102,13 @@ function NotificationsTab({ myId, accent, t }: { myId: string; accent: string; t
       })
   }, [myId])
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
   if (items.length === 0) return (
     <div style={{ textAlign: 'center', padding: '60px 20px', color: t.text3 }}>
       <div style={{ width: 72, height: 72, borderRadius: 20, background: `${accent}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
         <svg width="34" height="34" fill="none" stroke={accent} strokeWidth="1.6" viewBox="0 0 24 24"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9" /></svg>
       </div>
-      <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Уведомлений нет</div>
+      <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.noNotifs')}</div>
     </div>
   )
 
@@ -1122,6 +1131,7 @@ function NotificationsTab({ myId, accent, t }: { myId: string; accent: string; t
 // ── STOP-LIST TAB ────────────────────────────────────────────────────────────────
 
 function StopListTab({ canEdit, currency, accent, t, toast }: { canEdit: boolean; currency: string; accent: string; t: any; toast: (m: string) => void }) {
+  const { t: tr } = useI18n()
   const [cats, setCats] = useState<any[]>([])
   const [items, setItems] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -1143,30 +1153,30 @@ function StopListTab({ canEdit, currency, accent, t, toast }: { canEdit: boolean
     const next = !item.is_available
     setItems(its => its.map(x => x.id === item.id ? { ...x, is_available: next } : x))
     await db.from('menu_items').update({ is_available: next }).eq('id', item.id)
-    toast(next ? 'Вернули в меню' : 'В стоп-лист')
+    toast(next ? tr('pe.backToMenu') : tr('pe.toStopList'))
   }
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
 
   const itemsFor = (catId: string) => items.filter(i => i.category_id === catId && (!search || i.name.toLowerCase().includes(search.toLowerCase())))
   const stopCount = items.filter(i => !i.is_available).length
 
   if (items.length === 0) return (
     <div style={{ textAlign: 'center', padding: '60px 20px', color: t.text3 }}>
-      <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Меню пустое</div>
-      <div style={{ fontSize: 13, marginTop: 4 }}>Позиции добавляются в дашборде → Меню</div>
+      <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.menuEmpty')}</div>
+      <div style={{ fontSize: 13, marginTop: 4 }}>{tr('pe.itemsAddedInDash')}</div>
     </div>
   )
 
   return (
     <div>
       <div style={{ position: 'relative', marginBottom: 16 }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск позиции..."
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder={tr('pe.searchItem')}
           style={{ width: '100%', padding: '12px 14px 12px 42px', borderRadius: 14, border: `1px solid ${t.sep2}`, fontSize: 16, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', boxShadow: t.sh }} />
         <svg style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} width="18" height="18" fill="none" stroke={t.text3} strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
       </div>
       {stopCount > 0 && (
-        <div style={{ background: `${t.red}14`, borderRadius: 12, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: t.red, fontWeight: 600 }}>В стоп-листе: {stopCount} — гости видят «нет в наличии»</div>
+        <div style={{ background: `${t.red}14`, borderRadius: 12, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: t.red, fontWeight: 600 }}>{tr('pe.stopListInfo', { n: stopCount })}</div>
       )}
       {cats.map(cat => {
         const list = itemsFor(cat.id)
@@ -1182,7 +1192,7 @@ function StopListTab({ canEdit, currency, accent, t, toast }: { canEdit: boolean
                     {item.price != null && <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{item.price} {currency}</div>}
                   </div>
                   <button onClick={() => toggle(item)} style={{ padding: '7px 14px', borderRadius: 980, border: 'none', cursor: canEdit ? 'pointer' : 'default', fontFamily: 'inherit', fontSize: 13, fontWeight: 700, background: item.is_available ? `${t.green}1a` : t.red, color: item.is_available ? t.green : '#fff' }}>
-                    {item.is_available ? 'В наличии' : 'Стоп'}
+                    {item.is_available ? tr('pe.available') : tr('pe.stop')}
                   </button>
                 </div>
               ))}
@@ -1197,13 +1207,14 @@ function StopListTab({ canEdit, currency, accent, t, toast }: { canEdit: boolean
 // ── ORDERS INBOX (заказы из гостевого меню) ─────────────────────────────────────
 
 const ORDER_STATUS: Record<string, { label: string; next?: string; nextLabel?: string; color: (t: any) => string }> = {
-  new: { label: 'Новый', next: 'in_progress', nextLabel: 'Принять', color: t => t.orange },
-  in_progress: { label: 'В работе', next: 'done', nextLabel: 'Готово', color: t => t.blue },
-  done: { label: 'Выдан', color: t => t.green },
-  cancelled: { label: 'Отменён', color: t => t.text3 },
+  new: { label: 'pe.osNew', next: 'in_progress', nextLabel: 'pe.osNewNext', color: t => t.orange },
+  in_progress: { label: 'pe.osInProgress', next: 'done', nextLabel: 'pe.osInProgressNext', color: t => t.blue },
+  done: { label: 'pe.osDone', color: t => t.green },
+  cancelled: { label: 'pe.osCancelled', color: t => t.text3 },
 }
 
 function OrdersInbox({ currency, accent, t, toast }: { currency: string; accent: string; t: any; toast: (m: string) => void }) {
+  const { t: tr } = useI18n()
   const [orders, setOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [seg, setSeg] = useState<'active' | 'done'>('active')
@@ -1222,10 +1233,10 @@ function OrdersInbox({ currency, accent, t, toast }: { currency: string; accent:
   const setStatus = async (o: any, status: string) => {
     setOrders(os => os.map(x => x.id === o.id ? { ...x, status } : x))
     await db.from('menu_orders').update({ status }).eq('id', o.id)
-    toast(ORDER_STATUS[status]?.label || 'Обновлено')
+    toast(tr(ORDER_STATUS[status]?.label || 'pe.updated'))
   }
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
 
   const active = orders.filter(o => o.status === 'new' || o.status === 'in_progress')
   const finished = orders.filter(o => o.status === 'done' || o.status === 'cancelled')
@@ -1234,15 +1245,15 @@ function OrdersInbox({ currency, accent, t, toast }: { currency: string; accent:
   return (
     <div>
       <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
-        {([['active', `Активные${active.length ? ` · ${active.length}` : ''}`], ['done', 'Завершённые']] as const).map(([id, label]) => (
+        {([['active', `${tr('pe.activeOrders')}${active.length ? ` · ${active.length}` : ''}`], ['done', tr('pe.finishedOrders')]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSeg(id)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: seg === id ? 700 : 500, cursor: 'pointer', background: seg === id ? t.surface : 'transparent', color: seg === id ? accent : t.text3, boxShadow: seg === id ? t.sh2 : 'none' }}>{label}</button>
         ))}
       </div>
 
       {list.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
-          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{seg === 'active' ? 'Активных заказов нет' : 'Пока пусто'}</div>
-          <div style={{ fontSize: 13, marginTop: 4 }}>Заказы из гостевого меню появятся здесь</div>
+          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{seg === 'active' ? tr('pe.noActiveOrders') : tr('pe.emptyYet')}</div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>{tr('pe.ordersAppearHere')}</div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1253,12 +1264,12 @@ function OrdersInbox({ currency, accent, t, toast }: { currency: string; accent:
               <div key={o.id} style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh, borderLeft: `3px solid ${t.orange}` }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 15, fontWeight: 700, color: t.text }}>Зовут официанта</span>
-                    {o.table_number && <span style={{ fontSize: 13, fontWeight: 800, color: '#fff', background: t.orange, padding: '3px 10px', borderRadius: 8 }}>Стол {o.table_number}</span>}
+                    <span style={{ fontSize: 15, fontWeight: 700, color: t.text }}>{tr('pe.callingWaiter')}</span>
+                    {o.table_number && <span style={{ fontSize: 13, fontWeight: 800, color: '#fff', background: t.orange, padding: '3px 10px', borderRadius: 8 }}>{tr('pe.table', { n: o.table_number })}</span>}
                     <span style={{ fontSize: 12, color: t.text3 }}>{new Date(o.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
                   {(o.status === 'new' || o.status === 'in_progress')
-                    ? <button onClick={() => setStatus(o, 'done')} style={{ ...btnB2(t), background: accent, color: '#fff' }}>Иду</button>
+                    ? <button onClick={() => setStatus(o, 'done')} style={{ ...btnB2(t), background: accent, color: '#fff' }}>{tr('pe.coming')}</button>
                     : <span style={{ fontSize: 11, fontWeight: 700, color: t.green }}>✓</span>}
                 </div>
               </div>
@@ -1267,10 +1278,10 @@ function OrdersInbox({ currency, accent, t, toast }: { currency: string; accent:
               <div key={o.id} style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {o.table_number && <span style={{ fontSize: 13, fontWeight: 800, color: '#fff', background: accent, padding: '3px 10px', borderRadius: 8 }}>Стол {o.table_number}</span>}
+                    {o.table_number && <span style={{ fontSize: 13, fontWeight: 800, color: '#fff', background: accent, padding: '3px 10px', borderRadius: 8 }}>{tr('pe.table', { n: o.table_number })}</span>}
                     <span style={{ fontSize: 12, color: t.text3 }}>{new Date(o.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: st.color(t), background: `${st.color(t)}1a`, padding: '3px 9px', borderRadius: 8 }}>{st.label}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: st.color(t), background: `${st.color(t)}1a`, padding: '3px 9px', borderRadius: 8 }}>{tr(st.label)}</span>
                 </div>
                 {(Array.isArray(o.items) ? o.items : []).map((it: any, i: number) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, color: t.text, padding: '3px 0' }}>
@@ -1281,8 +1292,8 @@ function OrdersInbox({ currency, accent, t, toast }: { currency: string; accent:
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTop: `0.5px solid ${t.sep2}` }}>
                   <span style={{ fontSize: 15, fontWeight: 800, color: t.text }}>{Number(o.total || 0).toFixed(2)} {currency}</span>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    {o.status === 'new' && <button onClick={() => setStatus(o, 'cancelled')} style={btnB2(t)}>Отменить</button>}
-                    {st.next && <button onClick={() => setStatus(o, st.next!)} style={{ ...btnB2(t), background: accent, color: '#fff' }}>{st.nextLabel}</button>}
+                    {o.status === 'new' && <button onClick={() => setStatus(o, 'cancelled')} style={btnB2(t)}>{tr('pe.cancel')}</button>}
+                    {st.next && <button onClick={() => setStatus(o, st.next!)} style={{ ...btnB2(t), background: accent, color: '#fff' }}>{tr(st.nextLabel)}</button>}
                   </div>
                 </div>
               </div>
@@ -1298,16 +1309,17 @@ function OrdersInbox({ currency, accent, t, toast }: { currency: string; accent:
 
 // Цеха для чек-листов (role=null → общий, виден всем).
 const CHECKLIST_ROLES: { val: string | null; label: string }[] = [
-  { val: null, label: 'Общий (все)' },
-  { val: 'kitchen', label: 'Кухня' },
-  { val: 'bar', label: 'Бар' },
-  { val: 'hookah', label: 'Кальянная' },
-  { val: 'waiter', label: 'Официанты' },
-  { val: 'host', label: 'Хостес' },
-  { val: 'cleaner', label: 'Уборка' },
+  { val: null, label: 'pe.clAll' },
+  { val: 'kitchen', label: 'pe.roleKitchen' },
+  { val: 'bar', label: 'pe.roleBar' },
+  { val: 'hookah', label: 'pe.roleHookah' },
+  { val: 'waiter', label: 'pe.clWaiter' },
+  { val: 'host', label: 'pe.roleHost' },
+  { val: 'cleaner', label: 'pe.roleCleaner' },
 ]
 
 function ChecklistsView({ isManager, myId, myRole, accent, t, toast }: { isManager: boolean; myId: string; myRole?: string; accent: string; t: any; toast: (m: string) => void }) {
+  const { t: tr } = useI18n()
   const today = fmtDate(new Date())
   const [type, setType] = useState<'open' | 'close'>('open')
   const [lists, setLists] = useState<any[]>([])         // shift_checklists (шаблоны open/close × цех)
@@ -1345,37 +1357,37 @@ function ChecklistsView({ isManager, myId, myRole, accent, t, toast }: { isManag
       await db.from('shift_checklist_completions').insert({ checklist_id: list.id, date: today, staff_id: myId === 'owner' || !myId ? null : myId, items_state: next, completed_at: allDone ? new Date().toISOString() : null })
       await load() // получить id созданной записи
     }
-    if (allDone) toast(type === 'open' ? 'Зал открыт — всё готово' : 'Закрытие завершено')
+    if (allDone) toast(type === 'open' ? tr('pe.openDone') : tr('pe.closeDone'))
   }
 
   const saveTemplate = async () => {
     if (!editing) return
     const clean = editing.items.map(s => s.trim()).filter(Boolean)
-    if (clean.length === 0) { toast('Добавьте хотя бы один пункт'); return }
+    if (clean.length === 0) { toast(tr('pe.addAtLeastOneItem')); return }
     setSaving(true)
     if (editing.id) await db.from('shift_checklists').update({ items: clean, role: editing.role }).eq('id', editing.id)
     else await db.from('shift_checklists').insert({ type, items: clean, role: editing.role })
-    setSaving(false); setEditing(null); toast('Чек-лист сохранён'); await load()
+    setSaving(false); setEditing(null); toast(tr('pe.checklistSaved')); await load()
   }
   const removeList = async (id: string) => {
     setLists(ls => ls.filter(l => l.id !== id))
     await db.from('shift_checklists').delete().eq('id', id)
   }
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
 
   return (
     <div>
       <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
-        {([['open', 'Открытие'], ['close', 'Закрытие']] as const).map(([id, label]) => (
+        {([['open', tr('pe.opening')], ['close', tr('pe.closing')]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setType(id)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: type === id ? 700 : 500, cursor: 'pointer', background: type === id ? t.surface : 'transparent', color: type === id ? accent : t.text3, boxShadow: type === id ? t.sh2 : 'none' }}>{label}</button>
         ))}
       </div>
 
       {relevant.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
-          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Чек-лист не настроен</div>
-          <div style={{ fontSize: 13, marginTop: 4 }}>{isManager ? 'Добавьте пункты — команда будет отмечать их каждый день' : 'Менеджер ещё не добавил пункты'}</div>
+          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.checklistNotSet')}</div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>{isManager ? tr('pe.checklistManagerHint') : tr('pe.checklistStaffHint')}</div>
         </div>
       ) : relevant.map(list => {
         const items: string[] = Array.isArray(list.items) ? list.items : []
@@ -1385,12 +1397,12 @@ function ChecklistsView({ isManager, myId, myRole, accent, t, toast }: { isManag
         return (
           <div key={list.id} style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 10px', gap: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: list.role ? accent : t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{list.role ? roleLabel(list.role) : 'Общий'} · {doneCount}/{items.length}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: list.role ? accent : t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{list.role ? tr(roleLabel(list.role)) : tr('pe.general')} · {doneCount}/{items.length}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {doneCount === items.length && items.length > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: t.green, background: `${t.green}1a`, padding: '3px 9px', borderRadius: 8 }}>ГОТОВО</span>}
+                {doneCount === items.length && items.length > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: t.green, background: `${t.green}1a`, padding: '3px 9px', borderRadius: 8 }}>{tr('pe.doneCaps')}</span>}
                 {isManager && (
                   <>
-                    <button onClick={() => setEditing({ id: list.id, role: list.role ?? null, items: items.length ? [...items] : [''] })} style={{ background: 'none', border: 'none', color: accent, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, padding: 0 }}>Изменить</button>
+                    <button onClick={() => setEditing({ id: list.id, role: list.role ?? null, items: items.length ? [...items] : [''] })} style={{ background: 'none', border: 'none', color: accent, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, padding: 0 }}>{tr('pe.edit')}</button>
                     <button onClick={() => removeList(list.id)} style={{ background: 'none', border: 'none', color: t.text4, cursor: 'pointer', padding: 0, display: 'flex' }}>
                       <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /></svg>
                     </button>
@@ -1414,27 +1426,27 @@ function ChecklistsView({ isManager, myId, myRole, accent, t, toast }: { isManag
 
       {isManager && (
         <button onClick={() => setEditing({ role: null, items: [''] })} style={{ width: '100%', padding: '13px', borderRadius: 14, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: accent, fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer', marginTop: 4 }}>
-          + Чек-лист для цеха
+          {tr('pe.addChecklistForRole')}
         </button>
       )}
 
       {editing != null && (
         <Sheet onClose={() => setEditing(null)} t={t}>
           <div style={{ padding: '14px 20px 32px' }}>
-            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 18 }}>{type === 'open' ? 'Чек-лист открытия' : 'Чек-лист закрытия'}</div>
-            <label style={lbl(t)}>Цех</label>
+            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 18 }}>{type === 'open' ? tr('pe.checklistOpenTitle') : tr('pe.checklistCloseTitle')}</div>
+            <label style={lbl(t)}>{tr('pe.workshop')}</label>
             <select value={editing.role ?? ''} onChange={e => setEditing(ed => ({ ...ed!, role: e.target.value || null }))} style={inp(t)}>
-              {CHECKLIST_ROLES.map(r => <option key={r.val ?? 'all'} value={r.val ?? ''}>{r.label}</option>)}
+              {CHECKLIST_ROLES.map(r => <option key={r.val ?? 'all'} value={r.val ?? ''}>{tr(r.label)}</option>)}
             </select>
             {editing.items.map((v, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                <input value={v} onChange={e => setEditing(ed => ({ ...ed!, items: ed!.items.map((x, j) => j === i ? e.target.value : x) }))} placeholder={`Пункт ${i + 1}`} style={{ ...inp(t), marginBottom: 0, flex: 1 }} />
+                <input value={v} onChange={e => setEditing(ed => ({ ...ed!, items: ed!.items.map((x, j) => j === i ? e.target.value : x) }))} placeholder={tr('pe.itemN', { n: i + 1 })} style={{ ...inp(t), marginBottom: 0, flex: 1 }} />
                 <button onClick={() => setEditing(ed => ({ ...ed!, items: ed!.items.filter((_, j) => j !== i) }))} style={{ width: 44, borderRadius: 12, border: 'none', background: `${t.red}14`, color: t.red, cursor: 'pointer', fontSize: 18, fontFamily: 'inherit' }}>−</button>
               </div>
             ))}
-            <button onClick={() => setEditing(ed => ({ ...ed!, items: [...ed!.items, ''] }))} style={{ width: '100%', padding: '11px', borderRadius: 12, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: t.text3, fontFamily: 'inherit', fontSize: 14, cursor: 'pointer', marginBottom: 14 }}>+ Добавить пункт</button>
+            <button onClick={() => setEditing(ed => ({ ...ed!, items: [...ed!.items, ''] }))} style={{ width: '100%', padding: '11px', borderRadius: 12, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: t.text3, fontFamily: 'inherit', fontSize: 14, cursor: 'pointer', marginBottom: 14 }}>{tr('pe.addItem')}</button>
             <button onClick={saveTemplate} disabled={saving} style={{ width: '100%', padding: '15px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${accent}44` }}>
-              {saving ? '...' : 'Сохранить'}
+              {saving ? '...' : tr('pe.save')}
             </button>
           </div>
         </Sheet>
@@ -1445,9 +1457,10 @@ function ChecklistsView({ isManager, myId, myRole, accent, t, toast }: { isManag
 
 // ── TECH CARDS (технологички) ────────────────────────────────────────────────────
 
-const TC_CAT: Record<string, string> = { dish: 'Блюдо', prep: 'Заготовка', stoplist: 'Прочее' }
+const TC_CAT: Record<string, string> = { dish: 'pe.tcDish', prep: 'pe.tcPrep', stoplist: 'pe.tcOther' }
 
 function TechCardsView({ isManager, accent, t, toast }: { isManager: boolean; accent: string; t: any; toast: (m: string) => void }) {
+  const { t: tr } = useI18n()
   const [cards, setCards] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState<string | null>(null)
@@ -1461,32 +1474,32 @@ function TechCardsView({ isManager, accent, t, toast }: { isManager: boolean; ac
   useEffect(() => { load() }, [])
 
   const save = async () => {
-    if (!edit || !edit.name.trim()) { toast('Укажите название'); return }
+    if (!edit || !edit.name.trim()) { toast(tr('pe.enterName')); return }
     const clean = edit.items.map(s => s.trim()).filter(Boolean)
     setSaving(true)
     if (edit.id) await db.from('tech_cards').update({ name: edit.name.trim(), category: edit.category, items: clean }).eq('id', edit.id)
     else await db.from('tech_cards').insert({ name: edit.name.trim(), category: edit.category, items: clean })
-    setSaving(false); setEdit(null); toast('Сохранено'); await load()
+    setSaving(false); setEdit(null); toast(tr('pe.saved')); await load()
   }
   const remove = async (id: string) => {
     setCards(cs => cs.filter(c => c.id !== id))
     await db.from('tech_cards').update({ is_active: false }).eq('id', id)
   }
 
-  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>Загрузка...</div>
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
 
   return (
     <div>
       {isManager && (
         <button onClick={() => setEdit({ name: '', category: 'dish', items: [''] })} style={{ width: '100%', padding: '14px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', marginBottom: 16, boxShadow: `0 4px 16px ${accent}44` }}>
-          + Новая технологичка
+          {tr('pe.newTechCard')}
         </button>
       )}
 
       {cards.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
-          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Технологичек нет</div>
-          <div style={{ fontSize: 13, marginTop: 4 }}>{isManager ? 'Создайте карту блюда или заготовки' : 'Менеджер ещё не добавил карты'}</div>
+          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.noTechCards')}</div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>{isManager ? tr('pe.techCardManagerHint') : tr('pe.techCardStaffHint')}</div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1498,7 +1511,7 @@ function TechCardsView({ isManager, accent, t, toast }: { isManager: boolean; ac
                 <button onClick={() => setOpen(opened ? null : c.id)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{c.name}</div>
-                    <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{TC_CAT[c.category] || c.category} · {items.length} шагов</div>
+                    <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{TC_CAT[c.category] ? tr(TC_CAT[c.category]) : c.category} · {items.length} {tr('pe.stepsWord')}</div>
                   </div>
                   <svg width="14" height="14" fill="none" stroke={t.text3} strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 24 24" style={{ transform: opened ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}><path d="M6 9l6 6 6-6" /></svg>
                 </button>
@@ -1512,8 +1525,8 @@ function TechCardsView({ isManager, accent, t, toast }: { isManager: boolean; ac
                     ))}
                     {isManager && (
                       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                        <button onClick={() => setEdit({ id: c.id, name: c.name, category: c.category, items: items.length ? [...items] : [''] })} style={btnB2(t)}>Изменить</button>
-                        <button onClick={() => remove(c.id)} style={{ ...btnB2(t), color: t.red, background: `${t.red}14` }}>Удалить</button>
+                        <button onClick={() => setEdit({ id: c.id, name: c.name, category: c.category, items: items.length ? [...items] : [''] })} style={btnB2(t)}>{tr('pe.edit')}</button>
+                        <button onClick={() => remove(c.id)} style={{ ...btnB2(t), color: t.red, background: `${t.red}14` }}>{tr('pe.delete')}</button>
                       </div>
                     )}
                   </div>
@@ -1527,22 +1540,22 @@ function TechCardsView({ isManager, accent, t, toast }: { isManager: boolean; ac
       {edit && (
         <Sheet onClose={() => setEdit(null)} t={t}>
           <div style={{ padding: '14px 20px 32px' }}>
-            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 18 }}>{edit.id ? 'Изменить технологичку' : 'Новая технологичка'}</div>
-            <input value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} placeholder="Название (например: Бургер классический)" autoFocus style={inp(t)} />
-            <label style={lbl(t)}>Тип</label>
+            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 18 }}>{edit.id ? tr('pe.editTechCard') : tr('pe.newTechCardTitle')}</div>
+            <input value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} placeholder={tr('pe.techNamePh')} autoFocus style={inp(t)} />
+            <label style={lbl(t)}>{tr('pe.type')}</label>
             <select value={edit.category} onChange={e => setEdit({ ...edit, category: e.target.value })} style={inp(t)}>
-              {Object.entries(TC_CAT).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              {Object.entries(TC_CAT).map(([k, v]) => <option key={k} value={k}>{tr(v)}</option>)}
             </select>
-            <label style={lbl(t)}>Шаги / состав</label>
+            <label style={lbl(t)}>{tr('pe.stepsLabel')}</label>
             {edit.items.map((v, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                <input value={v} onChange={e => setEdit(ed => ({ ...ed!, items: ed!.items.map((x, j) => j === i ? e.target.value : x) }))} placeholder={`Шаг ${i + 1}`} style={{ ...inp(t), marginBottom: 0, flex: 1 }} />
+                <input value={v} onChange={e => setEdit(ed => ({ ...ed!, items: ed!.items.map((x, j) => j === i ? e.target.value : x) }))} placeholder={tr('pe.stepN', { n: i + 1 })} style={{ ...inp(t), marginBottom: 0, flex: 1 }} />
                 <button onClick={() => setEdit(ed => ({ ...ed!, items: ed!.items.filter((_, j) => j !== i) }))} style={{ width: 44, borderRadius: 12, border: 'none', background: `${t.red}14`, color: t.red, cursor: 'pointer', fontSize: 18, fontFamily: 'inherit' }}>−</button>
               </div>
             ))}
-            <button onClick={() => setEdit(ed => ({ ...ed!, items: [...ed!.items, ''] }))} style={{ width: '100%', padding: '11px', borderRadius: 12, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: t.text3, fontFamily: 'inherit', fontSize: 14, cursor: 'pointer', marginBottom: 14 }}>+ Добавить шаг</button>
+            <button onClick={() => setEdit(ed => ({ ...ed!, items: [...ed!.items, ''] }))} style={{ width: '100%', padding: '11px', borderRadius: 12, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: t.text3, fontFamily: 'inherit', fontSize: 14, cursor: 'pointer', marginBottom: 14 }}>{tr('pe.addStep')}</button>
             <button onClick={save} disabled={saving} style={{ width: '100%', padding: '15px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${accent}44` }}>
-              {saving ? '...' : 'Сохранить'}
+              {saving ? '...' : tr('pe.save')}
             </button>
           </div>
         </Sheet>
@@ -1554,6 +1567,7 @@ function TechCardsView({ isManager, accent, t, toast }: { isManager: boolean; ac
 // ── OPS TAB («Зал»: стоп-лист / заказы / чек-листы / техкарты) ──────────────────
 
 function OpsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boolean; accent: string; t: any; toast: (m: string) => void }) {
+  const { t: tr } = useI18n()
   const [view, setView] = useState<'stop' | 'orders' | 'check' | 'tech'>('stop')
   const [currency, setCurrency] = useState('€')
   const [ordersEnabled, setOrdersEnabled] = useState(false)
@@ -1572,10 +1586,10 @@ function OpsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boole
   const canStop = isManager || me.role === 'kitchen' // стоп ставят кухня и менеджер
   const canTech = isManager || me.role === 'kitchen' || me.role === 'bar' // техкарты — кухне/бару (не официанту/кальянщику)
   const VIEWS = [
-    { id: 'stop', label: 'Стоп-лист' },
-    ...(ordersEnabled ? [{ id: 'orders', label: 'Заказы' }] : []),
-    { id: 'check', label: 'Чек-листы' },
-    ...(canTech ? [{ id: 'tech', label: 'Техкарты' }] : []),
+    { id: 'stop', label: tr('pe.vStop') },
+    ...(ordersEnabled ? [{ id: 'orders', label: tr('pe.vOrders') }] : []),
+    { id: 'check', label: tr('pe.vChecklists') },
+    ...(canTech ? [{ id: 'tech', label: tr('pe.vTech') }] : []),
   ] as const
 
   return (
@@ -1611,7 +1625,7 @@ function navBtn(t: any): React.CSSProperties {
   return { width: 36, height: 36, borderRadius: '50%', background: t.fill, border: 'none', color: t.text, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }
 }
 function roleLabel(role?: string) {
-  const m: Record<string, string> = { kitchen: 'Кухня', bar: 'Бар', hookah: 'Кальянная', waiter: 'Официант', manager: 'Менеджер', host: 'Хостес', cleaner: 'Уборка', admin: 'Админ' }
+  const m: Record<string, string> = { kitchen: 'pe.roleKitchen', bar: 'pe.roleBar', hookah: 'pe.roleHookah', waiter: 'pe.roleWaiter', manager: 'pe.roleManager', host: 'pe.roleHost', cleaner: 'pe.roleCleaner', admin: 'pe.roleAdmin' }
   return role ? (m[role] || role) : '—'
 }
 
@@ -1619,11 +1633,12 @@ function roleLabel(role?: string) {
 // IA: вместо трёх вкладок в баре — один раздел с внутренним сегментом. «Я пришёл»
 // (чек-ин) живёт в «Явке», обмены сменами — рядом, расписание/мои смены — основной вид.
 function ShiftsHub({ me, isManager, restaurantId, accent, t, toast }: { me: any; isManager: boolean; restaurantId: string; accent: string; t: any; toast: (m: string) => void }) {
+  const { t: tr } = useI18n()
   const [view, setView] = useState<'shifts' | 'attendance' | 'swaps'>('shifts')
   const views: [string, string][] = [
-    ['shifts', isManager ? 'Расписание' : 'Мои смены'],
-    ['attendance', 'Явка'],
-    ['swaps', 'Обмены'],
+    ['shifts', isManager ? tr('pe.schedule') : tr('pe.myShifts')],
+    ['attendance', tr('pe.attendance')],
+    ['swaps', tr('pe.swaps')],
   ]
   return (
     <div>
@@ -1644,6 +1659,7 @@ function ShiftsHub({ me, isManager, restaurantId, accent, t, toast }: { me: any;
 // ── MAIN ─────────────────────────────────────────────────────────────────────────
 
 function PeopleApp({ restaurantId }: { restaurantId: string }) {
+  const { t: tr } = useI18n()
   const router = useRouter()
   const t = useTheme('mise_people_dark')
   const accent = t.dark ? '#5e5ce6' : '#5856d6'
@@ -1681,10 +1697,10 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
   // Первый таб зависит от роли; «Зал» (стоп-лист/заказы/чек-листы/техкарты) — у всех.
   // Уведомления переехали в колокольчик хедера.
   const TABS = [
-    { id: 'shifts', label: isManager ? 'Расписание' : 'Смены', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },
-    { id: 'tasks', label: 'Задачи', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /><path d="M9 13l2 2 4-4" /></svg> },
-    { id: 'ops', label: 'Зал', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M3 9l1.2-5h15.6L21 9" /><path d="M4 9v11a1 1 0 001 1h14a1 1 0 001-1V9" /><path d="M3 9h18" /><path d="M9 21v-6h6v6" /></svg> },
-    { id: 'salary', label: 'Зарплата', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="2" y="6" width="20" height="13" rx="2.5" /><path d="M2 10h20" /><circle cx="17.5" cy="14.5" r="1.4" fill="currentColor" stroke="none" /></svg> },
+    { id: 'shifts', label: isManager ? tr('pe.schedule') : tr('pe.shiftsTab'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },
+    { id: 'tasks', label: tr('pe.tasks'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /><path d="M9 13l2 2 4-4" /></svg> },
+    { id: 'ops', label: tr('pe.hall'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M3 9l1.2-5h15.6L21 9" /><path d="M4 9v11a1 1 0 001 1h14a1 1 0 001-1V9" /><path d="M3 9h18" /><path d="M9 21v-6h6v6" /></svg> },
+    { id: 'salary', label: tr('pe.salaryTab'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="2" y="6" width="20" height="13" rx="2.5" /><path d="M2 10h20" /><circle cx="17.5" cy="14.5" r="1.4" fill="currentColor" stroke="none" /></svg> },
   ]
 
   return (
@@ -1729,7 +1745,7 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
       {showNotif && me.id && (
         <Sheet onClose={() => { setShowNotif(false); setUnread(0) }} t={t}>
           <div style={{ padding: '14px 16px 32px' }}>
-            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 16 }}>Уведомления</div>
+            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 16 }}>{tr('pe.notifications')}</div>
             <NotificationsTab myId={me.id} accent={accent} t={t} />
           </div>
         </Sheet>
