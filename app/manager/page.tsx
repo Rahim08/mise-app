@@ -9,6 +9,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
 import { AppLoading } from '@/components/AppLoading'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
+import { useI18n } from '@/lib/i18n'
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -20,7 +21,6 @@ function fmtDate(d: Date) {
 function displayDate(d: Date) {
   return String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear()
 }
-const DOW = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
 
 // ── ICONS ─────────────────────────────────────────────────────────────────────
 
@@ -73,6 +73,7 @@ function SRow({ label, value, color, bold, t }: { label: string; value: string; 
 function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const router = useRouter()
   const t = useTheme()
+  const { t: tr, locale } = useI18n()
   const [currentDate, setCurrentDate] = useState(new Date())
   const [shift, setShift] = useState<Shift | null>(null)
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -163,7 +164,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
 
   const changeDate = async (dir: number) => {
     // Auto-save the current day before leaving so nothing entered is lost.
-    if (shift && !locked) { try { await persistShift() } catch (e: any) { showToast('Ошибка автосохранения: ' + (e?.message || '')) } }
+    if (shift && !locked) { try { await persistShift() } catch (e: any) { showToast(tr('mg.autosaveErr') + ': ' + (e?.message || '')) } }
     const d = new Date(currentDate); d.setDate(d.getDate() + dir)
     setCurrentDate(d)
     await loadDay(restaurantId, d, employees, categories)
@@ -186,12 +187,12 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       if (sh) {
         setShift({ ...sh, opening_balance: openingBalance })
         await loadAbsencesByDate(restaurantId, fmtDate(currentDate)) // подтянуть авто-прогулы дня
-        showToast('Смена открыта')
+        showToast(tr('mg.shiftOpened'))
       } else if (error?.code === '23505') {
         // Shift already exists — reload it
         await loadDay(restaurantId, currentDate, employees, categories)
       } else if (error) {
-        showToast('Ошибка: ' + error.message)
+        showToast(tr('mg.err') + ': ' + error.message)
       }
     } finally {
       setSaving(false)
@@ -271,15 +272,17 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const saveShift = async () => {
     if (!shift) return
     setSaving(true)
-    try { await persistShift() } catch (e: any) { showToast('Ошибка: ' + (e?.message || 'не сохранилось')); setSaving(false); return }
+    try { await persistShift() } catch (e: any) { showToast(tr('mg.err') + ': ' + (e?.message || tr('mg.notSaved'))); setSaving(false); return }
     setShowSummary(false)
     setLocked(true)
-    showToast('Смена сохранена')
+    showToast(tr('mg.shiftSaved'))
     setSaving(false)
   }
 
   const { inc, card, ink, totalExp, balance, opening, salary, inkNet } = calc()
   const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
+  const dowRaw = currentDate.toLocaleDateString(locale, { weekday: 'long' })
+  const dowName = dowRaw.charAt(0).toUpperCase() + dowRaw.slice(1)
 
   if (!mounted || (loading && employees.length === 0)) return <AppLoading app="manager" bg={t.bg} fill={t.fill} accent={t.blue} />
 
@@ -312,7 +315,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
               background: shift.status === 'open' ? `${t.green}22` : t.fill2,
               color: shift.status === 'open' ? t.green : t.text3, fontWeight: 600,
             }}>
-              {shift.status === 'open' ? 'Открыта' : 'Закрыта'}
+              {shift.status === 'open' ? tr('mg.statusOpen') : tr('mg.statusClosed')}
             </span>
           )}
           <button
@@ -334,7 +337,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
             </button>
             <div style={{ flex: 1, textAlign: 'center' }}>
               <div style={{ fontWeight: 700, fontSize: 17, color: t.text }}>{displayDate(currentDate)}</div>
-              <div style={{ fontSize: 13, color: t.blue, marginTop: 2, fontWeight: 500 }}>{DOW[currentDate.getDay()]} · День {currentDate.getDate()} из {daysInMonth}</div>
+              <div style={{ fontSize: 13, color: t.blue, marginTop: 2, fontWeight: 500 }}>{dowName} · {tr('mg.dayOf', { n: currentDate.getDate(), m: daysInMonth })}</div>
             </div>
             <button onClick={() => changeDate(1)} style={{ width: 40, height: 40, borderRadius: '50%', background: t.fill, border: 'none', fontSize: 20, color: t.text, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <svg width="10" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 10 18"><path d="M2 1l7 8-7 8" /></svg>
@@ -348,10 +351,10 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                   <circle cx="12" cy="12" r="10" /><path d="M12 8v4l3 3" />
                 </svg>
               </div>
-              <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8, color: t.text }}>Смена не открыта</div>
-              <div style={{ color: t.text3, fontSize: 14, marginBottom: 28 }}>Нажмите чтобы начать рабочий день</div>
+              <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 8, color: t.text }}>{tr('mg.emptyTitle')}</div>
+              <div style={{ color: t.text3, fontSize: 14, marginBottom: 28 }}>{tr('mg.emptySub')}</div>
               <button onClick={openShift} disabled={saving} style={{ padding: '16px 40px', borderRadius: 16, background: t.blue, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${t.blue}44` }}>
-                Открыть смену
+                {tr('mg.openShift')}
               </button>
             </div>
           ) : (
@@ -361,12 +364,12 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                 <div style={{ position: 'absolute', inset: -6, zIndex: 60, background: t.dark ? 'rgba(0,0,0,0.30)' : 'rgba(242,242,247,0.45)', backdropFilter: 'blur(2.5px)', WebkitBackdropFilter: 'blur(2.5px)', borderRadius: 18, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: 18 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: t.surface, borderRadius: 980, padding: '9px 18px', boxShadow: '0 4px 20px rgba(0,0,0,0.18)' }}>
                     <svg width="14" height="14" fill="none" stroke={t.green} strokeWidth="2.2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: t.text }}>Смена сохранена</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: t.text }}>{tr('mg.shiftSaved')}</span>
                   </div>
                 </div>
               )}
               {/* СОТРУДНИКИ */}
-              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Сотрудники</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('mg.secStaff')}</div>
               <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
                 {employees.map((emp, i) => {
                   const absent = absences.includes(emp.id)
@@ -376,7 +379,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                     <div key={emp.id} style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 10, borderBottom: i < employees.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
                       <div style={{ flex: 1, fontSize: 15, color: absent ? t.text4 : t.text, textDecoration: absent ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 7 }}>
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{emp.name}</span>
-                        {isAuto && absent && <span title="Авто-прогул по геоконтролю. Проверьте и сохраните смену." style={{ fontSize: 9, fontWeight: 800, color: t.orange, background: `${t.orange}1a`, padding: '2px 6px', borderRadius: 6, textTransform: 'uppercase', letterSpacing: 0.3, flexShrink: 0, textDecoration: 'none' }}>авто</span>}
+                        {isAuto && absent && <span title={tr('mg.autoTitle')} style={{ fontSize: 9, fontWeight: 800, color: t.orange, background: `${t.orange}1a`, padding: '2px 6px', borderRadius: 6, textTransform: 'uppercase', letterSpacing: 0.3, flexShrink: 0, textDecoration: 'none' }}>{tr('mg.auto')}</span>}
                       </div>
                       <input type="number" value={extra}
                         onChange={e => setEmpExtras({ ...empExtras, [emp.id]: e.target.value })}
@@ -402,7 +405,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
               </div>
 
               {/* РАСХОДЫ */}
-              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Расходы дня</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('mg.secExpenses')}</div>
               <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
                 {categories.map((cat, i) => {
                   const val = catAmounts[cat.id] || ''
@@ -426,7 +429,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                         <div style={{ padding: '4px 16px 10px', borderBottom: i < categories.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
                           <input value={catNotes[cat.id] || ''}
                             onChange={e => setCatNotes({ ...catNotes, [cat.id]: e.target.value })}
-                            placeholder="Комментарий..."
+                            placeholder={tr('mg.phComment')}
                             style={{ width: '100%', padding: '8px 12px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: 13, color: t.text3, fontFamily: 'inherit', outline: 'none', background: t.fill2 }}
                           />
                         </div>
@@ -437,30 +440,30 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
               </div>
 
               {/* ИНКАССАЦИЯ */}
-              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Инкассация</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('mg.secCollection')}</div>
               <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `0.5px solid ${t.sep2}` }}>
-                  <div style={{ fontSize: 15, color: t.text }}>Сумма</div>
+                  <div style={{ fontSize: 15, color: t.text }}>{tr('mg.inkSum')}</div>
                   <input type="number" value={inkSum} onChange={e => setInkSum(e.target.value)} placeholder="€ 0"
                     style={{ width: 130, textAlign: 'right', padding: '8px 10px', border: 'none', borderRadius: 10, fontSize: 14, fontFamily: 'inherit', outline: 'none', background: parseFloat(inkSum) > 0 ? `${t.blue}14` : t.fill, color: parseFloat(inkSum) > 0 ? t.blue : t.text, fontWeight: parseFloat(inkSum) > 0 ? 600 : 400 }}
                   />
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `0.5px solid ${t.sep2}` }}>
-                  <div style={{ fontSize: 15, color: t.text }}>Расход</div>
+                  <div style={{ fontSize: 15, color: t.text }}>{tr('mg.expense')}</div>
                   <input type="number" value={inkExpense} onChange={e => setInkExpense(e.target.value)} placeholder="€ 0"
                     style={{ width: 130, textAlign: 'right', padding: '8px 10px', border: 'none', borderRadius: 10, fontSize: 14, fontFamily: 'inherit', outline: 'none', background: parseFloat(inkExpense) > 0 ? `${t.red}14` : t.fill, color: parseFloat(inkExpense) > 0 ? t.red : t.text, fontWeight: parseFloat(inkExpense) > 0 ? 600 : 400 }}
                   />
                 </div>
                 <div style={{ padding: '10px 16px 12px', borderBottom: `0.5px solid ${t.sep2}` }}>
-                  <div style={{ fontSize: 12, color: t.text3, fontWeight: 500, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.3 }}>Причина</div>
-                  <input value={inkReason} onChange={e => setInkReason(e.target.value)} placeholder="Опишите назначение..."
+                  <div style={{ fontSize: 12, color: t.text3, fontWeight: 500, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.3 }}>{tr('mg.inkReason')}</div>
+                  <input value={inkReason} onChange={e => setInkReason(e.target.value)} placeholder={tr('mg.phPurpose')}
                     style={{ width: '100%', padding: '10px 12px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 14, color: t.text, fontFamily: 'inherit', outline: 'none', background: inkReason ? t.fill2 : t.fill2 }}
                   />
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `0.5px solid ${t.sep2}` }}>
                   <div>
-                    <div style={{ fontSize: 15, color: t.text }}>Выплата зарплаты</div>
-                    <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>вычитается из инкассации</div>
+                    <div style={{ fontSize: 15, color: t.text }}>{tr('mg.inkSalary')}</div>
+                    <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>{tr('mg.inkSalaryHint')}</div>
                   </div>
                   <input type="number" value={inkSalary} onChange={e => setInkSalary(e.target.value)} placeholder="€ 0"
                     style={{ width: 130, textAlign: 'right', padding: '8px 10px', border: 'none', borderRadius: 10, fontSize: 14, fontFamily: 'inherit', outline: 'none', background: salary > 0 ? `${t.purple}14` : t.fill, color: salary > 0 ? t.purple : t.text, fontWeight: salary > 0 ? 600 : 400 }}
@@ -468,33 +471,33 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                 </div>
                 {salary > 0 && (
                   <div style={{ padding: '4px 16px 12px', borderBottom: `0.5px solid ${t.sep2}` }}>
-                    <input value={inkSalaryNote} onChange={e => setInkSalaryNote(e.target.value)} placeholder="Кому выплачено..."
+                    <input value={inkSalaryNote} onChange={e => setInkSalaryNote(e.target.value)} placeholder={tr('mg.phPaidTo')}
                       style={{ width: '100%', padding: '8px 12px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: 13, color: t.text3, fontFamily: 'inherit', outline: 'none', background: t.fill2 }}
                     />
                   </div>
                 )}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: `${t.orange}12` }}>
                   <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: t.orange }}>Итог инкассации</div>
-                    {(parseFloat(inkExpense) > 0 || salary > 0) && <div style={{ fontSize: 11, color: t.orange, opacity: 0.7, marginTop: 2 }}>после расхода и зарплаты</div>}
+                    <div style={{ fontSize: 14, fontWeight: 600, color: t.orange }}>{tr('mg.inkNet')}</div>
+                    {(parseFloat(inkExpense) > 0 || salary > 0) && <div style={{ fontSize: 11, color: t.orange, opacity: 0.7, marginTop: 2 }}>{tr('mg.inkNetHint')}</div>}
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 700, color: t.orange }}>€{fv(inkNet)}</div>
                 </div>
               </div>
 
               {/* КАССА */}
-              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Касса</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('mg.secRegister')}</div>
               <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `0.5px solid ${t.sep2}` }}>
-                  <div style={{ fontSize: 15, color: t.text }}>Наличные</div>
+                  <div style={{ fontSize: 15, color: t.text }}>{tr('mg.cash')}</div>
                   <input type="number" value={income} onChange={e => setIncome(e.target.value)} placeholder="€ 0"
                     style={{ width: 130, textAlign: 'right', padding: '8px 10px', border: 'none', borderRadius: 10, fontSize: 14, fontFamily: 'inherit', outline: 'none', background: parseFloat(income) > 0 ? `${t.green}14` : t.fill, color: parseFloat(income) > 0 ? t.green : t.text, fontWeight: parseFloat(income) > 0 ? 600 : 400 }}
                   />
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `0.5px solid ${t.sep2}` }}>
                   <div>
-                    <div style={{ fontSize: 15, color: t.text }}>Безнал · карта</div>
-                    <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>в кассу не входит</div>
+                    <div style={{ fontSize: 15, color: t.text }}>{tr('mg.cardLine')}</div>
+                    <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>{tr('mg.cardHint')}</div>
                   </div>
                   <input type="number" value={incomeCard} onChange={e => setIncomeCard(e.target.value)} placeholder="€ 0"
                     style={{ width: 130, textAlign: 'right', padding: '8px 10px', border: 'none', borderRadius: 10, fontSize: 14, fontFamily: 'inherit', outline: 'none', background: card > 0 ? `${t.purple}14` : t.fill, color: card > 0 ? t.purple : t.text, fontWeight: card > 0 ? 600 : 400 }}
@@ -502,16 +505,16 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                 </div>
                 {card > 0 && (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderBottom: `0.5px solid ${t.sep2}`, background: `${t.green}08` }}>
-                    <div style={{ fontSize: 13, color: t.text3 }}>Общий доход (нал + безнал)</div>
+                    <div style={{ fontSize: 13, color: t.text3 }}>{tr('mg.totalIncome')}</div>
                     <div style={{ fontSize: 15, fontWeight: 700, color: t.green }}>€{fv(inc + card)}</div>
                   </div>
                 )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5px', background: t.sep2 }}>
                   {[
-                    { label: 'Вход', val: opening, color: t.blue },
-                    { label: 'Наличные', val: inc, color: t.green },
-                    { label: 'Расход', val: totalExp, color: t.red },
-                    { label: 'Остаток', val: balance, color: t.blue },
+                    { label: tr('mg.cellIn'), val: opening, color: t.blue },
+                    { label: tr('mg.cash'), val: inc, color: t.green },
+                    { label: tr('mg.expense'), val: totalExp, color: t.red },
+                    { label: tr('mg.cellBalance'), val: balance, color: t.blue },
                   ].map(cell => (
                     <div key={cell.label} style={{ background: t.surface, padding: '12px 14px' }}>
                       <div style={{ fontSize: 10, color: t.text3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>{cell.label}</div>
@@ -520,7 +523,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                   ))}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: `${t.blue}0a` }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: t.blue }}>Касса на конец смены</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: t.blue }}>{tr('mg.registerEnd')}</div>
                   <div style={{ fontSize: 22, fontWeight: 700, color: balance < 0 ? t.red : t.blue }}>€{fv(balance)}</div>
                 </div>
               </div>
@@ -546,8 +549,8 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
           }}>
             {locked
-              ? <><svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>Редактировать</>
-              : <><svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>Сохранить смену</>}
+              ? <><svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>{tr('mg.edit')}</>
+              : <><svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>{tr('mg.save')}</>}
           </button>
         </div>
       )}
@@ -559,30 +562,30 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
           <div style={{ background: t.bg, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
             onClick={(e: any) => e.stopPropagation()}>
             <div style={{ width: 40, height: 4, background: t.fill, borderRadius: 2, margin: '14px auto 0' }} />
-            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', padding: '14px 20px 0', color: t.text }}>Сводка смены</div>
+            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', padding: '14px 20px 0', color: t.text }}>{tr('mg.sumTitle')}</div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px' }}>
-              <SRow label="Дата" value={displayDate(currentDate)} t={t} />
-              <SRow label="Вход" value={`€${fv(opening)}`} color={t.blue} t={t} />
-              <SRow label="Наличные" value={`€${fv(inc)}`} color={t.green} t={t} />
-              {card > 0 && <SRow label="Безнал (карта)" value={`€${fv(card)}`} color={t.purple} t={t} />}
-              {card > 0 && <SRow label="Общий доход" value={`€${fv(inc + card)}`} color={t.green} bold t={t} />}
+              <SRow label={tr('mg.sumDate')} value={displayDate(currentDate)} t={t} />
+              <SRow label={tr('mg.cellIn')} value={`€${fv(opening)}`} color={t.blue} t={t} />
+              <SRow label={tr('mg.cash')} value={`€${fv(inc)}`} color={t.green} t={t} />
+              {card > 0 && <SRow label={tr('mg.sumCard')} value={`€${fv(card)}`} color={t.purple} t={t} />}
+              {card > 0 && <SRow label={tr('mg.sumTotalIncome')} value={`€${fv(inc + card)}`} color={t.green} bold t={t} />}
               {employees.filter(e => parseFloat(empExtras[e.id] || '0') > 0).map(e => (
-                <SRow key={e.id} label={`${e.name} (экстра)`} value={`€${fv(parseFloat(empExtras[e.id]))}`} color={t.orange} t={t} />
+                <SRow key={e.id} label={`${e.name} (${tr('mg.extra')})`} value={`€${fv(parseFloat(empExtras[e.id]))}`} color={t.orange} t={t} />
               ))}
               {categories.filter(c => parseFloat(catAmounts[c.id] || '0') > 0).map(c => (
                 <SRow key={c.id} label={c.name + (catNotes[c.id] ? ` (${catNotes[c.id]})` : '')} value={`−€${fv(parseFloat(catAmounts[c.id]))}`} color={t.red} t={t} />
               ))}
-              {parseFloat(inkSum) > 0 && <SRow label="Инкассация" value={`−€${fv(parseFloat(inkSum))}`} color={t.orange} t={t} />}
-              {parseFloat(inkExpense) > 0 && <SRow label={`Расход из инкасс${inkReason ? ` (${inkReason})` : ''}`} value={`−€${fv(parseFloat(inkExpense))}`} color={t.red} t={t} />}
-              {salary > 0 && <SRow label={`Зарплата из инкасс${inkSalaryNote ? ` (${inkSalaryNote})` : ''}`} value={`−€${fv(salary)}`} color={t.purple} t={t} />}
-              {(parseFloat(inkExpense) > 0 || salary > 0) && parseFloat(inkSum) > 0 && <SRow label="Итог инкассации" value={`€${fv(inkNet)}`} color={t.orange} bold t={t} />}
+              {parseFloat(inkSum) > 0 && <SRow label={tr('mg.secCollection')} value={`−€${fv(parseFloat(inkSum))}`} color={t.orange} t={t} />}
+              {parseFloat(inkExpense) > 0 && <SRow label={`${tr('mg.inkExpenseShort')}${inkReason ? ` (${inkReason})` : ''}`} value={`−€${fv(parseFloat(inkExpense))}`} color={t.red} t={t} />}
+              {salary > 0 && <SRow label={`${tr('mg.salaryShort')}${inkSalaryNote ? ` (${inkSalaryNote})` : ''}`} value={`−€${fv(salary)}`} color={t.purple} t={t} />}
+              {(parseFloat(inkExpense) > 0 || salary > 0) && parseFloat(inkSum) > 0 && <SRow label={tr('mg.inkNet')} value={`€${fv(inkNet)}`} color={t.orange} bold t={t} />}
               <div style={{ borderTop: `1.5px solid ${t.sep}`, marginTop: 10, paddingTop: 10 }}>
-                <SRow label="Итого расход" value={`−€${fv(totalExp)}`} color={t.red} bold t={t} />
-                <SRow label="Касса" value={`€${fv(balance)}`} color={balance < 0 ? t.red : t.blue} bold t={t} />
+                <SRow label={tr('mg.sumTotalExpense')} value={`−€${fv(totalExp)}`} color={t.red} bold t={t} />
+                <SRow label={tr('mg.secRegister')} value={`€${fv(balance)}`} color={balance < 0 ? t.red : t.blue} bold t={t} />
               </div>
               {absences.length > 0 && (
                 <div style={{ marginTop: 12, padding: '12px 14px', background: `${t.red}0e`, borderRadius: 12 }}>
-                  <div style={{ fontSize: 11, color: t.text3, fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Отсутствовали</div>
+                  <div style={{ fontSize: 11, color: t.text3, fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>{tr('mg.absent')}</div>
                   {employees.filter(e => absences.includes(e.id)).map(e => (
                     <div key={e.id} style={{ fontSize: 14, color: t.red, padding: '2px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
                       <svg width="12" height="12" fill="none" stroke={t.red} strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" /></svg>
@@ -593,9 +596,9 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
               )}
             </div>
             <div style={{ padding: '10px 16px 20px', display: 'flex', gap: 10 }}>
-              <button onClick={() => setShowSummary(false)} style={{ flex: 1, padding: '14px', borderRadius: 14, border: 'none', background: t.fill, color: t.text, fontFamily: 'inherit', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>Отмена</button>
+              <button onClick={() => setShowSummary(false)} style={{ flex: 1, padding: '14px', borderRadius: 14, border: 'none', background: t.fill, color: t.text, fontFamily: 'inherit', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>{tr('mg.cancel')}</button>
               <button onClick={saveShift} disabled={saving} style={{ flex: 2, padding: '14px', borderRadius: 14, border: 'none', background: saving ? t.fill : t.blue, color: saving ? t.text3 : '#fff', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: saving ? 'none' : `0 4px 16px ${t.blue}44` }}>
-                {saving ? 'Сохраняем...' : 'Подтвердить'}
+                {saving ? tr('mg.saving') : tr('mg.confirm')}
               </button>
             </div>
           </div>
