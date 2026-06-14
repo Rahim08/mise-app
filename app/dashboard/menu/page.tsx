@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { useTheme } from '@/hooks/useTheme'
+import { useI18n } from '@/lib/i18n'
 
 // ── TYPES ─────────────────────────────────────────────────────────────────────
 
@@ -52,7 +53,7 @@ interface MenuItem {
 }
 
 const ACCENT_PRESETS = ['#007aff', '#34c759', '#ff9500', '#ff3b30', '#af52de', '#00c7be', '#ff6b35', '#ff2d55']
-const THEMES = [{ id: 'light', label: 'Светлая' }, { id: 'dark', label: 'Тёмная' }, { id: 'auto', label: 'Авто' }]
+const THEMES = [{ id: 'light', label: 'me.themeLight' }, { id: 'dark', label: 'me.themeDark' }, { id: 'auto', label: 'me.themeAuto' }]
 
 // ── ICON ──────────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,7 @@ function Toggle({ value, onChange, color }: { value: boolean; onChange: (v: bool
 export default function MenuEditor() {
   const router = useRouter()
   const t = useTheme()
+  const { t: tr } = useI18n()
   const appOrigin = typeof window !== 'undefined' ? window.location.origin : ''
   const appHost = typeof window !== 'undefined' ? window.location.host : ''
   const [restaurantId, setRestaurantId] = useState('')
@@ -131,7 +133,7 @@ export default function MenuEditor() {
     if (!error) {
       const { data: { publicUrl } } = supabase.storage.from('restaurant-assets').getPublicUrl(path)
       onDone(publicUrl)
-    } else { showToast('Ошибка загрузки фото') }
+    } else { showToast(tr('me.photoErr')) }
     setPhotoUploading(false)
   }
 
@@ -176,16 +178,16 @@ export default function MenuEditor() {
       const payload: any = { ...settings, updated_at: new Date().toISOString() }
       let { error } = await db.from('menu_settings').update(payload).eq('id', settings.id)
       if (error?.code === '42703') { delete payload.layout; ({ error } = await db.from('menu_settings').update(payload).eq('id', settings.id)) } // колонка layout ещё не мигрирована — сохраняем без неё
-      if (error) { setSlugError(error.code === '23505' ? 'Этот адрес уже занят' : error.message); setSaving(false); return }
+      if (error) { setSlugError(error.code === '23505' ? tr('me.slugTaken') : error.message); setSaving(false); return }
     } else {
       const payload: any = { ...settings, restaurant_id: restaurantId }
       let res = await db.from('menu_settings').insert(payload).select().single()
       if (res.error?.code === '42703') { delete payload.layout; res = await db.from('menu_settings').insert(payload).select().single() }
-      if (res.error) { setSlugError(res.error.code === '23505' ? 'Этот адрес уже занят' : res.error.message); setSaving(false); return }
+      if (res.error) { setSlugError(res.error.code === '23505' ? tr('me.slugTaken') : res.error.message); setSaving(false); return }
       if (res.data) setSettings(res.data)
     }
     setSaving(false)
-    showToast('Настройки сохранены')
+    showToast(tr('me.settingsSaved'))
   }
 
   const addCategory = async () => {
@@ -208,7 +210,7 @@ export default function MenuEditor() {
   }
 
   const deleteCategory = async (catId: string) => {
-    if (!confirm('Удалить категорию и все позиции в ней?')) return
+    if (!confirm(tr('me.delCatConfirm'))) return
     await db.from('menu_items').delete().eq('category_id', catId)
     await db.from('menu_categories').delete().eq('id', catId)
     setCategories(cs => cs.filter(c => c.id !== catId))
@@ -267,13 +269,13 @@ export default function MenuEditor() {
     }
     setSaving(false)
     setShowAddItem(false)
-    showToast(editItem ? 'Позиция обновлена' : 'Позиция добавлена')
+    showToast(editItem ? tr('me.itemUpdated') : tr('me.itemAdded'))
   }
 
   const deleteItem = async (itemId: string) => {
     await db.from('menu_items').delete().eq('id', itemId)
     setItems(is => is.filter(i => i.id !== itemId))
-    showToast('Удалено')
+    showToast(tr('me.deleted'))
   }
 
   const toggleItemVisibility = async (item: MenuItem) => {
@@ -297,9 +299,9 @@ export default function MenuEditor() {
   )
 
   const TABS = [
-    { id: 'categories', label: 'Меню', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /><path d="M9 12h6M9 16h4" /></svg> },
-    { id: 'settings', label: 'Настройки', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" /></svg> },
-    { id: 'preview', label: 'Предпросмотр', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg> },
+    { id: 'categories', label: tr('me.tabMenu'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /><path d="M9 12h6M9 16h4" /></svg> },
+    { id: 'settings', label: tr('me.tabSettings'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" /></svg> },
+    { id: 'preview', label: tr('me.tabPreview'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg> },
   ] as const
 
   return (
@@ -323,7 +325,7 @@ export default function MenuEditor() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 20, background: settings.is_published ? `${t.green}22` : t.fill, color: settings.is_published ? t.green : t.text3 }}>
-            {settings.is_published ? 'Опубликовано' : 'Черновик'}
+            {settings.is_published ? tr('me.published') : tr('me.draft')}
           </div>
           {settings.slug && (
             <a href={`/menu/${settings.slug}`} target="_blank" rel="noopener noreferrer" style={{ width: 34, height: 34, borderRadius: '50%', background: `${t.purple}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}>
@@ -349,7 +351,7 @@ export default function MenuEditor() {
                 ))}
                 <button onClick={() => setShowAddCat(true)} style={{ flexShrink: 0, padding: '8px 16px', borderRadius: 20, border: `1.5px dashed ${t.sep}`, fontFamily: 'inherit', fontSize: 14, fontWeight: 500, cursor: 'pointer', background: 'transparent', color: t.text3, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 12 12"><path d="M6 1v10M1 6h10" /></svg>
-                  Категория
+                  {tr('me.category')}
                 </button>
               </div>
 
@@ -361,11 +363,11 @@ export default function MenuEditor() {
                   <div style={{ background: t.surface, borderRadius: 16, padding: '12px 16px', marginBottom: 16, boxShadow: t.sh, display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700, fontSize: 16, color: t.text }}>{cat.name}</div>
-                      <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{selectedCatItems.length} позиций</div>
+                      <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{tr('me.itemsCount', { n: selectedCatItems.length })}</div>
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button onClick={() => toggleCatVisibility(cat.id)} style={{ padding: '6px 12px', borderRadius: 10, background: cat.is_visible ? `${t.green}18` : t.fill, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: cat.is_visible ? t.green : t.text3, fontFamily: 'inherit' }}>
-                        {cat.is_visible ? 'Видна' : 'Скрыта'}
+                        {cat.is_visible ? tr('me.visible') : tr('me.hidden')}
                       </button>
                       <button onClick={() => deleteCategory(cat.id)} style={{ width: 32, height: 32, borderRadius: 10, background: `${t.red}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <svg width="14" height="14" fill="none" stroke={t.red} strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
@@ -383,8 +385,8 @@ export default function MenuEditor() {
                       <div style={{ width: 64, height: 64, borderRadius: 18, background: t.fill, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', opacity: 0.6 }}>
                         <svg width="30" height="30" fill="none" stroke={t.text3} strokeWidth="1.5" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /></svg>
                       </div>
-                      <div style={{ fontWeight: 600, fontSize: 16, color: t.text2, marginBottom: 6 }}>Категория пуста</div>
-                      <div style={{ fontSize: 13, marginBottom: 20 }}>Добавьте первую позицию</div>
+                      <div style={{ fontWeight: 600, fontSize: 16, color: t.text2, marginBottom: 6 }}>{tr('me.catEmpty')}</div>
+                      <div style={{ fontSize: 13, marginBottom: 20 }}>{tr('me.catEmptySub')}</div>
                     </div>
                   ) : (
                     <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
@@ -398,8 +400,8 @@ export default function MenuEditor() {
                             <div style={{ fontWeight: 600, fontSize: 15, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</div>
                             <div style={{ display: 'flex', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
                               {item.price && <span style={{ fontSize: 13, fontWeight: 600, color: t.purple }}>{item.price}{currency}</span>}
-                              {!item.is_available && <span style={{ fontSize: 11, color: t.orange, background: `${t.orange}18`, padding: '2px 7px', borderRadius: 6 }}>Нет в наличии</span>}
-                              {!item.is_visible && <span style={{ fontSize: 11, color: t.text3, background: t.fill, padding: '2px 7px', borderRadius: 6 }}>Скрыто</span>}
+                              {!item.is_available && <span style={{ fontSize: 11, color: t.orange, background: `${t.orange}18`, padding: '2px 7px', borderRadius: 6 }}>{tr('me.outOfStock')}</span>}
+                              {!item.is_visible && <span style={{ fontSize: 11, color: t.text3, background: t.fill, padding: '2px 7px', borderRadius: 6 }}>{tr('me.hiddenBadge')}</span>}
                             </div>
                           </div>
                           <div style={{ display: 'flex', gap: 6 }}>
@@ -420,16 +422,16 @@ export default function MenuEditor() {
 
                   <button onClick={openAddItem} style={{ width: '100%', padding: '16px', borderRadius: 16, background: t.purple, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${t.purple}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                     <svg width="18" height="18" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 18 18"><path d="M9 1v16M1 9h16" /></svg>
-                    Добавить позицию
+                    {tr('me.addItem')}
                   </button>
                 </>
               )}
 
               {categories.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-                  <div style={{ fontWeight: 700, fontSize: 18, color: t.text, marginBottom: 8 }}>Меню пустое</div>
-                  <div style={{ fontSize: 14, color: t.text3, marginBottom: 24 }}>Начните с создания первой категории</div>
-                  <button onClick={() => setShowAddCat(true)} style={{ padding: '14px 32px', borderRadius: 14, background: t.purple, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>Создать категорию</button>
+                  <div style={{ fontWeight: 700, fontSize: 18, color: t.text, marginBottom: 8 }}>{tr('me.menuEmpty')}</div>
+                  <div style={{ fontSize: 14, color: t.text3, marginBottom: 24 }}>{tr('me.menuEmptySub')}</div>
+                  <button onClick={() => setShowAddCat(true)} style={{ padding: '14px 32px', borderRadius: 14, background: t.purple, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>{tr('me.createCat')}</button>
                 </div>
               )}
             </div>
@@ -442,15 +444,15 @@ export default function MenuEditor() {
               <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px' }}>
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: 16, color: t.text }}>Опубликовать меню</div>
-                    <div style={{ fontSize: 13, color: t.text3, marginTop: 2 }}>Гости смогут открыть меню по ссылке</div>
+                    <div style={{ fontWeight: 600, fontSize: 16, color: t.text }}>{tr('me.publish')}</div>
+                    <div style={{ fontSize: 13, color: t.text3, marginTop: 2 }}>{tr('me.publishSub')}</div>
                   </div>
                   <Toggle value={settings.is_published} onChange={v => setSettings(s => ({ ...s, is_published: v }))} color={t.green} />
                 </div>
               </div>
 
               {/* Cover */}
-              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Обложка</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('me.cover')}</div>
               <div style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', marginBottom: 12, boxShadow: t.sh }}>
                 <div style={{ height: 120, borderRadius: 12, background: t.fill, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
                   {settings.cover_url
@@ -459,40 +461,40 @@ export default function MenuEditor() {
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button onClick={() => coverFileRef.current?.click()} disabled={photoUploading} style={{ background: t.fill, border: 'none', borderRadius: 980, padding: '8px 16px', fontSize: 13, fontWeight: 600, color: t.purple, cursor: 'pointer', fontFamily: 'inherit' }}>
-                    {photoUploading ? 'Загрузка…' : settings.cover_url ? 'Заменить обложку' : 'Загрузить обложку'}
+                    {photoUploading ? tr('me.uploading') : settings.cover_url ? tr('me.replaceCover') : tr('me.uploadCover')}
                   </button>
-                  {settings.cover_url && <button onClick={() => setSettings(s => ({ ...s, cover_url: null }))} style={{ background: 'none', border: 'none', color: t.red, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Убрать</button>}
+                  {settings.cover_url && <button onClick={() => setSettings(s => ({ ...s, cover_url: null }))} style={{ background: 'none', border: 'none', color: t.red, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{tr('me.remove')}</button>}
                   <input ref={coverFileRef} type="file" accept="image/*" onChange={e => { const file = e.target.files?.[0]; if (file) uploadPhoto(file, url => setSettings(s => ({ ...s, cover_url: url }))) }} style={{ display: 'none' }} />
                 </div>
-                <div style={{ fontSize: 12, color: t.text3, marginTop: 8 }}>Не забудьте «Сохранить настройки» ниже</div>
+                <div style={{ fontSize: 12, color: t.text3, marginTop: 8 }}>{tr('me.coverHint')}</div>
               </div>
 
               {/* Slug */}
-              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Адрес меню</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('me.addr')}</div>
               <div style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', marginBottom: 12, boxShadow: t.sh }}>
                 <div style={{ fontSize: 13, color: t.text3, marginBottom: 8 }}>{appHost}/menu/</div>
-                <input value={settings.slug} onChange={e => { setSettings(s => ({ ...s, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })); setSlugError('') }} placeholder="название-заведения" style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: `1px solid ${slugError ? t.red : t.sep2}`, fontSize: 16, color: t.text, background: t.fill2, fontFamily: 'inherit', outline: 'none' }} />
+                <input value={settings.slug} onChange={e => { setSettings(s => ({ ...s, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })); setSlugError('') }} placeholder={tr("me.slugPh")} style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: `1px solid ${slugError ? t.red : t.sep2}`, fontSize: 16, color: t.text, background: t.fill2, fontFamily: 'inherit', outline: 'none' }} />
                 {slugError && <div style={{ fontSize: 12, color: t.red, marginTop: 6 }}>{slugError}</div>}
                 {settings.slug && !slugError && <div style={{ fontSize: 12, color: t.green, marginTop: 6 }}>{appHost}/menu/{settings.slug}</div>}
               </div>
 
               {/* Theme */}
-              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Тема</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('me.theme')}</div>
               <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
                 {THEMES.map((th, i) => (
                   <div key={th.id} onClick={() => setSettings(s => ({ ...s, theme: th.id as any }))} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: i < THEMES.length - 1 ? `0.5px solid ${t.sep2}` : 'none', cursor: 'pointer' }}>
-                    <span style={{ fontSize: 16, color: t.text }}>{th.label}</span>
+                    <span style={{ fontSize: 16, color: t.text }}>{tr(th.label)}</span>
                     {settings.theme === th.id && <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="10" fill={t.purple} /><path d="m6 10 2.5 2.5L14 7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>}
                   </div>
                 ))}
               </div>
 
               {/* Layout */}
-              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Раскладка</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('me.layout')}</div>
               <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
                 {([
-                  { id: 'list', label: 'Список', icon: <><rect x="3" y="5" width="18" height="4" rx="1.5" /><rect x="3" y="13" width="18" height="4" rx="1.5" /></> },
-                  { id: 'grid', label: 'Сетка', icon: <><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" /></> },
+                  { id: 'list', label: tr('me.list'), icon: <><rect x="3" y="5" width="18" height="4" rx="1.5" /><rect x="3" y="13" width="18" height="4" rx="1.5" /></> },
+                  { id: 'grid', label: tr('me.grid'), icon: <><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" /></> },
                 ] as const).map(opt => {
                   const on = settings.layout === opt.id
                   return (
@@ -505,7 +507,7 @@ export default function MenuEditor() {
               </div>
 
               {/* Accent color */}
-              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Акцентный цвет</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('me.accent')}</div>
               <div style={{ background: t.surface, borderRadius: 16, padding: '16px', marginBottom: 12, boxShadow: t.sh }}>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   {ACCENT_PRESETS.map(color => (
@@ -515,20 +517,20 @@ export default function MenuEditor() {
                   ))}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <input type="color" value={settings.accent_color} onChange={e => setSettings(s => ({ ...s, accent_color: e.target.value }))} style={{ width: 36, height: 36, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0 }} />
-                    <span style={{ fontSize: 13, color: t.text3 }}>Свой цвет</span>
+                    <span style={{ fontSize: 13, color: t.text3 }}>{tr('me.customColor')}</span>
                   </div>
                 </div>
               </div>
 
               {/* Options */}
-              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Отображение</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('me.display')}</div>
               <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
                 {[
-                  { key: 'show_photos', label: 'Фотографии блюд', desc: 'Показывать изображения позиций' },
-                  { key: 'show_calories', label: 'Калорийность', desc: 'Показывать КБЖУ если указано' },
-                  { key: 'show_allergens', label: 'Аллергены', desc: 'Показывать состав и аллергены' },
-                  { key: 'allow_orders', label: 'Заказ за столом', desc: 'Гость может собрать корзину и отправить заказ' },
-                  { key: 'allow_pay_at_table', label: 'Оплата за столом', desc: 'Доступно при включённом заказе за столом', needsOrders: true },
+                  { key: 'show_photos', label: tr('me.optPhotos'), desc: tr('me.optPhotosD') },
+                  { key: 'show_calories', label: tr('me.optCalories'), desc: tr('me.optCaloriesD') },
+                  { key: 'show_allergens', label: tr('me.optAllergens'), desc: tr('me.optAllergensD') },
+                  { key: 'allow_orders', label: tr('me.optOrders'), desc: tr('me.optOrdersD') },
+                  { key: 'allow_pay_at_table', label: tr('me.optPay'), desc: tr('me.optPayD'), needsOrders: true },
                 ].map((opt: any, i, arr) => {
                   const disabled = opt.needsOrders && !settings.allow_orders
                   return (
@@ -548,7 +550,7 @@ export default function MenuEditor() {
               </div>
 
               <button onClick={saveSettings} disabled={saving} style={{ width: '100%', padding: '16px', borderRadius: 16, background: saving ? t.fill : t.purple, color: saving ? t.text3 : '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: saving ? 'none' : `0 4px 16px ${t.purple}44` }}>
-                {saving ? 'Сохранение...' : 'Сохранить настройки'}
+                {saving ? tr('me.saving') : tr('me.saveSettings')}
               </button>
             </div>
           )}
@@ -560,23 +562,23 @@ export default function MenuEditor() {
                 <div style={{ padding: '20px', textAlign: 'center' }}>
                   {settings.slug ? (
                     <>
-                      <div style={{ fontWeight: 700, fontSize: 18, color: t.text, marginBottom: 8 }}>Ваше меню готово</div>
-                      <div style={{ fontSize: 14, color: t.text3, marginBottom: 20 }}>Поделитесь ссылкой или распечатайте QR-код</div>
+                      <div style={{ fontWeight: 700, fontSize: 18, color: t.text, marginBottom: 8 }}>{tr('me.ready')}</div>
+                      <div style={{ fontSize: 14, color: t.text3, marginBottom: 20 }}>{tr('me.readySub')}</div>
                       <div style={{ background: t.fill, borderRadius: 14, padding: '14px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div style={{ flex: 1, fontSize: 14, color: t.text2, wordBreak: 'break-all' }}>{appHost}/menu/{settings.slug}</div>
-                        <button onClick={() => { navigator.clipboard.writeText(`${appOrigin}/menu/${settings.slug}`); showToast('Скопировано') }} style={{ flexShrink: 0, padding: '8px 14px', borderRadius: 10, background: `${t.purple}18`, border: 'none', color: t.purple, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Копировать</button>
+                        <button onClick={() => { navigator.clipboard.writeText(`${appOrigin}/menu/${settings.slug}`); showToast(tr('me.copied')) }} style={{ flexShrink: 0, padding: '8px 14px', borderRadius: 10, background: `${t.purple}18`, border: 'none', color: t.purple, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{tr('me.copy')}</button>
                       </div>
-                      {!settings.is_published && <div style={{ background: `${t.orange}14`, borderRadius: 12, padding: '12px 14px', fontSize: 13, color: t.orange, fontWeight: 500 }}>Меню не опубликовано — перейдите в Настройки и включите публикацию</div>}
+                      {!settings.is_published && <div style={{ background: `${t.orange}14`, borderRadius: 12, padding: '12px 14px', fontSize: 13, color: t.orange, fontWeight: 500 }}>{tr('me.notPublished')}</div>}
                       {settings.is_published && (
                         <a href={`/menu/${settings.slug}`} target="_blank" rel="noopener noreferrer" style={{ display: 'block', padding: '14px', borderRadius: 14, background: t.purple, color: '#fff', textDecoration: 'none', fontWeight: 700, fontSize: 15, boxShadow: `0 4px 16px ${t.purple}44` }}>
-                          Открыть меню
+                          {tr('me.openMenu')}
                         </a>
                       )}
                     </>
                   ) : (
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: 16, color: t.text, marginBottom: 8 }}>Задайте адрес меню</div>
-                      <div style={{ fontSize: 13, color: t.text3 }}>Перейдите в Настройки и укажите адрес</div>
+                      <div style={{ fontWeight: 600, fontSize: 16, color: t.text, marginBottom: 8 }}>{tr('me.setAddr')}</div>
+                      <div style={{ fontSize: 13, color: t.text3 }}>{tr('me.setAddrSub')}</div>
                     </div>
                   )}
                 </div>
@@ -601,10 +603,10 @@ export default function MenuEditor() {
         <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setShowAddCat(false)}>
           <div style={{ background: t.bg, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, padding: '0 16px 32px', animation: 'slideUp .3s ease' }} onClick={e => e.stopPropagation()}>
             <div style={{ width: 40, height: 4, background: t.fill, borderRadius: 2, margin: '14px auto 16px' }} />
-            <div style={{ fontWeight: 700, fontSize: 18, color: t.text, marginBottom: 16 }}>Новая категория</div>
-            <input value={newCatName} onChange={e => setNewCatName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addCategory()} placeholder="Название категории" autoFocus style={{ width: '100%', padding: '14px 16px', borderRadius: 14, border: `1px solid ${t.sep2}`, fontSize: 16, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', marginBottom: 12 }} />
+            <div style={{ fontWeight: 700, fontSize: 18, color: t.text, marginBottom: 16 }}>{tr('me.newCat')}</div>
+            <input value={newCatName} onChange={e => setNewCatName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addCategory()} placeholder={tr("me.catNamePh")} autoFocus style={{ width: '100%', padding: '14px 16px', borderRadius: 14, border: `1px solid ${t.sep2}`, fontSize: 16, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', marginBottom: 12 }} />
             <button onClick={addCategory} disabled={!newCatName.trim()} style={{ width: '100%', padding: '16px', borderRadius: 14, background: newCatName.trim() ? t.purple : t.fill, color: newCatName.trim() ? '#fff' : t.text3, border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer' }}>
-              Создать
+              {tr('me.create')}
             </button>
           </div>
         </div>
@@ -615,7 +617,7 @@ export default function MenuEditor() {
         <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setShowAddItem(false)}>
           <div style={{ background: t.bg, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto', animation: 'slideUp .3s ease' }} onClick={e => e.stopPropagation()}>
             <div style={{ width: 40, height: 4, background: t.fill, borderRadius: 2, margin: '14px auto 0' }} />
-            <div style={{ fontWeight: 700, fontSize: 18, textAlign: 'center', padding: '14px 20px 0', color: t.text }}>{editItem ? 'Редактировать' : 'Новая позиция'}</div>
+            <div style={{ fontWeight: 700, fontSize: 18, textAlign: 'center', padding: '14px 20px 0', color: t.text }}>{editItem ? tr('me.edit') : tr('me.newItem')}</div>
             <div style={{ padding: '16px 16px 36px', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {/* Photo upload */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 2 }}>
@@ -626,62 +628,62 @@ export default function MenuEditor() {
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button onClick={() => itemFileRef.current?.click()} disabled={photoUploading} style={{ background: t.fill, border: 'none', borderRadius: 980, padding: '8px 16px', fontSize: 13, fontWeight: 600, color: t.purple, cursor: 'pointer', fontFamily: 'inherit' }}>
-                    {photoUploading ? 'Загрузка…' : itemForm.image_url ? 'Заменить' : 'Загрузить фото'}
+                    {photoUploading ? tr('me.uploading') : itemForm.image_url ? tr('me.replace') : tr('me.uploadPhoto')}
                   </button>
-                  {itemForm.image_url && <button onClick={() => setItemForm(f => ({ ...f, image_url: '' }))} style={{ background: 'none', border: 'none', color: t.red, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Убрать</button>}
+                  {itemForm.image_url && <button onClick={() => setItemForm(f => ({ ...f, image_url: '' }))} style={{ background: 'none', border: 'none', color: t.red, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{tr('me.remove')}</button>}
                   <input ref={itemFileRef} type="file" accept="image/*" onChange={e => { const file = e.target.files?.[0]; if (file) uploadPhoto(file, url => setItemForm(f => ({ ...f, image_url: url }))) }} style={{ display: 'none' }} />
                 </div>
               </div>
               {[
-                { key: 'name', placeholder: 'Название *', required: true },
-                { key: 'description', placeholder: 'Описание' },
-                { key: 'price', placeholder: `Цена (${currency})`, type: 'number' },
-                { key: 'calories', placeholder: 'Калорийность (ккал)', type: 'number' },
-                { key: 'allergens', placeholder: 'Аллергены (через запятую)' },
+                { key: 'name', placeholder: tr('me.fName'), required: true },
+                { key: 'description', placeholder: tr('me.fDesc') },
+                { key: 'price', placeholder: tr('me.fPrice', { c: currency }), type: 'number' },
+                { key: 'calories', placeholder: tr('me.fCalories'), type: 'number' },
+                { key: 'allergens', placeholder: tr('me.fAllergens') },
               ].map(field => (
                 <input key={field.key} value={(itemForm as any)[field.key]} onChange={e => setItemForm(f => ({ ...f, [field.key]: e.target.value }))} placeholder={field.placeholder} type={field.type || 'text'} style={{ width: '100%', padding: '14px 16px', borderRadius: 14, border: `1px solid ${t.sep2}`, fontSize: 16, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none' }} />
               ))}
 
               {/* Модификаторы: размер / добавки */}
               <div style={{ background: t.surface, borderRadius: 14, padding: '12px 14px' }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: mods.length ? 10 : 0 }}>Модификаторы</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: mods.length ? 10 : 0 }}>{tr('me.mods')}</div>
                 {mods.map((g, gi) => (
                   <div key={gi} style={{ background: t.fill2, borderRadius: 12, padding: 10, marginBottom: 10 }}>
                     <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                      <input value={g.name} onChange={e => setMods(ms => ms.map((x, i) => i === gi ? { ...x, name: e.target.value } : x))} placeholder="Группа (Размер, Добавки...)"
+                      <input value={g.name} onChange={e => setMods(ms => ms.map((x, i) => i === gi ? { ...x, name: e.target.value } : x))} placeholder={tr("me.modGroup")}
                         style={{ flex: 1, padding: '9px 12px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: 14, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', fontWeight: 600 }} />
                       <button onClick={() => setMods(ms => ms.filter((_, i) => i !== gi))} style={{ width: 36, borderRadius: 10, border: 'none', background: `${t.red}14`, color: t.red, cursor: 'pointer', fontSize: 16, fontFamily: 'inherit' }}>−</button>
                     </div>
                     {g.options.map((o, oi) => (
                       <div key={oi} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-                        <input value={o.name} onChange={e => setMods(ms => ms.map((x, i) => i === gi ? { ...x, options: x.options.map((y, j) => j === oi ? { ...y, name: e.target.value } : y) } : x))} placeholder="Опция (S, M, сыр...)"
+                        <input value={o.name} onChange={e => setMods(ms => ms.map((x, i) => i === gi ? { ...x, options: x.options.map((y, j) => j === oi ? { ...y, name: e.target.value } : y) } : x))} placeholder={tr("me.modOption")}
                           style={{ flex: 1, padding: '8px 12px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: 14, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none' }} />
                         <input type="number" value={o.price} onChange={e => setMods(ms => ms.map((x, i) => i === gi ? { ...x, options: x.options.map((y, j) => j === oi ? { ...y, price: e.target.value } : y) } : x))} placeholder="+0"
                           style={{ width: 76, textAlign: 'right', padding: '8px 10px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: 14, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none' }} />
                         <button onClick={() => setMods(ms => ms.map((x, i) => i === gi ? { ...x, options: x.options.filter((_, j) => j !== oi) } : x))} style={{ width: 32, borderRadius: 10, border: 'none', background: t.fill, color: t.text3, cursor: 'pointer', fontSize: 14, fontFamily: 'inherit' }}>−</button>
                       </div>
                     ))}
-                    <button onClick={() => setMods(ms => ms.map((x, i) => i === gi ? { ...x, options: [...x.options, { name: '', price: '' }] } : x))} style={{ background: 'none', border: 'none', color: t.purple, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: '2px 0' }}>+ Опция</button>
+                    <button onClick={() => setMods(ms => ms.map((x, i) => i === gi ? { ...x, options: [...x.options, { name: '', price: '' }] } : x))} style={{ background: 'none', border: 'none', color: t.purple, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: '2px 0' }}>{tr('me.addOption')}</button>
                   </div>
                 ))}
                 <button onClick={() => setMods(ms => [...ms, { name: '', options: [{ name: '', price: '' }] }])} style={{ width: '100%', padding: '10px', borderRadius: 10, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: t.text3, fontFamily: 'inherit', fontSize: 13, cursor: 'pointer', marginTop: mods.length ? 0 : 8 }}>
-                  + Группа модификаторов
+                  {tr('me.addModGroup')}
                 </button>
               </div>
 
               <div style={{ display: 'flex', gap: 10 }}>
                 <div style={{ flex: 1, background: t.surface, borderRadius: 14, padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: 15, color: t.text }}>Показывать</span>
+                  <span style={{ fontSize: 15, color: t.text }}>{tr('me.showItem')}</span>
                   <Toggle value={itemForm.is_visible} onChange={v => setItemForm(f => ({ ...f, is_visible: v }))} color={t.purple} />
                 </div>
                 <div style={{ flex: 1, background: t.surface, borderRadius: 14, padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: 15, color: t.text }}>В наличии</span>
+                  <span style={{ fontSize: 15, color: t.text }}>{tr('me.inStock')}</span>
                   <Toggle value={itemForm.is_available} onChange={v => setItemForm(f => ({ ...f, is_available: v }))} color={t.green} />
                 </div>
               </div>
 
               <button onClick={saveItem} disabled={saving || !itemForm.name.trim()} style={{ width: '100%', padding: '16px', borderRadius: 16, background: saving || !itemForm.name.trim() ? t.fill : t.purple, color: saving || !itemForm.name.trim() ? t.text3 : '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', marginTop: 4, boxShadow: !saving && itemForm.name.trim() ? `0 4px 16px ${t.purple}44` : 'none' }}>
-                {saving ? 'Сохранение...' : editItem ? 'Сохранить' : 'Добавить'}
+                {saving ? tr('me.saving') : editItem ? tr('me.save') : tr('me.add')}
               </button>
             </div>
           </div>
