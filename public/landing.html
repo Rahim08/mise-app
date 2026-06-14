@@ -148,9 +148,11 @@ body{
 /* phone mock */
 .mock-side{display:flex;align-items:center;justify-content:center;position:relative;}
 .mock-aura{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:300px;height:300px;border-radius:50%;filter:blur(90px);opacity:.22;pointer-events:none;}
-.phone{width:262px;height:540px;background:#0d0d0d;border-radius:52px;padding:11px;box-shadow:0 80px 160px rgba(0,0,0,.7),0 0 0 .5px rgba(255,255,255,.14) inset,0 1px 0 rgba(255,255,255,.06) inset;position:relative;}
-.phone-screen-wrap{width:100%;height:100%;border-radius:42px;overflow:hidden;position:relative;}
-.phone-notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:90px;height:28px;background:#0d0d0d;border-radius:0 0 18px 18px;z-index:10;}
+.phone{width:256px;height:556px;background:#1c1c1e;border-radius:46px;padding:7px;box-shadow:0 60px 140px rgba(0,0,0,.7),0 0 0 2px #2b2b2d,0 0 0 4px #0b0b0c,0 1px 1px rgba(255,255,255,.22) inset;position:relative;}
+.phone::before{content:'';position:absolute;left:-2.5px;top:104px;width:2.5px;height:22px;background:#3a3a3c;border-radius:3px 0 0 3px;box-shadow:0 36px 0 #3a3a3c,0 72px 0 #3a3a3c;}
+.phone::after{content:'';position:absolute;right:-2.5px;top:158px;width:2.5px;height:52px;background:#3a3a3c;border-radius:0 3px 3px 0;}
+.phone-screen-wrap{width:100%;height:100%;border-radius:40px;overflow:hidden;position:relative;background:#000;}
+.phone-notch{position:absolute;top:9px;left:50%;transform:translateX(-50%);width:82px;height:23px;background:#000;border-radius:14px;z-index:10;}
 .ps-base{width:100%;height:100%;overflow:hidden;}
 
 /* mock UI */
@@ -350,7 +352,7 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
 @media(max-width:520px){
   .steps{grid-template-columns:1fr;}
   .ft-nav{grid-template-columns:1fr 1fr;}
-  .phone{width:230px;height:474px;}
+  .phone{width:228px;height:496px;}
 }
 </style>
 </head>
