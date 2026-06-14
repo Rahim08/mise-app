@@ -4,11 +4,11 @@ import type { CapacitorConfig } from '@capacitor/cli';
 // stay on Vercel). `webDir` is only an offline fallback shown when the device is offline.
 // To point at a different environment, change `server.url` (e.g. https://misesuite.com).
 const config: CapacitorConfig = {
-  appId: 'app.getmise.mise',
+  appId: 'com.misesuite.app',
   appName: 'Mise',
   webDir: 'capacitor-www',
   server: {
-    url: 'https://mise-app-omega.vercel.app',
+    url: 'https://misesuite.com',
     cleartext: false,
   },
   ios: {

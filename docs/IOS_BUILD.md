@@ -41,14 +41,14 @@ npx cap open ios
 
 В Xcode → target **App** → *Signing & Capabilities*:
 - выбрать Team (Apple Developer account),
-- Bundle Identifier: `app.getmise.mise`.
+- Bundle Identifier: `com.misesuite.app`.
 
 Запуск на устройстве/симуляторе — кнопкой ▶.
 
 ## Смена окружения
 
 URL берётся из `capacitor.config.ts → server.url`. Для прод-домена поменять на
-`https://getmise.app` и выполнить `npx cap sync ios`.
+`https://misesuite.com` и выполнить `npx cap sync ios`.
 
 ## App Store — важно (Guideline 4.2)
 
