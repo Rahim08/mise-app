@@ -3,76 +3,207 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Условия использования — Mise</title>
+<title>Terms — Mise</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;background:#fff;color:#1d1d1f;-webkit-font-smoothing:antialiased;}
-:root{--blue:#0071e3;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);}
-.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
-.nav-back{font-size:.82rem;color:var(--blue);text-decoration:none;}
+:root{--blue:#0071e3;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);--ease:cubic-bezier(.22,1,.36,1);}
+.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
+.nav-back{font-size:.85rem;font-weight:600;color:var(--blue);text-decoration:none;letter-spacing:-.01em;}
 .nav-back::before{content:'‹ ';}
+.lang-tog{position:relative;}
+.lang-cur{display:flex;align-items:center;gap:6px;background:var(--light);border:none;border-radius:8px;padding:6px 11px;cursor:pointer;color:var(--gray);font-family:inherit;font-size:.72rem;font-weight:700;letter-spacing:.04em;transition:all .2s;}
+.lang-cur:hover{color:#1d1d1f;background:#ececef;}
+.lang-cur svg{opacity:.6;}
+.lang-menu{position:absolute;top:calc(100% + 9px);right:0;min-width:168px;background:rgba(255,255,255,.86);backdrop-filter:blur(30px) saturate(160%);-webkit-backdrop-filter:blur(30px) saturate(160%);border:.5px solid var(--border);border-radius:15px;padding:6px;box-shadow:0 24px 60px rgba(0,0,0,.18),0 1px 0 rgba(255,255,255,.7) inset;opacity:0;transform:translateY(-7px) scale(.97);transform-origin:top right;pointer-events:none;transition:opacity .2s var(--ease),transform .2s var(--ease);z-index:1001;}
+.lang-menu.open{opacity:1;transform:translateY(0) scale(1);pointer-events:auto;}
+.lang-opt{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;background:transparent;border:none;border-radius:10px;padding:9px 13px;cursor:pointer;color:var(--gray);font-family:inherit;font-size:.84rem;font-weight:500;text-align:left;letter-spacing:-.01em;transition:background .15s,color .15s;}
+.lang-opt:hover{background:var(--light);color:#1d1d1f;}
+.lang-opt.active{color:#1d1d1f;}
+.lang-opt .lo-code{font-size:.62rem;font-weight:700;letter-spacing:.06em;color:#aeaeb2;}
 .page{max-width:720px;margin:0 auto;padding:120px 24px 80px;}
 .page-tag{font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--blue);margin-bottom:16px;}
 .page-title{font-size:clamp(2rem,4vw,3rem);font-weight:700;letter-spacing:-.03em;margin-bottom:12px;}
 .page-date{font-size:.85rem;color:var(--gray);margin-bottom:48px;}
-h2{font-size:1.2rem;font-weight:600;margin:36px 0 12px;}
+h2{font-size:1.2rem;font-weight:600;margin:36px 0 12px;letter-spacing:-.02em;}
 p{font-size:.92rem;color:var(--gray);line-height:1.8;margin-bottom:14px;}
 ul{margin:12px 0 14px 20px;}
 li{font-size:.92rem;color:var(--gray);line-height:1.8;margin-bottom:6px;}
+a{color:var(--blue);}
 </style>
 </head>
 <body>
 <nav class="nav">
   <a href="/" class="nav-back">Mise</a>
+  <div class="lang-tog" id="langTog">
+    <button class="lang-cur" onclick="toggleLangMenu(event)" aria-haspopup="true" aria-label="Language">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18" stroke-linecap="round"/><path d="M12 3c2.6 2.8 2.6 15.2 0 18M12 3c-2.6 2.8-2.6 15.2 0 18" stroke-linecap="round"/></svg>
+      <span id="langCurLabel">RU</span>
+    </button>
+    <div class="lang-menu" id="langMenu"></div>
+  </div>
 </nav>
 <div class="page">
-  <p class="page-tag">Правовое</p>
-  <h1 class="page-title">Условия использования</h1>
-  <p class="page-date">Последнее обновление: 12 июня 2026</p>
+  <p class="page-tag" data-i18n="tag">Правовое</p>
+  <h1 class="page-title" data-i18n="title">Условия использования</h1>
+  <p class="page-date" data-i18n="date">Обновлено 14 июня 2026 · версия 2.1</p>
 
-  <h2>1. Принятие условий</h2>
-  <p>Используя Mise, вы соглашаетесь с настоящими условиями использования. Если вы не согласны с условиями, пожалуйста, не используйте сервис.</p>
-
-  <h2>2. Описание сервиса</h2>
-  <p>Mise — это SaaS платформа для управления ресторанным бизнесом, включающая приложения Mise Manager, Mise Analytics, Mise Stash, Mise People и Mise Menu (QR-меню для гостей). Сервис предоставляется по модели подписки.</p>
-
-  <h2>2.1. Данные сотрудников и гостей</h2>
-  <p>Владелец заведения, предоставляя сотрудникам доступ к приложениям Mise (включая явку по геолокации в Mise People), подтверждает, что уведомил их об обработке данных и получил необходимые согласия в соответствии с применимым законодательством. Заказы гостей через Mise Menu принимаются без сбора их персональных данных. Подробнее — в <a href="/privacy.html" style="color:#0071e3;">Политике конфиденциальности</a>.</p>
-
-  <h2>3. Подписка и оплата</h2>
-  <ul>
-    <li>Подписка оплачивается ежемесячно или ежегодно</li>
-    <li>Оплата списывается автоматически в дату продления</li>
-    <li>Все цены указаны с НДС (если применимо)</li>
-    <li>При отмене подписки доступ сохраняется до конца оплаченного периода</li>
-    <li>Возврат средств возможен в течение 7 дней с момента оплаты</li>
-  </ul>
-
-  <h2>4. Пробный период</h2>
-  <p>Новые пользователи получают 7 дней бесплатного доступа. Карта не требуется для начала пробного периода. По окончании пробного периода сервис переходит на платный тариф только если вы явно подтвердили оплату.</p>
-
-  <h2>5. Ответственность за данные</h2>
-  <p>Вы несёте ответственность за данные которые вводите в систему. Mise не несёт ответственности за точность финансовых данных введённых пользователями. Рекомендуем регулярно делать резервные копии важных данных.</p>
-
-  <h2>6. Доступность сервиса</h2>
-  <p>Мы стремимся обеспечить доступность сервиса 99.9% времени. Плановые технические работы проводятся с уведомлением за 24 часа. Мы не несём ответственности за убытки вызванные недоступностью сервиса.</p>
-
-  <h2>7. Интеллектуальная собственность</h2>
-  <p>Все права на платформу Mise, включая дизайн, код и торговые марки, принадлежат Mise. Пользователи сохраняют все права на данные которые они вводят в систему.</p>
-
-  <h2>8. Прекращение доступа</h2>
-  <p>Mise оставляет за собой право прекратить доступ к сервису при нарушении условий использования. Вы можете прекратить использование сервиса в любой момент, отменив подписку.</p>
-
-  <h2>9. Изменение условий</h2>
-  <p>Мы можем обновлять условия использования. Об изменениях уведомляем по email за 30 дней. Продолжение использования сервиса означает согласие с новыми условиями.</p>
-
-  <h2>10. Контакты</h2>
-  <p>По вопросам: <a href="mailto:hello@mise.app" style="color:#0071e3;">hello@mise.app</a></p>
+  <h2 data-i18n="h1">1. Принятие условий</h2>
+  <p data-i18n="p1">Используя Mise, вы соглашаетесь с настоящими условиями. Если вы не согласны — пожалуйста, не используйте сервис.</p>
+  <h2 data-i18n="h2">2. Описание сервиса</h2>
+  <p data-i18n="p2">Mise — SaaS-платформа для управления рестораном: приложения Manager, Analytics, Stash, People и Menu (QR-меню для гостей). Сервис предоставляется по подписке.</p>
+  <h2 data-i18n="h21">2.1. Данные сотрудников и гостей</h2>
+  <p data-i18n="p21">Предоставляя сотрудникам доступ к Mise (включая явку по геолокации в Mise People), владелец подтверждает, что уведомил их об обработке данных и получил необходимые согласия согласно применимому законодательству. Заказы гостей через Mise Menu принимаются без сбора их персональных данных. Подробнее — в <a href="/privacy.html">Политике конфиденциальности</a>.</p>
+  <h2 data-i18n="h3">3. Подписка и оплата</h2>
+  <ul data-i18n="l3"><li>Подписка оплачивается ежемесячно или ежегодно</li><li>Оплата списывается автоматически в дату продления</li><li>Цены указаны с НДС, где применимо</li><li>При отмене доступ сохраняется до конца оплаченного периода</li><li>Возврат возможен в течение 7 дней с момента оплаты</li></ul>
+  <h2 data-i18n="h4">4. Пробный период</h2>
+  <p data-i18n="p4">Новые пользователи получают 7 дней бесплатно; карта для начала не нужна. После пробного периода сервис переходит на платный тариф только если вы явно подтвердили оплату.</p>
+  <h2 data-i18n="h5">5. Ответственность за данные</h2>
+  <p data-i18n="p5">Вы отвечаете за данные, которые вводите. Mise не отвечает за точность введённых пользователями финансовых данных. Рекомендуем регулярно сохранять резервные копии важных данных.</p>
+  <h2 data-i18n="h6">6. Доступность сервиса</h2>
+  <p data-i18n="p6">Мы стремимся к доступности 99,9%. О плановых работах уведомляем за 24 часа. Мы не отвечаем за убытки, вызванные временной недоступностью сервиса.</p>
+  <h2 data-i18n="h7">7. Интеллектуальная собственность</h2>
+  <p data-i18n="p7">Все права на платформу Mise — дизайн, код, товарные знаки — принадлежат Mise. Пользователи сохраняют все права на вводимые ими данные.</p>
+  <h2 data-i18n="h8">8. Прекращение доступа</h2>
+  <p data-i18n="p8">Mise вправе прекратить доступ при нарушении условий. Вы можете прекратить использование в любой момент, отменив подписку.</p>
+  <h2 data-i18n="h9">9. Изменение условий</h2>
+  <p data-i18n="p9">Мы можем обновлять условия. О существенных изменениях уведомляем по email за 30 дней. Продолжение использования означает согласие с новыми условиями.</p>
+  <h2 data-i18n="h10">10. Контакты</h2>
+  <p data-i18n="p10">По вопросам: <a href="mailto:hello@{DOMAIN}">hello@{DOMAIN}</a></p>
 </div>
 <script>
-window.addEventListener('scroll', () => {
-  document.querySelector('.nav').style.background = window.scrollY > 10 ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.92)';
-});
+const DOMAIN = 'getmise.app'; // контактный домен — заменить здесь при смене
+const LANGS = [['en','English','EN'],['ru','Русский','RU'],['it','Italiano','IT'],['fr','Français','FR'],['az','Azərbaycan','AZ'],['tr','Türkçe','TR'],['uk','Українська','UK'],['kk','Қазақша','KK']];
+const T = {
+ru:{tag:'Правовое',title:'Условия использования',date:'Обновлено 14 июня 2026 · версия 2.1',
+h1:'1. Принятие условий',p1:'Используя Mise, вы соглашаетесь с настоящими условиями. Если вы не согласны — пожалуйста, не используйте сервис.',
+h2:'2. Описание сервиса',p2:'Mise — SaaS-платформа для управления рестораном: приложения Manager, Analytics, Stash, People и Menu (QR-меню для гостей). Сервис предоставляется по подписке.',
+h21:'2.1. Данные сотрудников и гостей',p21:'Предоставляя сотрудникам доступ к Mise (включая явку по геолокации в Mise People), владелец подтверждает, что уведомил их об обработке данных и получил необходимые согласия согласно применимому законодательству. Заказы гостей через Mise Menu принимаются без сбора их персональных данных. Подробнее — в <a href="/privacy.html">Политике конфиденциальности</a>.',
+h3:'3. Подписка и оплата',l3:'<li>Подписка оплачивается ежемесячно или ежегодно</li><li>Оплата списывается автоматически в дату продления</li><li>Цены указаны с НДС, где применимо</li><li>При отмене доступ сохраняется до конца оплаченного периода</li><li>Возврат возможен в течение 7 дней с момента оплаты</li>',
+h4:'4. Пробный период',p4:'Новые пользователи получают 7 дней бесплатно; карта для начала не нужна. После пробного периода сервис переходит на платный тариф только если вы явно подтвердили оплату.',
+h5:'5. Ответственность за данные',p5:'Вы отвечаете за данные, которые вводите. Mise не отвечает за точность введённых пользователями финансовых данных. Рекомендуем регулярно сохранять резервные копии важных данных.',
+h6:'6. Доступность сервиса',p6:'Мы стремимся к доступности 99,9%. О плановых работах уведомляем за 24 часа. Мы не отвечаем за убытки, вызванные временной недоступностью сервиса.',
+h7:'7. Интеллектуальная собственность',p7:'Все права на платформу Mise — дизайн, код, товарные знаки — принадлежат Mise. Пользователи сохраняют все права на вводимые ими данные.',
+h8:'8. Прекращение доступа',p8:'Mise вправе прекратить доступ при нарушении условий. Вы можете прекратить использование в любой момент, отменив подписку.',
+h9:'9. Изменение условий',p9:'Мы можем обновлять условия. О существенных изменениях уведомляем по email за 30 дней. Продолжение использования означает согласие с новыми условиями.',
+h10:'10. Контакты',p10:'По вопросам: <a href="mailto:hello@{DOMAIN}">hello@{DOMAIN}</a>'},
+en:{tag:'Legal',title:'Terms of Service',date:'Updated 14 June 2026 · version 2.1',
+h1:'1. Acceptance',p1:'By using Mise you agree to these terms. If you do not agree, please do not use the service.',
+h2:'2. The service',p2:'Mise is a SaaS restaurant management platform: the Manager, Analytics, Stash, People and Menu (guest QR menu) apps. The service is provided on a subscription basis.',
+h21:'2.1. Staff and guest data',p21:'By giving staff access to Mise (including geo attendance in Mise People), the owner confirms they have informed staff about data processing and obtained the necessary consents under applicable law. Guest orders via Mise Menu are accepted without collecting guests’ personal data. See the <a href="/privacy.html">Privacy Policy</a> for details.',
+h3:'3. Subscription and billing',l3:'<li>Billed monthly or annually</li><li>Charged automatically on the renewal date</li><li>Prices include VAT where applicable</li><li>On cancellation, access continues until the end of the paid period</li><li>Refunds are available within 7 days of payment</li>',
+h4:'4. Free trial',p4:'New users get 7 days free; no card is required to start. After the trial, the service moves to a paid plan only if you have explicitly confirmed payment.',
+h5:'5. Responsibility for data',p5:'You are responsible for the data you enter. Mise is not liable for the accuracy of financial data entered by users. We recommend backing up important data regularly.',
+h6:'6. Availability',p6:'We aim for 99.9% uptime. Planned maintenance is announced 24 hours in advance. We are not liable for losses caused by temporary unavailability of the service.',
+h7:'7. Intellectual property',p7:'All rights to the Mise platform — design, code and trademarks — belong to Mise. Users retain all rights to the data they enter.',
+h8:'8. Termination',p8:'Mise may suspend access for breach of these terms. You may stop using the service at any time by cancelling your subscription.',
+h9:'9. Changes to the terms',p9:'We may update these terms. We notify you of material changes by email 30 days in advance. Continued use means acceptance of the new terms.',
+h10:'10. Contact',p10:'Questions: <a href="mailto:hello@{DOMAIN}">hello@{DOMAIN}</a>'},
+it:{tag:'Note legali',title:'Termini di servizio',date:'Aggiornato il 14 giugno 2026 · versione 2.1',
+h1:'1. Accettazione',p1:'Usando Mise accetti questi termini. Se non li accetti, ti preghiamo di non usare il servizio.',
+h2:'2. Il servizio',p2:'Mise è una piattaforma SaaS per la gestione di ristoranti: le app Manager, Analytics, Stash, People e Menu (menu QR per gli ospiti). Il servizio è fornito in abbonamento.',
+h21:'2.1. Dati del personale e degli ospiti',p21:'Dando al personale accesso a Mise (inclusa la presenza via GPS in Mise People), il titolare conferma di aver informato il personale sul trattamento dei dati e di aver ottenuto i consensi necessari ai sensi della legge applicabile. Gli ordini degli ospiti tramite Mise Menu sono accettati senza raccogliere i loro dati personali. Vedi l’<a href="/privacy.html">Informativa sulla privacy</a>.',
+h3:'3. Abbonamento e pagamenti',l3:'<li>Fatturazione mensile o annuale</li><li>Addebito automatico alla data di rinnovo</li><li>Prezzi IVA inclusa, ove applicabile</li><li>In caso di disdetta, l’accesso continua fino alla fine del periodo pagato</li><li>Rimborso possibile entro 7 giorni dal pagamento</li>',
+h4:'4. Periodo di prova',p4:'I nuovi utenti hanno 7 giorni gratuiti; nessuna carta richiesta per iniziare. Dopo la prova il servizio passa a un piano a pagamento solo se hai confermato esplicitamente il pagamento.',
+h5:'5. Responsabilità sui dati',p5:'Sei responsabile dei dati che inserisci. Mise non è responsabile dell’accuratezza dei dati finanziari inseriti dagli utenti. Consigliamo di eseguire backup regolari dei dati importanti.',
+h6:'6. Disponibilità',p6:'Puntiamo a una disponibilità del 99,9%. La manutenzione pianificata è annunciata con 24 ore di anticipo. Non siamo responsabili per perdite dovute a temporanea indisponibilità del servizio.',
+h7:'7. Proprietà intellettuale',p7:'Tutti i diritti sulla piattaforma Mise — design, codice e marchi — appartengono a Mise. Gli utenti mantengono tutti i diritti sui dati che inseriscono.',
+h8:'8. Risoluzione',p8:'Mise può sospendere l’accesso in caso di violazione dei termini. Puoi smettere di usare il servizio in qualsiasi momento disdicendo l’abbonamento.',
+h9:'9. Modifiche ai termini',p9:'Possiamo aggiornare i termini. Ti informiamo delle modifiche sostanziali via email con 30 giorni di anticipo. L’uso continuato implica accettazione dei nuovi termini.',
+h10:'10. Contatti',p10:'Domande: <a href="mailto:hello@{DOMAIN}">hello@{DOMAIN}</a>'},
+fr:{tag:'Mentions légales',title:'Conditions d’utilisation',date:'Mis à jour le 14 juin 2026 · version 2.1',
+h1:'1. Acceptation',p1:'En utilisant Mise, vous acceptez ces conditions. Si vous n’êtes pas d’accord, veuillez ne pas utiliser le service.',
+h2:'2. Le service',p2:'Mise est une plateforme SaaS de gestion de restaurant : les apps Manager, Analytics, Stash, People et Menu (menu QR pour les clients). Le service est fourni par abonnement.',
+h21:'2.1. Données du personnel et des clients',p21:'En donnant au personnel l’accès à Mise (y compris le pointage GPS dans Mise People), le gérant confirme avoir informé le personnel du traitement des données et obtenu les consentements requis selon le droit applicable. Les commandes des clients via Mise Menu sont acceptées sans collecte de leurs données personnelles. Voir la <a href="/privacy.html">Politique de confidentialité</a>.',
+h3:'3. Abonnement et paiement',l3:'<li>Facturation mensuelle ou annuelle</li><li>Prélèvement automatique à la date de renouvellement</li><li>Prix TTC le cas échéant</li><li>En cas de résiliation, l’accès continue jusqu’à la fin de la période payée</li><li>Remboursement possible sous 7 jours après le paiement</li>',
+h4:'4. Période d’essai',p4:'Les nouveaux utilisateurs disposent de 7 jours gratuits ; aucune carte requise pour commencer. Après l’essai, le service passe à une formule payante uniquement si vous avez explicitement confirmé le paiement.',
+h5:'5. Responsabilité des données',p5:'Vous êtes responsable des données que vous saisissez. Mise n’est pas responsable de l’exactitude des données financières saisies par les utilisateurs. Nous recommandons de sauvegarder régulièrement les données importantes.',
+h6:'6. Disponibilité',p6:'Nous visons une disponibilité de 99,9 %. La maintenance planifiée est annoncée 24 heures à l’avance. Nous ne sommes pas responsables des pertes dues à une indisponibilité temporaire du service.',
+h7:'7. Propriété intellectuelle',p7:'Tous les droits sur la plateforme Mise — design, code et marques — appartiennent à Mise. Les utilisateurs conservent tous les droits sur les données qu’ils saisissent.',
+h8:'8. Résiliation',p8:'Mise peut suspendre l’accès en cas de violation des conditions. Vous pouvez cesser d’utiliser le service à tout moment en résiliant votre abonnement.',
+h9:'9. Modification des conditions',p9:'Nous pouvons mettre à jour les conditions. Nous vous informons des changements importants par e-mail 30 jours à l’avance. La poursuite de l’utilisation vaut acceptation des nouvelles conditions.',
+h10:'10. Contact',p10:'Questions : <a href="mailto:hello@{DOMAIN}">hello@{DOMAIN}</a>'},
+az:{tag:'Hüquqi',title:'İstifadə şərtləri',date:'Yeniləndi 14 iyun 2026 · versiya 2.1',
+h1:'1. Şərtlərin qəbulu',p1:'Mise-dən istifadə etməklə bu şərtləri qəbul edirsiniz. Razı deyilsinizsə, zəhmət olmasa xidmətdən istifadə etməyin.',
+h2:'2. Xidmət',p2:'Mise restoran idarəetməsi üçün SaaS platformasıdır: Manager, Analytics, Stash, People və Menu (qonaqlar üçün QR-menyu) tətbiqləri. Xidmət abunəlik əsasında təqdim olunur.',
+h21:'2.1. İşçi və qonaq məlumatları',p21:'İşçilərə Mise-yə giriş verməklə (Mise People-dakı GPS davamiyyət daxil), sahib onları məlumatların emalı barədə məlumatlandırdığını və tətbiq olunan qanuna uyğun lazımi razılıqları aldığını təsdiqləyir. Mise Menu vasitəsilə qonaq sifarişləri onların şəxsi məlumatları toplanmadan qəbul edilir. Ətraflı — <a href="/privacy.html">Məxfilik siyasəti</a>.',
+h3:'3. Abunəlik və ödəniş',l3:'<li>Aylıq və ya illik ödənilir</li><li>Yenilənmə tarixində avtomatik silinir</li><li>Qiymətlər tətbiq olunduqda ƏDV daxildir</li><li>Ləğv edildikdə giriş ödənilmiş dövrün sonuna qədər qalır</li><li>Ödənişdən sonra 7 gün ərzində geri qaytarış mümkündür</li>',
+h4:'4. Sınaq müddəti',p4:'Yeni istifadəçilər 7 gün pulsuz alır; başlamaq üçün kart tələb olunmur. Sınaqdan sonra xidmət yalnız ödənişi açıq şəkildə təsdiqlədiyiniz halda ödənişli plana keçir.',
+h5:'5. Məlumatlara görə məsuliyyət',p5:'Daxil etdiyiniz məlumatlara görə siz məsuliyyət daşıyırsınız. Mise istifadəçilərin daxil etdiyi maliyyə məlumatlarının dəqiqliyinə görə məsuliyyət daşımır. Vacib məlumatların müntəzəm ehtiyat surətini saxlamağı tövsiyə edirik.',
+h6:'6. Əlçatanlıq',p6:'99,9% əlçatanlığa çalışırıq. Planlı işlər 24 saat əvvəl elan edilir. Xidmətin müvəqqəti əlçatmazlığından yaranan zərərlərə görə məsuliyyət daşımırıq.',
+h7:'7. Əqli mülkiyyət',p7:'Mise platformasına dair bütün hüquqlar — dizayn, kod və ticarət nişanları — Mise-yə məxsusdur. İstifadəçilər daxil etdikləri məlumatlara dair bütün hüquqları saxlayır.',
+h8:'8. Girişin dayandırılması',p8:'Şərtlər pozulduqda Mise girişi dayandıra bilər. Abunəliyi ləğv edərək istənilən vaxt istifadəni dayandıra bilərsiniz.',
+h9:'9. Şərtlərin dəyişdirilməsi',p9:'Şərtləri yeniləyə bilərik. Əhəmiyyətli dəyişikliklər barədə 30 gün əvvəl e-poçtla məlumat veririk. İstifadənin davam etdirilməsi yeni şərtlərin qəbulu deməkdir.',
+h10:'10. Əlaqə',p10:'Suallar: <a href="mailto:hello@{DOMAIN}">hello@{DOMAIN}</a>'},
+tr:{tag:'Yasal',title:'Kullanım Koşulları',date:'Güncellendi 14 Haziran 2026 · sürüm 2.1',
+h1:'1. Kabul',p1:'Mise’yi kullanarak bu koşulları kabul edersiniz. Kabul etmiyorsanız lütfen hizmeti kullanmayın.',
+h2:'2. Hizmet',p2:'Mise, restoran yönetimi için bir SaaS platformudur: Manager, Analytics, Stash, People ve Menu (misafirler için QR menü) uygulamaları. Hizmet abonelik esasıyla sunulur.',
+h21:'2.1. Personel ve misafir verileri',p21:'Personele Mise erişimi vererek (Mise People’deki GPS yoklama dâhil), işletme sahibi personeli veri işleme konusunda bilgilendirdiğini ve geçerli hukuka göre gerekli onayları aldığını teyit eder. Mise Menu üzerinden misafir siparişleri, kişisel verileri toplanmadan kabul edilir. Ayrıntı için <a href="/privacy.html">Gizlilik Politikası</a>.',
+h3:'3. Abonelik ve ödeme',l3:'<li>Aylık veya yıllık faturalandırılır</li><li>Yenileme tarihinde otomatik tahsil edilir</li><li>Geçerli olduğunda fiyatlara KDV dâhildir</li><li>İptalde erişim ödenen dönemin sonuna kadar sürer</li><li>Ödemeden sonra 7 gün içinde iade mümkündür</li>',
+h4:'4. Deneme süresi',p4:'Yeni kullanıcılar 7 gün ücretsiz kullanır; başlamak için kart gerekmez. Deneme sonunda hizmet, yalnızca ödemeyi açıkça onayladıysanız ücretli plana geçer.',
+h5:'5. Verilerden sorumluluk',p5:'Girdiğiniz verilerden siz sorumlusunuz. Mise, kullanıcıların girdiği finansal verilerin doğruluğundan sorumlu değildir. Önemli verileri düzenli olarak yedeklemenizi öneririz.',
+h6:'6. Erişilebilirlik',p6:'%99,9 çalışma süresini hedefliyoruz. Planlı bakım 24 saat önceden duyurulur. Hizmetin geçici olarak kullanılamamasından doğan zararlardan sorumlu değiliz.',
+h7:'7. Fikrî mülkiyet',p7:'Mise platformuna ilişkin tüm haklar — tasarım, kod ve ticari markalar — Mise’ye aittir. Kullanıcılar girdikleri verilere ilişkin tüm hakları saklı tutar.',
+h8:'8. Erişimin sonlandırılması',p8:'Mise, koşulların ihlali hâlinde erişimi durdurabilir. Aboneliğinizi iptal ederek hizmeti istediğiniz an bırakabilirsiniz.',
+h9:'9. Koşulların değişmesi',p9:'Koşulları güncelleyebiliriz. Önemli değişiklikleri 30 gün önceden e-postayla bildiririz. Kullanmaya devam etmek yeni koşulların kabulü anlamına gelir.',
+h10:'10. İletişim',p10:'Sorular: <a href="mailto:hello@{DOMAIN}">hello@{DOMAIN}</a>'},
+uk:{tag:'Правове',title:'Умови використання',date:'Оновлено 14 червня 2026 · версія 2.1',
+h1:'1. Прийняття умов',p1:'Користуючись Mise, ви погоджуєтеся з цими умовами. Якщо ви не згодні — будь ласка, не використовуйте сервіс.',
+h2:'2. Опис сервісу',p2:'Mise — SaaS-платформа для керування рестораном: застосунки Manager, Analytics, Stash, People та Menu (QR-меню для гостей). Сервіс надається за підпискою.',
+h21:'2.1. Дані працівників і гостей',p21:'Надаючи працівникам доступ до Mise (зокрема явку за геолокацією в Mise People), власник підтверджує, що повідомив їх про обробку даних і отримав необхідні згоди згідно з чинним законодавством. Замовлення гостей через Mise Menu приймаються без збору їхніх персональних даних. Докладніше — у <a href="/privacy.html">Політиці конфіденційності</a>.',
+h3:'3. Підписка та оплата',l3:'<li>Підписка оплачується щомісяця або щороку</li><li>Оплата списується автоматично в дату продовження</li><li>Ціни вказані з ПДВ, де застосовно</li><li>У разі скасування доступ зберігається до кінця оплаченого періоду</li><li>Повернення можливе протягом 7 днів з моменту оплати</li>',
+h4:'4. Пробний період',p4:'Нові користувачі отримують 7 днів безкоштовно; картка для початку не потрібна. Після пробного періоду сервіс переходить на платний тариф лише якщо ви явно підтвердили оплату.',
+h5:'5. Відповідальність за дані',p5:'Ви відповідаєте за дані, які вводите. Mise не відповідає за точність введених користувачами фінансових даних. Рекомендуємо регулярно зберігати резервні копії важливих даних.',
+h6:'6. Доступність сервісу',p6:'Ми прагнемо доступності 99,9%. Про планові роботи повідомляємо за 24 години. Ми не відповідаємо за збитки, спричинені тимчасовою недоступністю сервісу.',
+h7:'7. Інтелектуальна власність',p7:'Усі права на платформу Mise — дизайн, код, торговельні марки — належать Mise. Користувачі зберігають усі права на введені ними дані.',
+h8:'8. Припинення доступу',p8:'Mise має право припинити доступ у разі порушення умов. Ви можете припинити використання будь-коли, скасувавши підписку.',
+h9:'9. Зміна умов',p9:'Ми можемо оновлювати умови. Про істотні зміни повідомляємо електронною поштою за 30 днів. Продовження використання означає згоду з новими умовами.',
+h10:'10. Контакти',p10:'Питання: <a href="mailto:hello@{DOMAIN}">hello@{DOMAIN}</a>'},
+kk:{tag:'Құқықтық',title:'Пайдалану шарттары',date:'Жаңартылды 2026 ж. 14 маусым · нұсқа 2.1',
+h1:'1. Шарттарды қабылдау',p1:'Mise-ді пайдалану арқылы осы шарттарды қабылдайсыз. Келіспесеңіз, қызметті пайдаланбауыңызды сұраймыз.',
+h2:'2. Қызмет сипаттамасы',p2:'Mise — мейрамхананы басқаруға арналған SaaS платформасы: Manager, Analytics, Stash, People және Menu (қонақтарға арналған QR-мәзір) қолданбалары. Қызмет жазылым негізінде ұсынылады.',
+h21:'2.1. Қызметкерлер мен қонақтардың деректері',p21:'Қызметкерлерге Mise-ге қол жеткізу беру арқылы (Mise People-дегі GPS келу қоса), ие оларды деректерді өңдеу туралы хабардар еткенін және қолданыстағы заңға сәйкес қажетті келісімдерді алғанын растайды. Mise Menu арқылы қонақ тапсырыстары олардың жеке деректерін жинамай қабылданады. Толығырақ — <a href="/privacy.html">Құпиялылық саясатында</a>.',
+h3:'3. Жазылым және төлем',l3:'<li>Жазылым ай сайын немесе жыл сайын төленеді</li><li>Төлем ұзарту күнінде автоматты түрде алынады</li><li>Бағалар қолданылса, ҚҚС қосылған</li><li>Бас тартқанда қол жеткізу төленген кезең соңына дейін сақталады</li><li>Төлемнен кейін 7 күн ішінде қайтару мүмкін</li>',
+h4:'4. Сынақ кезеңі',p4:'Жаңа пайдаланушылар 7 күн тегін алады; бастау үшін карта қажет емес. Сынақтан кейін қызмет тек төлемді нақты растаған жағдайда ғана ақылы тарифке көшеді.',
+h5:'5. Деректерге жауапкершілік',p5:'Енгізген деректеріңізге сіз жауаптысыз. Mise пайдаланушылар енгізген қаржы деректерінің дәлдігіне жауап бермейді. Маңызды деректердің сақтық көшірмесін жүйелі түрде жасауды ұсынамыз.',
+h6:'6. Қолжетімділік',p6:'Біз 99,9% қолжетімділікке ұмтыламыз. Жоспарлы жұмыстар туралы 24 сағат бұрын хабарлаймыз. Қызметтің уақытша қолжетімсіздігінен туындаған шығындарға жауап бермейміз.',
+h7:'7. Зияткерлік меншік',p7:'Mise платформасына барлық құқықтар — дизайн, код, тауар белгілері — Mise-ге тиесілі. Пайдаланушылар енгізген деректеріне барлық құқықтарды сақтайды.',
+h8:'8. Қол жеткізуді тоқтату',p8:'Шарттар бұзылған жағдайда Mise қол жеткізуді тоқтата алады. Жазылымды тоқтату арқылы пайдалануды кез келген уақытта тоқтата аласыз.',
+h9:'9. Шарттарды өзгерту',p9:'Шарттарды жаңартуымыз мүмкін. Елеулі өзгерістер туралы 30 күн бұрын email арқылы хабарлаймыз. Пайдалануды жалғастыру жаңа шарттарды қабылдауды білдіреді.',
+h10:'10. Байланыс',p10:'Сұрақтар: <a href="mailto:hello@{DOMAIN}">hello@{DOMAIN}</a>'}
+};
+function setLang(lang){
+  if(!T[lang]) lang='en';
+  document.documentElement.lang=lang;
+  const dict=T[lang], fb=T.en;
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    const k=el.getAttribute('data-i18n');
+    let v=dict[k]!==undefined?dict[k]:fb[k];
+    if(v!==undefined){ v=v.replace(/{DOMAIN}/g,DOMAIN); el.innerHTML=v; }
+  });
+  const cur=LANGS.find(l=>l[0]===lang);
+  const label=document.getElementById('langCurLabel');
+  if(label) label.textContent=cur?cur[2]:lang.toUpperCase();
+  renderLangMenu(lang);
+  const m=document.getElementById('langMenu'); if(m) m.classList.remove('open');
+  try{ localStorage.setItem('mise_lang',lang); }catch(e){}
+}
+function renderLangMenu(active){
+  document.getElementById('langMenu').innerHTML=LANGS.map(([code,name,short])=>
+    `<button class="lang-opt${code===active?' active':''}" onclick="setLang('${code}')"><span>${name}</span><span class="lo-code">${short}</span></button>`).join('');
+}
+function toggleLangMenu(e){ e.stopPropagation(); document.getElementById('langMenu').classList.toggle('open'); }
+document.addEventListener('click',()=>{ const m=document.getElementById('langMenu'); if(m) m.classList.remove('open'); });
+window.addEventListener('scroll',()=>{ document.querySelector('.nav').style.background=window.scrollY>10?'rgba(255,255,255,0.97)':'rgba(255,255,255,0.92)'; });
+(function(){
+  const supported=LANGS.map(l=>l[0]); let lang='en';
+  try{
+    const saved=localStorage.getItem('mise_lang');
+    if(saved&&supported.includes(saved)) lang=saved;
+    else{ const navs=navigator.languages||[navigator.language||'en']; for(const n of navs){ const c=(n||'').slice(0,2).toLowerCase(); if(supported.includes(c)){ lang=c; break; } } }
+  }catch(e){}
+  setLang(lang);
+})();
 </script>
 </body>
 </html>

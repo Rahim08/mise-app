@@ -3,95 +3,213 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Конфиденциальность — Mise</title>
+<title>Privacy — Mise</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;background:#fff;color:#1d1d1f;-webkit-font-smoothing:antialiased;}
-:root{--blue:#0071e3;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);}
-.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
-.nav-back{font-size:.82rem;color:var(--blue);text-decoration:none;}
+:root{--blue:#0071e3;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);--ease:cubic-bezier(.22,1,.36,1);}
+.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
+.nav-back{font-size:.85rem;font-weight:600;color:var(--blue);text-decoration:none;letter-spacing:-.01em;}
 .nav-back::before{content:'‹ ';}
+.lang-tog{position:relative;}
+.lang-cur{display:flex;align-items:center;gap:6px;background:var(--light);border:none;border-radius:8px;padding:6px 11px;cursor:pointer;color:var(--gray);font-family:inherit;font-size:.72rem;font-weight:700;letter-spacing:.04em;transition:all .2s;}
+.lang-cur:hover{color:#1d1d1f;background:#ececef;}
+.lang-cur svg{opacity:.6;}
+.lang-menu{position:absolute;top:calc(100% + 9px);right:0;min-width:168px;background:rgba(255,255,255,.86);backdrop-filter:blur(30px) saturate(160%);-webkit-backdrop-filter:blur(30px) saturate(160%);border:.5px solid var(--border);border-radius:15px;padding:6px;box-shadow:0 24px 60px rgba(0,0,0,.18),0 1px 0 rgba(255,255,255,.7) inset;opacity:0;transform:translateY(-7px) scale(.97);transform-origin:top right;pointer-events:none;transition:opacity .2s var(--ease),transform .2s var(--ease);z-index:1001;}
+.lang-menu.open{opacity:1;transform:translateY(0) scale(1);pointer-events:auto;}
+.lang-opt{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;background:transparent;border:none;border-radius:10px;padding:9px 13px;cursor:pointer;color:var(--gray);font-family:inherit;font-size:.84rem;font-weight:500;text-align:left;letter-spacing:-.01em;transition:background .15s,color .15s;}
+.lang-opt:hover{background:var(--light);color:#1d1d1f;}
+.lang-opt.active{color:#1d1d1f;}
+.lang-opt .lo-code{font-size:.62rem;font-weight:700;letter-spacing:.06em;color:#aeaeb2;}
 .page{max-width:720px;margin:0 auto;padding:120px 24px 80px;}
 .page-tag{font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--blue);margin-bottom:16px;}
 .page-title{font-size:clamp(2rem,4vw,3rem);font-weight:700;letter-spacing:-.03em;margin-bottom:12px;}
 .page-date{font-size:.85rem;color:var(--gray);margin-bottom:48px;}
-h2{font-size:1.2rem;font-weight:600;margin:36px 0 12px;}
+h2{font-size:1.2rem;font-weight:600;margin:36px 0 12px;letter-spacing:-.02em;}
 p{font-size:.92rem;color:var(--gray);line-height:1.8;margin-bottom:14px;}
 ul{margin:12px 0 14px 20px;}
 li{font-size:.92rem;color:var(--gray);line-height:1.8;margin-bottom:6px;}
+a{color:var(--blue);}
 .divider{height:0.5px;background:var(--border);margin:32px 0;}
 </style>
 </head>
 <body>
 <nav class="nav">
   <a href="/" class="nav-back">Mise</a>
+  <div class="lang-tog" id="langTog">
+    <button class="lang-cur" onclick="toggleLangMenu(event)" aria-haspopup="true" aria-label="Language">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18" stroke-linecap="round"/><path d="M12 3c2.6 2.8 2.6 15.2 0 18M12 3c-2.6 2.8-2.6 15.2 0 18" stroke-linecap="round"/></svg>
+      <span id="langCurLabel">RU</span>
+    </button>
+    <div class="lang-menu" id="langMenu"></div>
+  </div>
 </nav>
 <div class="page">
-  <p class="page-tag">Правовое</p>
-  <h1 class="page-title">Политика конфиденциальности</h1>
-  <p class="page-date">Последнее обновление: 12 июня 2026</p>
+  <p class="page-tag" data-i18n="tag">Правовое</p>
+  <h1 class="page-title" data-i18n="title">Политика конфиденциальности</h1>
+  <p class="page-date" data-i18n="date">Обновлено 14 июня 2026</p>
 
-  <h2>1. Какие данные мы собираем</h2>
-  <p>При использовании Mise мы собираем следующие данные:</p>
-  <ul>
-    <li>Email адрес и имя при регистрации</li>
-    <li>Данные о вашем ресторане (название, сотрудники, график работы, задачи)</li>
-    <li>Финансовые данные которые вы вводите в приложения (смены, транзакции, склад)</li>
-    <li>Геолокация сотрудников — только при включённой функции «явка по геолокации» (см. раздел 2)</li>
-    <li>Заказы гостей через QR-меню (состав заказа, номер стола; без персональных данных гостя)</li>
-    <li>Технические данные (тип устройства, браузер, IP адрес)</li>
-  </ul>
+  <p data-i18n="intro">Mise — платформа управления рестораном (Manager, Analytics, Stash, People, Menu). Мы относимся к вашим данным так же серьёзно, как вы — к своему заведению. Ниже без юридического тумана объясняем, что мы собираем, зачем и какие у вас права.</p>
 
-  <h2>2. Геолокация сотрудников</h2>
-  <p>Функция «явка по геолокации» в Mise People <strong>выключена по умолчанию</strong> и включается владельцем заведения. При её использовании:</p>
-  <ul>
-    <li>Координаты запрашиваются <strong>только с явного согласия сотрудника</strong> — через стандартный системный запрос разрешения на устройстве. Без согласия функция не работает, отметиться можно вручную.</li>
-    <li>Геолокация считывается <strong>только в момент отметки прихода/ухода</strong> при открытом приложении. Мы не отслеживаем местоположение в фоне и не ведём историю перемещений.</li>
-    <li>Сохраняются: координаты в момент отметки, расстояние до заведения и время. Эти данные видят сотрудник и руководство заведения.</li>
-    <li>Сотрудник может отозвать согласие в любой момент в настройках браузера/устройства, а также запросить удаление записей через владельца заведения или privacy@mise.app.</li>
-  </ul>
-  <p>Владелец заведения, включая функцию, обязуется уведомить сотрудников об обработке геоданных в соответствии с местным трудовым законодательством.</p>
+  <h2 data-i18n="h1">1. Какие данные мы собираем</h2>
+  <p data-i18n="p1">Чтобы сервис работал, мы обрабатываем:</p>
+  <ul data-i18n="l1"><li>Email и имя при регистрации</li><li>Данные заведения: название, сотрудники, графики, задачи</li><li>Операционные и финансовые данные, которые вы вводите: смены, выручка, расходы, склад</li><li>Геолокацию сотрудников — только при включённой функции «явка по геолокации» (раздел 2)</li><li>Заказы гостей через QR-меню: состав и номер стола, без персональных данных гостя</li><li>Технические данные: тип устройства, браузер, IP-адрес</li></ul>
 
-  <h2>3. Как мы используем данные</h2>
-  <p>Ваши данные используются исключительно для предоставления услуг Mise:</p>
-  <ul>
-    <li>Обеспечение работы приложений Mise Manager, Mise Analytics, Mise Stash, Mise People, Mise Menu</li>
-    <li>Отправка уведомлений связанных с подпиской, оплатой и рабочими сменами</li>
-    <li>Техническая поддержка</li>
-    <li>Улучшение продукта (в анонимизированном виде)</li>
-  </ul>
-  <p>Мы никогда не продаём ваши данные третьим лицам.</p>
+  <h2 data-i18n="h2">2. Геолокация сотрудников</h2>
+  <p data-i18n="p2">Функция «явка по геолокации» в Mise People <strong>выключена по умолчанию</strong> и активируется владельцем заведения. При её использовании:</p>
+  <ul data-i18n="l2"><li>Координаты запрашиваются <strong>только с явного согласия сотрудника</strong> — через системный запрос разрешения на устройстве. Без согласия отметиться можно вручную.</li><li>Геопозиция считывается <strong>только в момент отметки прихода/ухода</strong> при открытом приложении. Мы не следим за местоположением в фоне и не ведём историю перемещений.</li><li>Сохраняются координаты отметки, расстояние до заведения и время. Их видят сотрудник и руководство.</li><li>Согласие можно отозвать в любой момент в настройках устройства, а удаление записей запросить у владельца или на privacy@{DOMAIN}.</li></ul>
+  <p data-i18n="p2b">Включая функцию, владелец обязуется уведомить сотрудников об обработке геоданных в соответствии с местным трудовым законодательством.</p>
 
-  <h2>4. Хранение данных</h2>
-  <p>Все данные хранятся на серверах Supabase в дата-центре AWS в Ирландии (Европейский Союз). Данные зашифрованы при хранении и передаче. Каждый ресторан имеет доступ только к своим данным — это обеспечивается на уровне базы данных.</p>
+  <h2 data-i18n="h3">3. Как мы используем данные</h2>
+  <p data-i18n="p3">Данные используются исключительно для предоставления услуг Mise:</p>
+  <ul data-i18n="l3"><li>Работа приложений Manager, Analytics, Stash, People и Menu</li><li>Уведомления о подписке, оплате и рабочих сменах</li><li>Техническая поддержка</li><li>Улучшение продукта — в обезличенном виде</li></ul>
+  <p data-i18n="p3b">Мы никогда не продаём ваши данные третьим лицам.</p>
 
-  <h2>5. Платёжные данные</h2>
-  <p>Все платежи обрабатываются через Stripe. Мы не храним данные вашей банковской карты. Stripe соответствует стандарту безопасности PCI DSS уровня 1.</p>
+  <h2 data-i18n="h4">4. Хранение и защита</h2>
+  <p data-i18n="p4">Данные хранятся на серверах Supabase в дата-центре AWS в Ирландии (ЕС), зашифрованы при хранении и передаче. Каждое заведение имеет доступ только к своим данным — это обеспечивается на уровне базы данных (Row-Level Security).</p>
 
-  <h2>6. Ваши права (GDPR)</h2>
-  <p>Если вы находитесь в Европейском Союзе, вы имеете право:</p>
-  <ul>
-    <li>Получить копию своих данных</li>
-    <li>Исправить неточные данные</li>
-    <li>Удалить свои данные</li>
-    <li>Ограничить обработку данных</li>
-    <li>Перенести данные в другой сервис</li>
-  </ul>
-  <p>Для реализации прав напишите на hello@mise.app</p>
+  <h2 data-i18n="h5">5. Платёжные данные</h2>
+  <p data-i18n="p5">Платежи обрабатывает Stripe. Мы не храним данные вашей карты. Stripe сертифицирован по стандарту PCI DSS уровня 1.</p>
 
-  <h2>7. Cookies</h2>
-  <p>Мы используем только необходимые cookies для работы приложения (авторизация, сессии). Мы не используем рекламные или аналитические cookies третьих сторон.</p>
+  <h2 data-i18n="h6">6. Ваши права (GDPR)</h2>
+  <p data-i18n="p6">Если вы в Европейском Союзе, вы вправе:</p>
+  <ul data-i18n="l6"><li>Получить копию своих данных</li><li>Исправить неточности</li><li>Удалить свои данные</li><li>Ограничить обработку</li><li>Перенести данные в другой сервис</li></ul>
+  <p data-i18n="p6b">Чтобы воспользоваться правами, напишите на hello@{DOMAIN}.</p>
 
-  <h2>8. Удаление аккаунта</h2>
-  <p>Вы можете удалить аккаунт в любой момент из личного кабинета или написав на hello@mise.app. Все ваши данные будут удалены в течение 30 дней.</p>
+  <h2 data-i18n="h7">7. Cookies</h2>
+  <p data-i18n="p7">Мы используем только необходимые cookies (авторизация и сессии). Аналитика подключается лишь с вашего согласия и не использует рекламные cookies третьих сторон.</p>
 
-  <h2>9. Контакты</h2>
-  <p>По вопросам конфиденциальности: <a href="mailto:privacy@mise.app" style="color:#0071e3;">privacy@mise.app</a></p>
+  <h2 data-i18n="h8">8. Удаление аккаунта</h2>
+  <p data-i18n="p8">Аккаунт можно удалить в любой момент из личного кабинета или письмом на hello@{DOMAIN}. Все данные удаляются в течение 30 дней.</p>
+
+  <h2 data-i18n="h9">9. Контакты</h2>
+  <p data-i18n="p9">По вопросам конфиденциальности: <a href="mailto:privacy@{DOMAIN}">privacy@{DOMAIN}</a></p>
 </div>
 <script>
-window.addEventListener('scroll', () => {
-  document.querySelector('.nav').style.background = window.scrollY > 10 ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.92)';
-});
+const DOMAIN = 'getmise.app'; // контактный домен — заменить здесь при смене
+const LANGS = [['en','English','EN'],['ru','Русский','RU'],['it','Italiano','IT'],['fr','Français','FR'],['az','Azərbaycan','AZ'],['tr','Türkçe','TR'],['uk','Українська','UK'],['kk','Қазақша','KK']];
+const T = {
+ru:{tag:'Правовое',title:'Политика конфиденциальности',date:'Обновлено 14 июня 2026',
+intro:'Mise — платформа управления рестораном (Manager, Analytics, Stash, People, Menu). Мы относимся к вашим данным так же серьёзно, как вы — к своему заведению. Ниже без юридического тумана объясняем, что мы собираем, зачем и какие у вас права.',
+h1:'1. Какие данные мы собираем',p1:'Чтобы сервис работал, мы обрабатываем:',l1:'<li>Email и имя при регистрации</li><li>Данные заведения: название, сотрудники, графики, задачи</li><li>Операционные и финансовые данные, которые вы вводите: смены, выручка, расходы, склад</li><li>Геолокацию сотрудников — только при включённой функции «явка по геолокации» (раздел 2)</li><li>Заказы гостей через QR-меню: состав и номер стола, без персональных данных гостя</li><li>Технические данные: тип устройства, браузер, IP-адрес</li>',
+h2:'2. Геолокация сотрудников',p2:'Функция «явка по геолокации» в Mise People <strong>выключена по умолчанию</strong> и активируется владельцем заведения. При её использовании:',l2:'<li>Координаты запрашиваются <strong>только с явного согласия сотрудника</strong> — через системный запрос разрешения на устройстве. Без согласия отметиться можно вручную.</li><li>Геопозиция считывается <strong>только в момент отметки прихода/ухода</strong> при открытом приложении. Мы не следим за местоположением в фоне и не ведём историю перемещений.</li><li>Сохраняются координаты отметки, расстояние до заведения и время. Их видят сотрудник и руководство.</li><li>Согласие можно отозвать в любой момент в настройках устройства, а удаление записей запросить у владельца или на privacy@{DOMAIN}.</li>',p2b:'Включая функцию, владелец обязуется уведомить сотрудников об обработке геоданных в соответствии с местным трудовым законодательством.',
+h3:'3. Как мы используем данные',p3:'Данные используются исключительно для предоставления услуг Mise:',l3:'<li>Работа приложений Manager, Analytics, Stash, People и Menu</li><li>Уведомления о подписке, оплате и рабочих сменах</li><li>Техническая поддержка</li><li>Улучшение продукта — в обезличенном виде</li>',p3b:'Мы никогда не продаём ваши данные третьим лицам.',
+h4:'4. Хранение и защита',p4:'Данные хранятся на серверах Supabase в дата-центре AWS в Ирландии (ЕС), зашифрованы при хранении и передаче. Каждое заведение имеет доступ только к своим данным — это обеспечивается на уровне базы данных (Row-Level Security).',
+h5:'5. Платёжные данные',p5:'Платежи обрабатывает Stripe. Мы не храним данные вашей карты. Stripe сертифицирован по стандарту PCI DSS уровня 1.',
+h6:'6. Ваши права (GDPR)',p6:'Если вы в Европейском Союзе, вы вправе:',l6:'<li>Получить копию своих данных</li><li>Исправить неточности</li><li>Удалить свои данные</li><li>Ограничить обработку</li><li>Перенести данные в другой сервис</li>',p6b:'Чтобы воспользоваться правами, напишите на hello@{DOMAIN}.',
+h7:'7. Cookies',p7:'Мы используем только необходимые cookies (авторизация и сессии). Аналитика подключается лишь с вашего согласия и не использует рекламные cookies третьих сторон.',
+h8:'8. Удаление аккаунта',p8:'Аккаунт можно удалить в любой момент из личного кабинета или письмом на hello@{DOMAIN}. Все данные удаляются в течение 30 дней.',
+h9:'9. Контакты',p9:'По вопросам конфиденциальности: <a href="mailto:privacy@{DOMAIN}">privacy@{DOMAIN}</a>'},
+en:{tag:'Legal',title:'Privacy Policy',date:'Updated 14 June 2026',
+intro:'Mise is a restaurant management platform (Manager, Analytics, Stash, People, Menu). We take your data as seriously as you take your venue. Below we explain — without legal fog — what we collect, why, and what rights you have.',
+h1:'1. What we collect',p1:'To run the service we process:',l1:'<li>Email and name at sign-up</li><li>Venue data: name, staff, schedules, tasks</li><li>Operational and financial data you enter: shifts, revenue, expenses, inventory</li><li>Staff location — only when the “geo attendance” feature is enabled (section 2)</li><li>Guest orders via the QR menu: items and table number, no guest personal data</li><li>Technical data: device type, browser, IP address</li>',
+h2:'2. Staff geolocation',p2:'The “geo attendance” feature in Mise People is <strong>off by default</strong> and enabled by the venue owner. When in use:',l2:'<li>Coordinates are requested <strong>only with the employee’s explicit consent</strong>, via the device permission prompt. Without consent, check-in can be done manually.</li><li>Location is read <strong>only at the moment of check-in/out</strong> with the app open. We do not track location in the background or keep a movement history.</li><li>We store the check-in coordinates, distance to the venue and time. The employee and management can see them.</li><li>Consent can be withdrawn anytime in device settings; record deletion can be requested from the owner or at privacy@{DOMAIN}.</li>',p2b:'By enabling the feature, the owner undertakes to notify staff about geodata processing in accordance with local labour law.',
+h3:'3. How we use data',p3:'Data is used solely to provide Mise services:',l3:'<li>Running the Manager, Analytics, Stash, People and Menu apps</li><li>Notifications about subscription, billing and work shifts</li><li>Technical support</li><li>Improving the product — in anonymised form</li>',p3b:'We never sell your data to third parties.',
+h4:'4. Storage and security',p4:'Data is stored on Supabase servers in an AWS data centre in Ireland (EU), encrypted at rest and in transit. Each venue can access only its own data, enforced at the database level (Row-Level Security).',
+h5:'5. Payment data',p5:'Payments are handled by Stripe. We do not store your card details. Stripe is certified to PCI DSS Level 1.',
+h6:'6. Your rights (GDPR)',p6:'If you are in the European Union, you have the right to:',l6:'<li>Receive a copy of your data</li><li>Correct inaccuracies</li><li>Erase your data</li><li>Restrict processing</li><li>Port your data to another service</li>',p6b:'To exercise these rights, write to hello@{DOMAIN}.',
+h7:'7. Cookies',p7:'We use only essential cookies (authentication and sessions). Analytics loads only with your consent and uses no third-party advertising cookies.',
+h8:'8. Account deletion',p8:'You can delete your account anytime from your dashboard or by emailing hello@{DOMAIN}. All your data is removed within 30 days.',
+h9:'9. Contact',p9:'For privacy matters: <a href="mailto:privacy@{DOMAIN}">privacy@{DOMAIN}</a>'},
+it:{tag:'Note legali',title:'Informativa sulla privacy',date:'Aggiornato il 14 giugno 2026',
+intro:'Mise è una piattaforma di gestione per ristoranti (Manager, Analytics, Stash, People, Menu). Trattiamo i tuoi dati con la stessa serietà con cui tu gestisci il tuo locale. Di seguito spieghiamo — senza linguaggio oscuro — cosa raccogliamo, perché e quali diritti hai.',
+h1:'1. Quali dati raccogliamo',p1:'Per far funzionare il servizio trattiamo:',l1:'<li>Email e nome alla registrazione</li><li>Dati del locale: nome, personale, turni, attività</li><li>Dati operativi e finanziari che inserisci: turni, incassi, spese, magazzino</li><li>Geolocalizzazione del personale — solo con la funzione “presenza via GPS” attiva (sezione 2)</li><li>Ordini degli ospiti dal menu QR: articoli e numero del tavolo, senza dati personali dell’ospite</li><li>Dati tecnici: tipo di dispositivo, browser, indirizzo IP</li>',
+h2:'2. Geolocalizzazione del personale',p2:'La funzione “presenza via GPS” in Mise People è <strong>disattivata per impostazione predefinita</strong> e viene attivata dal titolare. Quando è in uso:',l2:'<li>Le coordinate sono richieste <strong>solo con il consenso esplicito del dipendente</strong>, tramite la richiesta di autorizzazione del dispositivo. Senza consenso la timbratura è manuale.</li><li>La posizione è letta <strong>solo al momento dell’entrata/uscita</strong> con l’app aperta. Non tracciamo la posizione in background né conserviamo cronologie di spostamenti.</li><li>Conserviamo coordinate della timbratura, distanza dal locale e ora. Le vedono il dipendente e la direzione.</li><li>Il consenso è revocabile in qualsiasi momento nelle impostazioni del dispositivo; la cancellazione dei dati si richiede al titolare o a privacy@{DOMAIN}.</li>',p2b:'Attivando la funzione, il titolare si impegna a informare il personale sul trattamento dei geodati nel rispetto della normativa locale sul lavoro.',
+h3:'3. Come usiamo i dati',p3:'I dati sono usati esclusivamente per fornire i servizi Mise:',l3:'<li>Funzionamento delle app Manager, Analytics, Stash, People e Menu</li><li>Notifiche su abbonamento, pagamenti e turni</li><li>Assistenza tecnica</li><li>Miglioramento del prodotto — in forma anonima</li>',p3b:'Non vendiamo mai i tuoi dati a terzi.',
+h4:'4. Conservazione e sicurezza',p4:'I dati sono conservati su server Supabase in un data center AWS in Irlanda (UE), cifrati a riposo e in transito. Ogni locale accede solo ai propri dati, garantito a livello di database (Row-Level Security).',
+h5:'5. Dati di pagamento',p5:'I pagamenti sono gestiti da Stripe. Non conserviamo i dati della tua carta. Stripe è certificato PCI DSS Livello 1.',
+h6:'6. I tuoi diritti (GDPR)',p6:'Se sei nell’Unione Europea, hai diritto a:',l6:'<li>Ricevere una copia dei tuoi dati</li><li>Correggere le inesattezze</li><li>Cancellare i tuoi dati</li><li>Limitare il trattamento</li><li>Portare i dati a un altro servizio</li>',p6b:'Per esercitare questi diritti scrivi a hello@{DOMAIN}.',
+h7:'7. Cookie',p7:'Usiamo solo cookie essenziali (autenticazione e sessioni). L’analisi si attiva solo con il tuo consenso e non usa cookie pubblicitari di terzi.',
+h8:'8. Eliminazione dell’account',p8:'Puoi eliminare l’account in qualsiasi momento dalla dashboard o scrivendo a hello@{DOMAIN}. Tutti i dati vengono rimossi entro 30 giorni.',
+h9:'9. Contatti',p9:'Per questioni di privacy: <a href="mailto:privacy@{DOMAIN}">privacy@{DOMAIN}</a>'},
+fr:{tag:'Mentions légales',title:'Politique de confidentialité',date:'Mis à jour le 14 juin 2026',
+intro:'Mise est une plateforme de gestion de restaurant (Manager, Analytics, Stash, People, Menu). Nous prenons vos données aussi au sérieux que vous prenez votre établissement. Ci-dessous, sans jargon, ce que nous collectons, pourquoi et quels sont vos droits.',
+h1:'1. Données que nous collectons',p1:'Pour faire fonctionner le service, nous traitons :',l1:'<li>E-mail et nom à l’inscription</li><li>Données de l’établissement : nom, personnel, plannings, tâches</li><li>Données opérationnelles et financières que vous saisissez : services, recettes, dépenses, stock</li><li>Géolocalisation du personnel — uniquement si la fonction « pointage GPS » est activée (section 2)</li><li>Commandes des clients via le menu QR : articles et numéro de table, sans données personnelles du client</li><li>Données techniques : type d’appareil, navigateur, adresse IP</li>',
+h2:'2. Géolocalisation du personnel',p2:'La fonction « pointage GPS » dans Mise People est <strong>désactivée par défaut</strong> et activée par le gérant. Lorsqu’elle est utilisée :',l2:'<li>Les coordonnées sont demandées <strong>uniquement avec le consentement explicite de l’employé</strong>, via la demande d’autorisation de l’appareil. Sans consentement, le pointage se fait manuellement.</li><li>La position est lue <strong>uniquement au moment de l’arrivée/du départ</strong>, l’application ouverte. Nous ne suivons pas la position en arrière-plan et ne conservons pas d’historique de déplacements.</li><li>Nous conservons les coordonnées du pointage, la distance à l’établissement et l’heure. L’employé et la direction les voient.</li><li>Le consentement est révocable à tout moment dans les réglages de l’appareil ; la suppression des données se demande au gérant ou à privacy@{DOMAIN}.</li>',p2b:'En activant la fonction, le gérant s’engage à informer le personnel du traitement des géodonnées conformément au droit du travail local.',
+h3:'3. Utilisation des données',p3:'Les données servent uniquement à fournir les services Mise :',l3:'<li>Fonctionnement des apps Manager, Analytics, Stash, People et Menu</li><li>Notifications d’abonnement, de paiement et de service</li><li>Assistance technique</li><li>Amélioration du produit — sous forme anonymisée</li>',p3b:'Nous ne vendons jamais vos données à des tiers.',
+h4:'4. Stockage et sécurité',p4:'Les données sont stockées sur des serveurs Supabase dans un centre AWS en Irlande (UE), chiffrées au repos et en transit. Chaque établissement n’accède qu’à ses propres données, garanti au niveau de la base (Row-Level Security).',
+h5:'5. Données de paiement',p5:'Les paiements sont gérés par Stripe. Nous ne stockons pas les données de votre carte. Stripe est certifié PCI DSS niveau 1.',
+h6:'6. Vos droits (RGPD)',p6:'Si vous êtes dans l’Union européenne, vous avez le droit de :',l6:'<li>Recevoir une copie de vos données</li><li>Corriger les inexactitudes</li><li>Effacer vos données</li><li>Limiter le traitement</li><li>Porter vos données vers un autre service</li>',p6b:'Pour exercer ces droits, écrivez à hello@{DOMAIN}.',
+h7:'7. Cookies',p7:'Nous n’utilisons que des cookies essentiels (authentification et sessions). L’analyse ne se charge qu’avec votre consentement et n’utilise aucun cookie publicitaire tiers.',
+h8:'8. Suppression du compte',p8:'Vous pouvez supprimer votre compte à tout moment depuis le tableau de bord ou par e-mail à hello@{DOMAIN}. Toutes vos données sont supprimées sous 30 jours.',
+h9:'9. Contact',p9:'Pour les questions de confidentialité : <a href="mailto:privacy@{DOMAIN}">privacy@{DOMAIN}</a>'},
+az:{tag:'Hüquqi',title:'Məxfilik siyasəti',date:'Yeniləndi 14 iyun 2026',
+intro:'Mise restoran idarəetmə platformasıdır (Manager, Analytics, Stash, People, Menu). Məlumatlarınıza siz öz müəssisənizə yanaşdığınız ciddiliklə yanaşırıq. Aşağıda hüquqi dumandan uzaq şəkildə nə topladığımızı, niyə və hansı hüquqlarınız olduğunu izah edirik.',
+h1:'1. Hansı məlumatları toplayırıq',p1:'Xidmətin işləməsi üçün emal edirik:',l1:'<li>Qeydiyyatda e-poçt və ad</li><li>Müəssisə məlumatları: ad, işçilər, qrafiklər, tapşırıqlar</li><li>Daxil etdiyiniz əməliyyat və maliyyə məlumatları: növbələr, gəlir, xərclər, anbar</li><li>İşçilərin yeri — yalnız “GPS davamiyyət” funksiyası aktiv olduqda (bölmə 2)</li><li>QR-menyu vasitəsilə qonaq sifarişləri: məhsullar və masa nömrəsi, qonağın şəxsi məlumatı olmadan</li><li>Texniki məlumatlar: cihaz növü, brauzer, IP ünvanı</li>',
+h2:'2. İşçilərin geolokasiyası',p2:'Mise People-dakı “GPS davamiyyət” funksiyası <strong>standart olaraq söndürülüb</strong> və müəssisə sahibi tərəfindən aktivləşdirilir. İstifadə zamanı:',l2:'<li>Koordinatlar <strong>yalnız işçinin açıq razılığı ilə</strong> cihazın icazə sorğusu vasitəsilə istənilir. Razılıq olmadan davamiyyət əl ilə qeyd edilir.</li><li>Yer <strong>yalnız gəliş/gediş anında</strong>, tətbiq açıq olarkən oxunur. Yeri fonda izləmirik və hərəkət tarixçəsi saxlamırıq.</li><li>Qeydin koordinatları, müəssisəyə məsafə və vaxt saxlanılır. Bunları işçi və rəhbərlik görür.</li><li>Razılıq istənilən vaxt cihaz tənzimləmələrində geri götürülə bilər; qeydlərin silinməsi sahibdən və ya privacy@{DOMAIN} ünvanından istənilir.</li>',p2b:'Funksiyanı aktivləşdirərkən sahib yerli əmək qanunvericiliyinə uyğun olaraq işçiləri geo-məlumatların emalı barədə xəbərdar etməyi öhdəsinə götürür.',
+h3:'3. Məlumatları necə istifadə edirik',p3:'Məlumatlar yalnız Mise xidmətlərini təmin etmək üçün istifadə olunur:',l3:'<li>Manager, Analytics, Stash, People və Menu tətbiqlərinin işi</li><li>Abunəlik, ödəniş və növbələr barədə bildirişlər</li><li>Texniki dəstək</li><li>Məhsulun təkmilləşdirilməsi — anonimləşdirilmiş formada</li>',p3b:'Məlumatlarınızı heç vaxt üçüncü tərəflərə satmırıq.',
+h4:'4. Saxlanma və təhlükəsizlik',p4:'Məlumatlar İrlandiyadakı (Aİ) AWS data mərkəzində Supabase serverlərində saxlanılır, saxlanma və ötürülmə zamanı şifrələnir. Hər müəssisə yalnız öz məlumatlarına çıxış əldə edir — bu, baza səviyyəsində (Row-Level Security) təmin edilir.',
+h5:'5. Ödəniş məlumatları',p5:'Ödənişləri Stripe emal edir. Kart məlumatlarınızı saxlamırıq. Stripe PCI DSS Səviyyə 1 sertifikatına malikdir.',
+h6:'6. Hüquqlarınız (GDPR)',p6:'Avropa İttifaqındasınızsa, hüququnuz var:',l6:'<li>Məlumatlarınızın surətini almaq</li><li>Yanlışlıqları düzəltmək</li><li>Məlumatlarınızı silmək</li><li>Emalı məhdudlaşdırmaq</li><li>Məlumatları başqa xidmətə köçürmək</li>',p6b:'Bu hüquqlardan istifadə üçün hello@{DOMAIN} ünvanına yazın.',
+h7:'7. Cookie-lər',p7:'Yalnız zəruri cookie-lərdən (autentifikasiya və sessiyalar) istifadə edirik. Analitika yalnız sizin razılığınızla yüklənir və üçüncü tərəf reklam cookie-lərindən istifadə etmir.',
+h8:'8. Hesabın silinməsi',p8:'Hesabı istənilən vaxt idarə panelindən və ya hello@{DOMAIN} ünvanına yazaraq silə bilərsiniz. Bütün məlumatlar 30 gün ərzində silinir.',
+h9:'9. Əlaqə',p9:'Məxfilik məsələləri üçün: <a href="mailto:privacy@{DOMAIN}">privacy@{DOMAIN}</a>'},
+tr:{tag:'Yasal',title:'Gizlilik Politikası',date:'Güncellendi 14 Haziran 2026',
+intro:'Mise bir restoran yönetim platformudur (Manager, Analytics, Stash, People, Menu). Verilerinizi, siz işletmenizi ne kadar ciddiye alıyorsanız o kadar ciddiye alıyoruz. Aşağıda hukuki bulanıklık olmadan neyi, neden topladığımızı ve haklarınızı açıklıyoruz.',
+h1:'1. Hangi verileri topluyoruz',p1:'Hizmetin çalışması için şunları işliyoruz:',l1:'<li>Kayıtta e-posta ve ad</li><li>İşletme verileri: ad, personel, programlar, görevler</li><li>Girdiğiniz operasyonel ve finansal veriler: vardiyalar, ciro, giderler, stok</li><li>Personel konumu — yalnızca “GPS yoklama” özelliği açıkken (bölüm 2)</li><li>QR menü üzerinden misafir siparişleri: ürünler ve masa numarası, misafirin kişisel verisi olmadan</li><li>Teknik veriler: cihaz türü, tarayıcı, IP adresi</li>',
+h2:'2. Personel konumu',p2:'Mise People’deki “GPS yoklama” özelliği <strong>varsayılan olarak kapalıdır</strong> ve işletme sahibi tarafından açılır. Kullanıldığında:',l2:'<li>Koordinatlar <strong>yalnızca çalışanın açık onayıyla</strong>, cihazın izin istemiyle alınır. Onay olmadan yoklama elle yapılır.</li><li>Konum <strong>yalnızca giriş/çıkış anında</strong>, uygulama açıkken okunur. Konumu arka planda izlemeyiz ve hareket geçmişi tutmayız.</li><li>Yoklama koordinatları, işletmeye uzaklık ve saat saklanır. Bunları çalışan ve yönetim görür.</li><li>Onay cihaz ayarlarından istediğiniz an geri alınabilir; kayıtların silinmesi sahipten veya privacy@{DOMAIN} adresinden istenebilir.</li>',p2b:'Özelliği açan sahip, yerel iş hukukuna uygun olarak personeli konum verilerinin işlenmesi hakkında bilgilendirmeyi taahhüt eder.',
+h3:'3. Verileri nasıl kullanıyoruz',p3:'Veriler yalnızca Mise hizmetlerini sunmak için kullanılır:',l3:'<li>Manager, Analytics, Stash, People ve Menu uygulamalarının çalışması</li><li>Abonelik, ödeme ve vardiya bildirimleri</li><li>Teknik destek</li><li>Ürünü iyileştirme — anonimleştirilmiş biçimde</li>',p3b:'Verilerinizi asla üçüncü taraflara satmayız.',
+h4:'4. Saklama ve güvenlik',p4:'Veriler İrlanda’daki (AB) bir AWS veri merkezinde Supabase sunucularında saklanır, beklemede ve aktarımda şifrelenir. Her işletme yalnızca kendi verilerine erişir; bu, veritabanı düzeyinde (Row-Level Security) sağlanır.',
+h5:'5. Ödeme verileri',p5:'Ödemeler Stripe tarafından işlenir. Kart bilgilerinizi saklamayız. Stripe PCI DSS Seviye 1 sertifikalıdır.',
+h6:'6. Haklarınız (GDPR)',p6:'Avrupa Birliği’ndeyseniz şu haklara sahipsiniz:',l6:'<li>Verilerinizin kopyasını alma</li><li>Yanlışlıkları düzeltme</li><li>Verilerinizi silme</li><li>İşlemeyi kısıtlama</li><li>Verileri başka bir hizmete taşıma</li>',p6b:'Bu hakları kullanmak için hello@{DOMAIN} adresine yazın.',
+h7:'7. Çerezler',p7:'Yalnızca temel çerezler (kimlik doğrulama ve oturumlar) kullanırız. Analitik yalnızca onayınızla yüklenir ve üçüncü taraf reklam çerezi kullanmaz.',
+h8:'8. Hesap silme',p8:'Hesabınızı istediğiniz an panelden veya hello@{DOMAIN} adresine yazarak silebilirsiniz. Tüm verileriniz 30 gün içinde kaldırılır.',
+h9:'9. İletişim',p9:'Gizlilik konuları için: <a href="mailto:privacy@{DOMAIN}">privacy@{DOMAIN}</a>'},
+uk:{tag:'Правове',title:'Політика конфіденційності',date:'Оновлено 14 червня 2026',
+intro:'Mise — платформа керування рестораном (Manager, Analytics, Stash, People, Menu). Ми ставимося до ваших даних так само серйозно, як ви — до свого закладу. Нижче без юридичного туману пояснюємо, що збираємо, навіщо і які у вас права.',
+h1:'1. Які дані ми збираємо',p1:'Щоб сервіс працював, ми обробляємо:',l1:'<li>Email та ім’я під час реєстрації</li><li>Дані закладу: назва, працівники, графіки, завдання</li><li>Операційні та фінансові дані, які ви вводите: зміни, виручка, витрати, склад</li><li>Геолокацію працівників — лише за увімкненої функції «явка за геолокацією» (розділ 2)</li><li>Замовлення гостей через QR-меню: склад і номер столу, без персональних даних гостя</li><li>Технічні дані: тип пристрою, браузер, IP-адреса</li>',
+h2:'2. Геолокація працівників',p2:'Функція «явка за геолокацією» у Mise People <strong>вимкнена за замовчуванням</strong> і вмикається власником закладу. Під час використання:',l2:'<li>Координати запитуються <strong>лише за явної згоди працівника</strong> — через системний запит дозволу на пристрої. Без згоди відмітитися можна вручну.</li><li>Геопозиція зчитується <strong>лише в момент відмітки приходу/виходу</strong> за відкритого застосунку. Ми не стежимо за місцем у фоні й не ведемо історії переміщень.</li><li>Зберігаються координати відмітки, відстань до закладу та час. Їх бачать працівник і керівництво.</li><li>Згоду можна відкликати будь-коли в налаштуваннях пристрою, а видалення записів запросити у власника або на privacy@{DOMAIN}.</li>',p2b:'Вмикаючи функцію, власник зобов’язується повідомити працівників про обробку геоданих відповідно до місцевого трудового законодавства.',
+h3:'3. Як ми використовуємо дані',p3:'Дані використовуються виключно для надання послуг Mise:',l3:'<li>Робота застосунків Manager, Analytics, Stash, People та Menu</li><li>Сповіщення про підписку, оплату та робочі зміни</li><li>Технічна підтримка</li><li>Покращення продукту — в знеособленому вигляді</li>',p3b:'Ми ніколи не продаємо ваші дані третім сторонам.',
+h4:'4. Зберігання та захист',p4:'Дані зберігаються на серверах Supabase у дата-центрі AWS в Ірландії (ЄС), зашифровані під час зберігання та передавання. Кожен заклад має доступ лише до своїх даних — це забезпечується на рівні бази даних (Row-Level Security).',
+h5:'5. Платіжні дані',p5:'Платежі обробляє Stripe. Ми не зберігаємо дані вашої картки. Stripe сертифікований за стандартом PCI DSS рівня 1.',
+h6:'6. Ваші права (GDPR)',p6:'Якщо ви в Європейському Союзі, ви маєте право:',l6:'<li>Отримати копію своїх даних</li><li>Виправити неточності</li><li>Видалити свої дані</li><li>Обмежити обробку</li><li>Перенести дані в інший сервіс</li>',p6b:'Щоб скористатися правами, напишіть на hello@{DOMAIN}.',
+h7:'7. Cookies',p7:'Ми використовуємо лише необхідні cookies (авторизація та сесії). Аналітика підключається лише за вашої згоди й не використовує рекламні cookies третіх сторін.',
+h8:'8. Видалення акаунта',p8:'Акаунт можна видалити будь-коли з кабінету або листом на hello@{DOMAIN}. Усі дані видаляються протягом 30 днів.',
+h9:'9. Контакти',p9:'З питань конфіденційності: <a href="mailto:privacy@{DOMAIN}">privacy@{DOMAIN}</a>'},
+kk:{tag:'Құқықтық',title:'Құпиялылық саясаты',date:'Жаңартылды 2026 ж. 14 маусым',
+intro:'Mise — мейрамхананы басқару платформасы (Manager, Analytics, Stash, People, Menu). Деректеріңізге сіз өз мекемеңізге қараған сияқты байыппен қараймыз. Төменде заңды тұмансыз нені, не үшін жинайтынымызды және қандай құқықтарыңыз бар екенін түсіндіреміз.',
+h1:'1. Қандай деректер жинаймыз',p1:'Қызмет жұмыс істеуі үшін өңдейміз:',l1:'<li>Тіркелу кезіндегі email және аты</li><li>Мекеме деректері: атауы, қызметкерлер, кестелер, тапсырмалар</li><li>Сіз енгізетін операциялық және қаржы деректері: ауысымдар, түсім, шығыс, қойма</li><li>Қызметкерлердің орналасуы — тек «GPS келу» функциясы қосулы болғанда (2-бөлім)</li><li>QR-мәзір арқылы қонақ тапсырыстары: құрамы және үстел нөмірі, қонақтың жеке деректерінсіз</li><li>Техникалық деректер: құрылғы түрі, браузер, IP-мекенжай</li>',
+h2:'2. Қызметкерлердің геолокациясы',p2:'Mise People-дегі «GPS келу» функциясы <strong>әдепкі бойынша өшірулі</strong> және мекеме иесі қосады. Қолданғанда:',l2:'<li>Координаталар <strong>тек қызметкердің нақты келісімімен</strong> құрылғының рұқсат сұрауы арқылы сұралады. Келісімсіз келуді қолмен белгілеуге болады.</li><li>Орналасу <strong>тек келу/кету сәтінде</strong>, қолданба ашық кезде оқылады. Орналасуды фондық режимде бақыламаймыз және қозғалыс тарихын сақтамаймыз.</li><li>Белгінің координаталары, мекемеге дейінгі қашықтық пен уақыт сақталады. Оларды қызметкер мен басшылық көреді.</li><li>Келісімді кез келген уақытта құрылғы баптауларынан кері қайтаруға, жазбаларды жоюды иеден немесе privacy@{DOMAIN} арқылы сұрауға болады.</li>',p2b:'Функцияны қосқанда ие жергілікті еңбек заңнамасына сәйкес қызметкерлерді геодеректерді өңдеу туралы хабардар етуге міндеттенеді.',
+h3:'3. Деректерді қалай қолданамыз',p3:'Деректер тек Mise қызметтерін ұсыну үшін қолданылады:',l3:'<li>Manager, Analytics, Stash, People және Menu қолданбаларының жұмысы</li><li>Жазылым, төлем және ауысымдар туралы хабарламалар</li><li>Техникалық қолдау</li><li>Өнімді жетілдіру — анонимделген түрде</li>',p3b:'Деректеріңізді ешқашан үшінші тараптарға сатпаймыз.',
+h4:'4. Сақтау және қорғау',p4:'Деректер Ирландиядағы (ЕО) AWS дата-орталығындағы Supabase серверлерінде сақталады, сақтау мен берілу кезінде шифрланады. Әр мекеме тек өз деректеріне қол жеткізеді — бұл дерекқор деңгейінде (Row-Level Security) қамтамасыз етіледі.',
+h5:'5. Төлем деректері',p5:'Төлемдерді Stripe өңдейді. Картаңыздың деректерін сақтамаймыз. Stripe PCI DSS 1-деңгей сертификатына ие.',
+h6:'6. Сіздің құқықтарыңыз (GDPR)',p6:'Егер Еуропалық Одақта болсаңыз, құқығыңыз бар:',l6:'<li>Деректеріңіздің көшірмесін алу</li><li>Қателерді түзету</li><li>Деректеріңізді жою</li><li>Өңдеуді шектеу</li><li>Деректерді басқа қызметке көшіру</li>',p6b:'Осы құқықтарды пайдалану үшін hello@{DOMAIN} мекенжайына жазыңыз.',
+h7:'7. Cookie файлдары',p7:'Тек қажетті cookie файлдарын (аутентификация мен сеанстар) қолданамыз. Аналитика тек сіздің келісіміңізбен жүктеледі және үшінші тарап жарнамалық cookie файлдарын қолданбайды.',
+h8:'8. Тіркелгіні жою',p8:'Тіркелгіні кез келген уақытта басқару тақтасынан немесе hello@{DOMAIN} мекенжайына жазып жоюға болады. Барлық деректер 30 күн ішінде жойылады.',
+h9:'9. Байланыс',p9:'Құпиялылық мәселелері бойынша: <a href="mailto:privacy@{DOMAIN}">privacy@{DOMAIN}</a>'}
+};
+function setLang(lang){
+  if(!T[lang]) lang='en';
+  document.documentElement.lang=lang;
+  const dict=T[lang], fb=T.en;
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    const k=el.getAttribute('data-i18n');
+    let v=dict[k]!==undefined?dict[k]:fb[k];
+    if(v!==undefined){ v=v.replace(/{DOMAIN}/g,DOMAIN); el.innerHTML=v; }
+  });
+  const cur=LANGS.find(l=>l[0]===lang);
+  const label=document.getElementById('langCurLabel');
+  if(label) label.textContent=cur?cur[2]:lang.toUpperCase();
+  renderLangMenu(lang);
+  const m=document.getElementById('langMenu'); if(m) m.classList.remove('open');
+  try{ localStorage.setItem('mise_lang',lang); }catch(e){}
+}
+function renderLangMenu(active){
+  document.getElementById('langMenu').innerHTML=LANGS.map(([code,name,short])=>
+    `<button class="lang-opt${code===active?' active':''}" onclick="setLang('${code}')"><span>${name}</span><span class="lo-code">${short}</span></button>`).join('');
+}
+function toggleLangMenu(e){ e.stopPropagation(); document.getElementById('langMenu').classList.toggle('open'); }
+document.addEventListener('click',()=>{ const m=document.getElementById('langMenu'); if(m) m.classList.remove('open'); });
+window.addEventListener('scroll',()=>{ document.querySelector('.nav').style.background=window.scrollY>10?'rgba(255,255,255,0.97)':'rgba(255,255,255,0.92)'; });
+(function(){
+  const supported=LANGS.map(l=>l[0]); let lang='en';
+  try{
+    const saved=localStorage.getItem('mise_lang');
+    if(saved&&supported.includes(saved)) lang=saved;
+    else{ const navs=navigator.languages||[navigator.language||'en']; for(const n of navs){ const c=(n||'').slice(0,2).toLowerCase(); if(supported.includes(c)){ lang=c; break; } } }
+  }catch(e){}
+  setLang(lang);
+})();
 </script>
 </body>
 </html>
