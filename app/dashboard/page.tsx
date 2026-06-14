@@ -9,6 +9,7 @@ import { AppIcon, Wordmark, WordmarkMark, ACCENT_GLOW, type BrandApp } from '@/c
 import { track } from '@/lib/analytics'
 import { openCookieSettings } from '@/components/CookieConsent'
 import { useIsNative } from '@/lib/native'
+import { useI18n, tCurrent } from '@/lib/i18n'
 
 
 
@@ -20,39 +21,39 @@ type Restaurant = {
 }
 
 const APPS = [
-  { id: 'manager',   name: 'Mise Manager',   desc: 'Смены · Расходы · Инкассации',             color: '#007aff', hint: 'Для менеджеров', path: '/manager',        plans: ['starter','business','pro'] },
-  { id: 'analytics', name: 'Mise Analytics', desc: 'Финансы · Зарплаты · AI',                  color: '#34c759', hint: 'Для владельца',  path: '/analytics',      plans: ['starter','business','pro'] },
-  { id: 'stash',     name: 'Mise Stash',     desc: 'Склад табака · Смена кальянщика',          color: '#ff9500', hint: 'Для кальянщика', path: '/tobacco',        plans: ['business','pro'] },
-  { id: 'people',    name: 'Mise People',    desc: 'Расписание · Задачи · Явка · Зал',         color: '#5856d6', hint: 'Для команды',    path: '/people',         plans: ['business','pro'] },
-  { id: 'menu',      name: 'Mise Menu',      desc: 'QR-меню · Заказы за столом',               color: '#ff2d55', hint: 'Для гостей',     path: '/dashboard/menu', plans: ['business','pro'] },
+  { id: 'manager',   name: 'Mise Manager',   desc: 'dash.appManagerDesc',             color: '#007aff', hint: 'dash.appManagerHint', path: '/manager',        plans: ['starter','business','pro'] },
+  { id: 'analytics', name: 'Mise Analytics', desc: 'dash.appAnalyticsDesc',                  color: '#34c759', hint: 'dash.appAnalyticsHint',  path: '/analytics',      plans: ['starter','business','pro'] },
+  { id: 'stash',     name: 'Mise Stash',     desc: 'dash.appStashDesc',          color: '#ff9500', hint: 'dash.appStashHint', path: '/tobacco',        plans: ['business','pro'] },
+  { id: 'people',    name: 'Mise People',    desc: 'dash.appPeopleDesc',         color: '#5856d6', hint: 'dash.appPeopleHint',    path: '/people',         plans: ['business','pro'] },
+  { id: 'menu',      name: 'Mise Menu',      desc: 'dash.appMenuDesc',               color: '#ff2d55', hint: 'dash.appMenuHint',     path: '/dashboard/menu', plans: ['business','pro'] },
 ]
 
 
 const PLANS = [
   // maxStaff = доступы сотрудников (устройства); лимит дублируется на сервере в /api/db (PLAN_LIMITS)
-  { id: 'starter',  name: 'Starter',  price: 14, maxStaff: 2,  color: '#007aff', features: ['Mise Manager', 'Mise Analytics', '2 пользователя'] },
-  { id: 'business', name: 'Business', price: 24, maxStaff: 5,  color: '#34c759', popular: true, features: ['Все приложения', 'QR-меню для гостей', 'До 5 пользователей'] },
-  { id: 'pro',      name: 'Pro',      price: 39, maxStaff: 10, color: '#af52de', features: ['Всё из Business', 'AI-аналитика', 'До 10 пользователей', 'Интеграции: касса · банк'] },
+  { id: 'starter',  name: 'Starter',  price: 14, maxStaff: 2,  color: '#007aff', features: ['Mise Manager', 'Mise Analytics', 'dash.feat2users'] },
+  { id: 'business', name: 'Business', price: 24, maxStaff: 5,  color: '#34c759', popular: true, features: ['dash.featAllApps', 'dash.featQrGuests', 'dash.featUpTo5'] },
+  { id: 'pro',      name: 'Pro',      price: 39, maxStaff: 10, color: '#af52de', features: ['dash.featAllBusiness', 'dash.featAiAnalytics', 'dash.featUpTo10', 'dash.featIntegrations'] },
 ]
 
 const ROLE_OPTS = [
-  { value: 'waiter', label: 'Официант' }, { value: 'kitchen', label: 'Кухня' }, { value: 'bar', label: 'Бар' },
-  { value: 'hookah', label: 'Кальянная' }, { value: 'manager', label: 'Менеджер' }, { value: 'host', label: 'Хостес' },
-  { value: 'cleaner', label: 'Уборка' }, { value: 'admin', label: 'Админ' },
+  { value: 'waiter', label: 'pe.roleWaiter' }, { value: 'kitchen', label: 'pe.roleKitchen' }, { value: 'bar', label: 'pe.roleBar' },
+  { value: 'hookah', label: 'pe.roleHookah' }, { value: 'manager', label: 'pe.roleManager' }, { value: 'host', label: 'pe.roleHost' },
+  { value: 'cleaner', label: 'pe.roleCleaner' }, { value: 'admin', label: 'pe.roleAdmin' },
 ]
 function roleLabel(role?: string) { return ROLE_OPTS.find(r => r.value === role)?.label || (role || '—') }
 
 // Сайдбар, два этажа: верхний — «работа» (каждый день), нижний — «обслуживание» (раз в неделю/месяц).
 // Аккаунт — отдельно внизу, категории расходов живут внутри Настроек.
 const NAV_MAIN = [
-  { id: 'overview', label: 'Обзор' },
-  { id: 'apps',     label: 'Приложения' },
-  { id: 'team',     label: 'Команда' },
+  { id: 'overview', label: 'dash.navOverview' },
+  { id: 'apps',     label: 'dash.navApps' },
+  { id: 'team',     label: 'dash.navTeam' },
 ]
 const NAV_SERVICE = [
-  { id: 'notifications', label: 'Уведомления' },
-  { id: 'settings',      label: 'Настройки' },
-  { id: 'billing',       label: 'Подписка' },
+  { id: 'notifications', label: 'dash.navNotifications' },
+  { id: 'settings',      label: 'dash.navSettings' },
+  { id: 'billing',       label: 'dash.navBilling' },
 ]
 
 // SF-Symbols-style line icons for the dashboard tabs (no emoji).
@@ -78,10 +79,10 @@ function fmtDay(d: Date) {
 }
 function timeAgo(iso: string) {
   const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
-  if (m < 1) return 'только что'
-  if (m < 60) return `${m} мин назад`
+  if (m < 1) return tCurrent('dash.justNow')
+  if (m < 60) return tCurrent('dash.minAgo', { m })
   const h = Math.floor(m / 60)
-  if (h < 24) return `${h} ч назад`
+  if (h < 24) return tCurrent('dash.hAgo', { h })
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
 }
 
@@ -196,12 +197,13 @@ function Btn({ children, onClick, variant = 'primary', small = false, disabled =
 }
 
 function Field({ label, value, onChange, placeholder, type = 'text', select, options }: any) {
+  const { t: tr } = useI18n()
   return (
     <div style={{ marginBottom: 12 }}>
       {label && <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: 'var(--tx2)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</label>}
       {select ? (
         <select value={value} onChange={e => onChange(e.target.value)} style={inputStyle}>
-          {options.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {options.map((o: any) => <option key={o.value} value={o.value}>{tr(o.label)}</option>)}
         </select>
       ) : (
         <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={inputStyle} />
@@ -231,6 +233,7 @@ function SectionTitle({ title, sub }: { title: string; sub?: string }) {
 
 function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
   const router = useRouter()
+  const { t: tr } = useI18n()
   const plan = restaurant?.subscription_plan || ''
   const status = restaurant?.subscription_status || ''
   // 'canceling' = отмена в конце периода: Stripe держит подписку живой до endsAt
@@ -238,16 +241,16 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
 
   return (
     <div>
-      <SectionTitle title="Приложения" sub={restaurant?.name || '—'} />
+      <SectionTitle title={tr('dash.navApps')} sub={restaurant?.name || '—'} />
 
       {status === 'trialing' && (
         <div style={{ background: 'rgba(0,122,255,.08)', border: '1px solid rgba(0,122,255,.2)', borderRadius: 12, padding: '12px 16px', marginBottom: 16, fontSize: '.85rem', color: '#007aff', fontWeight: 500 }}>
-          Пробный период активен — 7 дней бесплатно
+          {tr('dash.trialActive')}
         </div>
       )}
       {!isActive && (
         <div style={{ background: 'rgba(255,59,48,.08)', border: '1px solid rgba(255,59,48,.2)', borderRadius: 12, padding: '12px 16px', marginBottom: 16, fontSize: '.85rem', color: '#ff3b30', fontWeight: 500 }}>
-          Подписка неактивна — перейдите во вкладку «Подписка»
+          {tr('dash.subInactive')}
         </div>
       )}
 
@@ -266,10 +269,10 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontWeight: 700, fontSize: '.92rem', color: 'var(--tx)' }}>{app.name}</span>
-                  {comped && <span style={{ fontSize: '.6rem', fontWeight: 700, color: '#34c759', background: '#34c75918', padding: '2px 7px', borderRadius: 980 }}>ПОДАРОК</span>}
+                  {comped && <span style={{ fontSize: '.6rem', fontWeight: 700, color: '#34c759', background: '#34c75918', padding: '2px 7px', borderRadius: 980 }}>{tr('dash.gift')}</span>}
                 </div>
                 <div style={{ color: 'var(--tx2)', fontSize: '.74rem', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {locked ? 'Доступно с Business' : !isActive ? 'Нужна подписка' : app.desc}
+                  {locked ? tr('dash.availFromBusiness') : !isActive ? tr('dash.needSub') : tr(app.desc)}
                 </div>
               </div>
               {enabled
@@ -287,6 +290,7 @@ function AppsTab({ restaurant }: { restaurant: Restaurant | null }) {
 // ── CATEGORIES CARD (живёт в Настройках) ──────────────────────────────────────
 
 function CategoriesCard({ restaurantId }: { restaurantId: string }) {
+  const { t: tr } = useI18n()
   const [cats, setCats] = useState<any[]>([])
   const [newName, setNewName] = useState('')
   const [loading, setLoading] = useState(true)
@@ -309,23 +313,23 @@ function CategoriesCard({ restaurantId }: { restaurantId: string }) {
     // Detach from any saved shift expenses (keeps their category_name) so the FK doesn't block deletion.
     await db.from('shift_expenses').update({ category_id: null }).eq('category_id', id)
     const { error } = await db.from('expense_categories').delete().eq('id', id)
-    if (error) { alert('Не удалось удалить категорию: ' + error.message); return }
+    if (error) { alert(tr('dash.notSaved') + error.message); return }
     load()
   }
 
   return (
     <Card style={{ marginBottom: 14 }}>
-      <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Категории расходов</div>
-      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', margin: '2px 0 14px' }}>Менеджер выбирает из этого списка при добавлении расхода</div>
+      <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>{tr('dash.expenseCats')}</div>
+      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', margin: '2px 0 14px' }}>{tr('dash.expenseCatsSub')}</div>
       <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
         <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
-          placeholder="Например: Мойка, DJ, Ремонт..."
+          placeholder={tr('dash.catPh')}
           style={{ ...inputStyle, flex: 1 }} />
-        <Btn onClick={add}>Добавить</Btn>
+        <Btn onClick={add}>{tr('dash.add')}</Btn>
       </div>
       {loading ? <Spinner />
         : cats.length === 0
-          ? <div style={{ color: 'var(--tx2)', fontSize: '.85rem' }}>Нет категорий</div>
+          ? <div style={{ color: 'var(--tx2)', fontSize: '.85rem' }}>{tr('dash.noCats')}</div>
           : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {cats.map(cat => (
                 <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--fill)', borderRadius: 980, padding: '6px 12px' }}>
@@ -342,6 +346,7 @@ function CategoriesCard({ restaurantId }: { restaurantId: string }) {
 // ── TEAM TAB ──────────────────────────────────────────────────────────────────
 
 function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
+  const { t: tr } = useI18n()
   const restaurantId = restaurant?.id || ''
   const plan = restaurant?.subscription_plan || 'starter'
   const maxStaff = PLANS.find(p => p.id === plan)?.maxStaff || 2
@@ -377,7 +382,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
   useEffect(() => { if (restaurantId) load() }, [restaurantId])
 
   const saveOwnerPin = async () => {
-    if (ownerPinVal.length !== 4 || !/^\d+$/.test(ownerPinVal)) { alert('PIN должен быть 4 цифры'); return }
+    if (ownerPinVal.length !== 4 || !/^\d+$/.test(ownerPinVal)) { alert(tr('dash.pin4digits')); return }
     setOwnerSaving(true)
     const hashRes = await fetch('/api/auth/pin/hash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: ownerPinVal }) })
     const { hash } = await hashRes.json()
@@ -393,7 +398,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
 
   // One save handles both HR (employees) and access (staff).
   const save = async () => {
-    if (!form.name.trim()) { alert('Введите имя'); return }
+    if (!form.name.trim()) { alert(tr('dash.enterName')); return }
     setSaving(true)
     const name = form.name.trim()
     const empPayload = { restaurant_id: restaurantId, name, salary: +form.salary || 0, deduct_per_absence: +form.deduct || 0, card_amount: +form.card || 0, is_active: true }
@@ -402,7 +407,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
 
     const existing = staffFor(name)
     if (form.apps.length) {
-      if (!existing && (form.pin.length !== 4 || !/^\d+$/.test(form.pin))) { alert('Для доступа задайте PIN (4 цифры)'); setSaving(false); return }
+      if (!existing && (form.pin.length !== 4 || !/^\d+$/.test(form.pin))) { alert(tr('dash.setPinForAccess')); setSaving(false); return }
       let pinHash: string | undefined
       if (form.pin) { const r = await fetch('/api/auth/pin/hash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: form.pin }) }); pinHash = (await r.json()).hash }
       const sp: any = { restaurant_id: restaurantId, name, apps: form.apps, role: form.role, is_active: true }
@@ -437,14 +442,14 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-        <SectionTitle title="Команда" sub="Сотрудники, зарплаты и доступы" />
+        <SectionTitle title={tr('dash.navTeam')} sub={tr('dash.teamSub')} />
         <Btn onClick={() => { setShowForm(!showForm); setEditingEmpId(null); setForm(blank) }}>
-          {showForm ? 'Отмена' : '+ Добавить'}
+          {showForm ? tr('dash.cancel') : tr('dash.addBtn')}
         </Btn>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 16 }}>
-        {[{ l: 'В команде', v: String(employees.length), c: 'var(--tx)' }, { l: 'С доступом', v: `${withAccess}/${maxStaff}`, c: '#007aff' }, { l: 'ФОТ/мес', v: `€${totalSalary.toLocaleString()}`, c: '#af52de' }].map(it => (
+        {[{ l: tr('dash.inTeam'), v: String(employees.length), c: 'var(--tx)' }, { l: tr('dash.withAccess'), v: `${withAccess}/${maxStaff}`, c: '#007aff' }, { l: tr('dash.payrollMo'), v: `€${totalSalary.toLocaleString()}`, c: '#af52de' }].map(it => (
           <Card key={it.l} style={{ padding: '14px 16px', textAlign: 'center' }}>
             <div style={{ fontSize: '.68rem', color: 'var(--tx2)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4, letterSpacing: '.04em' }}>{it.l}</div>
             <div style={{ fontSize: '1.3rem', fontWeight: 700, color: it.c }}>{it.v}</div>
@@ -454,7 +459,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
 
       {atLimit && (
         <div style={{ background: 'rgba(255,149,0,.08)', border: '1px solid rgba(255,149,0,.25)', borderRadius: 12, padding: '10px 14px', marginBottom: 14, fontSize: '.83rem', color: '#ff9500', fontWeight: 500 }}>
-          Лимит доступов тарифа ({maxStaff}). Новым сотрудникам доступ не выдать — обновите подписку.
+          {tr('dash.accessLimit', { n: maxStaff })}
         </div>
       )}
 
@@ -462,13 +467,13 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
       <Card style={{ marginBottom: 14, background: 'linear-gradient(135deg, #007aff08 0%, #5856d608 100%)', border: '1px solid rgba(0,122,255,.15)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)', marginBottom: 4 }}>QR-код заведения</div>
+            <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)', marginBottom: 4 }}>{tr('dash.venueQr')}</div>
             <div style={{ fontSize: '.8rem', color: 'var(--tx2)', lineHeight: 1.5 }}>
-              Сотрудник сканирует при первом входе чтобы привязать устройство к заведению
+              {tr('dash.qrSub')}
             </div>
           </div>
           <button onClick={() => setShowQR(!showQR)} style={{ flexShrink: 0, background: '#007aff', border: 'none', borderRadius: 12, padding: '10px 18px', color: '#fff', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: 'pointer' }}>
-            {showQR ? 'Скрыть' : 'Показать QR'}
+            {showQR ? tr('dash.hide') : tr('dash.showQr')}
           </button>
         </div>
 
@@ -492,7 +497,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
                 document.body.removeChild(el)
               }
             }} style={{ background: 'var(--fill)', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#007aff', cursor: 'pointer', fontFamily: 'inherit' }}>
-              Скопировать ссылку
+              {tr('dash.copyLink')}
             </button>
           </div>
         )}
@@ -503,22 +508,22 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)' }}>Владелец</div>
-              <div style={{ fontSize: '.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: 980, background: '#af52de15', color: '#af52de' }}>Полный доступ</div>
+              <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)' }}>{tr('dash.owner')}</div>
+              <div style={{ fontSize: '.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: 980, background: '#af52de15', color: '#af52de' }}>{tr('dash.fullAccess')}</div>
             </div>
             <div style={{ fontSize: '.8rem', color: 'var(--tx2)' }}>
-              {ownerPin ? 'PIN установлен · Доступ ко всем приложениям' : 'PIN не установлен'}
+              {ownerPin ? tr('dash.pinSet') : tr('dash.pinNotSet')}
             </div>
           </div>
           <button onClick={() => { setOwnerPinEdit(!ownerPinEdit); setOwnerPinVal('') }} style={{ background: 'none', border: '1px solid rgba(175,82,222,.3)', borderRadius: 980, padding: '7px 14px', fontSize: '.78rem', fontWeight: 600, color: '#af52de', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
-            {ownerPinEdit ? 'Отмена' : ownerPin ? 'Изменить PIN' : 'Задать PIN'}
+            {ownerPinEdit ? tr('dash.cancel') : ownerPin ? tr('dash.changePin') : tr('dash.setPin')}
           </button>
         </div>
 
         {ownerPinEdit && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(175,82,222,.1)', display: 'flex', gap: 10, alignItems: 'flex-end' }}>
             <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: 'var(--tx2)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>Новый PIN (4 цифры)</label>
+              <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: 'var(--tx2)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>{tr('dash.newPin4')}</label>
               <input
                 type="password" inputMode="numeric" maxLength={4}
                 value={ownerPinVal} onChange={e => setOwnerPinVal(e.target.value.replace(/\D/g,'').slice(0,4))}
@@ -527,7 +532,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
               />
             </div>
             <Btn onClick={saveOwnerPin} disabled={ownerSaving}>
-              {ownerSaving ? '...' : ownerSaved ? '✓' : 'Сохранить'}
+              {ownerSaving ? '...' : ownerSaved ? '✓' : tr('dash.save')}
             </Btn>
           </div>
         )}
@@ -536,19 +541,19 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
       {/* ─ ФОРМА ─ */}
       {showForm && (
         <Card style={{ marginBottom: 14, border: '1px solid #007aff' }}>
-          <div style={{ fontWeight: 700, fontSize: '.95rem', marginBottom: 14 }}>{editingEmpId ? 'Редактировать сотрудника' : 'Новый сотрудник'}</div>
+          <div style={{ fontWeight: 700, fontSize: '.95rem', marginBottom: 14 }}>{editingEmpId ? tr('dash.editEmployee') : tr('dash.newEmployee')}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <div style={{ gridColumn: '1/-1' }}>
-              <Field label="Имя" value={form.name} onChange={(v: string) => setForm({ ...form, name: v })} placeholder="Александр Иванов" />
+              <Field label={tr('dash.name')} value={form.name} onChange={(v: string) => setForm({ ...form, name: v })} placeholder={tr('dash.namePh')} />
             </div>
-            <Field label="Роль" value={form.role} onChange={(v: string) => setForm({ ...form, role: v })} select options={ROLE_OPTS} />
-            <Field label="Оклад" value={form.salary} onChange={(v: string) => setForm({ ...form, salary: v })} placeholder="1000" type="number" />
-            <Field label="Вычет за пропуск" value={form.deduct} onChange={(v: string) => setForm({ ...form, deduct: v })} placeholder="50" type="number" />
-            <Field label="На карту" value={form.card} onChange={(v: string) => setForm({ ...form, card: v })} placeholder="0" type="number" />
+            <Field label={tr('dash.role')} value={form.role} onChange={(v: string) => setForm({ ...form, role: v })} select options={ROLE_OPTS} />
+            <Field label={tr('dash.salary')} value={form.salary} onChange={(v: string) => setForm({ ...form, salary: v })} placeholder="1000" type="number" />
+            <Field label={tr('dash.deductPerAbsence')} value={form.deduct} onChange={(v: string) => setForm({ ...form, deduct: v })} placeholder="50" type="number" />
+            <Field label={tr('dash.toCard')} value={form.card} onChange={(v: string) => setForm({ ...form, card: v })} placeholder="0" type="number" />
           </div>
 
           <div style={{ borderTop: '1px solid rgba(var(--seprgb),.1)', margin: '8px 0 14px', paddingTop: 14 }}>
-            <div style={{ fontSize: '.72rem', fontWeight: 600, color: 'var(--tx2)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>Доступ к приложениям</div>
+            <div style={{ fontSize: '.72rem', fontWeight: 600, color: 'var(--tx2)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>{tr('dash.appAccess')}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
               {APPS.map(app => (
                 <label key={app.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '9px 12px', borderRadius: 10, background: form.apps.includes(app.id) ? app.color + '10' : 'var(--fill2)', border: `1px solid ${form.apps.includes(app.id) ? app.color : 'transparent'}`, transition: 'all .15s' }}>
@@ -562,17 +567,17 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
             </div>
             {form.apps.length > 0 && (
               <Field
-                label={staffFor(form.name.trim()) ? 'Новый PIN (оставьте пустым чтобы не менять)' : 'PIN-код для входа (4 цифры)'}
+                label={staffFor(form.name.trim()) ? tr('dash.newPinOptional') : tr('dash.pinForLogin')}
                 value={form.pin} onChange={(v: string) => setForm({ ...form, pin: v.replace(/\D/g, '').slice(0, 4) })}
                 placeholder="1234" type="password"
               />
             )}
-            <div style={{ fontSize: '.72rem', color: 'var(--tx3)' }}>Без выбранных приложений сотрудник учитывается в зарплатах, но не входит в приложения.</div>
+            <div style={{ fontSize: '.72rem', color: 'var(--tx3)' }}>{tr('dash.noAppsNote')}</div>
           </div>
 
           <div style={{ display: 'flex', gap: 8 }}>
-            <Btn onClick={save} disabled={saving}>{saving ? 'Сохранение...' : editingEmpId ? 'Сохранить' : 'Добавить'}</Btn>
-            <Btn variant="gray" onClick={() => { setShowForm(false); setEditingEmpId(null) }}>Отмена</Btn>
+            <Btn onClick={save} disabled={saving}>{saving ? tr('dash.saving') : editingEmpId ? tr('dash.save') : tr('dash.add')}</Btn>
+            <Btn variant="gray" onClick={() => { setShowForm(false); setEditingEmpId(null) }}>{tr('dash.cancel')}</Btn>
           </div>
         </Card>
       )}
@@ -581,7 +586,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
       {loading ? (
         <Spinner />
       ) : employees.length === 0 ? (
-        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>Добавьте первого сотрудника</div></Card>
+        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>{tr('dash.addFirstEmployee')}</div></Card>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {employees.map(emp => {
@@ -592,27 +597,27 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
                       <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)' }}>{emp.name}</div>
-                      <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: '#5856d615', color: '#5856d6' }}>{roleLabel(s?.role)}</div>
+                      <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: '#5856d615', color: '#5856d6' }}>{tr(roleLabel(s?.role))}</div>
                       {s
-                        ? <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: s.device_id ? '#34c75915' : 'var(--fill)', color: s.device_id ? '#34c759' : 'var(--tx3)' }}>{s.device_id ? '● Привязано' : 'Не привязано'}</div>
-                        : <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: 'var(--fill)', color: 'var(--tx3)' }}>Нет доступа</div>}
+                        ? <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: s.device_id ? '#34c75915' : 'var(--fill)', color: s.device_id ? '#34c759' : 'var(--tx3)' }}>{s.device_id ? tr('dash.bound') : tr('dash.notBound')}</div>
+                        : <div style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: 'var(--fill)', color: 'var(--tx3)' }}>{tr('dash.noAccess')}</div>}
                     </div>
                     <div style={{ fontSize: '.75rem', color: 'var(--tx2)', display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: s ? 8 : 0 }}>
-                      <span>Оклад: <strong style={{ color: 'var(--tx)' }}>€{emp.salary}</strong></span>
-                      <span>Вычет: <strong style={{ color: 'var(--tx)' }}>€{emp.deduct_per_absence}</strong></span>
-                      {emp.card_amount > 0 && <span>Карта: <strong style={{ color: '#af52de' }}>€{emp.card_amount}</strong></span>}
+                      <span>{tr('dash.salaryShort')}: <strong style={{ color: 'var(--tx)' }}>€{emp.salary}</strong></span>
+                      <span>{tr('dash.deductShort')}: <strong style={{ color: 'var(--tx)' }}>€{emp.deduct_per_absence}</strong></span>
+                      {emp.card_amount > 0 && <span>{tr('dash.cardShort')}: <strong style={{ color: '#af52de' }}>€{emp.card_amount}</strong></span>}
                     </div>
                     {s && (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                         {(s.apps || []).map((appId: string) => (
                           <span key={appId} style={{ fontSize: '.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: 980, background: appColor(appId) + '15', color: appColor(appId) }}>{appName(appId)}</span>
                         ))}
-                        {s.device_id && <button onClick={() => resetDevice(s.id)} style={{ background: 'none', border: 'none', color: '#ff9500', fontSize: '.75rem', fontWeight: 600, cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>Сбросить устройство</button>}
+                        {s.device_id && <button onClick={() => resetDevice(s.id)} style={{ background: 'none', border: 'none', color: '#ff9500', fontSize: '.75rem', fontWeight: 600, cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>{tr('dash.resetDevice')}</button>}
                       </div>
                     )}
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                    <Btn small variant="ghost" onClick={() => startEdit(emp)}>Изменить</Btn>
+                    <Btn small variant="ghost" onClick={() => startEdit(emp)}>{tr('dash.edit')}</Btn>
                     <Btn small variant="danger" onClick={() => removePerson(emp)}>✕</Btn>
                   </div>
                 </div>
@@ -638,6 +643,7 @@ function MiniToggle({ value, onChange, color = '#5856d6' }: { value: boolean; on
 }
 
 function GeoSettingsCard() {
+  const { t: tr } = useI18n()
   const [row, setRow] = useState<any>(null)
   const [f, setF] = useState({ attendance_enabled: false, latitude: '', longitude: '', geo_radius_m: '150', reminder_mode: 'hours_before', reminder_hours: '12', reminder_time: '18:00' })
   const [saving, setSaving] = useState(false)
@@ -667,7 +673,7 @@ function GeoSettingsCard() {
     setLocating(true)
     navigator.geolocation.getCurrentPosition(
       p => { setF(s => ({ ...s, latitude: p.coords.latitude.toFixed(6), longitude: p.coords.longitude.toFixed(6) })); setLocating(false) },
-      () => { alert('Не удалось получить местоположение'); setLocating(false) },
+      () => { alert(tr('dash.geoFailed')); setLocating(false) },
       { enableHighAccuracy: true, timeout: 10000 }
     )
   }
@@ -686,7 +692,7 @@ function GeoSettingsCard() {
     const res = row?.id
       ? await db.from('restaurant_settings').update(payload).eq('id', row.id)
       : await db.from('restaurant_settings').insert(payload).select().single()
-    if (res.error) { alert('Не сохранилось: ' + res.error.message); setSaving(false); return }
+    if (res.error) { alert(tr('dash.notSaved') + res.error.message); setSaving(false); return }
     if (!row?.id && res.data) setRow(res.data)
     setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000)
   }
@@ -696,30 +702,30 @@ function GeoSettingsCard() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <div>
           <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)', display: 'flex', alignItems: 'center', gap: 7 }}>
-            Геолокация и явка
+            {tr('dash.geoTitle')}
             <span style={{ fontSize: '.6rem', fontWeight: 800, letterSpacing: '.4px', color: '#5856d6', background: 'rgba(88,86,214,.12)', padding: '2px 6px', borderRadius: 6, textTransform: 'uppercase' }}>Beta</span>
           </div>
-          <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2 }}>Mise People — авто-отметка прихода по гео</div>
+          <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2 }}>{tr('dash.geoSub')}</div>
         </div>
         <MiniToggle value={f.attendance_enabled} onChange={v => setF({ ...f, attendance_enabled: v })} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 4 }}>
-        <Field label="Широта" value={f.latitude} onChange={(v: string) => setF({ ...f, latitude: v })} placeholder="41.3111" />
-        <Field label="Долгота" value={f.longitude} onChange={(v: string) => setF({ ...f, longitude: v })} placeholder="69.2797" />
+        <Field label={tr('dash.latitude')} value={f.latitude} onChange={(v: string) => setF({ ...f, latitude: v })} placeholder="41.3111" />
+        <Field label={tr('dash.longitude')} value={f.longitude} onChange={(v: string) => setF({ ...f, longitude: v })} placeholder="69.2797" />
       </div>
       <button onClick={useMyLocation} style={{ background: 'var(--fill)', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#5856d6', cursor: 'pointer', fontFamily: 'inherit', marginBottom: 12 }}>
-        {locating ? 'Определяю…' : 'Использовать моё местоположение'}
+        {locating ? tr('dash.locating') : tr('dash.useMyLocation')}
       </button>
-      <Field label="Радиус, метров" value={f.geo_radius_m} onChange={(v: string) => setF({ ...f, geo_radius_m: v })} type="number" placeholder="150" />
+      <Field label={tr('dash.radiusM')} value={f.geo_radius_m} onChange={(v: string) => setF({ ...f, geo_radius_m: v })} type="number" placeholder="150" />
 
-      <div style={{ fontWeight: 600, fontSize: '.82rem', color: 'var(--tx)', margin: '8px 0 10px' }}>Напоминание о смене</div>
-      <Field label="Режим" value={f.reminder_mode} onChange={(v: string) => setF({ ...f, reminder_mode: v })} select options={[{ value: 'hours_before', label: 'За N часов до смены' }, { value: 'fixed_time', label: 'В фикс. время накануне' }]} />
+      <div style={{ fontWeight: 600, fontSize: '.82rem', color: 'var(--tx)', margin: '8px 0 10px' }}>{tr('dash.shiftReminder')}</div>
+      <Field label={tr('dash.mode')} value={f.reminder_mode} onChange={(v: string) => setF({ ...f, reminder_mode: v })} select options={[{ value: 'hours_before', label: 'dash.remHoursBefore' }, { value: 'fixed_time', label: 'dash.remFixedTime' }]} />
       {f.reminder_mode === 'hours_before'
-        ? <Field label="За сколько часов" value={f.reminder_hours} onChange={(v: string) => setF({ ...f, reminder_hours: v })} type="number" placeholder="12" />
-        : <Field label="Время (накануне)" value={f.reminder_time} onChange={(v: string) => setF({ ...f, reminder_time: v })} type="time" />}
+        ? <Field label={tr('dash.hoursBefore')} value={f.reminder_hours} onChange={(v: string) => setF({ ...f, reminder_hours: v })} type="number" placeholder="12" />
+        : <Field label={tr('dash.timeEve')} value={f.reminder_time} onChange={(v: string) => setF({ ...f, reminder_time: v })} type="time" />}
 
-      <Btn onClick={save}>{saving ? 'Сохранение...' : saved ? '✓ Сохранено' : 'Сохранить'}</Btn>
+      <Btn onClick={save}>{saving ? tr('dash.saving') : saved ? tr('dash.savedCheck') : tr('dash.save')}</Btn>
     </Card>
   )
 }
@@ -727,6 +733,7 @@ function GeoSettingsCard() {
 // Безнал в аналитике: менеджер не видит расходов по карте, поэтому включённый безнал
 // раздувает итог. По умолчанию выкл — владелец видит реальные (наличные) показатели.
 function AnalyticsSettingsCard() {
+  const { t: tr } = useI18n()
   const [row, setRow] = useState<any>(null)
   const [includeCard, setIncludeCard] = useState(false)
 
@@ -747,9 +754,9 @@ function AnalyticsSettingsCard() {
     <Card style={{ marginBottom: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Учитывать безнал в аналитике</div>
+          <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>{tr('dash.includeCard')}</div>
           <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2, maxWidth: 380 }}>
-            Включает доход по карте в показатели Mise Analytics. Выкл — показатели только по наличным (касса всегда считается от наличных).
+            {tr('dash.includeCardSub')}
           </div>
         </div>
         <MiniToggle value={includeCard} onChange={toggle} color="#34c759" />
@@ -761,6 +768,7 @@ function AnalyticsSettingsCard() {
 // Виды кальянов: у каждого своё имя, цена, граммовка и допустимые бренды
 // (пусто = любые). Кальянщик в Stash отмечает продажи по этим видам.
 function HookahSettingsCard() {
+  const { t: tr } = useI18n()
   const [types, setTypes] = useState<any[]>([])
   const [edit, setEdit] = useState<{ id?: string; name: string; price: string; portion: string; brands: string } | null>(null)
   const [saving, setSaving] = useState(false)
@@ -769,7 +777,7 @@ function HookahSettingsCard() {
   useEffect(() => { load() }, [])
 
   const save = async () => {
-    if (!edit || !edit.name.trim()) { alert('Укажите название'); return }
+    if (!edit || !edit.name.trim()) { alert(tr('dash.enterTitle')); return }
     setSaving(true)
     const payload = {
       name: edit.name.trim(),
@@ -781,52 +789,53 @@ function HookahSettingsCard() {
       ? await db.from('hookah_types').update(payload).eq('id', edit.id)
       : await db.from('hookah_types').insert(payload)
     setSaving(false)
-    if (res.error) { alert('Не сохранилось: ' + res.error.message); return }
+    if (res.error) { alert(tr('dash.notSaved') + res.error.message); return }
     setEdit(null); await load()
   }
   const remove = async (id: string) => {
-    if (!confirm('Убрать этот вид кальяна?')) return
+    if (!confirm(tr('dash.removeHookahType'))) return
     await db.from('hookah_types').update({ is_active: false }).eq('id', id)
     await load()
   }
 
   return (
     <Card style={{ marginBottom: 14 }}>
-      <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Виды кальянов</div>
-      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', margin: '2px 0 14px' }}>Смена кальянщика в Stash и вкладка «Кальян» в Analytics. У каждого вида — цена, граммовка и допустимые бренды.</div>
+      <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>{tr('dash.hookahTypes')}</div>
+      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', margin: '2px 0 14px' }}>{tr('dash.hookahTypesSub')}</div>
 
       {types.map(tp => (
         <div key={tp.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--fill)', borderRadius: 12, marginBottom: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 600, fontSize: '.86rem', color: 'var(--tx)' }}>{tp.name} · €{tp.price} · {tp.portion_g} г</div>
-            <div style={{ fontSize: '.72rem', color: 'var(--tx2)', marginTop: 1 }}>{tp.brands?.length ? tp.brands.join(', ') : 'Любые бренды'}</div>
+            <div style={{ fontSize: '.72rem', color: 'var(--tx2)', marginTop: 1 }}>{tp.brands?.length ? tp.brands.join(', ') : tr('dash.anyBrands')}</div>
           </div>
-          <button onClick={() => setEdit({ id: tp.id, name: tp.name, price: String(tp.price), portion: String(tp.portion_g), brands: (tp.brands || []).join(', ') })} style={{ background: 'none', border: 'none', color: '#007aff', fontSize: '.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Изменить</button>
-          <button onClick={() => remove(tp.id)} style={{ background: 'none', border: 'none', color: '#ff3b30', fontSize: '.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Убрать</button>
+          <button onClick={() => setEdit({ id: tp.id, name: tp.name, price: String(tp.price), portion: String(tp.portion_g), brands: (tp.brands || []).join(', ') })} style={{ background: 'none', border: 'none', color: '#007aff', fontSize: '.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{tr('dash.edit')}</button>
+          <button onClick={() => remove(tp.id)} style={{ background: 'none', border: 'none', color: '#ff3b30', fontSize: '.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{tr('dash.remove')}</button>
         </div>
       ))}
 
       {edit ? (
         <div style={{ background: 'var(--fill2)', borderRadius: 12, padding: 12, marginTop: 8 }}>
-          <Field label="Название" value={edit.name} onChange={(v: string) => setEdit({ ...edit, name: v })} placeholder="Классика / Премиум / Фрукт..." />
+          <Field label={tr('dash.title')} value={edit.name} onChange={(v: string) => setEdit({ ...edit, name: v })} placeholder={tr('dash.hookahNamePh')} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <Field label="Цена" value={edit.price} onChange={(v: string) => setEdit({ ...edit, price: v })} type="number" placeholder="15" />
-            <Field label="Граммовка, г" value={edit.portion} onChange={(v: string) => setEdit({ ...edit, portion: v })} type="number" placeholder="20" />
+            <Field label={tr('dash.price')} value={edit.price} onChange={(v: string) => setEdit({ ...edit, price: v })} type="number" placeholder="15" />
+            <Field label={tr('dash.portionG')} value={edit.portion} onChange={(v: string) => setEdit({ ...edit, portion: v })} type="number" placeholder="20" />
           </div>
-          <Field label="Бренды (через запятую; пусто = любые)" value={edit.brands} onChange={(v: string) => setEdit({ ...edit, brands: v })} placeholder="Darkside, Element" />
+          <Field label={tr('dash.brandsField')} value={edit.brands} onChange={(v: string) => setEdit({ ...edit, brands: v })} placeholder="Darkside, Element" />
           <div style={{ display: 'flex', gap: 8 }}>
-            <Btn onClick={save}>{saving ? 'Сохранение...' : 'Сохранить вид'}</Btn>
-            <Btn variant="gray" onClick={() => setEdit(null)}>Отмена</Btn>
+            <Btn onClick={save}>{saving ? tr('dash.saving') : tr('dash.saveType')}</Btn>
+            <Btn variant="gray" onClick={() => setEdit(null)}>{tr('dash.cancel')}</Btn>
           </div>
         </div>
       ) : (
-        <Btn variant="ghost" onClick={() => setEdit({ name: '', price: '', portion: '20', brands: '' })}>+ Добавить вид кальяна</Btn>
+        <Btn variant="ghost" onClick={() => setEdit({ name: '', price: '', portion: '20', brands: '' })}>{tr('dash.addHookahType')}</Btn>
       )}
     </Card>
   )
 }
 
 function SettingsTab({ restaurant, theme, onUpdate }: { restaurant: Restaurant | null; theme: { dark: boolean; toggle: () => void; mode: 'system' | 'light' | 'dark'; setMode: (m: 'system' | 'light' | 'dark') => void }; onUpdate: () => void }) {
+  const { t: tr } = useI18n()
   const [name, setName] = useState(restaurant?.name || '')
   const [currency, setCurrency] = useState(restaurant?.currency || '€')
   const [saving, setSaving] = useState(false)
@@ -865,18 +874,18 @@ function SettingsTab({ restaurant, theme, onUpdate }: { restaurant: Restaurant |
     if (!restaurant) return
     setSaving(true)
     const { error } = await db.from('restaurants').update({ name, currency }).eq('id', restaurant.id)
-    if (error) { alert('Не сохранилось: ' + error.message); setSaving(false); return }
+    if (error) { alert(tr('dash.notSaved') + error.message); setSaving(false); return }
     if (logoFile) await uploadLogo()
     setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000); onUpdate()
   }
 
   return (
     <div>
-      <SectionTitle title="Настройки" sub="Заведение, кальян, валюта, тема" />
+      <SectionTitle title={tr('dash.navSettings')} sub={tr('dash.settingsSub')} />
 
       {/* Логотип */}
       <Card style={{ marginBottom: 14 }}>
-        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 14, color: 'var(--tx)' }}>Логотип заведения</div>
+        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 14, color: 'var(--tx)' }}>{tr('dash.venueLogo')}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div style={{ width: 72, height: 72, borderRadius: 16, background: 'var(--fill)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(var(--seprgb),.12)', flexShrink: 0 }}>
             {logoPreview ? (
@@ -887,14 +896,13 @@ function SettingsTab({ restaurant, theme, onUpdate }: { restaurant: Restaurant |
           </div>
           <div>
             <div style={{ fontSize: '.85rem', color: 'var(--tx)', fontWeight: 500, marginBottom: 6 }}>
-              {logoPreview ? 'Логотип загружен' : 'Логотип не загружен'}
+              {logoPreview ? tr('dash.logoUploaded') : tr('dash.logoNotUploaded')}
             </div>
             <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginBottom: 10 }}>
-              Отображается на экране входа для сотрудников.<br />
-              PNG или JPG, квадрат, рекомендуем 512×512, до 2 МБ
+              <span dangerouslySetInnerHTML={{ __html: tr('dash.logoNote') }} />
             </div>
             <button onClick={() => fileRef.current?.click()} style={{ background: 'var(--fill)', border: 'none', borderRadius: 980, padding: '7px 16px', fontSize: '.78rem', fontWeight: 600, color: '#007aff', cursor: 'pointer', fontFamily: 'inherit' }}>
-              {logoPreview ? 'Заменить' : 'Загрузить фото'}
+              {logoPreview ? tr('dash.replace') : tr('dash.uploadPhoto')}
             </button>
             <input ref={fileRef} type="file" accept="image/*" onChange={pickLogo} style={{ display: 'none' }} />
           </div>
@@ -902,21 +910,21 @@ function SettingsTab({ restaurant, theme, onUpdate }: { restaurant: Restaurant |
       </Card>
 
       <Card style={{ marginBottom: 14 }}>
-        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 14, color: 'var(--tx)' }}>Заведение</div>
-        <Field label="Название" value={name} onChange={setName} placeholder="Название ресторана" />
+        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 14, color: 'var(--tx)' }}>{tr('dash.venue')}</div>
+        <Field label={tr('dash.name')} value={name} onChange={setName} placeholder={tr('dash.restaurantNamePh')} />
         <Field
-          label="Валюта"
+          label={tr('dash.currency')}
           value={currency}
           onChange={setCurrency}
           select
           options={[
-            { value: '€', label: '€ — Евро' },
-            { value: '₸', label: '₸ — Тенге' },
-            { value: '₽', label: '₽ — Рубль' },
-            { value: '$', label: '$ — Доллар' },
+            { value: '€', label: 'dash.curEur' },
+            { value: '₸', label: 'dash.curKzt' },
+            { value: '₽', label: 'dash.curRub' },
+            { value: '$', label: 'dash.curUsd' },
           ]}
         />
-        <Btn onClick={save}>{saving ? 'Сохранение...' : saved ? '✓ Сохранено' : 'Сохранить'}</Btn>
+        <Btn onClick={save}>{saving ? tr('dash.saving') : saved ? tr('dash.savedCheck') : tr('dash.save')}</Btn>
       </Card>
 
       {restaurant && <CategoriesCard restaurantId={restaurant.id} />}
@@ -929,11 +937,11 @@ function SettingsTab({ restaurant, theme, onUpdate }: { restaurant: Restaurant |
 
       <Card>
         <div style={{ marginBottom: 12 }}>
-          <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>Тема оформления</div>
-          <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2 }}>«Система» следует настройке устройства</div>
+          <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>{tr('dash.theme')}</div>
+          <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2 }}>{tr('dash.themeSub')}</div>
         </div>
         <div style={{ display: 'flex', gap: 6, background: 'var(--fill, rgba(120,120,128,.12))', padding: 4, borderRadius: 12 }}>
-          {([['system', 'Система'], ['light', 'Светлая'], ['dark', 'Тёмная']] as const).map(([m, label]) => {
+          {([['system', tr('dash.system')], ['light', tr('dash.light')], ['dark', tr('dash.dark')]] as const).map(([m, label]) => {
             const on = theme.mode === m
             return (
               <button key={m} type="button" onClick={() => theme.setMode(m)} style={{
@@ -954,6 +962,7 @@ function SettingsTab({ restaurant, theme, onUpdate }: { restaurant: Restaurant |
 // ── BILLING TAB ───────────────────────────────────────────────────────────────
 
 function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | null; user: any; onRefresh: () => void }) {
+  const { t: tr, locale } = useI18n()
   const [loading, setLoading] = useState(false)
   const [cancelConfirm, setCancelConfirm] = useState(false)
   const [portalLoading, setPortalLoading] = useState(false)
@@ -985,17 +994,17 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
       if (data.error) { alert(data.error); return }
       if (data.url) window.location.href = data.url
     } catch (e: any) {
-      alert('Ошибка: ' + e?.message)
+      alert(tr('dash.error') + e?.message)
     } finally { setPortalLoading(false) }
   }
 
   const statusLabel: Record<string, { label: string; color: string; bg: string }> = {
-    trialing: { label: 'Пробный период', color: '#007aff', bg: 'rgba(0,122,255,.1)' },
-    active:   { label: 'Активна',        color: '#34c759', bg: 'rgba(52,199,89,.1)' },
-    past_due: { label: 'Просрочена',     color: '#ff9500', bg: 'rgba(255,149,0,.1)' },
-    canceling: { label: 'Отмена в конце периода', color: '#ff9500', bg: 'rgba(255,149,0,.1)' },
-    canceled:  { label: 'Отменена',       color: '#ff3b30', bg: 'rgba(255,59,48,.1)' },
-    inactive:  { label: 'Неактивна',      color: 'var(--tx3)', bg: 'var(--fill)' },
+    trialing: { label: 'dash.stTrialing', color: '#007aff', bg: 'rgba(0,122,255,.1)' },
+    active:   { label: 'dash.stActive',   color: '#34c759', bg: 'rgba(52,199,89,.1)' },
+    past_due: { label: 'dash.stPastDue',  color: '#ff9500', bg: 'rgba(255,149,0,.1)' },
+    canceling: { label: 'dash.stCanceling', color: '#ff9500', bg: 'rgba(255,149,0,.1)' },
+    canceled:  { label: 'dash.stCanceled', color: '#ff3b30', bg: 'rgba(255,59,48,.1)' },
+    inactive:  { label: 'dash.stInactive', color: 'var(--tx3)', bg: 'var(--fill)' },
   }
   const badge = statusLabel[status || 'inactive'] || statusLabel['inactive']
 
@@ -1013,11 +1022,11 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
       })
       // Ошибки наружу: молчаливый фейл выглядел как «кнопка не работает»
       const data = await res.json().catch(() => ({}))
-      if (!res.ok || data.error) { alert(`Не удалось открыть оплату (${res.status}): ${data.error || 'попробуйте перезайти в аккаунт'}`); return }
+      if (!res.ok || data.error) { alert(`${tr('dash.checkoutFailed')} (${res.status}): ${data.error || tr('dash.tryRelogin')}`); return }
       if (data.url) window.location.href = data.url
-      else alert('Stripe не вернул ссылку оплаты — напишите в поддержку')
+      else alert(tr('dash.noStripeUrl'))
     } catch (e: any) {
-      alert('Ошибка сети при открытии оплаты: ' + (e?.message || e))
+      alert(tr('dash.netErrCheckout') + (e?.message || e))
     } finally { setLoading(false); setPendingPlan(null) }
   }
 
@@ -1043,13 +1052,13 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
 
   return (
     <div>
-      <SectionTitle title="Подписка" sub="Управление тарифом и оплатой" />
+      <SectionTitle title={tr('dash.navBilling')} sub={tr('dash.billingSub')} />
 
       {justPaid && !isActive && (
         <Card style={{ marginBottom: 16, border: '1px solid rgba(0,122,255,.25)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '.85rem', color: 'var(--tx2)' }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#007aff', flexShrink: 0 }} />
-            Оплата получена — активируем подписку, это занимает несколько секунд…
+            {tr('dash.paymentReceived')}
           </div>
         </Card>
       )}
@@ -1057,8 +1066,8 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
       {/* App Store: подписка управляется в вебе (нативная сборка) */}
       {native && (
         <Card style={{ marginBottom: 16, background: 'var(--fill2)', boxShadow: 'none' }}>
-          <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)', marginBottom: 4 }}>Управление подпиской</div>
-          <div style={{ fontSize: '.82rem', color: 'var(--tx2)', lineHeight: 1.5 }}>Оформить или изменить тариф можно в веб-версии mise на сайте. Здесь показан ваш текущий статус.</div>
+          <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)', marginBottom: 4 }}>{tr('dash.manageSub')}</div>
+          <div style={{ fontSize: '.82rem', color: 'var(--tx2)', lineHeight: 1.5 }}>{tr('dash.manageSubNative')}</div>
         </Card>
       )}
 
@@ -1068,9 +1077,9 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div>
               <div style={{ fontWeight: 700, fontSize: '.92rem', color: 'var(--tx)', marginBottom: 2 }}>
-                {trialDaysLeft <= 0 ? 'Пробный период заканчивается сегодня' : `Пробный период заканчивается через ${trialDaysLeft} ${trialDaysLeft === 1 ? 'день' : 'дня'}`}
+                {trialDaysLeft <= 0 ? tr('dash.trialEndsToday') : locale === 'ru' ? `Пробный период заканчивается через ${trialDaysLeft} ${trialDaysLeft === 1 ? 'день' : 'дня'}` : tr('dash.trialEndsIn', { n: trialDaysLeft })}
               </div>
-              <div style={{ fontSize: '.8rem', color: 'var(--tx2)' }}>Выберите тариф ниже, чтобы не потерять доступ</div>
+              <div style={{ fontSize: '.8rem', color: 'var(--tx2)' }}>{tr('dash.choosePlanKeepAccess')}</div>
             </div>
             <svg width="20" height="20" fill="none" stroke="#ff9500" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" /></svg>
           </div>
@@ -1085,26 +1094,26 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
               <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--tx)', marginBottom: 2 }}>{currentPlan.name}</div>
               {endsAt && (
                 <div style={{ fontSize: '.8rem', color: 'var(--tx2)' }}>
-                  {isActive && status !== 'canceling' ? 'Следующий платёж' : 'Доступ до'}: {endsAt.toLocaleDateString('ru-RU')}
+                  {isActive && status !== 'canceling' ? tr('dash.nextPayment') : tr('dash.accessUntil')}: {endsAt.toLocaleDateString(locale)}
                 </div>
               )}
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--tx)' }}>€{currentPlan.price}</div>
-              <div style={{ color: 'var(--tx2)', fontSize: '.78rem' }}>в месяц</div>
+              <div style={{ color: 'var(--tx2)', fontSize: '.78rem' }}>{tr('dash.perMonth')}</div>
             </div>
           </div>
           {!native && isActive && status !== 'canceling' && (
             <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(var(--seprgb),.08)' }}>
               {!cancelConfirm ? (
                 <button onClick={() => setCancelConfirm(true)} style={{ background: 'none', border: 'none', color: '#ff3b30', fontSize: '.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
-                  Отменить подписку
+                  {tr('dash.cancelSub')}
                 </button>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '.82rem', color: 'var(--tx2)' }}>Подтвердить отмену?</span>
-                  <Btn small variant="danger" onClick={cancel} disabled={loading}>Да, отменить</Btn>
-                  <Btn small variant="gray" onClick={() => setCancelConfirm(false)}>Нет</Btn>
+                  <span style={{ fontSize: '.82rem', color: 'var(--tx2)' }}>{tr('dash.confirmCancel')}</span>
+                  <Btn small variant="danger" onClick={cancel} disabled={loading}>{tr('dash.yesCancel')}</Btn>
+                  <Btn small variant="gray" onClick={() => setCancelConfirm(false)}>{tr('dash.no')}</Btn>
                 </div>
               )}
             </div>
@@ -1117,11 +1126,11 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
         <Card style={{ marginBottom: 16, background: 'var(--fill2)', boxShadow: 'none' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
             <div>
-              <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)', marginBottom: 2 }}>Управление картой и инвойсами</div>
-              <div style={{ fontSize: '.78rem', color: 'var(--tx2)' }}>Обновить карту, скачать счета, изменить платёжные данные</div>
+              <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)', marginBottom: 2 }}>{tr('dash.manageCard')}</div>
+              <div style={{ fontSize: '.78rem', color: 'var(--tx2)' }}>{tr('dash.manageCardSub')}</div>
             </div>
             <button onClick={openPortal} disabled={portalLoading} style={{ background: 'var(--surface)', border: '1px solid rgba(var(--seprgb),.15)', borderRadius: 10, padding: '9px 16px', fontSize: '.82rem', fontWeight: 600, color: '#007aff', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
-              {portalLoading ? '...' : 'Открыть портал →'}
+              {portalLoading ? '...' : tr('dash.openPortal')}
             </button>
           </div>
         </Card>
@@ -1129,7 +1138,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
 
       {!native && <>
       <div style={{ fontWeight: 600, fontSize: '.78rem', color: 'var(--tx2)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '.06em' }}>
-        {currentPlan ? 'Сменить тариф' : 'Выберите тариф'}
+        {currentPlan ? tr('dash.changePlan') : tr('dash.choosePlan')}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12, marginBottom: 16 }}>
@@ -1138,25 +1147,25 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
           return (
             <Card key={plan.id} style={{ border: `2px solid ${isCurrent ? plan.color : plan.popular ? plan.color + '40' : 'rgba(var(--seprgb),.1)'}`, position: 'relative', padding: 16 }}>
               {plan.popular && !isCurrent && (
-                <div style={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', background: plan.color, color: '#fff', fontSize: '.65rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, whiteSpace: 'nowrap' }}>ПОПУЛЯРНЫЙ</div>
+                <div style={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', background: plan.color, color: '#fff', fontSize: '.65rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, whiteSpace: 'nowrap' }}>{tr('dash.popular')}</div>
               )}
               {isCurrent && (
-                <div style={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', background: plan.color, color: '#fff', fontSize: '.65rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, whiteSpace: 'nowrap' }}>ТЕКУЩИЙ</div>
+                <div style={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', background: plan.color, color: '#fff', fontSize: '.65rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980, whiteSpace: 'nowrap' }}>{tr('dash.current')}</div>
               )}
               <div style={{ marginBottom: 10 }}>
                 <div style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--tx)', marginBottom: 2 }}>{plan.name}</div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: plan.color }}>€{plan.price}<span style={{ fontSize: '.75rem', color: 'var(--tx2)', fontWeight: 400 }}>/мес</span></div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: plan.color }}>€{plan.price}<span style={{ fontSize: '.75rem', color: 'var(--tx2)', fontWeight: 400 }}>{tr('dash.perMo')}</span></div>
               </div>
               <div style={{ marginBottom: 14 }}>
                 {plan.features.map(f => (
                   <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '.8rem', color: 'var(--tx2)', marginBottom: 4 }}>
-                    <span style={{ color: plan.color, fontWeight: 700 }}>✓</span> {f}
+                    <span style={{ color: plan.color, fontWeight: 700 }}>✓</span> {tr(f)}
                   </div>
                 ))}
               </div>
               <button type="button" onClick={() => !isCurrent && subscribe(plan.id)} disabled={isCurrent}
                 style={{ width: '100%', padding: '10px 0', borderRadius: 10, border: 'none', background: isCurrent ? 'var(--fill)' : plan.color, color: isCurrent ? 'var(--tx3)' : '#fff', fontFamily: 'inherit', fontSize: '.85rem', fontWeight: 600, cursor: isCurrent ? 'default' : 'pointer' }}>
-                {isCurrent ? 'Активен' : pendingPlan === plan.id ? 'Открываем оплату…' : 'Выбрать'}
+                {isCurrent ? tr('dash.active') : pendingPlan === plan.id ? tr('dash.openingPayment') : tr('dash.choose')}
               </button>
             </Card>
           )
@@ -1164,7 +1173,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
       </div>
 
       <div style={{ textAlign: 'center', fontSize: '.75rem', color: 'var(--tx3)' }}>
-        Платежи защищены через Stripe · 7 дней бесплатно при первой оплате
+        {tr('dash.stripeNote')}
       </div>
       </>}
     </div>
@@ -1175,6 +1184,7 @@ function BillingTab({ restaurant, user, onRefresh }: { restaurant: Restaurant | 
 // Один вопрос экрана: «как дела сегодня?» — касса, кальяны, заказы + максимум 2 аномалии.
 
 function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo: (tab: string) => void }) {
+  const { t: tr, locale } = useI18n()
   const cur = restaurant?.currency || '€'
   const plan = restaurant?.subscription_plan || ''
   const status = restaurant?.subscription_status || ''
@@ -1220,25 +1230,25 @@ function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo
 
   // Аномалии: показываем максимум две, по убыванию важности
   const issues: { key: string; title: string; sub: string; color: string; tab?: string }[] = []
-  if (status === 'past_due') issues.push({ key: 'pd', title: 'Платёж не прошёл', sub: 'Обновите карту, иначе доступ закроется', color: '#ff3b30', tab: 'billing' })
-  if (!loading && (!shift || shift.status !== 'open')) issues.push({ key: 'sh', title: 'Смена не открыта', sub: 'Менеджер ещё не открыл смену в Mise Manager', color: '#ff9500' })
-  if (orders.fresh > 0) issues.push({ key: 'or', title: `Новые заказы: ${orders.fresh}`, sub: 'Ждут принятия — People → Зал', color: '#007aff', tab: 'notifications' })
-  if (status === 'canceling' && restaurant?.subscription_ends_at) issues.push({ key: 'cn', title: 'Подписка отменена', sub: `Доступ до ${new Date(restaurant.subscription_ends_at).toLocaleDateString('ru-RU')}`, color: '#ff9500', tab: 'billing' })
+  if (status === 'past_due') issues.push({ key: 'pd', title: tr('dash.paymentFailed'), sub: tr('dash.updateCardElseLock'), color: '#ff3b30', tab: 'billing' })
+  if (!loading && (!shift || shift.status !== 'open')) issues.push({ key: 'sh', title: tr('dash.shiftNotOpen'), sub: tr('dash.managerNotOpenedShift'), color: '#ff9500' })
+  if (orders.fresh > 0) issues.push({ key: 'or', title: tr('dash.newOrdersN', { n: orders.fresh }), sub: tr('dash.waitingAcceptance'), color: '#007aff', tab: 'notifications' })
+  if (status === 'canceling' && restaurant?.subscription_ends_at) issues.push({ key: 'cn', title: tr('dash.subCancelled'), sub: tr('dash.accessUntilD', { date: new Date(restaurant.subscription_ends_at).toLocaleDateString(locale) }), color: '#ff9500', tab: 'billing' })
 
   const stats: { l: string; v: string; c: string }[] = [
-    { l: 'Наличные', v: `${cur}${(shift?.income || 0).toLocaleString()}`, c: '#007aff' },
-    { l: 'Безнал', v: `${cur}${(shift?.income_card || 0).toLocaleString()}`, c: '#34c759' },
-    ...(appOk('stash') ? [{ l: 'Кальяны', v: `${hookah.qty} · ${cur}${hookah.revenue.toLocaleString()}`, c: '#ff9500' }] : []),
-    ...(appOk('menu') ? [{ l: 'Заказы меню', v: String(orders.total), c: '#ff2d55' }] : []),
+    { l: tr('dash.cash'), v: `${cur}${(shift?.income || 0).toLocaleString()}`, c: '#007aff' },
+    { l: tr('dash.card'), v: `${cur}${(shift?.income_card || 0).toLocaleString()}`, c: '#34c759' },
+    ...(appOk('stash') ? [{ l: tr('dash.hookahs'), v: `${hookah.qty} · ${cur}${hookah.revenue.toLocaleString()}`, c: '#ff9500' }] : []),
+    ...(appOk('menu') ? [{ l: tr('dash.menuOrders'), v: String(orders.total), c: '#ff2d55' }] : []),
   ]
 
   // Шаги настройки: data-driven, ведём до полной активации (даже после оплаты — пока не добавлены
   // сотрудники и не открыта первая смена). Скрываем, когда всё готово.
   const allSteps = [
-    { done: true,          label: 'Аккаунт создан',        sub: null,                    tab: null },
-    { done: isActive,      label: 'Активировать подписку',  sub: '7 дней бесплатно',      tab: 'billing' },
-    { done: setup.hasStaff, label: 'Добавить сотрудников',   sub: 'Раздайте PIN-доступы',  tab: 'team' },
-    { done: setup.hasShift, label: 'Открыть первую смену',   sub: 'Через Mise Manager',    tab: 'apps' },
+    { done: true,          label: tr('dash.stepAccount'),       sub: null,                    tab: null },
+    { done: isActive,      label: tr('dash.stepActivateSub'),   sub: tr('dash.days7free'),    tab: 'billing' },
+    { done: setup.hasStaff, label: tr('dash.stepAddStaff'),      sub: tr('dash.givePins'),     tab: 'team' },
+    { done: setup.hasShift, label: tr('dash.stepFirstShift'),    sub: tr('dash.viaManager'),   tab: 'apps' },
   ]
   const setupDone = allSteps.every(s => s.done)
   const nextStepIdx = allSteps.findIndex(s => !s.done)
@@ -1246,15 +1256,15 @@ function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo
 
   return (
     <div>
-      <SectionTitle title="Обзор" sub={new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })} />
+      <SectionTitle title={tr('dash.navOverview')} sub={new Date().toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })} />
 
       {/* Onboarding: показывается пока нет активной подписки */}
       {setupSteps && (
         <Card style={{ marginBottom: 16, border: '1px solid rgba(0,122,255,.18)', background: 'linear-gradient(135deg,rgba(0,122,255,.05) 0%,rgba(88,86,214,.05) 100%)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-            <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)' }}>С чего начать</div>
+            <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)' }}>{tr('dash.whereToStart')}</div>
             <div style={{ fontSize: '.72rem', fontWeight: 700, color: '#007aff', background: 'rgba(0,122,255,.1)', padding: '3px 10px', borderRadius: 980 }}>
-              {allSteps.filter(s => s.done).length} из {allSteps.length}
+              {allSteps.filter(s => s.done).length} {tr('dash.ofWord')} {allSteps.length}
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1297,7 +1307,7 @@ function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo
             <Card style={{ marginBottom: 10, padding: '12px 16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '.85rem', color: 'var(--tx2)' }}>
                 <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#34c759', flexShrink: 0 }} />
-                Смена открыта · касса {cur}{(shift.closing_balance || 0).toLocaleString()}
+                {tr('dash.shiftOpenLine', { v: `${cur}${(shift.closing_balance || 0).toLocaleString()}` })}
               </div>
             </Card>
           )}
@@ -1318,7 +1328,7 @@ function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo
           {issues.length === 0 && (
             <Card style={{ padding: '12px 16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '.85rem', color: 'var(--tx2)' }}>
-                <span style={{ color: '#34c759', fontWeight: 700 }}>✓</span> Всё в порядке — аномалий нет
+                <span style={{ color: '#34c759', fontWeight: 700 }}>✓</span> {tr('dash.allGood')}
               </div>
             </Card>
           )}
@@ -1332,6 +1342,7 @@ function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo
 // Не раздел с табами, а одна лента: заказы, вызовы официанта, события подписки.
 
 function NotificationsTab({ restaurant, onSeen }: { restaurant: Restaurant | null; onSeen: () => void }) {
+  const { t: tr } = useI18n()
   const [rows, setRows] = useState<any[]>([])
   const [lowStock, setLowStock] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -1354,21 +1365,21 @@ function NotificationsTab({ restaurant, onSeen }: { restaurant: Restaurant | nul
     })
   }, [restaurant?.id])
 
-  const stockName = (s: any) => s.flavor_name || [s.brand, s.flavor].filter(Boolean).join(' ') || 'Табак'
+  const stockName = (s: any) => s.flavor_name || [s.brand, s.flavor].filter(Boolean).join(' ') || tr('dash.tobacco')
 
   const orderStatus: Record<string, { label: string; color: string }> = {
-    new: { label: 'Новый', color: '#ff9500' }, in_progress: { label: 'В работе', color: '#007aff' },
-    done: { label: 'Выдан', color: '#34c759' }, cancelled: { label: 'Отменён', color: 'var(--tx3)' },
+    new: { label: 'pe.osNew', color: '#ff9500' }, in_progress: { label: 'pe.osInProgress', color: '#007aff' },
+    done: { label: 'pe.osDone', color: '#34c759' }, cancelled: { label: 'pe.osCancelled', color: 'var(--tx3)' },
   }
 
   return (
     <div>
-      <SectionTitle title="Уведомления" sub="Заказы, вызовы и события за последние 2 дня" />
+      <SectionTitle title={tr('dash.navNotifications')} sub={tr('dash.notifsSub')} />
 
       {status === 'past_due' && (
         <Card style={{ marginBottom: 10, padding: '12px 16px', borderLeft: '3px solid #ff3b30' }}>
-          <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>Платёж по подписке не прошёл</div>
-          <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 1 }}>Stripe повторит списание; проверьте карту во вкладке «Подписка»</div>
+          <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>{tr('dash.subPaymentFailed')}</div>
+          <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 1 }}>{tr('dash.stripeRetry')}</div>
         </Card>
       )}
 
@@ -1382,7 +1393,7 @@ function NotificationsTab({ restaurant, onSeen }: { restaurant: Restaurant | nul
                 <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>{out ? 'Табак закончился' : 'Табак заканчивается'}</div>
+                <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>{out ? tr('dash.tobaccoOut') : tr('dash.tobaccoLow')}</div>
                 <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 1 }}>{stockName(s)} · {Math.round(Number(s.quantity_g || 0))} г</div>
               </div>
             </div>
@@ -1395,7 +1406,7 @@ function NotificationsTab({ restaurant, onSeen }: { restaurant: Restaurant | nul
           {[0, 1, 2].map(i => <div key={i} style={{ height: 64, borderRadius: 16, background: 'var(--fill)', animation: 'dashPulse 1.2s ease-in-out infinite' }} />)}
         </div>
       ) : rows.length === 0 && lowStock.length === 0 ? (
-        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>Пока тихо — уведомлений нет</div></Card>
+        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>{tr('dash.quietNoNotifs')}</div></Card>
       ) : rows.length === 0 ? null : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {rows.map(o => {
@@ -1412,11 +1423,11 @@ function NotificationsTab({ restaurant, onSeen }: { restaurant: Restaurant | nul
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>
-                      {isCall ? 'Вызов официанта' : `Заказ · ${count} поз.`}{o.table_number ? ` · стол ${o.table_number}` : ''}
+                      {isCall ? tr('dash.waiterCall') : tr('dash.orderNItems', { n: count })}{o.table_number ? ` · ${tr('dash.tableWord')} ${o.table_number}` : ''}
                     </div>
                     <div style={{ fontSize: '.75rem', color: 'var(--tx2)', marginTop: 1 }}>{timeAgo(o.created_at)}</div>
                   </div>
-                  <span style={{ fontSize: '.7rem', fontWeight: 700, color: st.color, background: 'var(--fill)', padding: '3px 10px', borderRadius: 980, flexShrink: 0 }}>{st.label}</span>
+                  <span style={{ fontSize: '.7rem', fontWeight: 700, color: st.color, background: 'var(--fill)', padding: '3px 10px', borderRadius: 980, flexShrink: 0 }}>{tr(st.label)}</span>
                 </div>
               </Card>
             )
@@ -1430,6 +1441,7 @@ function NotificationsTab({ restaurant, onSeen }: { restaurant: Restaurant | nul
 // ── ACCOUNT TAB ───────────────────────────────────────────────────────────────
 
 function AccountTab({ restaurant, user }: { restaurant: Restaurant | null; user: any }) {
+  const { t: tr } = useI18n()
   const router = useRouter()
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -1450,7 +1462,7 @@ function AccountTab({ restaurant, user }: { restaurant: Restaurant | null; user:
 
   return (
     <div>
-      <SectionTitle title="Аккаунт" sub="Владелец заведения" />
+      <SectionTitle title={tr('dash.account')} sub={tr('dash.accountSub')} />
 
       <Card style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -1460,7 +1472,7 @@ function AccountTab({ restaurant, user }: { restaurant: Restaurant | null; user:
               : (restaurant?.name || 'M')[0].toUpperCase()}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--tx)' }}>{restaurant?.name || 'Мой ресторан'}</div>
+            <div style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--tx)' }}>{restaurant?.name || tr('dash.myRestaurant')}</div>
             <div style={{ fontSize: '.8rem', color: 'var(--tx2)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis' }}>{user?.email}</div>
           </div>
           {planName && <span style={{ fontSize: '.7rem', fontWeight: 700, color: '#007aff', background: '#007aff12', padding: '3px 10px', borderRadius: 980, flexShrink: 0 }}>{planName}</span>}
@@ -1470,32 +1482,32 @@ function AccountTab({ restaurant, user }: { restaurant: Restaurant | null; user:
       <Card style={{ marginBottom: 14 }}>
         <button onClick={async () => { await supabase.auth.signOut(); router.replace('/auth/login') }}
           style={{ background: 'none', border: 'none', color: '#ff3b30', fontSize: '.88rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
-          Выйти из аккаунта
+          {tr('dash.signOut')}
         </button>
       </Card>
 
       <Card style={{ marginBottom: 14, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
         <button onClick={openCookieSettings}
           style={{ background: 'none', border: 'none', color: 'var(--tx2)', fontSize: '.84rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
-          Настройки cookie
+          {tr('dash.cookieSettings')}
         </button>
-        <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--tx2)', fontSize: '.84rem', fontWeight: 600, textDecoration: 'none' }}>Конфиденциальность</a>
-        <a href="/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--tx2)', fontSize: '.84rem', fontWeight: 600, textDecoration: 'none' }}>Условия</a>
+        <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--tx2)', fontSize: '.84rem', fontWeight: 600, textDecoration: 'none' }}>{tr('dash.privacy')}</a>
+        <a href="/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--tx2)', fontSize: '.84rem', fontWeight: 600, textDecoration: 'none' }}>{tr('dash.terms')}</a>
       </Card>
 
       <Card style={{ border: '1px solid rgba(255,59,48,.15)' }}>
-        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 4, color: 'var(--tx)' }}>Опасная зона</div>
-        <div style={{ fontSize: '.82rem', color: 'var(--tx2)', marginBottom: 14 }}>Удаление аккаунта необратимо. Все данные заведения, сотрудники и подписка будут удалены.</div>
+        <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 4, color: 'var(--tx)' }}>{tr('dash.dangerZone')}</div>
+        <div style={{ fontSize: '.82rem', color: 'var(--tx2)', marginBottom: 14 }}>{tr('dash.deleteAccountNote')}</div>
         {!deleteConfirm ? (
-          <Btn variant="danger" onClick={() => setDeleteConfirm(true)}>Удалить аккаунт</Btn>
+          <Btn variant="danger" onClick={() => setDeleteConfirm(true)}>{tr('dash.deleteAccount')}</Btn>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: '.82rem', color: '#ff3b30', fontWeight: 600 }}>Вы уверены? Это действие нельзя отменить.</div>
+            <div style={{ fontSize: '.82rem', color: '#ff3b30', fontWeight: 600 }}>{tr('dash.sureIrreversible')}</div>
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn variant="danger" small onClick={deleteAccount} disabled={deleting}>
-                {deleting ? 'Удаление...' : 'Да, удалить всё'}
+                {deleting ? tr('dash.deleting') : tr('dash.yesDeleteAll')}
               </Btn>
-              <Btn variant="ghost" small onClick={() => setDeleteConfirm(false)}>Отмена</Btn>
+              <Btn variant="ghost" small onClick={() => setDeleteConfirm(false)}>{tr('dash.cancel')}</Btn>
             </div>
           </div>
         )}
@@ -1507,6 +1519,7 @@ function AccountTab({ restaurant, user }: { restaurant: Restaurant | null; user:
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
+  const { t: tr } = useI18n()
   const router = useRouter()
   // Тёмная тема: цвета дашборда — CSS-переменные (globals.css), класс mise-dark на <html>
   const theme = useTheme('mise_dash_dark')
@@ -1604,7 +1617,7 @@ export default function Dashboard() {
     const active = tab === id
     const handle = () => { go(id); if (id === 'notifications') markSeen() }
     if (sideCollapsed) return (
-      <button onClick={handle} title={label} style={{
+      <button onClick={handle} title={tr(label)} style={{
         position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
         width: 40, height: 40, borderRadius: 10, border: 'none', fontFamily: 'inherit',
         background: active ? 'var(--fill)' : 'transparent', color: active ? 'var(--tx)' : 'var(--tx2)',
@@ -1623,7 +1636,7 @@ export default function Dashboard() {
         color: active ? 'var(--tx)' : 'var(--tx2)', cursor: 'pointer',
       }}>
         <TabIcon id={id} size={16} />
-        <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden' }}>{label}</span>
+        <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden' }}>{tr(label)}</span>
         {badge > 0 && <span style={{ fontSize: '.65rem', fontWeight: 700, color: '#fff', background: '#ff3b30', borderRadius: 980, padding: '1px 7px' }}>{badge}</span>}
       </button>
     )
@@ -1671,7 +1684,7 @@ export default function Dashboard() {
           {sideCollapsed ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 14 }}>
               <WordmarkMark size={26} />
-              <button onClick={toggleSide} title="Развернуть" style={{
+              <button onClick={toggleSide} title={tr('dash.expand')} style={{
                 width: 28, height: 28, borderRadius: 8, background: 'var(--fill)', border: 'none',
                 cursor: 'pointer', color: 'var(--tx2)', display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
@@ -1681,7 +1694,7 @@ export default function Dashboard() {
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 0 12px', marginBottom: 24 }}>
               <Wordmark size={24} />
-              <button onClick={toggleSide} title="Свернуть" style={{
+              <button onClick={toggleSide} title={tr('dash.collapse')} style={{
                 width: 28, height: 28, borderRadius: 8, background: 'var(--fill)', border: 'none',
                 cursor: 'pointer', color: 'var(--tx2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
               }}>
@@ -1701,7 +1714,7 @@ export default function Dashboard() {
 
           {/* Аккаунт */}
           {sideCollapsed ? (
-            <button onClick={() => go('account')} title="Аккаунт" style={{
+            <button onClick={() => go('account')} title={tr('dash.account')} style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               width: 40, height: 40, borderRadius: 10, border: 'none', cursor: 'pointer',
               background: tab === 'account' ? 'var(--fill)' : 'transparent', margin: '0 auto',
@@ -1716,8 +1729,8 @@ export default function Dashboard() {
             }}>
               {avatar(32)}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '.82rem', fontWeight: 600, color: 'var(--tx)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{restaurant?.name || 'Мой ресторан'}</div>
-                <div style={{ fontSize: '.68rem', color: 'var(--tx3)' }}>Аккаунт</div>
+                <div style={{ fontSize: '.82rem', fontWeight: 600, color: 'var(--tx)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{restaurant?.name || tr('dash.myRestaurant')}</div>
+                <div style={{ fontSize: '.68rem', color: 'var(--tx3)' }}>{tr('dash.account')}</div>
               </div>
             </button>
           )}
@@ -1750,7 +1763,7 @@ export default function Dashboard() {
                   boxShadow: tab === t.id ? 'none' : '0 1px 3px rgba(0,0,0,.06)',
                 }}>
                   <TabIcon id={t.id} />
-                  {t.label}
+                  {tr(t.label)}
                 </button>
               ))}
             </div>
