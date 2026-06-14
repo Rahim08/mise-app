@@ -1,6 +1,13 @@
 # Запуск на misesuite.com — что нужно сделать (владелец)
 
-Код уже переведён на `misesuite.com` и задеплоен. Ниже — внешние настройки в дашбордах. Иди по порядку; блоки 1–2 уже сделаны.
+Код уже переведён на `misesuite.com` и задеплоен.
+
+**СТАТУС 2026-06-14:** ✅ домен в Vercel · ✅ Email Routing · ✅ Resend DNS verified · ✅ Supabase Auth.
+**ОСТАЛОСЬ ДВА ШАГА:**
+1. **Vercel env** (блок 4) — добавить `RESEND_API_KEY` + `NEXT_PUBLIC_APP_URL`, затем Redeploy. ← для писем приложения
+2. **Apple** (блок 6) — App ID + подпись, перед публикацией в App Store.
+
+(Регистрация/вход и письмо-подтверждение уже работают — это Supabase.)
 
 Логин для всех аккаунтов далее → заведи и используй **admin@misesuite.com** (через Cloudflare Email Routing, см. блок 2).
 
@@ -15,30 +22,22 @@
 
 ---
 
-## ☐ 3. Resend — отправка писем приложения (письма-подтверждения, уведомления)
-1. Зайти на **resend.com**, зарегистрироваться (логин `admin@misesuite.com`).
-2. **Add Domain** → `misesuite.com`.
-3. Resend покажет 3 DNS-записи: **SPF** (TXT), **DKIM** (TXT/CNAME), **DMARC** (TXT).
-   → Добавить их вручную в **Cloudflare → DNS → Records**, у всех **Proxy = DNS only (серое облако)**.
-4. Дождаться статуса **Verified** в Resend (обычно 5–30 мин).
-5. **API Keys → Create** → скопировать ключ (`re_...`).
-6. Vercel → проект → **Settings → Environment Variables** → добавить:
-   - `RESEND_API_KEY` = `re_...` (Environment: Production, можно и Preview)
+## ✅ 3. Resend — DNS домена VERIFIED (СДЕЛАНО 2026-06-14)
+- Домен `misesuite.com` в Resend, записи DKIM/SPF/MX добавлены в Cloudflare и **verified** (проверено через API).
+- Отправитель `noreply@misesuite.com` готов на уровне DNS.
 
-> Пока `RESEND_API_KEY` не задан — письма не шлются (код это переживает, no-op). После задания — `noreply@misesuite.com` будет реальным отправителем.
+## ☐ 4. Vercel — переменные окружения ← ЕДИНСТВЕННЫЙ ОСТАВШИЙСЯ ШАГ ДЛЯ ПОЧТЫ
+Vercel → проект → **Settings → Environment Variables** → добавить (Production):
+- `RESEND_API_KEY` = `re_...` (Resend → API Keys → Create, если ещё нет)
+- `NEXT_PUBLIC_APP_URL` = `https://misesuite.com`
 
-## ☐ 4. Vercel — переменные окружения
-В том же разделе Environment Variables добавить:
-- `NEXT_PUBLIC_APP_URL` = `https://misesuite.com` (ссылки в письмах ведут на дашборд)
+Затем Vercel → Deployments → у последнего **Redeploy** (чтобы env подхватились).
 
-После добавления переменных → Vercel → Deployments → у последнего деплоя **Redeploy** (чтобы env подхватились). Либо просто дождаться следующего push.
+> Пока `RESEND_API_KEY` не задан — доп-письма (приветствие/триал/чек) не шлются (no-op). Письмо-подтверждение при регистрации шлёт Supabase и работает уже сейчас.
 
-## ☐ 5. Supabase — Auth (важно для регистрации и писем подтверждения)
-Supabase → проект → **Authentication → URL Configuration**:
-- **Site URL** = `https://misesuite.com`
-- **Redirect URLs** → добавить `https://misesuite.com/**`
-
-(Опционально) Authentication → **Email Templates** — подключить свой SMTP через Resend, чтобы письма Supabase (подтверждение почты, сброс пароля) уходили с `@misesuite.com`, а не с дефолтного адреса Supabase.
+## ✅ 5. Supabase — Auth (СДЕЛАНО)
+Site URL + Redirect URLs выставлены на `https://misesuite.com`.
+(Опционально позже) Email Templates → подключить SMTP Resend, чтобы письма Supabase уходили с `@misesuite.com`.
 
 ## ☐ 6. Apple Developer (до публикации в App Store)
 - Решить тип аккаунта: **Individual** ($99/год, продавец = твоё имя, оформляется за день) или **Organization** ($99/год, продавец = компания, нужен D-U-N-S, ~1–2 недели).
