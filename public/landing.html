@@ -42,7 +42,7 @@ body{
 
 /* ── NAV ─────────────────────────────────────────── */
 .nav{position:fixed;top:0;left:0;right:0;z-index:999;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(0,0,0,.55);backdrop-filter:blur(28px) saturate(160%);-webkit-backdrop-filter:blur(28px) saturate(160%);border-bottom:.5px solid var(--border);}
-.nav-logo{display:flex;align-items:center;gap:9px;text-decoration:none;font-size:1.12rem;font-weight:800;color:#fff;letter-spacing:-.045em;}
+.nav-logo{display:inline-flex;align-items:baseline;text-decoration:none;font-size:1.12rem;font-weight:800;color:#fff;letter-spacing:-.045em;}
 .nav-links{display:flex;list-style:none;}
 .nav-links a{font-size:.78rem;color:var(--text-2);text-decoration:none;padding:0 14px;transition:color .2s;letter-spacing:-.01em;font-weight:500;}
 .nav-links a:hover{color:#fff;}
@@ -96,7 +96,7 @@ body{
 .btn-ghost{background:rgba(255,255,255,.06);color:#fff;border:.5px solid rgba(255,255,255,.16);padding:15px 30px;border-radius:980px;font-family:inherit;font-size:.92rem;cursor:pointer;transition:all .2s;letter-spacing:-.01em;backdrop-filter:blur(10px);}
 .btn-ghost:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.3);}
 .hero-apps{display:flex;gap:14px;margin-top:64px;flex-wrap:wrap;justify-content:center;opacity:0;animation:fadeUp .8s .8s var(--ease) forwards;}
-.hero-app{display:flex;flex-direction:column;align-items:center;gap:10px;}
+.hero-app{display:flex;flex-direction:column;align-items:center;gap:10px;text-decoration:none;}
 .hero-app .app-icon{transition:transform .3s var(--ease);}
 .hero-app:hover .app-icon{transform:translateY(-6px);}
 .hero-app span{font-size:.68rem;color:var(--text-3);font-weight:600;letter-spacing:-.01em;transition:color .2s;}
@@ -400,9 +400,9 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
 </div>
 
 <!-- APPS HEAD -->
-<div class="apps-head">
+<div class="apps-head" id="apps">
   <h2 class="reveal" data-i18n="apps.t">Пять приложений.<br>Под каждую роль.</h2>
-  <p class="reveal d1" data-i18n="apps.s">Владельцу — аналитика. Менеджеру — касса. Кальянщику — склад. Команде — расписание. Гостю — меню.</p>
+  <p class="reveal d1" data-i18n="apps.s">Включите только нужные. Всё в одном аккаунте, синхронизация в реальном времени.</p>
 </div>
 
 <!-- MANAGER -->
@@ -632,7 +632,7 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
     <div class="steps">
       <div class="steps-line"></div>
       <div class="step reveal d1"><div class="step-n">1</div><p class="step-t" data-i18n="step1.t">Регистрация</p><p class="step-d" data-i18n="step1.d">Создайте аккаунт за 30 секунд.</p></div>
-      <div class="step reveal d2"><div class="step-n">2</div><p class="step-t" data-i18n="step2.t">Подписка</p><p class="step-d" data-i18n="step2.d">7 дней бесплатно, карта не нужна.</p></div>
+      <div class="step reveal d2"><div class="step-n">2</div><p class="step-t" data-i18n="step2.t">Подписка</p><p class="step-d" data-i18n="step2.d">7 дней бесплатно.</p></div>
       <div class="step reveal d3"><div class="step-n">3</div><p class="step-t" data-i18n="step3.t">Команда</p><p class="step-d" data-i18n="step3.d">Доступ через QR-код и PIN.</p></div>
       <div class="step reveal d4" style="transition-delay:.34s;"><div class="step-n">4</div><p class="step-t" data-i18n="step4.t">Контроль</p><p class="step-d" data-i18n="step4.d">Аналитика и отчёты в любое время.</p></div>
     </div>
@@ -701,7 +701,7 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
 <section class="big-cta">
   <div class="big-cta-aurora"></div>
   <div class="big-cta-word" id="cta-word" data-i18n="cta.w">Готовы?</div>
-  <p class="big-cta-sub" id="cta-sub" data-i18n="cta.s">Первые 7 дней бесплатно. Карта не нужна.</p>
+  <p class="big-cta-sub" id="cta-sub" data-i18n="cta.s">Первые 7 дней бесплатно.</p>
   <button class="btn-primary" onclick="window.location.href='/auth/register'" data-i18n="cta.b">Создать аккаунт</button>
 </section>
 
@@ -756,15 +756,24 @@ window.addEventListener('scroll', () => {
 (function(){
   const wrap = document.getElementById('scale-wrap'), text = document.getElementById('scale-text');
   if (!wrap || !text) return;
-  window.addEventListener('scroll', () => {
+  const apply = () => {
     const rect = wrap.getBoundingClientRect();
     const total = wrap.offsetHeight - window.innerHeight;
-    const progress = Math.max(0, Math.min(1, -rect.top / total));
-    const scale = 0.62 + progress * 1.05;
-    const opacity = progress < 0.08 ? 0.35 + progress / 0.08 * 0.65 : progress > 0.82 ? Math.max(0, 1 - (progress - 0.82) / 0.18) : 1;
+    // Прогресс стартует, КАК ТОЛЬКО секция начинает входить снизу (rect.top = высота окна),
+    // а не когда она уже прилипла сверху. Так «mise» растёт ещё на подходе.
+    const progress = Math.max(0, Math.min(1, (window.innerHeight - rect.top) / (window.innerHeight + total)));
+    const target = 0.6 + progress * 1.0;
+    // Не даём тексту вылезти за края (обрезался справа): ограничиваем масштаб под ширину окна.
+    const uw = text.offsetWidth || 1;
+    const maxScale = (window.innerWidth * 0.9) / uw;
+    const scale = Math.min(target, maxScale);
+    const opacity = progress < 0.1 ? 0.3 + progress / 0.1 * 0.7 : progress > 0.85 ? Math.max(0, 1 - (progress - 0.85) / 0.15) : 1;
     text.style.transform = `scale(${scale})`;
     text.style.opacity = opacity;
-  }, { passive: true });
+  };
+  window.addEventListener('scroll', apply, { passive: true });
+  window.addEventListener('resize', apply);
+  apply();
 })();
 
 // ─ REVEAL / STATEMENT / STATS / CTA ─
@@ -801,7 +810,7 @@ const T = {
     'st1.n':'12 сек','st1.l':'среднее время\nоткрытия смены',
     'st2.n':'5-в-1','st2.l':'приложений в\nодном аккаунте',
     'st3.n':'€0','st3.l':'потерянных смен\nв базе данных',
-    'apps.t':'Пять приложений.\nПод каждую роль.','apps.s':'Владельцу — аналитика. Менеджеру — касса. Бару — склад. Команде — расписание. Гостю — меню.',
+    'apps.t':'Пять приложений.\nПод каждую роль.','apps.s':'Включите только нужные. Всё в одном аккаунте, синхронизация в реальном времени.',
     'mg.h':'Смена под контролем —\nот открытия до отчёта.','mg.p':'Менеджер открывает смену одним касанием. Выручка, расходы и касса считаются в реальном времени. В конце дня владелец получает полный отчёт — автоматически.','mg.f1':'Открытие и закрытие смены, баланс кассы','mg.f2':'Расходы по категориям с лимитами','mg.f3':'Инкассация и отчёт смены владельцу',
     'an.h':'Цифры, которые\nпринимают решения.','an.p':'Финансы по дням, неделям и месяцам. Сравнение периодов, динамика выручки, зарплаты без Excel. На тарифе Pro — AI-ассистент, который отвечает о бизнесе понятным языком.','an.f1':'Аналитика и сравнение периодов','an.f2':'Зарплаты: оклады, вычеты, нал и карта','an.f3':'AI-ассистент на естественном языке · Pro',
     'sh.h':'Склад табака,\nсмена кальянщика.','sh.p':'Остатки по каждому бренду и вкусу — с цветными индикаторами уровня. Приход и инвентаризация в пару касаний. Смена кальянщика считает продажи, расход табака и выручку.','sh.f1':'Остатки по брендам и вкусам','sh.f2':'Приход и инвентаризация с историей','sh.f3':'Смена кальянщика: продажи и расход',
@@ -813,13 +822,13 @@ const T = {
     'cc2.t':'PIN-доступ','cc2.d':'4-значный PIN задаёт владелец. Каждому — свой код и свой набор приложений.',
     'cc3.t':'Единый вход','cc3.d':'Один PIN открывает все доступные сотруднику разделы. Переключение между ними — без повторного входа.',
     'hw.l':'Как это работает','hw.t':'Запуск за минуты.','hw.s':'Четыре шага — и весь ресторан под контролем.',
-    'step1.t':'Регистрация','step1.d':'Аккаунт за 30 секунд.','step2.t':'Подписка','step2.d':'7 дней бесплатно, карта не нужна.','step3.t':'Команда','step3.d':'Доступ по QR и PIN.','step4.t':'Контроль','step4.d':'Аналитика и отчёты в любое время.',
+    'step1.t':'Регистрация','step1.d':'Аккаунт за 30 секунд.','step2.t':'Подписка','step2.d':'7 дней бесплатно.','step3.t':'Команда','step3.d':'Доступ по QR и PIN.','step4.t':'Контроль','step4.d':'Аналитика и отчёты в любое время.',
     'pr.l':'Тарифы','pr.t':'Прозрачные цены.','pr.s':'Сменить или отменить тариф — в любой момент.',
     'p1.d':'€0.47 в день','p1.f1':'До 2 пользователей','p1.f2':'AI-аналитика','p1.btn':'Выбрать',
     'p2.d':'€0.79 в день','p2.f1':'Все пять приложений','p2.f2':'До 5 пользователей','p2.f3':'QR-меню для гостей','p2.f4':'Приоритетная поддержка','p2.f5':'AI-аналитика','p2.btn':'Начать бесплатно',
     'p3.d':'€1.29 в день','p3.f1':'Всё из Business','p3.f2':'До 10 пользователей','p3.f3':'AI-аналитика','p3.f4':'Интеграции: касса · банк','p3.btn':'Выбрать',
     'pop':'Популярный','pay.free':'7 дней бесплатно',
-    'cta.w':'Готовы?','cta.s':'Первые 7 дней бесплатно. Карта не нужна.','cta.b':'Создать аккаунт',
+    'cta.w':'Готовы?','cta.s':'Первые 7 дней бесплатно.','cta.b':'Создать аккаунт',
     'ft.tag':'Платформа управления рестораном. Пять приложений в одном аккаунте.','ft.p':'Приложения','ft.c':'Компания','ft.l':'Правовое','ft.about':'О нас','ft.sup':'Поддержка','ft.cont':'Контакты','ft.priv':'Конфиденциальность','ft.terms':'Условия',
   },
   en:{
@@ -832,7 +841,7 @@ const T = {
     'st1.n':'12 sec','st1.l':'average shift\nopen time',
     'st2.n':'5-in-1','st2.l':'apps in\none account',
     'st3.n':'€0','st3.l':'lost shifts\nin the database',
-    'apps.t':'Five apps.\nOne for every role.','apps.s':'Analytics for the owner. Cash for the manager. Inventory for the bar. Scheduling for the team. A menu for the guest.',
+    'apps.t':'Five apps.\nOne for every role.','apps.s':'Turn on only what you need. One account, synced in real time.',
     'mg.h':'The shift, under control —\nfrom open to report.','mg.p':'One tap opens the shift. Revenue, expenses, and the register update in real time. At close, the owner gets the full report — automatically.','mg.f1':'Open and close shifts, register balance','mg.f2':'Expenses by category, with limits','mg.f3':'Cash collection and shift report to the owner',
     'an.h':'Numbers that\nmake decisions.','an.p':'Finances by day, week, and month. Period comparisons, revenue trends, payroll without Excel. On Pro, an AI assistant answers questions about your business in plain language.','an.f1':'Analytics and period comparison','an.f2':'Payroll: salaries, deductions, cash & card','an.f3':'AI assistant in natural language · Pro',
     'sh.h':'Tobacco stock,\nhookah shifts.','sh.p':'Stock by every brand and flavor, with color level indicators. Deliveries and inventory in a couple of taps. The hookah shift counts sales, tobacco usage, and revenue.','sh.f1':'Stock by brand and flavor','sh.f2':'Deliveries and inventory, with history','sh.f3':'Hookah shift: sales and usage',
@@ -844,13 +853,13 @@ const T = {
     'cc2.t':'PIN access','cc2.d':'A 4-digit PIN, set by the owner. Each person gets their own code and their own apps.',
     'cc3.t':'One sign-in','cc3.d':'One PIN opens every section the staff member can access. Switching between them needs no repeat login.',
     'hw.l':'How it works','hw.t':'Live in minutes.','hw.s':'Four steps, and your whole restaurant is under control.',
-    'step1.t':'Register','step1.d':'An account in 30 seconds.','step2.t':'Subscribe','step2.d':'7 days free, no card required.','step3.t':'Team','step3.d':'Access by QR and PIN.','step4.t':'Control','step4.d':'Analytics and reports, anytime.',
+    'step1.t':'Register','step1.d':'An account in 30 seconds.','step2.t':'Subscribe','step2.d':'7 days free.','step3.t':'Team','step3.d':'Access by QR and PIN.','step4.t':'Control','step4.d':'Analytics and reports, anytime.',
     'pr.l':'Pricing','pr.t':'Transparent pricing.','pr.s':'Switch or cancel anytime.',
     'p1.d':'€0.47 per day','p1.f1':'Up to 2 users','p1.f2':'AI analytics','p1.btn':'Choose',
     'p2.d':'€0.79 per day','p2.f1':'All five apps','p2.f2':'Up to 5 users','p2.f3':'Guest QR menu','p2.f4':'Priority support','p2.f5':'AI analytics','p2.btn':'Start free',
     'p3.d':'€1.29 per day','p3.f1':'Everything in Business','p3.f2':'Up to 10 users','p3.f3':'AI analytics','p3.f4':'Integrations: POS · bank','p3.btn':'Choose',
     'pop':'Most popular','pay.free':'7 days free',
-    'cta.w':'Ready?','cta.s':'Your first 7 days are free. No card required.','cta.b':'Create account',
+    'cta.w':'Ready?','cta.s':'Your first 7 days are free.','cta.b':'Create account',
     'ft.tag':'Restaurant management platform. Five apps in one account.','ft.p':'Apps','ft.c':'Company','ft.l':'Legal','ft.about':'About','ft.sup':'Support','ft.cont':'Contact','ft.priv':'Privacy','ft.terms':'Terms',
   },
   it:{
@@ -863,7 +872,7 @@ const T = {
     'st1.n':"12 sec",'st1.l':"tempo medio di\napertura turno",
     'st2.n':"5-in-1",'st2.l':"app in\nun solo account",
     'st3.n':"€0",'st3.l':"turni persi\nnel database",
-    'apps.t':"Cinque app.\nUna per ogni ruolo.",'apps.s':"Analisi per il titolare. Cassa per il manager. Magazzino per il bar. Turni per il team. Menu per l'ospite.",
+    'apps.t':"Cinque app.\nUna per ogni ruolo.",'apps.s':"Attiva solo ciò che ti serve. Un unico account, sincronizzato in tempo reale.",
     'mg.h':"Il turno, sotto controllo —\ndall'apertura al report.",'mg.p':"Il manager apre il turno con un tocco. Incassi, spese e cassa si aggiornano in tempo reale. A fine giornata il titolare riceve il report completo — in automatico.",'mg.f1':"Apertura e chiusura turno, saldo cassa",'mg.f2':"Spese per categoria, con limiti",'mg.f3':"Versamenti e report del turno al titolare",
     'an.h':"Numeri che\ndecidono.",'an.p':"Finanze per giorno, settimana e mese. Confronto tra periodi, andamento degli incassi, buste paga senza Excel. Con Pro, un assistente AI risponde sul tuo business in linguaggio naturale.",'an.f1':"Analisi e confronto tra periodi",'an.f2':"Buste paga: stipendi, trattenute, contanti e carta",'an.f3':"Assistente AI in linguaggio naturale · Pro",
     'sh.h':"Scorte di tabacco,\nturno narghilè.",'sh.p':"Scorte per ogni marca e gusto, con indicatori di livello a colori. Carichi e inventario in pochi tocchi. Il turno narghilè conta vendite, consumo di tabacco e incassi.",'sh.f1':"Scorte per marca e gusto",'sh.f2':"Carichi e inventario, con storico",'sh.f3':"Turno narghilè: vendite e consumo",
@@ -875,13 +884,13 @@ const T = {
     'cc2.t':"Accesso PIN",'cc2.d':"Un PIN di 4 cifre, impostato dal titolare. A ciascuno il proprio codice e le proprie app.",
     'cc3.t':"Accesso unico",'cc3.d':"Un solo PIN apre tutte le sezioni a cui il dipendente ha accesso. Passare dall'una all'altra non richiede un nuovo accesso.",
     'hw.l':"Come funziona",'hw.t':"Operativo in pochi minuti.",'hw.s':"Quattro passi, e tutto il ristorante è sotto controllo.",
-    'step1.t':"Registrazione",'step1.d':"Un account in 30 secondi.",'step2.t':"Abbonamento",'step2.d':"7 giorni gratis, senza carta.",'step3.t':"Team",'step3.d':"Accesso con QR e PIN.",'step4.t':"Controllo",'step4.d':"Analisi e report, sempre.",
+    'step1.t':"Registrazione",'step1.d':"Un account in 30 secondi.",'step2.t':"Abbonamento",'step2.d':"7 giorni gratis.",'step3.t':"Team",'step3.d':"Accesso con QR e PIN.",'step4.t':"Controllo",'step4.d':"Analisi e report, sempre.",
     'pr.l':"Prezzi",'pr.t':"Prezzi trasparenti.",'pr.s':"Cambia o annulla quando vuoi.",
     'p1.d':"€0.47 al giorno",'p1.f1':"Fino a 2 utenti",'p1.f2':"Analisi AI",'p1.btn':"Scegli",
     'p2.d':"€0.79 al giorno",'p2.f1':"Tutte e cinque le app",'p2.f2':"Fino a 5 utenti",'p2.f3':"Menu QR per gli ospiti",'p2.f4':"Supporto prioritario",'p2.f5':"Analisi AI",'p2.btn':"Inizia gratis",
     'p3.d':"€1.29 al giorno",'p3.f1':"Tutto di Business",'p3.f2':"Fino a 10 utenti",'p3.f3':"Analisi AI",'p3.f4':"Integrazioni: cassa · banca",'p3.btn':"Scegli",
     'pop':"Più scelto",'pay.free':"7 giorni gratis",
-    'cta.w':"Pronto?",'cta.s':"I primi 7 giorni sono gratis. Senza carta.",'cta.b':"Crea un account",
+    'cta.w':"Pronto?",'cta.s':"I primi 7 giorni sono gratis.",'cta.b':"Crea un account",
     'ft.tag':"La piattaforma per gestire il ristorante. Cinque app in un solo account.",'ft.p':"App",'ft.c':"Azienda",'ft.l':"Note legali",'ft.about':"Chi siamo",'ft.sup':"Supporto",'ft.cont':"Contatti",'ft.priv':"Privacy",'ft.terms':"Termini",
   },
   fr:{
@@ -894,7 +903,7 @@ const T = {
     'st1.n':"12 s",'st1.l':"temps moyen\nd'ouverture du service",
     'st2.n':"5-en-1",'st2.l':"apps dans\nun seul compte",
     'st3.n':"€0",'st3.l':"services perdus\ndans la base",
-    'apps.t':"Cinq apps.\nUne pour chaque rôle.",'apps.s':"Les analyses pour le gérant. La caisse pour le manager. Le stock pour le bar. Les plannings pour l'équipe. Le menu pour le client.",
+    'apps.t':"Cinq apps.\nUne pour chaque rôle.",'apps.s':"Activez seulement ce qu'il vous faut. Un seul compte, synchronisé en temps réel.",
     'mg.h':"Le service, sous contrôle —\nde l'ouverture au rapport.",'mg.p':"Le manager ouvre le service d'un geste. Recettes, dépenses et caisse se mettent à jour en temps réel. En fin de journée, le gérant reçoit le rapport complet — automatiquement.",'mg.f1':"Ouverture et clôture du service, solde de caisse",'mg.f2':"Dépenses par catégorie, avec limites",'mg.f3':"Encaissements et rapport de service au gérant",
     'an.h':"Des chiffres qui\ndécident.",'an.p':"Finances par jour, semaine et mois. Comparaison de périodes, évolution des recettes, paie sans Excel. Avec Pro, un assistant IA répond sur votre activité en langage naturel.",'an.f1':"Analyses et comparaison de périodes",'an.f2':"Paie : salaires, retenues, espèces et carte",'an.f3':"Assistant IA en langage naturel · Pro",
     'sh.h':"Stock de tabac,\nservice chicha.",'sh.p':"Stock par marque et par parfum, avec indicateurs de niveau colorés. Réceptions et inventaire en quelques gestes. Le service chicha compte les ventes, la consommation de tabac et les recettes.",'sh.f1':"Stock par marque et parfum",'sh.f2':"Réceptions et inventaire, avec historique",'sh.f3':"Service chicha : ventes et consommation",
@@ -906,13 +915,13 @@ const T = {
     'cc2.t':"Accès PIN",'cc2.d':"Un PIN à 4 chiffres, défini par le gérant. À chacun son code et ses apps.",
     'cc3.t':"Connexion unique",'cc3.d':"Un seul PIN ouvre toutes les sections autorisées. Passer de l'une à l'autre ne demande aucune reconnexion.",
     'hw.l':"Fonctionnement",'hw.t':"Opérationnel en minutes.",'hw.s':"Quatre étapes, et tout le restaurant est sous contrôle.",
-    'step1.t':"Inscription",'step1.d':"Un compte en 30 secondes.",'step2.t':"Abonnement",'step2.d':"7 jours gratuits, sans carte.",'step3.t':"Équipe",'step3.d':"Accès par QR et PIN.",'step4.t':"Contrôle",'step4.d':"Analyses et rapports, à tout moment.",
+    'step1.t':"Inscription",'step1.d':"Un compte en 30 secondes.",'step2.t':"Abonnement",'step2.d':"7 jours gratuits.",'step3.t':"Équipe",'step3.d':"Accès par QR et PIN.",'step4.t':"Contrôle",'step4.d':"Analyses et rapports, à tout moment.",
     'pr.l':"Tarifs",'pr.t':"Des tarifs transparents.",'pr.s':"Changez ou annulez à tout moment.",
     'p1.d':"€0.47 par jour",'p1.f1':"Jusqu'à 2 utilisateurs",'p1.f2':"Analyses IA",'p1.btn':"Choisir",
     'p2.d':"€0.79 par jour",'p2.f1':"Les cinq apps",'p2.f2':"Jusqu'à 5 utilisateurs",'p2.f3':"Menu QR pour les clients",'p2.f4':"Support prioritaire",'p2.f5':"Analyses IA",'p2.btn':"Commencer gratuitement",
     'p3.d':"€1.29 par jour",'p3.f1':"Tout Business",'p3.f2':"Jusqu'à 10 utilisateurs",'p3.f3':"Analyses IA",'p3.f4':"Intégrations : caisse · banque",'p3.btn':"Choisir",
     'pop':"Le plus choisi",'pay.free':"7 jours gratuits",
-    'cta.w':"Prêt ?",'cta.s':"Vos 7 premiers jours sont gratuits. Sans carte.",'cta.b':"Créer un compte",
+    'cta.w':"Prêt ?",'cta.s':"Vos 7 premiers jours sont gratuits.",'cta.b':"Créer un compte",
     'ft.tag':"La plateforme de gestion de restaurant. Cinq apps dans un seul compte.",'ft.p':"Apps",'ft.c':"Entreprise",'ft.l':"Mentions légales",'ft.about':"À propos",'ft.sup':"Support",'ft.cont':"Contact",'ft.priv':"Confidentialité",'ft.terms':"Conditions",
   },
   az:{
@@ -925,7 +934,7 @@ const T = {
     'st1.n':"12 san",'st1.l':"növbənin açılması üçün\norta vaxt",
     'st2.n':"5-i-1-də",'st2.l':"bir hesabda\ntətbiq",
     'st3.n':"€0",'st3.l':"bazada itirilən\nnövbə",
-    'apps.t':"Beş tətbiq.\nHər rol üçün biri.",'apps.s':"Sahibə — analitika. Menecerə — kassa. Bara — anbar. Komandaya — qrafik. Qonağa — menyu.",
+    'apps.t':"Beş tətbiq.\nHər rol üçün biri.",'apps.s':"Yalnız lazım olanı aktivləşdirin. Bir hesab, real vaxtda sinxron.",
     'mg.h':"Növbə nəzarətdə —\naçılışdan hesabata qədər.",'mg.p':"Menecer növbəni bir toxunuşla açır. Gəlir, xərc və kassa real vaxtda yenilənir. Günün sonunda sahib tam hesabatı avtomatik alır.",'mg.f1':"Növbənin açılışı və bağlanışı, kassa balansı",'mg.f2':"Kateqoriyalar üzrə xərclər, limitlərlə",'mg.f3':"İnkassasiya və növbə hesabatı sahibə",
     'an.h':"Qərar verən\nrəqəmlər.",'an.p':"Gün, həftə və ay üzrə maliyyə. Dövrlərin müqayisəsi, gəlir dinamikası, Excelsiz əməkhaqqı. Pro tarifində — biznesinizə aydın dildə cavab verən AI-köməkçi.",'an.f1':"Analitika və dövrlərin müqayisəsi",'an.f2':"Əməkhaqqı: maaş, tutulmalar, nağd və kart",'an.f3':"Təbii dildə AI-köməkçi · Pro",
     'sh.h':"Tütün anbarı,\nkalyan növbəsi.",'sh.p':"Hər brend və dad üzrə qalıqlar — rəngli səviyyə göstəriciləri ilə. Mədaxil və inventarizasiya bir neçə toxunuşla. Kalyan növbəsi satışı, tütün sərfini və gəliri sayır.",'sh.f1':"Brend və dad üzrə qalıqlar",'sh.f2':"Mədaxil və inventarizasiya, tarixçə ilə",'sh.f3':"Kalyan növbəsi: satış və sərf",
@@ -937,13 +946,13 @@ const T = {
     'cc2.t':"PIN-giriş",'cc2.d':"4 rəqəmli PIN sahib tərəfindən təyin olunur. Hər kəsə öz kodu və öz tətbiqləri.",
     'cc3.t':"Vahid giriş",'cc3.d':"Bir PIN işçinin icazəli bütün bölmələrini açır. Onlar arasında keçid təkrar giriş tələb etmir.",
     'hw.l':"Necə işləyir",'hw.t':"Dəqiqələrdə işə hazır.",'hw.s':"Dörd addım — və bütün restoran nəzarətdədir.",
-    'step1.t':"Qeydiyyat",'step1.d':"30 saniyəyə hesab.",'step2.t':"Abunəlik",'step2.d':"7 gün pulsuz, kart lazım deyil.",'step3.t':"Komanda",'step3.d':"QR və PIN ilə giriş.",'step4.t':"Nəzarət",'step4.d':"Analitika və hesabatlar istənilən vaxt.",
+    'step1.t':"Qeydiyyat",'step1.d':"30 saniyəyə hesab.",'step2.t':"Abunəlik",'step2.d':"7 gün pulsuz.",'step3.t':"Komanda",'step3.d':"QR və PIN ilə giriş.",'step4.t':"Nəzarət",'step4.d':"Analitika və hesabatlar istənilən vaxt.",
     'pr.l':"Qiymətlər",'pr.t':"Şəffaf qiymətlər.",'pr.s':"İstənilən vaxt dəyiş və ya ləğv et.",
     'p1.d':"gündə €0.47",'p1.f1':"2 istifadəçiyə qədər",'p1.f2':"AI-analitika",'p1.btn':"Seç",
     'p2.d':"gündə €0.79",'p2.f1':"Beş tətbiqin hamısı",'p2.f2':"5 istifadəçiyə qədər",'p2.f3':"Qonaqlar üçün QR-menyu",'p2.f4':"Prioritet dəstək",'p2.f5':"AI-analitika",'p2.btn':"Pulsuz başla",
     'p3.d':"gündə €1.29",'p3.f1':"Business-in hamısı",'p3.f2':"10 istifadəçiyə qədər",'p3.f3':"AI-analitika",'p3.f4':"İnteqrasiyalar: kassa · bank",'p3.btn':"Seç",
     'pop':"Populyar",'pay.free':"7 gün pulsuz",
-    'cta.w':"Hazırsınız?",'cta.s':"İlk 7 gün pulsuz. Kart lazım deyil.",'cta.b':"Hesab yarat",
+    'cta.w':"Hazırsınız?",'cta.s':"İlk 7 gün pulsuz.",'cta.b':"Hesab yarat",
     'ft.tag':"Restoran idarəetmə platforması. Bir hesabda beş tətbiq.",'ft.p':"Tətbiqlər",'ft.c':"Şirkət",'ft.l':"Hüquqi",'ft.about':"Haqqımızda",'ft.sup':"Dəstək",'ft.cont':"Əlaqə",'ft.priv':"Məxfilik",'ft.terms':"Şərtlər",
   },
   tr:{
@@ -956,7 +965,7 @@ const T = {
     'st1.n':"12 sn",'st1.l':"ortalama vardiya\naçma süresi",
     'st2.n':"5'i 1'de",'st2.l':"tek hesapta\nuygulama",
     'st3.n':"€0",'st3.l':"veritabanında\nkaybolan vardiya",
-    'apps.t':"Beş uygulama.\nHer rol için biri.",'apps.s':"Sahibe analiz. Müdüre kasa. Bara depo. Ekibe vardiya planı. Misafire menü.",
+    'apps.t':"Beş uygulama.\nHer rol için biri.",'apps.s':"Yalnızca ihtiyacınız olanı açın. Tek hesap, gerçek zamanlı senkron.",
     'mg.h':"Vardiya kontrol altında —\naçılıştan rapora.",'mg.p':"Müdür vardiyayı tek dokunuşla açar. Gelir, gider ve kasa gerçek zamanlı güncellenir. Gün sonunda sahip tam raporu otomatik alır.",'mg.f1':"Vardiya açma ve kapama, kasa bakiyesi",'mg.f2':"Kategoriye göre giderler, limitlerle",'mg.f3':"Tahsilat ve vardiya raporu sahibe",
     'an.h':"Karar veren\nrakamlar.",'an.p':"Günlük, haftalık ve aylık finans. Dönem karşılaştırma, gelir trendi, Excel'siz bordro. Pro'da, işiniz hakkında doğal dilde yanıt veren bir AI asistanı.",'an.f1':"Analiz ve dönem karşılaştırma",'an.f2':"Bordro: maaş, kesinti, nakit ve kart",'an.f3':"Doğal dilde AI asistanı · Pro",
     'sh.h':"Tütün deposu,\nnargile vardiyası.",'sh.p':"Her marka ve aromaya göre stok — renkli seviye göstergeleriyle. Giriş ve sayım birkaç dokunuşla. Nargile vardiyası satışı, tütün tüketimini ve geliri sayar.",'sh.f1':"Marka ve aromaya göre stok",'sh.f2':"Giriş ve sayım, geçmişiyle",'sh.f3':"Nargile vardiyası: satış ve tüketim",
@@ -968,13 +977,13 @@ const T = {
     'cc2.t':"PIN erişimi",'cc2.d':"Sahibin belirlediği 4 haneli PIN. Herkese kendi kodu ve kendi uygulamaları.",
     'cc3.t':"Tek giriş",'cc3.d':"Tek PIN, çalışanın erişebildiği tüm bölümleri açar. Aralarında geçiş için tekrar giriş gerekmez.",
     'hw.l':"Nasıl çalışır",'hw.t':"Dakikalar içinde hazır.",'hw.s':"Dört adım — ve tüm restoran kontrol altında.",
-    'step1.t':"Kayıt",'step1.d':"30 saniyede hesap.",'step2.t':"Abonelik",'step2.d':"7 gün ücretsiz, kart gerekmez.",'step3.t':"Ekip",'step3.d':"QR ve PIN ile erişim.",'step4.t':"Kontrol",'step4.d':"Her an analiz ve rapor.",
+    'step1.t':"Kayıt",'step1.d':"30 saniyede hesap.",'step2.t':"Abonelik",'step2.d':"7 gün ücretsiz.",'step3.t':"Ekip",'step3.d':"QR ve PIN ile erişim.",'step4.t':"Kontrol",'step4.d':"Her an analiz ve rapor.",
     'pr.l':"Fiyatlar",'pr.t':"Şeffaf fiyatlar.",'pr.s':"İstediğin zaman değiştir ya da iptal et.",
     'p1.d':"günde €0.47",'p1.f1':"2 kullanıcıya kadar",'p1.f2':"AI analizi",'p1.btn':"Seç",
     'p2.d':"günde €0.79",'p2.f1':"Beş uygulamanın tümü",'p2.f2':"5 kullanıcıya kadar",'p2.f3':"Misafirler için QR menü",'p2.f4':"Öncelikli destek",'p2.f5':"AI analizi",'p2.btn':"Ücretsiz başla",
     'p3.d':"günde €1.29",'p3.f1':"Business'taki her şey",'p3.f2':"10 kullanıcıya kadar",'p3.f3':"AI analizi",'p3.f4':"Entegrasyonlar: kasa · banka",'p3.btn':"Seç",
     'pop':"En popüler",'pay.free':"7 gün ücretsiz",
-    'cta.w':"Hazır mısınız?",'cta.s':"İlk 7 gün ücretsiz. Kart gerekmez.",'cta.b':"Hesap oluştur",
+    'cta.w':"Hazır mısınız?",'cta.s':"İlk 7 gün ücretsiz.",'cta.b':"Hesap oluştur",
     'ft.tag':"Restoran yönetim platformu. Tek hesapta beş uygulama.",'ft.p':"Uygulamalar",'ft.c':"Şirket",'ft.l':"Yasal",'ft.about':"Hakkımızda",'ft.sup':"Destek",'ft.cont':"İletişim",'ft.priv':"Gizlilik",'ft.terms':"Koşullar",
   },
   uk:{
@@ -987,7 +996,7 @@ const T = {
     'st1.n':"12 сек",'st1.l':"середній час\nвідкриття зміни",
     'st2.n':"5-в-1",'st2.l':"застосунків в\nодному акаунті",
     'st3.n':"€0",'st3.l':"втрачених змін\nу базі даних",
-    'apps.t':"П'ять застосунків.\nПід кожну роль.",'apps.s':"Власнику — аналітика. Менеджеру — каса. Бару — склад. Команді — розклад. Гостю — меню.",
+    'apps.t':"П'ять застосунків.\nПід кожну роль.",'apps.s':"Увімкніть лише потрібні. Один акаунт, синхронізація в реальному часі.",
     'mg.h':"Зміна під контролем —\nвід відкриття до звіту.",'mg.p':"Менеджер відкриває зміну одним дотиком. Виручка, витрати й каса рахуються в реальному часі. Наприкінці дня власник отримує повний звіт — автоматично.",'mg.f1':"Відкриття та закриття зміни, баланс каси",'mg.f2':"Витрати за категоріями, з лімітами",'mg.f3':"Інкасація та звіт зміни власнику",
     'an.h':"Цифри, які\nприймають рішення.",'an.p':"Фінанси за днями, тижнями й місяцями. Порівняння періодів, динаміка виручки, зарплати без Excel. У тарифі Pro — AI-асистент, що відповідає про бізнес зрозумілою мовою.",'an.f1':"Аналітика та порівняння періодів",'an.f2':"Зарплати: оклади, утримання, готівка й картка",'an.f3':"AI-асистент природною мовою · Pro",
     'sh.h':"Склад тютюну,\nзміна кальянника.",'sh.p':"Залишки за кожним брендом і смаком — з кольоровими індикаторами рівня. Прихід та інвентаризація за пару дотиків. Зміна кальянника рахує продажі, витрату тютюну й виручку.",'sh.f1':"Залишки за брендами та смаками",'sh.f2':"Прихід та інвентаризація з історією",'sh.f3':"Зміна кальянника: продажі та витрата",
@@ -999,13 +1008,13 @@ const T = {
     'cc2.t':"PIN-доступ",'cc2.d':"4-значний PIN задає власник. Кожному — свій код і свій набір застосунків.",
     'cc3.t':"Єдиний вхід",'cc3.d':"Один PIN відкриває всі доступні працівнику розділи. Перемикання між ними не потребує повторного входу.",
     'hw.l':"Як це працює",'hw.t':"Запуск за хвилини.",'hw.s':"Чотири кроки — і весь ресторан під контролем.",
-    'step1.t':"Реєстрація",'step1.d':"Акаунт за 30 секунд.",'step2.t':"Підписка",'step2.d':"7 днів безкоштовно, без картки.",'step3.t':"Команда",'step3.d':"Доступ через QR і PIN.",'step4.t':"Контроль",'step4.d':"Аналітика та звіти будь-коли.",
+    'step1.t':"Реєстрація",'step1.d':"Акаунт за 30 секунд.",'step2.t':"Підписка",'step2.d':"7 днів безкоштовно.",'step3.t':"Команда",'step3.d':"Доступ через QR і PIN.",'step4.t':"Контроль",'step4.d':"Аналітика та звіти будь-коли.",
     'pr.l':"Ціни",'pr.t':"Прозорі ціни.",'pr.s':"Змінити чи скасувати тариф — будь-коли.",
     'p1.d':"€0.47 на день",'p1.f1':"До 2 користувачів",'p1.f2':"AI-аналітика",'p1.btn':"Обрати",
     'p2.d':"€0.79 на день",'p2.f1':"Усі п'ять застосунків",'p2.f2':"До 5 користувачів",'p2.f3':"QR-меню для гостей",'p2.f4':"Пріоритетна підтримка",'p2.f5':"AI-аналітика",'p2.btn':"Почати безкоштовно",
     'p3.d':"€1.29 на день",'p3.f1':"Усе з Business",'p3.f2':"До 10 користувачів",'p3.f3':"AI-аналітика",'p3.f4':"Інтеграції: каса · банк",'p3.btn':"Обрати",
     'pop':"Популярний",'pay.free':"7 днів безкоштовно",
-    'cta.w':"Готові?",'cta.s':"Перші 7 днів безкоштовно. Картка не потрібна.",'cta.b':"Створити акаунт",
+    'cta.w':"Готові?",'cta.s':"Перші 7 днів безкоштовно.",'cta.b':"Створити акаунт",
     'ft.tag':"Платформа керування рестораном. П'ять застосунків в одному акаунті.",'ft.p':"Застосунки",'ft.c':"Компанія",'ft.l':"Правове",'ft.about':"Про нас",'ft.sup':"Підтримка",'ft.cont':"Контакти",'ft.priv':"Конфіденційність",'ft.terms':"Умови",
   },
   kk:{
@@ -1018,7 +1027,7 @@ const T = {
     'st1.n':"12 сек",'st1.l':"ауысымды ашудың\nорташа уақыты",
     'st2.n':"5-і-1-де",'st2.l':"бір аккаунттағы\nқолданба",
     'st3.n':"€0",'st3.l':"дерекқорда жоғалған\nауысым",
-    'apps.t':"Бес қолданба.\nӘр рөлге арналған.",'apps.s':"Иесіне — аналитика. Менеджерге — касса. Барға — қойма. Командаға — кесте. Қонаққа — мәзір.",
+    'apps.t':"Бес қолданба.\nӘр рөлге арналған.",'apps.s':"Тек қажеттісін қосыңыз. Бір аккаунт, нақты уақытта синхрондау.",
     'mg.h':"Ауысым бақылауда —\nашудан есепке дейін.",'mg.p':"Менеджер ауысымды бір рет түртіп ашады. Түсім, шығын және касса нақты уақытта есептеледі. Күн соңында иесі толық есепті автоматты түрде алады.",'mg.f1':"Ауысымды ашу мен жабу, касса балансы",'mg.f2':"Санаттар бойынша шығындар, лимиттермен",'mg.f3':"Инкассация және ауысым есебі иесіне",
     'an.h':"Шешім қабылдайтын\nсандар.",'an.p':"Күн, апта және ай бойынша қаржы. Кезеңдерді салыстыру, түсім динамикасы, Excelсіз жалақы. Pro тарифінде — бизнес туралы түсінікті тілде жауап беретін AI-көмекші.",'an.f1':"Аналитика және кезеңдерді салыстыру",'an.f2':"Жалақы: оклад, ұстамдар, қолма-қол және карта",'an.f3':"Табиғи тілдегі AI-көмекші · Pro",
     'sh.h':"Темекі қоймасы,\nкальянші ауысымы.",'sh.p':"Әр бренд пен дәм бойынша қалдықтар — түрлі-түсті деңгей көрсеткіштерімен. Кіріс пен түгендеу бірнеше түртумен. Кальянші ауысымы сатылымды, темекі шығынын және түсімді санайды.",'sh.f1':"Бренд пен дәм бойынша қалдықтар",'sh.f2':"Кіріс пен түгендеу, тарихымен",'sh.f3':"Кальянші ауысымы: сатылым мен шығын",
@@ -1030,13 +1039,13 @@ const T = {
     'cc2.t':"PIN-қолжетім",'cc2.d':"4 таңбалы PIN-ді иесі белгілейді. Әрқайсысына — өз коды мен өз қолданбалары.",
     'cc3.t':"Бірыңғай кіру",'cc3.d':"Бір PIN қызметкерге қолжетімді барлық бөлімдерді ашады. Олардың арасында ауысу қайта кіруді қажет етпейді.",
     'hw.l':"Қалай жұмыс істейді",'hw.t':"Минут ішінде іске қосу.",'hw.s':"Төрт қадам — және бүкіл мейрамхана бақылауда.",
-    'step1.t':"Тіркелу",'step1.d':"30 секундта аккаунт.",'step2.t':"Жазылым",'step2.d':"7 күн тегін, карта қажет емес.",'step3.t':"Команда",'step3.d':"QR және PIN арқылы қолжетім.",'step4.t':"Бақылау",'step4.d':"Аналитика мен есептер кез келген уақытта.",
+    'step1.t':"Тіркелу",'step1.d':"30 секундта аккаунт.",'step2.t':"Жазылым",'step2.d':"7 күн тегін.",'step3.t':"Команда",'step3.d':"QR және PIN арқылы қолжетім.",'step4.t':"Бақылау",'step4.d':"Аналитика мен есептер кез келген уақытта.",
     'pr.l':"Бағалар",'pr.t':"Айқын бағалар.",'pr.s':"Кез келген уақытта ауыстыр немесе бас тарт.",
     'p1.d':"күніне €0.47",'p1.f1':"2 пайдаланушыға дейін",'p1.f2':"AI-аналитика",'p1.btn':"Таңдау",
     'p2.d':"күніне €0.79",'p2.f1':"Бес қолданбаның бәрі",'p2.f2':"5 пайдаланушыға дейін",'p2.f3':"Қонақтарға арналған QR-мәзір",'p2.f4':"Басым қолдау",'p2.f5':"AI-аналитика",'p2.btn':"Тегін бастау",
     'p3.d':"күніне €1.29",'p3.f1':"Business-тегі бәрі",'p3.f2':"10 пайдаланушыға дейін",'p3.f3':"AI-аналитика",'p3.f4':"Интеграциялар: касса · банк",'p3.btn':"Таңдау",
     'pop':"Танымал",'pay.free':"7 күн тегін",
-    'cta.w':"Дайынсыз ба?",'cta.s':"Алғашқы 7 күн тегін. Карта қажет емес.",'cta.b':"Аккаунт жасау",
+    'cta.w':"Дайынсыз ба?",'cta.s':"Алғашқы 7 күн тегін.",'cta.b':"Аккаунт жасау",
     'ft.tag':"Мейрамхананы басқару платформасы. Бір аккаунтта бес қолданба.",'ft.p':"Қолданбалар",'ft.c':"Компания",'ft.l':"Құқықтық",'ft.about':"Біз туралы",'ft.sup':"Қолдау",'ft.cont':"Байланыс",'ft.priv':"Құпиялылық",'ft.terms':"Шарттар",
   }
 };
