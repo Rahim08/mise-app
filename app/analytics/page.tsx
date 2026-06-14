@@ -7,6 +7,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
 import { AppLoading } from '@/components/AppLoading'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
+import { useI18n, tCurrent } from '@/lib/i18n'
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -16,10 +17,7 @@ function fmtDate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 function dd(s: string) { return s.slice(8, 10) + '.' + s.slice(5, 7) }
-const MRU = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
-const DOW = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
 const COLORS = ['#34c759', '#ff3b30', '#007aff', '#ff9500', '#af52de', '#00c7be', '#ff6b35', '#5856d6']
-const SUGGESTED = ['Как идёт этот месяц?', 'Где больше всего трат?', 'Сравни с прошлым месяцем', 'Хватит ли на зарплаты?']
 
 // ── CSV EXPORT (Excel-compatible: ';' delimiter + UTF-8 BOM for Cyrillic) ──────
 function downloadCSV(filename: string, rows: (string | number)[][]) {
@@ -253,9 +251,9 @@ function BarChartSVG({ labels, income, expense, currency }: { labels: string[]; 
       })}
       <g>
         <rect x={W - 80} y={4} width={8} height={8} rx="2" fill="#34c759" opacity="0.8" />
-        <text x={W - 70} y={12} fontSize="8" fill="currentColor" fillOpacity="0.5">Доход</text>
+        <text x={W - 70} y={12} fontSize="8" fill="currentColor" fillOpacity="0.5">{tCurrent('an.income')}</text>
         <rect x={W - 80} y={16} width={8} height={8} rx="2" fill="#ff3b30" opacity="0.8" />
-        <text x={W - 70} y={24} fontSize="8" fill="currentColor" fillOpacity="0.5">Расход</text>
+        <text x={W - 70} y={24} fontSize="8" fill="currentColor" fillOpacity="0.5">{tCurrent('an.expense')}</text>
       </g>
     </svg>
   )
@@ -366,7 +364,7 @@ function StatCard({ label, value, rawValue, color, sub, sm, pct, sparkValues, t 
           <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: up ? `${t.green}18` : `${t.red}18`, padding: '2px 7px', borderRadius: 8 }}>
             <span style={{ fontSize: 10, color: up ? t.green : t.red, fontWeight: 700 }}>{up ? '↑' : '↓'} {Math.abs(pct).toFixed(1)}%</span>
           </div>
-          <span style={{ fontSize: 10, color: t.text4 }}>vs прошлый</span>
+          <span style={{ fontSize: 10, color: t.text4 }}>{tCurrent('an.vsPrev')}</span>
         </div>
       )}
       {sub && <div style={{ fontSize: 11, color: t.text4, marginTop: 4 }}>{sub}</div>}
@@ -409,6 +407,11 @@ function ProgressRing({ value, max, color, size = 56, label }: { value: number; 
 
 export default function AnalyticsApp() {
   const t = useTheme('mise_ana_dark')
+  const { t: tr, locale } = useI18n()
+  const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1)
+  const mFull = (d: Date) => cap(d.toLocaleDateString(locale, { month: 'long' }))
+  const mShort = (d: Date) => mFull(d).slice(0, 3)
+  const dowShort = (d: Date) => cap(d.toLocaleDateString(locale, { weekday: 'short' }))
   const [restaurantId, setRestaurantId] = useState('')
   const [currency, setCurrency] = useState('€')
   const [isPro, setIsPro] = useState(false)
@@ -546,7 +549,7 @@ export default function AnalyticsApp() {
     const topCats = Object.entries(catMap).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, v]) => `${n}: ${currency}${fv(v)}`).join(', ')
     const totalAllIncome = allShifts.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
     const totalAllExpense = allShifts.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
-    return `Ты AI-ассистент ресторана. Текущий месяц (${MRU[currentDate.getMonth()]} ${currentDate.getFullYear()}): доход ${currency}${fv(totalIncome)}, расходы ${currency}${fv(totalExpense)}, касса ${currency}${fv(lastShift?.closing_balance || 0)}, инкассация ${currency}${fv(totalInkass)}, смен ${shifts.length}. Прошлый месяц: доход ${currency}${fv(prevIncome)}, расходы ${currency}${fv(prevExpense)}. За последний год: общий доход ${currency}${fv(totalAllIncome)}, общие расходы ${currency}${fv(totalAllExpense)}, смен ${allShifts.length}. Топ расходов за всё время: ${topCats}. Сотрудников: ${employees.length}, ФОТ: ${currency}${fv(employees.reduce((s: number, e: any) => s + e.salary, 0))}. Отвечай кратко и по делу на русском.`
+    return `Ты AI-ассистент ресторана. Текущий месяц (${mFull(currentDate)} ${currentDate.getFullYear()}): доход ${currency}${fv(totalIncome)}, расходы ${currency}${fv(totalExpense)}, касса ${currency}${fv(lastShift?.closing_balance || 0)}, инкассация ${currency}${fv(totalInkass)}, смен ${shifts.length}. Прошлый месяц: доход ${currency}${fv(prevIncome)}, расходы ${currency}${fv(prevExpense)}. За последний год: общий доход ${currency}${fv(totalAllIncome)}, общие расходы ${currency}${fv(totalAllExpense)}, смен ${allShifts.length}. Топ расходов за всё время: ${topCats}. Сотрудников: ${employees.length}, ФОТ: ${currency}${fv(employees.reduce((s: number, e: any) => s + e.salary, 0))}. ${tr('an.aiInstruction')}`
   }
 
   const sendAI = async (msg?: string) => {
@@ -557,15 +560,15 @@ export default function AnalyticsApp() {
     try {
       const r = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: [...chatMsgs, userMsg], context: buildContext() }) })
       const d = await r.json()
-      setChatMsgs(p => [...p, { role: 'ai', text: d.text || 'Нет ответа' }])
-    } catch { setChatMsgs(p => [...p, { role: 'ai', text: 'Ошибка соединения' }]) }
+      setChatMsgs(p => [...p, { role: 'ai', text: d.text || tr('an.aiNoAnswer') }])
+    } catch { setChatMsgs(p => [...p, { role: 'ai', text: tr('an.aiConnErr') }]) }
     setChatLoading(false)
   }
 
   // ── EXPORTS ──
-  const monthTag = `${MRU[currentDate.getMonth()]}_${currentDate.getFullYear()}`
+  const monthTag = `${mFull(currentDate)}_${currentDate.getFullYear()}`
   const pdfCur = currency === '₸' ? 'KZT ' : currency // ₸ glyph not in embedded font
-  const monthTitle = `${MRU[currentDate.getMonth()]} ${currentDate.getFullYear()}`
+  const monthTitle = `${mFull(currentDate)} ${currentDate.getFullYear()}`
 
   const exportShifts = () => {
     const rows: (string | number)[][] = [['Дата', 'Вход', 'Доход', 'Расход', 'Инкассация', 'Касса']]
@@ -652,7 +655,7 @@ export default function AnalyticsApp() {
           <div style={{ fontSize: 44, marginBottom: 12, opacity: 0.3 }}>
             <svg fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" width="48" height="48"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
           </div>
-          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Нет данных за {dd(dayStr)}</div>
+          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('an.noDataFor', { d: dd(dayStr) })}</div>
         </div>
       )
 
@@ -661,17 +664,17 @@ export default function AnalyticsApp() {
         <div>
           {/* Hero cards */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-            <StatCard label="Доход" rawValue={dayShift.income} value={`${currency}${fv(dayShift.income)}`} color={t.green} t={t} />
-            <StatCard label="Расход" rawValue={dayShift.total_expense} value={`${currency}${fv(dayShift.total_expense)}`} color={t.red} t={t} />
+            <StatCard label={tr('an.income')} rawValue={dayShift.income} value={`${currency}${fv(dayShift.income)}`} color={t.green} t={t} />
+            <StatCard label={tr('an.expense')} rawValue={dayShift.total_expense} value={`${currency}${fv(dayShift.total_expense)}`} color={t.red} t={t} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 16 }}>
-            <StatCard label="Вход" value={`${currency}${fv(dayShift.opening_balance)}`} rawValue={dayShift.opening_balance} color={t.blue} sm t={t} />
-            <StatCard label="Доход" value={`${currency}${fv(dayShift.income)}`} rawValue={dayShift.income} color={t.green} sm t={t} />
-            <StatCard label="Расход" value={`${currency}${fv(dayShift.total_expense)}`} rawValue={dayShift.total_expense} color={t.red} sm t={t} />
-            <StatCard label="Касса" value={`${currency}${fv(dayShift.closing_balance)}`} rawValue={dayShift.closing_balance} color={t.blue} sm t={t} />
+            <StatCard label={tr('an.cOpen')} value={`${currency}${fv(dayShift.opening_balance)}`} rawValue={dayShift.opening_balance} color={t.blue} sm t={t} />
+            <StatCard label={tr('an.income')} value={`${currency}${fv(dayShift.income)}`} rawValue={dayShift.income} color={t.green} sm t={t} />
+            <StatCard label={tr('an.expense')} value={`${currency}${fv(dayShift.total_expense)}`} rawValue={dayShift.total_expense} color={t.red} sm t={t} />
+            <StatCard label={tr('an.cKassa')} value={`${currency}${fv(dayShift.closing_balance)}`} rawValue={dayShift.closing_balance} color={t.blue} sm t={t} />
           </div>
           {dayExps.length > 0 && <>
-            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Расходы дня</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.dayExpenses')}</div>
             <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
               {dayExps.map((e: any, i: number) => (
                 <HBar key={e.id} name={e.category_name} val={e.amount} max={maxExp} color={COLORS[i % COLORS.length]} currency={currency} sub={e.note} t={t} />
@@ -679,10 +682,10 @@ export default function AnalyticsApp() {
             </div>
           </>}
           {dayInk && <>
-            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Инкассация</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.inkassation')}</div>
             <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '0.5px', background: t.sep2 }}>
-                {[{ l: 'Приход', v: dayInk.amount > 0 ? `${currency}${fv(dayInk.amount)}` : '—', c: t.green }, { l: 'Расход', v: dayInk.expense > 0 ? `${currency}${fv(dayInk.expense)}` : '—', c: t.red }, { l: 'Причина', v: dayInk.reason || '—', c: t.text3 }, { l: 'Итог', v: `${currency}${fv(dayInk.balance)}`, c: t.orange }].map(cell => (
+                {[{ l: tr('an.inkIncome'), v: dayInk.amount > 0 ? `${currency}${fv(dayInk.amount)}` : '—', c: t.green }, { l: tr('an.expense'), v: dayInk.expense > 0 ? `${currency}${fv(dayInk.expense)}` : '—', c: t.red }, { l: tr('an.reason'), v: dayInk.reason || '—', c: t.text3 }, { l: tr('an.inkTotal'), v: `${currency}${fv(dayInk.balance)}`, c: t.orange }].map(cell => (
                   <div key={cell.l} style={{ background: t.surface, padding: '12px 10px' }}>
                     <div style={{ fontSize: 9, color: t.text3, textTransform: 'uppercase', marginBottom: 5, fontWeight: 600 }}>{cell.l}</div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: cell.c }}>{cell.v}</div>
@@ -706,11 +709,11 @@ export default function AnalyticsApp() {
       return (
         <div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-            <StatCard label="Доход за неделю" rawValue={wi} value={`${currency}${fv(wi)}`} color={t.green} pct={ip} t={t} />
-            <StatCard label="Расходы" rawValue={we} value={`${currency}${fv(we)}`} color={t.red} pct={ep} t={t} />
+            <StatCard label={tr('an.weekIncome')} rawValue={wi} value={`${currency}${fv(wi)}`} color={t.green} pct={ip} t={t} />
+            <StatCard label={tr('an.expenses')} rawValue={we} value={`${currency}${fv(we)}`} color={t.red} pct={ep} t={t} />
           </div>
           {ws.length > 1 && <>
-            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Доходы и расходы</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.incomeExpense')}</div>
             <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
               <div style={{ padding: '14px 14px 10px', color: t.text }}>
                 <BarChartSVG labels={ws.map((s: any) => dd(s.date))} income={ws.map((s: any) => s.income || 0)} expense={ws.map((s: any) => s.total_expense || 0)} currency={currency} />
@@ -718,12 +721,12 @@ export default function AnalyticsApp() {
             </div>
           </>}
           {cats.length > 0 && <>
-            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Структура расходов</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.expenseStructure')}</div>
             <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
               {cats.map(([n, v], i) => <HBar key={n} name={n} val={v} max={maxV} color={COLORS[i % COLORS.length]} currency={currency} t={t} />)}
             </div>
           </>}
-          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>По дням</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.byDays')}</div>
           <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
             {ws.map((s: any, i: number) => (
               <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '44px 1fr 1fr 1fr 1fr', padding: '12px 14px', gap: 4, borderBottom: i < ws.length - 1 ? `0.5px solid ${t.sep2}` : 'none', fontSize: 13 }}>
@@ -750,13 +753,13 @@ export default function AnalyticsApp() {
       <div>
         {/* Top stats */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-          <StatCard label="Доход" rawValue={totalIncome} value={`${currency}${fv(totalIncome)}`} color={t.green} pct={ip} sparkValues={incomeArr} t={t} />
-          <StatCard label="Расходы" rawValue={totalExpense} value={`${currency}${fv(totalExpense)}`} color={t.red} pct={ep} t={t} />
+          <StatCard label={tr('an.income')} rawValue={totalIncome} value={`${currency}${fv(totalIncome)}`} color={t.green} pct={ip} sparkValues={incomeArr} t={t} />
+          <StatCard label={tr('an.expenses')} rawValue={totalExpense} value={`${currency}${fv(totalExpense)}`} color={t.red} pct={ep} t={t} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
-          <StatCard label="Смен" value={String(shifts.length)} sm t={t} />
-          <StatCard label="Инкасс" rawValue={totalInkass} value={`${currency}${fv(totalInkass)}`} color={t.orange} sm t={t} />
-          <StatCard label="Касса" rawValue={lastShift?.closing_balance || 0} value={`${currency}${fv(lastShift?.closing_balance || 0)}`} color={t.blue} sm t={t} />
+          <StatCard label={tr('an.shiftsCount')} value={String(shifts.length)} sm t={t} />
+          <StatCard label={tr('an.cInkassShort')} rawValue={totalInkass} value={`${currency}${fv(totalInkass)}`} color={t.orange} sm t={t} />
+          <StatCard label={tr('an.cKassa')} rawValue={lastShift?.closing_balance || 0} value={`${currency}${fv(lastShift?.closing_balance || 0)}`} color={t.blue} sm t={t} />
         </div>
 
         {/* Нал vs безнал: соотношение продаж за месяц (инкассация — всегда только нал) */}
@@ -769,8 +772,8 @@ export default function AnalyticsApp() {
           return (
             <div style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh, marginBottom: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: t.text }}>Наличные · Безнал</span>
-                <span style={{ fontSize: 12, color: t.text3 }}>{currency}{fv(total)} всего</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: t.text }}>{tr('an.cashCard')}</span>
+                <span style={{ fontSize: 12, color: t.text3 }}>{currency}{fv(total)} {tr('an.totalWord')}</span>
               </div>
               <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', gap: 2 }}>
                 <div style={{ width: `${cashPct}%`, background: t.green, borderRadius: 5, transition: 'width .4s ease' }} />
@@ -779,13 +782,13 @@ export default function AnalyticsApp() {
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
                 <span style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.green }} />
-                  <span style={{ color: t.text2 }}>Нал</span>
+                  <span style={{ color: t.text2 }}>{tr('an.cashShort')}</span>
                   <span style={{ fontWeight: 700, color: t.green }}>{currency}{fv(cash)}</span>
                   <span style={{ color: t.text3 }}>{cashPct}%</span>
                 </span>
                 <span style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.purple }} />
-                  <span style={{ color: t.text2 }}>Карта</span>
+                  <span style={{ color: t.text2 }}>{tr('an.card')}</span>
                   <span style={{ fontWeight: 700, color: t.purple }}>{currency}{fv(card)}</span>
                   <span style={{ color: t.text3 }}>{100 - cashPct}%</span>
                 </span>
@@ -797,7 +800,7 @@ export default function AnalyticsApp() {
 
 
         {shifts.length > 1 && <>
-          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Доходы и расходы</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.incomeExpense')}</div>
           <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
             <div style={{ padding: '14px 14px 8px', color: t.text }}>
               <BarChartSVG labels={shifts.map((s: any) => dd(s.date))} income={incomeArr} expense={shifts.map((s: any) => s.total_expense || 0)} currency={currency} />
@@ -807,19 +810,19 @@ export default function AnalyticsApp() {
 
         {/* Donut */}
         {top5.length > 0 && <>
-          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Структура расходов</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.expenseStructure')}</div>
           <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh, color: t.text }}>
-            <DonutChartSVG data={top5.map(([, v]) => v)} colors={COLORS.slice(0, top5.length)} labels={top5.map(([n]) => n)} centerVal={`${currency}${Math.round(totalExpense)}`} centerLabel="расходы" />
+            <DonutChartSVG data={top5.map(([, v]) => v)} colors={COLORS.slice(0, top5.length)} labels={top5.map(([n]) => n)} centerVal={`${currency}${Math.round(totalExpense)}`} centerLabel={tr('an.expensesLc')} />
           </div>
 
-          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Топ расходов</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.topExpenses')}</div>
           <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
             {top5.map(([n, v], i) => <HBar key={n} name={n} val={v} max={maxV} color={COLORS[i % COLORS.length]} currency={currency} t={t} />)}
           </div>
         </>}
 
         {cats.length > 0 && <>
-          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Все категории</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.allCategories')}</div>
           <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
             {cats.map(([n, v], i) => (
               <div key={n} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: i < cats.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
@@ -841,17 +844,17 @@ export default function AnalyticsApp() {
       return (
         <div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-            <StatCard label="Остаток" rawValue={lastShift?.closing_balance || 0} value={`${currency}${fv(lastShift?.closing_balance || 0)}`} color={t.blue} sparkValues={balArr} t={t} />
-            <StatCard label="Последний доход" rawValue={lastShift?.income || 0} value={`${currency}${fv(lastShift?.income || 0)}`} color={t.green} sub={lastShift ? dd(lastShift.date) : undefined} t={t} />
+            <StatCard label={tr('an.balance')} rawValue={lastShift?.closing_balance || 0} value={`${currency}${fv(lastShift?.closing_balance || 0)}`} color={t.blue} sparkValues={balArr} t={t} />
+            <StatCard label={tr('an.lastIncome')} rawValue={lastShift?.income || 0} value={`${currency}${fv(lastShift?.income || 0)}`} color={t.green} sub={lastShift ? dd(lastShift.date) : undefined} t={t} />
           </div>
           {filled.length > 1 && <>
-            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Баланс кассы</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.kassaBalance')}</div>
             <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
               <div style={{ padding: '14px 14px 8px', color: t.text }}>
                 <LineChartSVG labels={filled.map((s: any) => dd(s.date))} values={balArr} color={t.blue} currency={currency} />
               </div>
             </div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Доходы и расходы</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.incomeExpense')}</div>
             <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
               <div style={{ padding: '14px 14px 8px', color: t.text }}>
                 <BarChartSVG labels={filled.map((s: any) => dd(s.date))} income={filled.map((s: any) => s.income || 0)} expense={filled.map((s: any) => s.total_expense || 0)} currency={currency} />
@@ -859,7 +862,7 @@ export default function AnalyticsApp() {
             </div>
           </>}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 4px 8px' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>По дням</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{tr('an.byDays')}</div>
             {filled.length > 0 && (
               <div style={{ display: 'flex', gap: 6 }}>
                 <button onClick={exportShifts} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.green}18`, border: 'none', borderRadius: 16, padding: '5px 12px', fontSize: 12, fontWeight: 600, color: t.green, cursor: 'pointer', fontFamily: 'inherit' }}>
@@ -897,21 +900,21 @@ export default function AnalyticsApp() {
     return (
       <div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-          <StatCard label="Итого инкасс." rawValue={inkBal} value={`${currency}${fv(inkBal)}`} color={t.orange} t={t} />
-          <StatCard label="ЗП на сегодня" rawValue={salToday} value={`${currency}${fv(salToday)}`} color={diff >= 0 ? t.green : t.red} sub={`${diff >= 0 ? 'Опережаем' : 'Отстаём'} ${currency}${fv(Math.abs(diff))}`} t={t} />
+          <StatCard label={tr('an.totalInkass')} rawValue={inkBal} value={`${currency}${fv(inkBal)}`} color={t.orange} t={t} />
+          <StatCard label={tr('an.salToday')} rawValue={salToday} value={`${currency}${fv(salToday)}`} color={diff >= 0 ? t.green : t.red} sub={`${diff >= 0 ? tr('an.ahead') : tr('an.behind')} ${currency}${fv(Math.abs(diff))}`} t={t} />
         </div>
         {shiftsWithInk.length > 1 && <>
-          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>Динамика</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.dynamics')}</div>
           <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
             <div style={{ padding: '14px 14px 8px', color: t.text }}>
               <LineChartSVG labels={shiftsWithInk.map((s: any) => dd(s.date))} values={shiftsWithInk.map((s: any) => s.inkassation || 0)} color={t.orange} currency={currency} />
             </div>
           </div>
         </>}
-        <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>История</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.history')}</div>
         <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
           {shiftsWithInk.length === 0
-            ? <div style={{ padding: '32px', textAlign: 'center', color: t.text4 }}>Нет инкассаций</div>
+            ? <div style={{ padding: '32px', textAlign: 'center', color: t.text4 }}>{tr('an.noInkass')}</div>
             : shiftsWithInk.map((s: any, i: number) => (
               <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '44px 1fr 1fr', padding: '12px 14px', gap: 4, borderBottom: i < shiftsWithInk.length - 1 ? `0.5px solid ${t.sep2}` : 'none', fontSize: 13 }}>
                 <span style={{ color: t.text3 }}>{dd(s.date)}</span>
@@ -950,13 +953,13 @@ export default function AnalyticsApp() {
     return (
       <div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
-          <StatCard label="ФОТ" rawValue={totFOT} value={`${currency}${fv(totFOT)}`} color={t.blue} sm t={t} />
-          <StatCard label="Наличные" rawValue={totCash} value={`${currency}${fv(totCash)}`} color={t.orange} sm t={t} />
-          <StatCard label="Карта" rawValue={totCard} value={`${currency}${fv(totCard)}`} color={t.purple} sm t={t} />
+          <StatCard label={tr('an.payroll')} rawValue={totFOT} value={`${currency}${fv(totFOT)}`} color={t.blue} sm t={t} />
+          <StatCard label={tr('an.cashFull')} rawValue={totCash} value={`${currency}${fv(totCash)}`} color={t.orange} sm t={t} />
+          <StatCard label={tr('an.card')} rawValue={totCard} value={`${currency}${fv(totCard)}`} color={t.purple} sm t={t} />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 4px 8px' }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>Сотрудники</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{tr('an.employees')}</div>
           {employees.length > 0 && (
             <div style={{ display: 'flex', gap: 6 }}>
               <button onClick={exportSalary} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.green}18`, border: 'none', borderRadius: 16, padding: '5px 12px', fontSize: 12, fontWeight: 600, color: t.green, cursor: 'pointer', fontFamily: 'inherit' }}>
@@ -986,7 +989,7 @@ export default function AnalyticsApp() {
                   <div>
                     <div style={{ fontSize: 15, color: t.text, fontWeight: 600 }}>{emp.name}</div>
                     <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>
-                      {abs > 0 ? `${abs} пропусков · −${currency}${fv(deduct)}` : 'оклад полностью'}
+                      {abs > 0 ? `${abs} ${tr('an.absWord')} · −${currency}${fv(deduct)}` : tr('an.fullSalary')}
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -998,14 +1001,14 @@ export default function AnalyticsApp() {
                 <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .28s cubic-bezier(.32,.72,0,1)' }}>
                   <div style={{ overflow: 'hidden' }}>
                     <div style={{ padding: '0 16px 14px' }}>
-                      <div style={{ fontSize: 12, color: t.text3, marginBottom: 8 }}>ЗП: {currency}{fv(emp.salary)}{deduct > 0 ? ` · вычет −${currency}${fv(deduct)}` : ''}</div>
+                      <div style={{ fontSize: 12, color: t.text3, marginBottom: 8 }}>{tr('an.salaryLabel')}: {currency}{fv(emp.salary)}{deduct > 0 ? ` · ${tr('an.deductWord')} −${currency}${fv(deduct)}` : ''}</div>
                       {abs > 0 && <div style={{ marginBottom: 8, height: 3, background: t.fill2, borderRadius: 2, overflow: 'hidden' }}>
                         <div style={{ height: '100%', width: `${Math.min(abs / 22 * 100, 100).toFixed(1)}%`, background: t.red, borderRadius: 2 }} />
                       </div>}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: 13, color: t.orange, fontWeight: 600 }}>Нал {currency}{fv(cash)}</span>
+                        <span style={{ fontSize: 13, color: t.orange, fontWeight: 600 }}>{tr('an.cashShort')} {currency}{fv(cash)}</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontSize: 12, color: t.text3 }}>На карту {currency}</span>
+                          <span style={{ fontSize: 12, color: t.text3 }}>{tr('an.toCard')} {currency}</span>
                           <input
                             key={`card-${emp.id}-${monthKey}`} type="number" inputMode="decimal"
                             defaultValue={card || ''} placeholder="0"
@@ -1031,11 +1034,11 @@ export default function AnalyticsApp() {
   if (!t.mounted || loading) return <AppLoading app="analytics" bg={t.bg} fill={t.fill} accent={t.blue} />
 
   const TABS = [
-    { id: 'period', label: 'Период', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },
-    { id: 'kassa', label: 'Касса', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 3H8L2 7h20z" /></svg> },
-    { id: 'forecast', label: 'Прогноз', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M3 17l6-6 4 4 7-7" strokeLinecap="round" strokeLinejoin="round" /><path d="M14 8h6v6" strokeLinecap="round" strokeLinejoin="round" /></svg> },
-    { id: 'salary', label: 'Зарплаты', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" /></svg> },
-    { id: 'hookah', label: 'Кальян', icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M8 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M12 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M16 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M5 14h14" strokeLinecap="round"/><path d="M5 17c1 1.5 2 2 3.5 2s2.5-1 4-1 2.5 1 4 1 2.5-.5 3.5-2" strokeLinecap="round"/></svg> },
+    { id: 'period', label: tr('an.tabPeriod'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },
+    { id: 'kassa', label: tr('an.tabKassa'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 3H8L2 7h20z" /></svg> },
+    { id: 'forecast', label: tr('an.tabForecast'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M3 17l6-6 4 4 7-7" strokeLinecap="round" strokeLinejoin="round" /><path d="M14 8h6v6" strokeLinecap="round" strokeLinejoin="round" /></svg> },
+    { id: 'salary', label: tr('an.tabSalary'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" /></svg> },
+    { id: 'hookah', label: tr('an.tabHookah'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M8 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M12 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M16 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M5 14h14" strokeLinecap="round"/><path d="M5 17c1 1.5 2 2 3.5 2s2.5-1 4-1 2.5 1 4 1 2.5-.5 3.5-2" strokeLinecap="round"/></svg> },
   ] as const
 
   return (
@@ -1060,10 +1063,10 @@ export default function AnalyticsApp() {
             }
           </button>
           <button onClick={() => setShowMonthPicker(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.green}18`, borderRadius: 20, padding: '7px 14px', cursor: 'pointer', fontSize: 14, fontWeight: 600, color: t.green, border: 'none', fontFamily: 'inherit' }}>
-            {MRU[currentDate.getMonth()].slice(0, 3)} {currentDate.getFullYear()}
+            {mShort(currentDate)} {currentDate.getFullYear()}
             <svg width="10" height="6" fill="none" stroke={t.green} strokeWidth="2.5" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" /></svg>
           </button>
-          <button onClick={() => isPro ? setShowAI(true) : alert('AI-аналитика доступна в тарифе Pro')} style={{ width: 36, height: 36, borderRadius: '50%', background: `${t.green}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' as const, opacity: isPro ? 1 : 0.55 }}>
+          <button onClick={() => isPro ? setShowAI(true) : alert(tr('an.aiProOnly'))} style={{ width: 36, height: 36, borderRadius: '50%', background: `${t.green}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' as const, opacity: isPro ? 1 : 0.55 }}>
             <div style={{ position: 'relative' as const, width: 20, height: 20 }}>
               <div style={{ position: 'absolute' as const, inset: 0, borderRadius: '50%', border: `1.5px solid ${t.green}66`, animation: 'pulse 2s ease-in-out infinite' }} />
               <div style={{ position: 'absolute' as const, inset: 3, borderRadius: '50%', background: t.green, animation: 'pulse 2s ease-in-out infinite .3s' }} />
@@ -1082,7 +1085,7 @@ export default function AnalyticsApp() {
               <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
                 {(['day', 'week', 'month'] as const).map(m => (
                   <button key={m} onClick={() => setPeriodMode(m)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: periodMode === m ? 700 : 500, cursor: 'pointer', background: periodMode === m ? t.surface : 'transparent', color: periodMode === m ? t.green : t.text3, boxShadow: periodMode === m ? t.sh2 : 'none', transition: 'all .18s' }}>
-                    {m === 'day' ? 'День' : m === 'week' ? 'Неделя' : 'Месяц'}
+                    {m === 'day' ? tr('an.day') : m === 'week' ? tr('an.week') : tr('an.month')}
                   </button>
                 ))}
               </div>
@@ -1092,8 +1095,8 @@ export default function AnalyticsApp() {
                     <svg width="10" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 10 18"><path d="M8 1L1 9l7 8" /></svg>
                   </button>
                   <div style={{ flex: 1, textAlign: 'center' as const }}>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>{periodMode === 'day' ? `${currentDate.getDate()} ${MRU[currentDate.getMonth()].slice(0, 3)}` : `Неделя ${currentDate.getDate()} ${MRU[currentDate.getMonth()].slice(0, 3)}`}</div>
-                    <div style={{ fontSize: 12, color: t.green, marginTop: 1, fontWeight: 500 }}>{periodMode === 'day' ? DOW[currentDate.getDay()] : ''}</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>{periodMode === 'day' ? `${currentDate.getDate()} ${mShort(currentDate)}` : `${tr('an.week')} ${currentDate.getDate()} ${mShort(currentDate)}`}</div>
+                    <div style={{ fontSize: 12, color: t.green, marginTop: 1, fontWeight: 500 }}>{periodMode === 'day' ? dowShort(currentDate) : ''}</div>
                   </div>
                   <button onClick={() => { const d = new Date(currentDate); d.setDate(d.getDate() + (periodMode === 'week' ? 7 : 1)); setCurrentDate(d) }} style={{ width: 40, height: 40, borderRadius: '50%', background: t.fill, border: 'none', color: t.text, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <svg width="10" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 10 18"><path d="M2 1l7 8-7 8" /></svg>
@@ -1109,7 +1112,7 @@ export default function AnalyticsApp() {
               <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
                 {(['kassa', 'inkass'] as const).map(m => (
                   <button key={m} onClick={() => setKassaMode(m)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: kassaMode === m ? 700 : 500, cursor: 'pointer', background: kassaMode === m ? t.surface : 'transparent', color: kassaMode === m ? t.green : t.text3, boxShadow: kassaMode === m ? t.sh2 : 'none', transition: 'all .18s' }}>
-                    {m === 'kassa' ? 'Касса' : 'Инкасс'}
+                    {m === 'kassa' ? tr('an.cKassa') : tr('an.cInkassShort')}
                   </button>
                 ))}
               </div>
@@ -1142,25 +1145,25 @@ export default function AnalyticsApp() {
               <div>
                 {/* Прогноз на месяц */}
                 <div style={{ background: t.surface, borderRadius: 18, padding: '20px 18px', boxShadow: t.sh, marginBottom: 12 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{isCur ? 'Прогноз на месяц' : 'Выручка за месяц'}</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{isCur ? tr('an.forecastMonth') : tr('an.revenueMonth')}</div>
                   <div style={{ fontSize: 34, fontWeight: 800, color: t.text, letterSpacing: -1, marginTop: 6 }}>{currency}{fv(isCur ? projected : mtd)}</div>
                   <div style={{ fontSize: 13, color: t.text3, marginTop: 4 }}>
-                    {isCur ? `при текущем темпе ${currency}${fv(Math.round(dailyAvg))}/день` : 'итог месяца'}
-                    {projPct !== null && <span style={{ color: projPct >= 0 ? t.green : t.red, fontWeight: 600 }}> · {projPct >= 0 ? '+' : ''}{projPct.toFixed(0)}% к прошлому</span>}
+                    {isCur ? tr('an.atCurrentPace', { v: `${currency}${fv(Math.round(dailyAvg))}` }) : tr('an.monthResult')}
+                    {projPct !== null && <span style={{ color: projPct >= 0 ? t.green : t.red, fontWeight: 600 }}> · {projPct >= 0 ? '+' : ''}{projPct.toFixed(0)}% {tr('an.vsPrevious')}</span>}
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
-                  <StatCard label="С начала месяца" rawValue={mtd} value={`${currency}${fv(mtd)}`} color={t.blue} sm t={t} />
-                  <StatCard label="В среднем/день" rawValue={dailyAvg} value={`${currency}${fv(Math.round(dailyAvg))}`} color={t.orange} sm t={t} />
-                  <StatCard label="Прошлый месяц" rawValue={prevIncome} value={`${currency}${fv(prevIncome)}`} color={t.purple} sm t={t} />
+                  <StatCard label={tr('an.sinceMonthStart')} rawValue={mtd} value={`${currency}${fv(mtd)}`} color={t.blue} sm t={t} />
+                  <StatCard label={tr('an.avgPerDay')} rawValue={dailyAvg} value={`${currency}${fv(Math.round(dailyAvg))}`} color={t.orange} sm t={t} />
+                  <StatCard label={tr('an.prevMonth')} rawValue={prevIncome} value={`${currency}${fv(prevIncome)}`} color={t.purple} sm t={t} />
                 </div>
 
                 {/* Цель на месяц */}
-                <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>Цель на месяц</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>{tr('an.monthGoal')}</div>
                 <div style={{ background: t.surface, borderRadius: 16, padding: '16px', boxShadow: t.sh }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: revGoal > 0 ? 12 : 0 }}>
-                    <span style={{ fontSize: 14, color: t.text, fontWeight: 500 }}>Цель выручки</span>
+                    <span style={{ fontSize: 14, color: t.text, fontWeight: 500 }}>{tr('an.revenueGoal')}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ fontSize: 14, color: t.text3 }}>{currency}</span>
                       <input
@@ -1178,10 +1181,10 @@ export default function AnalyticsApp() {
                         <div style={{ height: '100%', width: `${goalPct}%`, borderRadius: 4, background: onTrack ? t.green : t.orange, transition: 'width 0.8s cubic-bezier(.16,1,.3,1)' }} />
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 12 }}>
-                        <span style={{ color: t.text3 }}>{goalPct.toFixed(0)}% · {currency}{fv(mtd)} из {currency}{fv(revGoal)}</span>
+                        <span style={{ color: t.text3 }}>{goalPct.toFixed(0)}% · {currency}{fv(mtd)} {tr('an.ofWord')} {currency}{fv(revGoal)}</span>
                         {isCur && daysLeft > 0
-                          ? <span style={{ color: onTrack ? t.green : t.orange, fontWeight: 600 }}>{onTrack ? 'в графике' : `нужно ${currency}${fv(Math.round(needPerDay))}/день`}</span>
-                          : <span style={{ color: mtd >= revGoal ? t.green : t.red, fontWeight: 600 }}>{mtd >= revGoal ? 'цель достигнута' : `не хватило ${currency}${fv(revGoal - mtd)}`}</span>}
+                          ? <span style={{ color: onTrack ? t.green : t.orange, fontWeight: 600 }}>{onTrack ? tr('an.onTrack') : tr('an.needPerDay', { v: `${currency}${fv(Math.round(needPerDay))}` })}</span>
+                          : <span style={{ color: mtd >= revGoal ? t.green : t.red, fontWeight: 600 }}>{mtd >= revGoal ? tr('an.goalReached') : tr('an.short', { v: `${currency}${fv(revGoal - mtd)}` })}</span>}
                       </div>
                     </>
                   )}
@@ -1204,7 +1207,7 @@ export default function AnalyticsApp() {
             const usedMonthG = hookahRows.reduce((s: number, r: any) => s + rowG(r), 0)
             const allUsedG = hk.allRows.reduce((s: number, r: any) => s + rowG(r), 0)
             const venueG = Math.max(0, hk.issuedG - allUsedG) // выдано в зал − списано по сменам
-            const fmtKg = (g: number) => g >= 1000 ? `${(g / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} кг` : `${Math.round(g)} г`
+            const fmtKg = (g: number) => g >= 1000 ? `${(g / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} ${tr('an.kg')}` : `${Math.round(g)} ${tr('an.gUnit')}`
             // По дням и по вкусам
             const byDay = new Map<string, { total: number; paid: number }>()
             const byFlavor = new Map<string, number>()
@@ -1225,18 +1228,18 @@ export default function AnalyticsApp() {
             return (
               <div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-                  <StatCard label="Продано за месяц" rawValue={qtyMonth} value={String(qtyMonth)} color={t.orange} t={t} />
-                  <StatCard label="Выручка кальяна" rawValue={revMonth} value={`${currency}${fv(revMonth)}`} color={t.green} t={t} />
-                  <StatCard label="Бесплатные" rawValue={qtyFree} value={`${qtyFree} · ${fmtKg(qtyFree * hk.portion)}`} color={t.purple} sm t={t} />
-                  <StatCard label="Табака израсходовано" rawValue={usedMonthG} value={fmtKg(usedMonthG)} color={t.blue} sm t={t} />
+                  <StatCard label={tr('an.soldMonth')} rawValue={qtyMonth} value={String(qtyMonth)} color={t.orange} t={t} />
+                  <StatCard label={tr('an.hookahRevenue')} rawValue={revMonth} value={`${currency}${fv(revMonth)}`} color={t.green} t={t} />
+                  <StatCard label={tr('an.free')} rawValue={qtyFree} value={`${qtyFree} · ${fmtKg(qtyFree * hk.portion)}`} color={t.purple} sm t={t} />
+                  <StatCard label={tr('an.tobaccoUsed')} rawValue={usedMonthG} value={fmtKg(usedMonthG)} color={t.blue} sm t={t} />
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 10, marginBottom: 12 }}>
-                  <StatCard label="На складе" rawValue={hk.stockG} value={fmtKg(hk.stockG)} color={t.text2 as any} sm t={t} />
+                  <StatCard label={tr('an.inStock')} rawValue={hk.stockG} value={fmtKg(hk.stockG)} color={t.text2 as any} sm t={t} />
                 </div>
                 <div style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh, marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: t.text }}>В заведении</div>
-                    <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>выдано в зал − продано × {hk.portion} г</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: t.text }}>{tr('an.atVenue')}</div>
+                    <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{tr('an.venueFormula', { n: hk.portion })}</div>
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 800, color: t.orange }}>{fmtKg(venueG)}</div>
                 </div>
@@ -1256,8 +1259,8 @@ export default function AnalyticsApp() {
                   return (
                     <>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 8px' }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>Склад по брендам</div>
-                        {lowTotal > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: t.red, background: `${t.red}14`, padding: '2px 8px', borderRadius: 10 }}>{lowTotal} заканчив.</span>}
+                        <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{tr('an.stockByBrand')}</div>
+                        {lowTotal > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: t.red, background: `${t.red}14`, padding: '2px 8px', borderRadius: 10 }}>{tr('an.endingCount', { n: lowTotal })}</span>}
                       </div>
                       <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 12 }}>
                         {brands.map(([b, x], i) => (
@@ -1276,8 +1279,8 @@ export default function AnalyticsApp() {
 
                 {hookahRows.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '40px 20px', color: t.text3 }}>
-                    <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>Смен пока нет</div>
-                    <div style={{ fontSize: 13, marginTop: 4 }}>Кальянщик отмечает кальяны в Mise Stash → Смена</div>
+                    <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('an.noShifts')}</div>
+                    <div style={{ fontSize: 13, marginTop: 4 }}>{tr('an.hookahHint')}</div>
                   </div>
                 ) : (
                   <>
@@ -1294,14 +1297,14 @@ export default function AnalyticsApp() {
                       if (!list.length) return null
                       return (
                         <>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>По видам</div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>{tr('an.byTypes')}</div>
                           <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 12 }}>
                             {list.map(([id, n], i) => (
                               <div key={id} style={{ display: 'flex', justifyContent: 'space-between', padding: '11px 16px', borderBottom: i < list.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
                                 <span style={{ fontSize: 14, color: t.text, fontWeight: 500 }}>{hk.types.find((tp: any) => tp.id === id)?.name || '—'}</span>
                                 <span style={{ fontSize: 14 }}>
                                   <span style={{ fontWeight: 700, color: t.orange }}>{n.paid}</span>
-                                  {n.free > 0 && <span style={{ color: t.purple }}> +{n.free} бесп.</span>}
+                                  {n.free > 0 && <span style={{ color: t.purple }}> +{n.free} {tr('an.freeShort')}</span>}
                                 </span>
                               </div>
                             ))}
@@ -1310,7 +1313,7 @@ export default function AnalyticsApp() {
                       )
                     })()}
 
-                    <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>Топ вкусов</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>{tr('an.topFlavors')}</div>
                     <div style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh, marginBottom: 12 }}>
                       {flavors.map(([name, n]) => (
                         <div key={name} style={{ marginBottom: 10 }}>
@@ -1324,7 +1327,7 @@ export default function AnalyticsApp() {
                         </div>
                       ))}
                     </div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>По дням</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>{tr('an.byDays')}</div>
                     <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
                       {[...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([d, n], i, arr) => {
                         const open = expDay === d
@@ -1346,7 +1349,7 @@ export default function AnalyticsApp() {
                               </span>
                               <span style={{ fontSize: 14 }}>
                                 <span style={{ fontWeight: 700, color: t.orange }}>{n.paid}</span>
-                                {n.total > n.paid && <span style={{ color: t.purple }}> +{n.total - n.paid} бесп.</span>}
+                                {n.total > n.paid && <span style={{ color: t.purple }}> +{n.total - n.paid} {tr('an.freeShort')}</span>}
                                 <span style={{ color: t.text3 }}> · {currency}{fv(n.paid * hk.price)}</span>
                               </span>
                             </button>
@@ -1354,11 +1357,11 @@ export default function AnalyticsApp() {
                               <div style={{ overflow: 'hidden' }}>
                                 <div style={{ padding: '0 16px 12px 36px' }}>
                                   {dayTypes.length === 0
-                                    ? <div style={{ fontSize: 12, color: t.text3, paddingBottom: 4 }}>Без разбивки по видам</div>
+                                    ? <div style={{ fontSize: 12, color: t.text3, paddingBottom: 4 }}>{tr('an.noTypeBreakdown')}</div>
                                     : dayTypes.map(([id, x]) => (
                                       <div key={id} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13 }}>
                                         <span style={{ color: t.text2 }}>{hk.types.find((tp: any) => tp.id === id)?.name || '—'}</span>
-                                        <span><span style={{ fontWeight: 600, color: t.orange }}>{x.paid}</span>{x.free > 0 && <span style={{ color: t.purple }}> +{x.free} бесп.</span>}</span>
+                                        <span><span style={{ fontWeight: 600, color: t.orange }}>{x.paid}</span>{x.free > 0 && <span style={{ color: t.purple }}> +{x.free} {tr('an.freeShort')}</span>}</span>
                                       </div>
                                     ))}
                                 </div>
@@ -1391,13 +1394,13 @@ export default function AnalyticsApp() {
         <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setShowMonthPicker(false)}>
           <div style={{ background: t.surface, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, paddingBottom: 32 }} onClick={(e: any) => e.stopPropagation()}>
             <div style={{ width: 36, height: 4, background: t.fill, borderRadius: 2, margin: '12px auto 0' }} />
-            <div style={{ fontSize: 17, fontWeight: 700, textAlign: 'center' as const, padding: '14px 20px 0', color: t.text }}>Выбор месяца</div>
+            <div style={{ fontSize: 17, fontWeight: 700, textAlign: 'center' as const, padding: '14px 20px 0', color: t.text }}>{tr('an.monthPick')}</div>
             {Array.from({ length: 12 }, (_, i) => {
               const d = new Date(); d.setMonth(d.getMonth() - i)
               const active = d.getMonth() === currentDate.getMonth() && d.getFullYear() === currentDate.getFullYear()
               return (
                 <div key={i} onClick={() => { setCurrentDate(d); setShowMonthPicker(false); loadAll(restaurantId, d) }} style={{ padding: '15px 20px', fontSize: 16, cursor: 'pointer', borderBottom: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: active ? t.green : t.text, fontWeight: active ? 700 : 400 }}>
-                  {MRU[d.getMonth()]} {d.getFullYear()}
+                  {mFull(d)} {d.getFullYear()}
                   {active && <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="10" fill={t.green} /><path d="m6 10 2.5 2.5L14 7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>}
                 </div>
               )
@@ -1419,14 +1422,14 @@ export default function AnalyticsApp() {
                 </div>
                 <div style={{ fontSize: 17, fontWeight: 700, color: t.text }}>Mise AI</div>
               </div>
-              <button onClick={() => { setChatMsgs([]); localStorage.removeItem('mise_chat') }} style={{ background: 'none', border: 'none', color: t.text4, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Очистить</button>
+              <button onClick={() => { setChatMsgs([]); localStorage.removeItem('mise_chat') }} style={{ background: 'none', border: 'none', color: t.text4, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>{tr('an.clear')}</button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto' as const, padding: '12px 16px', display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
               {chatMsgs.length === 0 && (
                 <div>
-                  <div style={{ textAlign: 'center' as const, color: t.text4, padding: '16px 0 20px', fontSize: 13 }}>Спросите о вашем бизнесе</div>
+                  <div style={{ textAlign: 'center' as const, color: t.text4, padding: '16px 0 20px', fontSize: 13 }}>{tr('an.askBusiness')}</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    {SUGGESTED.map(q => (
+                    {[tr('an.sg1'), tr('an.sg2'), tr('an.sg3'), tr('an.sg4')].map(q => (
                       <button key={q} onClick={() => sendAI(q)} style={{ padding: '10px 12px', borderRadius: 12, background: t.fill, border: 'none', fontFamily: 'inherit', fontSize: 13, color: t.text, cursor: 'pointer', textAlign: 'left' as const, lineHeight: 1.4 }}>{q}</button>
                     ))}
                   </div>
@@ -1437,11 +1440,11 @@ export default function AnalyticsApp() {
                   <div style={{ maxWidth: '82%', padding: '10px 14px', borderRadius: m.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px', background: m.role === 'user' ? t.green : t.fill, color: m.role === 'user' ? '#fff' : t.text, fontSize: 14, lineHeight: 1.5 }}>{m.text}</div>
                 </div>
               ))}
-              {chatLoading && <div style={{ display: 'flex' }}><div style={{ padding: '10px 14px', borderRadius: '16px 16px 16px 4px', background: t.fill, color: t.text3, fontSize: 14 }}>Думаю...</div></div>}
+              {chatLoading && <div style={{ display: 'flex' }}><div style={{ padding: '10px 14px', borderRadius: '16px 16px 16px 4px', background: t.fill, color: t.text3, fontSize: 14 }}>{tr('an.thinking')}</div></div>}
               <div ref={chatEndRef} />
             </div>
             <div style={{ padding: '10px 16px 20px', display: 'flex', gap: 8 }}>
-              <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendAI()} placeholder="Спросите о бизнесе..." style={{ flex: 1, padding: '11px 14px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 14, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none' }} />
+              <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendAI()} placeholder={tr('an.askBusinessPh')} style={{ flex: 1, padding: '11px 14px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 14, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none' }} />
               <button onClick={() => sendAI()} disabled={chatLoading || !chatInput.trim()} style={{ padding: '11px 18px', borderRadius: 12, background: t.green, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer', opacity: chatLoading || !chatInput.trim() ? 0.5 : 1 }}>
                 <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" /></svg>
               </button>
