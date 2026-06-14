@@ -8,8 +8,8 @@
 // To activate: set RESEND_API_KEY and (optionally) MISE_EMAIL_FROM in Vercel.
 // See docs/LAUNCH-READINESS.md.
 
-const FROM = process.env.MISE_EMAIL_FROM || 'Mise <noreply@getmise.app>'
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://getmise.app'
+const FROM = process.env.MISE_EMAIL_FROM || 'Mise <noreply@misesuite.com>'
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://misesuite.com'
 
 interface SendArgs {
   to: string

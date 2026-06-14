@@ -9,6 +9,6 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ['/dashboard', '/manager', '/analytics', '/tobacco', '/people', '/admin', '/api/'],
       },
     ],
-    sitemap: 'https://mise-app-omega.vercel.app/sitemap.xml',
+    sitemap: 'https://misesuite.com/sitemap.xml',
   }
 }

@@ -13,6 +13,7 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://misesuite.com"),
   title: { default: "Mise", template: "%s · Mise" },
   description: "Mise — система управления рестораном: кассовые смены, аналитика, склад, команда и QR-меню в одном приложении.",
   manifest: "/manifest.json",
