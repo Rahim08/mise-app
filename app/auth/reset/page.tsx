@@ -56,7 +56,7 @@ export default function ResetPassword() {
     <div style={S.bg}>
       <div style={{ ...S.card, textAlign: 'center' }}>
         <div style={{ marginBottom: 24 }}><Wordmark size={34} color="#1c1c1e" /></div>
-        <div style={{ fontSize: '2.5rem', marginBottom: 16 }}>✅</div>
+        <div style={{ marginBottom: 16 }}><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#34c759" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></div>
         <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 8 }}>{t('auth.reset.doneTitle')}</div>
         <a href="/dashboard" style={{ display: 'block', padding: '12px', borderRadius: 12, background: '#007aff', color: '#fff', textDecoration: 'none', fontSize: '.92rem', fontWeight: 700, marginTop: 16 }}>
           {t('auth.reset.toDashboard')}

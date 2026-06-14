@@ -27,7 +27,7 @@ export default function ForgotPassword() {
     <div style={S.bg}>
       <div style={{ ...S.card, textAlign: 'center' }}>
         <div style={{ marginBottom: 24 }}><Wordmark size={34} color="#1c1c1e" /></div>
-        <div style={{ fontSize: '2.5rem', marginBottom: 16 }}>📬</div>
+        <div style={{ marginBottom: 16 }}><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#007aff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3 7 9 6 9-6"/></svg></div>
         <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 8 }}>{t('auth.register.checkEmail')}</div>
         <div style={{ color: '#6d6d72', fontSize: '.88rem', marginBottom: 24, lineHeight: 1.6 }}>
           {t('auth.forgot.sentBody')}<br/>

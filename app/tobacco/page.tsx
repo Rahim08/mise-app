@@ -662,7 +662,7 @@ export default function StashApp() {
               {/* Stock list */}
               {filteredStock.length === 0 ? (
                 <div style={{ padding: '60px 20px', textAlign: 'center', color: t.text3 }}>
-                  <div style={{ fontSize: 44, marginBottom: 12, opacity: 0.3 }}>📦</div>
+                  <div style={{ marginBottom: 12, opacity: 0.3 }}><svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></div>
                   <div style={{ fontSize: 16, fontWeight: 600, color: t.text2, marginBottom: 6 }}>{search ? tr('st.notFound') : tr('st.stockEmpty')}</div>
                   <div style={{ fontSize: 14, color: t.text3 }}>{search ? tr('st.tryAnother') : tr('st.addFirstSupply')}</div>
                 </div>
@@ -731,7 +731,7 @@ export default function StashApp() {
               </div>
               {batches.length === 0 ? (
                 <div style={{ padding: '60px 20px', textAlign: 'center', color: t.text3 }}>
-                  <div style={{ fontSize: 44, marginBottom: 12, opacity: 0.3 }}>{movMode === 'in' ? '📥' : movMode === 'out' ? '📤' : '🗑️'}</div>
+                  <div style={{ marginBottom: 12, opacity: 0.3 }}>{movMode === 'in' ? <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><path d="M12 7v4"/><path d="m9.5 9 2.5 2.5L14.5 9"/></svg> : movMode === 'out' ? <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><path d="M12 11V7"/><path d="m9.5 9 2.5-2.5L14.5 9"/></svg> : <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>}</div>
                   <div style={{ fontSize: 16, fontWeight: 600, color: t.text2, marginBottom: 6 }}>{movMode === 'in' ? tr('st.suppliesEmpty') : movMode === 'out' ? tr('st.issuesEmpty') : tr('st.writeoffsEmpty')}</div>
                 </div>
               ) : batches.map(([batchId, items], bi) => {
