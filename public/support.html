@@ -3,14 +3,26 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Поддержка — Mise</title>
+<title>Support — Mise</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;background:#fff;color:#1d1d1f;-webkit-font-smoothing:antialiased;}
-:root{--blue:#0071e3;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);}
-.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
-.nav-back{font-size:.82rem;color:var(--blue);text-decoration:none;}
+:root{--blue:#0071e3;--light:#f5f5f7;--gray:#6e6e73;--border:rgba(0,0,0,0.08);--ease:cubic-bezier(.22,1,.36,1);}
+.nav{position:fixed;top:0;left:0;right:0;z-index:500;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:0.5px solid var(--border);}
+.nav-back{font-size:.85rem;font-weight:600;color:var(--blue);text-decoration:none;letter-spacing:-.01em;}
 .nav-back::before{content:'‹ ';}
+.nav-right{display:flex;align-items:center;gap:12px;}
+.nav-start{font-size:.78rem;font-weight:600;color:var(--blue);text-decoration:none;}
+.lang-tog{position:relative;}
+.lang-cur{display:flex;align-items:center;gap:6px;background:var(--light);border:none;border-radius:8px;padding:6px 11px;cursor:pointer;color:var(--gray);font-family:inherit;font-size:.72rem;font-weight:700;letter-spacing:.04em;transition:all .2s;}
+.lang-cur:hover{color:#1d1d1f;background:#ececef;}
+.lang-cur svg{opacity:.6;}
+.lang-menu{position:absolute;top:calc(100% + 9px);right:0;min-width:168px;background:rgba(255,255,255,.86);backdrop-filter:blur(30px) saturate(160%);-webkit-backdrop-filter:blur(30px) saturate(160%);border:.5px solid var(--border);border-radius:15px;padding:6px;box-shadow:0 24px 60px rgba(0,0,0,.18),0 1px 0 rgba(255,255,255,.7) inset;opacity:0;transform:translateY(-7px) scale(.97);transform-origin:top right;pointer-events:none;transition:opacity .2s var(--ease),transform .2s var(--ease);z-index:1001;}
+.lang-menu.open{opacity:1;transform:translateY(0) scale(1);pointer-events:auto;}
+.lang-opt{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;background:transparent;border:none;border-radius:10px;padding:9px 13px;cursor:pointer;color:var(--gray);font-family:inherit;font-size:.84rem;font-weight:500;text-align:left;letter-spacing:-.01em;transition:background .15s,color .15s;}
+.lang-opt:hover{background:var(--light);color:#1d1d1f;}
+.lang-opt.active{color:#1d1d1f;}
+.lang-opt .lo-code{font-size:.62rem;font-weight:700;letter-spacing:.06em;color:#aeaeb2;}
 .page{max-width:720px;margin:0 auto;padding:120px 24px 80px;}
 .page-tag{font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--blue);margin-bottom:16px;}
 .page-title{font-size:clamp(2.5rem,5vw,4rem);font-weight:700;letter-spacing:-.04em;line-height:1.05;margin-bottom:24px;}
@@ -40,106 +52,173 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;ba
 <body>
 <nav class="nav">
   <a href="/" class="nav-back">Mise</a>
-  <a href="/auth/register" style="font-size:.78rem;color:var(--blue);text-decoration:none;">Начать →</a>
+  <div class="nav-right">
+    <div class="lang-tog" id="langTog">
+      <button class="lang-cur" onclick="toggleLangMenu(event)" aria-haspopup="true" aria-label="Language">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18" stroke-linecap="round"/><path d="M12 3c2.6 2.8 2.6 15.2 0 18M12 3c-2.6 2.8-2.6 15.2 0 18" stroke-linecap="round"/></svg>
+        <span id="langCurLabel">RU</span>
+      </button>
+      <div class="lang-menu" id="langMenu"></div>
+    </div>
+    <a href="/auth/register" class="nav-start" data-i18n="navstart">Начать →</a>
+  </div>
 </nav>
 <div class="page">
-  <p class="page-tag">Поддержка</p>
-  <h1 class="page-title">Мы всегда готовы помочь.</h1>
-  <p class="page-sub">Напишите нам удобным способом — ответим в течение нескольких часов.</p>
+  <p class="page-tag" data-i18n="tag">Поддержка</p>
+  <h1 class="page-title" data-i18n="title">Мы всегда готовы помочь.</h1>
+  <p class="page-sub" data-i18n="sub">Напишите нам удобным способом — ответим в течение нескольких часов.</p>
 
   <div class="contact-grid">
-    <a href="mailto:hello@mise.app" class="contact-card">
+    <a href="mailto:hello@getmise.app" class="contact-card" id="cEmail">
       <div class="contact-icon">✉️</div>
       <div class="contact-label">Email</div>
-      <div class="contact-val">hello@mise.app</div>
-      <div class="contact-desc">Ответ в течение 24 часов</div>
+      <div class="contact-val" id="cEmailVal">hello@getmise.app</div>
+      <div class="contact-desc" data-i18n="c1desc">Ответ в течение 24 часов</div>
     </a>
     <a href="https://t.me/miseapp" class="contact-card">
       <div class="contact-icon">💬</div>
       <div class="contact-label">Telegram</div>
       <div class="contact-val">@miseapp</div>
-      <div class="contact-desc">Быстрый ответ в рабочее время</div>
+      <div class="contact-desc" data-i18n="c2desc">Быстрый ответ в рабочее время</div>
     </a>
   </div>
 
   <div class="divider"></div>
-  <h2 class="section-title">Часто задаваемые вопросы</h2>
+  <h2 class="section-title" data-i18n="faqh">Частые вопросы</h2>
 
-  <div class="faq-item">
-    <button class="faq-btn" onclick="toggleFaq(this)">
-      Как начать пользоваться Mise?
-      <span class="faq-icon">+</span>
-    </button>
-    <div class="faq-answer">Зарегистрируйтесь на сайте, выберите тариф и оплатите подписку. После оплаты вы получите доступ к нужным приложениям. Добавьте сотрудников из личного кабинета — они получат email с инструкцией.</div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-btn" onclick="toggleFaq(this)">
-      Работает ли Mise на iPhone?
-      <span class="faq-icon">+</span>
-    </button>
-    <div class="faq-answer">Да. Все приложения Mise работают как PWA — установите их на iPhone через Safari: откройте сайт → нажмите «Поделиться» → «На экран «Домой»». Приложение будет работать как нативное без App Store.</div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-btn" onclick="toggleFaq(this)">
-      Можно ли отменить подписку?
-      <span class="faq-icon">+</span>
-    </button>
-    <div class="faq-answer">Да, в любой момент из личного кабинета. Доступ сохраняется до конца оплаченного периода. Никаких штрафов или скрытых платежей.</div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-btn" onclick="toggleFaq(this)">
-      Как добавить сотрудников?
-      <span class="faq-icon">+</span>
-    </button>
-    <div class="faq-answer">В личном кабинете перейдите в раздел «Команда» и введите email сотрудника. Он получит письмо с приглашением и сможет создать аккаунт с доступом к нужным приложениям.</div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-btn" onclick="toggleFaq(this)">
-      Мои данные в безопасности?
-      <span class="faq-icon">+</span>
-    </button>
-    <div class="faq-answer">Все данные хранятся в зашифрованном виде на серверах Supabase (ирландский дата-центр AWS). Каждый ресторан видит только свои данные — доступ разграничен на уровне базы данных.</div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-btn" onclick="toggleFaq(this)">
-      Какие способы оплаты доступны?
-      <span class="faq-icon">+</span>
-    </button>
-    <div class="faq-answer">Apple Pay, Visa, Mastercard. Все платежи обрабатываются через Stripe — один из самых надёжных платёжных провайдеров в мире. Мы не храним данные вашей карты.</div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-btn" onclick="toggleFaq(this)">
-      Есть ли бесплатный период?
-      <span class="faq-icon">+</span>
-    </button>
-    <div class="faq-answer">Да — первые 7 дней бесплатно на любом тарифе. Карта не нужна для начала. После окончания пробного периода вы можете выбрать подходящий тариф.</div>
-  </div>
+  <div class="faq-item"><button class="faq-btn" onclick="toggleFaq(this)"><span data-i18n="q1">Как начать пользоваться Mise?</span><span class="faq-icon">+</span></button><div class="faq-answer" data-i18n="a1">Зарегистрируйтесь на сайте, выберите тариф и оформите подписку. Сразу после этого откроется доступ к приложениям. Добавьте сотрудников из личного кабинета — они войдут по QR-коду и PIN.</div></div>
+  <div class="faq-item"><button class="faq-btn" onclick="toggleFaq(this)"><span data-i18n="q2">На каких устройствах работает Mise?</span><span class="faq-icon">+</span></button><div class="faq-answer" data-i18n="a2">Mise работает в браузере на любом устройстве и доступен как приложение для iPhone в App Store. QR-меню открывается у гостей без установки чего-либо.</div></div>
+  <div class="faq-item"><button class="faq-btn" onclick="toggleFaq(this)"><span data-i18n="q3">Можно ли отменить подписку?</span><span class="faq-icon">+</span></button><div class="faq-answer" data-i18n="a3">Да, в любой момент из личного кабинета. Доступ сохраняется до конца оплаченного периода. Без штрафов и скрытых платежей.</div></div>
+  <div class="faq-item"><button class="faq-btn" onclick="toggleFaq(this)"><span data-i18n="q4">Как добавить сотрудников?</span><span class="faq-icon">+</span></button><div class="faq-answer" data-i18n="a4">В разделе «Команда» добавьте сотрудника и выберите, к каким приложениям он имеет доступ. Он войдёт через QR-код и личный PIN — без регистрации и паролей.</div></div>
+  <div class="faq-item"><button class="faq-btn" onclick="toggleFaq(this)"><span data-i18n="q5">Мои данные в безопасности?</span><span class="faq-icon">+</span></button><div class="faq-answer" data-i18n="a5">Все данные хранятся в зашифрованном виде на серверах Supabase (дата-центр AWS в Ирландии). Каждое заведение видит только свои данные — доступ разграничен на уровне базы.</div></div>
+  <div class="faq-item"><button class="faq-btn" onclick="toggleFaq(this)"><span data-i18n="q6">Какие способы оплаты доступны?</span><span class="faq-icon">+</span></button><div class="faq-answer" data-i18n="a6">Apple Pay, Visa, Mastercard. Платежи обрабатывает Stripe — один из самых надёжных провайдеров в мире. Данные вашей карты мы не храним.</div></div>
+  <div class="faq-item"><button class="faq-btn" onclick="toggleFaq(this)"><span data-i18n="q7">Есть ли бесплатный период?</span><span class="faq-icon">+</span></button><div class="faq-answer" data-i18n="a7">Да — первые 7 дней бесплатно на любом тарифе, карта для старта не нужна. После пробного периода выберите подходящий план.</div></div>
 
   <div class="cta-box">
-    <h2>Не нашли ответ?</h2>
-    <p>Напишите нам — ответим на любой вопрос.</p>
-    <a href="mailto:hello@mise.app" class="btn">Написать в поддержку</a>
+    <h2 data-i18n="ctah">Не нашли ответ?</h2>
+    <p data-i18n="ctap">Напишите нам — ответим на любой вопрос.</p>
+    <a href="mailto:hello@getmise.app" class="btn" id="ctaMail" data-i18n="ctabtn">Написать в поддержку</a>
   </div>
 </div>
-
 <script>
-function toggleFaq(btn) {
-  const answer = btn.nextElementSibling;
-  const icon = btn.querySelector('.faq-icon');
-  const isOpen = answer.classList.contains('open');
-  document.querySelectorAll('.faq-answer').forEach(a => a.classList.remove('open'));
-  document.querySelectorAll('.faq-icon').forEach(i => i.classList.remove('open'));
-  if (!isOpen) { answer.classList.add('open'); icon.classList.add('open'); }
+const DOMAIN = 'getmise.app';
+const LANGS = [['en','English','EN'],['ru','Русский','RU'],['it','Italiano','IT'],['fr','Français','FR'],['az','Azərbaycan','AZ'],['tr','Türkçe','TR'],['uk','Українська','UK'],['kk','Қазақша','KK']];
+const T = {
+ru:{navstart:'Начать →',tag:'Поддержка',title:'Мы всегда готовы помочь.',sub:'Напишите нам удобным способом — ответим в течение нескольких часов.',c1desc:'Ответ в течение 24 часов',c2desc:'Быстрый ответ в рабочее время',faqh:'Частые вопросы',
+q1:'Как начать пользоваться Mise?',a1:'Зарегистрируйтесь на сайте, выберите тариф и оформите подписку. Сразу после этого откроется доступ к приложениям. Добавьте сотрудников из личного кабинета — они войдут по QR-коду и PIN.',
+q2:'На каких устройствах работает Mise?',a2:'Mise работает в браузере на любом устройстве и доступен как приложение для iPhone в App Store. QR-меню открывается у гостей без установки чего-либо.',
+q3:'Можно ли отменить подписку?',a3:'Да, в любой момент из личного кабинета. Доступ сохраняется до конца оплаченного периода. Без штрафов и скрытых платежей.',
+q4:'Как добавить сотрудников?',a4:'В разделе «Команда» добавьте сотрудника и выберите, к каким приложениям он имеет доступ. Он войдёт через QR-код и личный PIN — без регистрации и паролей.',
+q5:'Мои данные в безопасности?',a5:'Все данные хранятся в зашифрованном виде на серверах Supabase (дата-центр AWS в Ирландии). Каждое заведение видит только свои данные — доступ разграничен на уровне базы.',
+q6:'Какие способы оплаты доступны?',a6:'Apple Pay, Visa, Mastercard. Платежи обрабатывает Stripe — один из самых надёжных провайдеров в мире. Данные вашей карты мы не храним.',
+q7:'Есть ли бесплатный период?',a7:'Да — первые 7 дней бесплатно на любом тарифе, карта для старта не нужна. После пробного периода выберите подходящий план.',
+ctah:'Не нашли ответ?',ctap:'Напишите нам — ответим на любой вопрос.',ctabtn:'Написать в поддержку'},
+en:{navstart:'Get started →',tag:'Support',title:'We’re always here to help.',sub:'Reach out however suits you — we usually reply within a few hours.',c1desc:'Reply within 24 hours',c2desc:'Fast reply during business hours',faqh:'Frequently asked questions',
+q1:'How do I get started with Mise?',a1:'Sign up on the website, choose a plan and subscribe. Access to the apps opens immediately. Add staff from your dashboard — they sign in with a QR code and PIN.',
+q2:'Which devices does Mise run on?',a2:'Mise runs in the browser on any device and is available as an iPhone app on the App Store. The QR menu opens for guests with nothing to install.',
+q3:'Can I cancel my subscription?',a3:'Yes, anytime from your dashboard. Access continues until the end of the paid period. No penalties, no hidden fees.',
+q4:'How do I add staff?',a4:'In the “Team” section, add an employee and choose which apps they can access. They sign in with a QR code and personal PIN — no registration, no passwords.',
+q5:'Is my data safe?',a5:'All data is stored encrypted on Supabase servers (AWS data centre in Ireland). Each venue sees only its own data — access is enforced at the database level.',
+q6:'What payment methods are available?',a6:'Apple Pay, Visa, Mastercard. Payments are handled by Stripe, one of the most trusted providers in the world. We never store your card details.',
+q7:'Is there a free trial?',a7:'Yes — the first 7 days are free on any plan, and no card is needed to start. After the trial, pick the plan that suits you.',
+ctah:'Didn’t find your answer?',ctap:'Write to us — we’ll answer any question.',ctabtn:'Contact support'},
+it:{navstart:'Inizia →',tag:'Assistenza',title:'Siamo sempre qui per aiutarti.',sub:'Scrivici come preferisci — di solito rispondiamo entro poche ore.',c1desc:'Risposta entro 24 ore',c2desc:'Risposta rapida in orario lavorativo',faqh:'Domande frequenti',
+q1:'Come inizio con Mise?',a1:'Registrati sul sito, scegli un piano e attiva l’abbonamento. L’accesso alle app si apre subito. Aggiungi il personale dalla dashboard — accede con QR code e PIN.',
+q2:'Su quali dispositivi funziona Mise?',a2:'Mise funziona nel browser su qualsiasi dispositivo ed è disponibile come app per iPhone sull’App Store. Il menu QR si apre per gli ospiti senza installare nulla.',
+q3:'Posso disdire l’abbonamento?',a3:'Sì, in qualsiasi momento dalla dashboard. L’accesso continua fino alla fine del periodo pagato. Nessuna penale, nessun costo nascosto.',
+q4:'Come aggiungo il personale?',a4:'Nella sezione “Team” aggiungi un dipendente e scegli a quali app può accedere. Accede con QR code e PIN personale — senza registrazione né password.',
+q5:'I miei dati sono al sicuro?',a5:'Tutti i dati sono cifrati su server Supabase (data center AWS in Irlanda). Ogni locale vede solo i propri dati — l’accesso è garantito a livello di database.',
+q6:'Quali metodi di pagamento ci sono?',a6:'Apple Pay, Visa, Mastercard. I pagamenti sono gestiti da Stripe, uno dei provider più affidabili al mondo. Non conserviamo i dati della tua carta.',
+q7:'C’è una prova gratuita?',a7:'Sì — i primi 7 giorni sono gratis su qualsiasi piano e non serve la carta per iniziare. Dopo la prova scegli il piano adatto.',
+ctah:'Non hai trovato la risposta?',ctap:'Scrivici — rispondiamo a qualsiasi domanda.',ctabtn:'Contatta l’assistenza'},
+fr:{navstart:'Commencer →',tag:'Assistance',title:'Nous sommes toujours là pour vous aider.',sub:'Écrivez-nous comme vous voulez — nous répondons en général sous quelques heures.',c1desc:'Réponse sous 24 heures',c2desc:'Réponse rapide aux heures ouvrées',faqh:'Questions fréquentes',
+q1:'Comment démarrer avec Mise ?',a1:'Inscrivez-vous sur le site, choisissez une formule et abonnez-vous. L’accès aux apps s’ouvre immédiatement. Ajoutez le personnel depuis le tableau de bord — ils se connectent par QR code et PIN.',
+q2:'Sur quels appareils Mise fonctionne-t-il ?',a2:'Mise fonctionne dans le navigateur sur tout appareil et est disponible en app iPhone sur l’App Store. Le menu QR s’ouvre pour les clients sans rien installer.',
+q3:'Puis-je résilier mon abonnement ?',a3:'Oui, à tout moment depuis le tableau de bord. L’accès continue jusqu’à la fin de la période payée. Sans pénalité ni frais cachés.',
+q4:'Comment ajouter du personnel ?',a4:'Dans la section « Équipe », ajoutez un employé et choisissez les apps auxquelles il accède. Il se connecte par QR code et PIN personnel — sans inscription ni mot de passe.',
+q5:'Mes données sont-elles en sécurité ?',a5:'Toutes les données sont chiffrées sur des serveurs Supabase (centre AWS en Irlande). Chaque établissement ne voit que ses données — l’accès est garanti au niveau de la base.',
+q6:'Quels moyens de paiement sont acceptés ?',a6:'Apple Pay, Visa, Mastercard. Les paiements sont gérés par Stripe, l’un des prestataires les plus fiables au monde. Nous ne stockons pas vos données de carte.',
+q7:'Y a-t-il un essai gratuit ?',a7:'Oui — les 7 premiers jours sont gratuits sur toute formule, sans carte pour commencer. Après l’essai, choisissez la formule qui vous convient.',
+ctah:'Vous n’avez pas trouvé ?',ctap:'Écrivez-nous — nous répondons à toute question.',ctabtn:'Contacter l’assistance'},
+az:{navstart:'Başla →',tag:'Dəstək',title:'Kömək üçün həmişə buradayıq.',sub:'Sizə uyğun şəkildə yazın — adətən bir neçə saat ərzində cavab veririk.',c1desc:'24 saat ərzində cavab',c2desc:'İş saatlarında sürətli cavab',faqh:'Tez-tez verilən suallar',
+q1:'Mise-yə necə başlayım?',a1:'Saytda qeydiyyatdan keçin, plan seçin və abunə olun. Tətbiqlərə giriş dərhal açılır. İşçiləri idarə panelindən əlavə edin — onlar QR kod və PIN ilə daxil olur.',
+q2:'Mise hansı cihazlarda işləyir?',a2:'Mise istənilən cihazda brauzerdə işləyir və App Store-da iPhone tətbiqi kimi mövcuddur. QR-menyu qonaqlar üçün heç nə quraşdırmadan açılır.',
+q3:'Abunəliyi ləğv edə bilərəm?',a3:'Bəli, istənilən vaxt idarə panelindən. Giriş ödənilmiş dövrün sonuna qədər qalır. Cərimə və gizli ödəniş yoxdur.',
+q4:'İşçiləri necə əlavə edim?',a4:'“Komanda” bölməsində işçi əlavə edin və hansı tətbiqlərə girişi olduğunu seçin. O, QR kod və şəxsi PIN ilə daxil olur — qeydiyyat və parol olmadan.',
+q5:'Məlumatlarım təhlükəsizdir?',a5:'Bütün məlumatlar Supabase serverlərində (İrlandiyadakı AWS data mərkəzi) şifrəli saxlanılır. Hər müəssisə yalnız öz məlumatlarını görür — giriş baza səviyyəsində məhdudlaşdırılıb.',
+q6:'Hansı ödəniş üsulları var?',a6:'Apple Pay, Visa, Mastercard. Ödənişləri dünyanın ən etibarlı provayderlərindən biri olan Stripe emal edir. Kart məlumatlarınızı saxlamırıq.',
+q7:'Pulsuz sınaq varmı?',a7:'Bəli — istənilən planda ilk 7 gün pulsuzdur, başlamaq üçün kart lazım deyil. Sınaqdan sonra uyğun planı seçin.',
+ctah:'Cavab tapmadınız?',ctap:'Bizə yazın — istənilən suala cavab veririk.',ctabtn:'Dəstəyə yazın'},
+tr:{navstart:'Başla →',tag:'Destek',title:'Yardım için her zaman buradayız.',sub:'Size uygun şekilde yazın — genellikle birkaç saat içinde yanıtlıyoruz.',c1desc:'24 saat içinde yanıt',c2desc:'Mesai saatlerinde hızlı yanıt',faqh:'Sık sorulan sorular',
+q1:'Mise’ye nasıl başlarım?',a1:'Sitede kaydolun, bir plan seçin ve abone olun. Uygulamalara erişim hemen açılır. Personeli panelden ekleyin — QR kod ve PIN ile giriş yaparlar.',
+q2:'Mise hangi cihazlarda çalışır?',a2:'Mise her cihazda tarayıcıda çalışır ve App Store’da iPhone uygulaması olarak sunulur. QR menü, misafirler için hiçbir şey kurmadan açılır.',
+q3:'Aboneliği iptal edebilir miyim?',a3:'Evet, istediğiniz an panelden. Erişim ödenen dönemin sonuna kadar sürer. Ceza veya gizli ücret yok.',
+q4:'Personeli nasıl eklerim?',a4:'“Ekip” bölümünde bir çalışan ekleyin ve hangi uygulamalara erişebileceğini seçin. QR kod ve kişisel PIN ile giriş yapar — kayıt ve parola olmadan.',
+q5:'Verilerim güvende mi?',a5:'Tüm veriler Supabase sunucularında (İrlanda’daki AWS veri merkezi) şifreli saklanır. Her işletme yalnızca kendi verisini görür — erişim veritabanı düzeyinde sınırlanır.',
+q6:'Hangi ödeme yöntemleri var?',a6:'Apple Pay, Visa, Mastercard. Ödemeler dünyanın en güvenilir sağlayıcılarından Stripe ile işlenir. Kart bilgilerinizi saklamayız.',
+q7:'Ücretsiz deneme var mı?',a7:'Evet — her planda ilk 7 gün ücretsiz, başlamak için kart gerekmez. Denemeden sonra size uygun planı seçin.',
+ctah:'Cevabı bulamadınız mı?',ctap:'Bize yazın — her soruyu yanıtlarız.',ctabtn:'Desteğe yazın'},
+uk:{navstart:'Почати →',tag:'Підтримка',title:'Ми завжди готові допомогти.',sub:'Напишіть нам зручним способом — зазвичай відповідаємо протягом кількох годин.',c1desc:'Відповідь протягом 24 годин',c2desc:'Швидка відповідь у робочий час',faqh:'Поширені запитання',
+q1:'Як почати користуватися Mise?',a1:'Зареєструйтеся на сайті, оберіть тариф і оформіть підписку. Доступ до застосунків відкриється одразу. Додайте працівників із кабінету — вони входять за QR-кодом і PIN.',
+q2:'На яких пристроях працює Mise?',a2:'Mise працює в браузері на будь-якому пристрої та доступний як застосунок для iPhone в App Store. QR-меню відкривається у гостей без встановлення.',
+q3:'Чи можна скасувати підписку?',a3:'Так, будь-коли з кабінету. Доступ зберігається до кінця оплаченого періоду. Без штрафів і прихованих платежів.',
+q4:'Як додати працівників?',a4:'У розділі «Команда» додайте працівника й оберіть, до яких застосунків він має доступ. Він входить за QR-кодом і особистим PIN — без реєстрації та паролів.',
+q5:'Чи мої дані в безпеці?',a5:'Усі дані зберігаються зашифрованими на серверах Supabase (дата-центр AWS в Ірландії). Кожен заклад бачить лише свої дані — доступ розмежовано на рівні бази.',
+q6:'Які способи оплати доступні?',a6:'Apple Pay, Visa, Mastercard. Платежі обробляє Stripe — один із найнадійніших провайдерів у світі. Дані вашої картки ми не зберігаємо.',
+q7:'Чи є безкоштовний період?',a7:'Так — перші 7 днів безкоштовно на будь-якому тарифі, картка для старту не потрібна. Після пробного періоду оберіть відповідний план.',
+ctah:'Не знайшли відповідь?',ctap:'Напишіть нам — відповімо на будь-яке запитання.',ctabtn:'Написати в підтримку'},
+kk:{navstart:'Бастау →',tag:'Қолдау',title:'Біз әрқашан көмектесуге дайынбыз.',sub:'Ыңғайлы тәсілмен жазыңыз — әдетте бірнеше сағат ішінде жауап береміз.',c1desc:'24 сағат ішінде жауап',c2desc:'Жұмыс уақытында жылдам жауап',faqh:'Жиі қойылатын сұрақтар',
+q1:'Mise-ді қалай бастаймын?',a1:'Сайтта тіркеліп, тариф таңдап, жазылыңыз. Қолданбаларға қол жеткізу бірден ашылады. Қызметкерлерді кабинеттен қосыңыз — олар QR-код пен PIN арқылы кіреді.',
+q2:'Mise қандай құрылғыларда жұмыс істейді?',a2:'Mise кез келген құрылғыда браузерде жұмыс істейді әрі App Store-да iPhone қолданбасы ретінде қолжетімді. QR-мәзір қонақтарға ештеңе орнатпай ашылады.',
+q3:'Жазылымды тоқтатуға бола ма?',a3:'Иә, кез келген уақытта кабинеттен. Қол жеткізу төленген кезең соңына дейін сақталады. Айыппұл мен жасырын төлем жоқ.',
+q4:'Қызметкерлерді қалай қосамын?',a4:'«Команда» бөлімінде қызметкер қосып, оның қай қолданбаларға қолжетімі бар екенін таңдаңыз. Ол QR-код пен жеке PIN арқылы кіреді — тіркеусіз және құпиясөзсіз.',
+q5:'Деректерім қауіпсіз бе?',a5:'Барлық деректер Supabase серверлерінде (Ирландиядағы AWS дата-орталығы) шифрланып сақталады. Әр мекеме тек өз деректерін көреді — қол жеткізу дерекқор деңгейінде шектелген.',
+q6:'Қандай төлем тәсілдері бар?',a6:'Apple Pay, Visa, Mastercard. Төлемдерді әлемдегі ең сенімді провайдерлердің бірі Stripe өңдейді. Картаңыздың деректерін сақтамаймыз.',
+q7:'Тегін кезең бар ма?',a7:'Иә — кез келген тарифте алғашқы 7 күн тегін, бастау үшін карта қажет емес. Сынақтан кейін лайық жоспарды таңдаңыз.',
+ctah:'Жауап таппадыңыз ба?',ctap:'Бізге жазыңыз — кез келген сұраққа жауап береміз.',ctabtn:'Қолдауға жазу'}
+};
+function setLang(lang){
+  if(!T[lang]) lang='en';
+  document.documentElement.lang=lang;
+  const dict=T[lang], fb=T.en;
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    const k=el.getAttribute('data-i18n');
+    let v=dict[k]!==undefined?dict[k]:fb[k];
+    if(v!==undefined){ v=v.replace(/{DOMAIN}/g,DOMAIN); el.innerHTML=v; }
+  });
+  const mail='hello@'+DOMAIN;
+  const ce=document.getElementById('cEmail'); if(ce) ce.href='mailto:'+mail;
+  const cev=document.getElementById('cEmailVal'); if(cev) cev.textContent=mail;
+  const cm=document.getElementById('ctaMail'); if(cm) cm.href='mailto:'+mail;
+  const cur=LANGS.find(l=>l[0]===lang);
+  const label=document.getElementById('langCurLabel');
+  if(label) label.textContent=cur?cur[2]:lang.toUpperCase();
+  renderLangMenu(lang);
+  const m=document.getElementById('langMenu'); if(m) m.classList.remove('open');
+  try{ localStorage.setItem('mise_lang',lang); }catch(e){}
 }
-window.addEventListener('scroll', () => {
-  document.querySelector('.nav').style.background = window.scrollY > 10 ? 'rgba(255,255,255,0.97)' : 'rgba(255,255,255,0.92)';
-});
+function renderLangMenu(active){
+  document.getElementById('langMenu').innerHTML=LANGS.map(([code,name,short])=>
+    `<button class="lang-opt${code===active?' active':''}" onclick="setLang('${code}')"><span>${name}</span><span class="lo-code">${short}</span></button>`).join('');
+}
+function toggleLangMenu(e){ e.stopPropagation(); document.getElementById('langMenu').classList.toggle('open'); }
+function toggleFaq(btn){
+  const answer=btn.nextElementSibling, icon=btn.querySelector('.faq-icon'), isOpen=answer.classList.contains('open');
+  document.querySelectorAll('.faq-answer').forEach(a=>a.classList.remove('open'));
+  document.querySelectorAll('.faq-icon').forEach(i=>i.classList.remove('open'));
+  if(!isOpen){ answer.classList.add('open'); icon.classList.add('open'); }
+}
+document.addEventListener('click',()=>{ const m=document.getElementById('langMenu'); if(m) m.classList.remove('open'); });
+window.addEventListener('scroll',()=>{ document.querySelector('.nav').style.background=window.scrollY>10?'rgba(255,255,255,0.97)':'rgba(255,255,255,0.92)'; });
+(function(){
+  const supported=LANGS.map(l=>l[0]); let lang='en';
+  try{
+    const saved=localStorage.getItem('mise_lang');
+    if(saved&&supported.includes(saved)) lang=saved;
+    else{ const navs=navigator.languages||[navigator.language||'en']; for(const n of navs){ const c=(n||'').slice(0,2).toLowerCase(); if(supported.includes(c)){ lang=c; break; } } }
+  }catch(e){}
+  setLang(lang);
+})();
 </script>
 </body>
 </html>
