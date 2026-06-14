@@ -1081,6 +1081,12 @@ function setLang(lang) {
     const v = dict[k] !== undefined ? dict[k] : fb[k];
     if (v !== undefined) el.innerHTML = v.replace(/\n/g, '<br>');
   });
+  // Залогиненный владелец (?account=Имя): кнопка «Войти» → имя ресторана, тап на дашборд.
+  // Переустанавливаем после i18n-цикла, чтобы переключение языка не вернуло «Войти».
+  if (window.__MISE_ACCOUNT) {
+    const cta = document.querySelector('.nav-cta');
+    if (cta) { cta.textContent = window.__MISE_ACCOUNT; cta.setAttribute('href', '/dashboard'); }
+  }
   const cur = LANGS.find(l => l[0] === lang);
   const label = document.getElementById('langCurLabel');
   if (label) label.textContent = cur ? cur[2] : lang.toUpperCase();
@@ -1093,6 +1099,7 @@ function setLang(lang) {
 
 // ─ INIT: detect language across 8 supported locales ─
 (function(){
+  try { const acc = new URLSearchParams(location.search).get('account'); if (acc) window.__MISE_ACCOUNT = acc; } catch {}
   const supported = LANGS.map(l => l[0]);
   let lang = 'en';
   try {

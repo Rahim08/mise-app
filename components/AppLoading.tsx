@@ -10,15 +10,15 @@ export function AppLoading({ app, bg, fill, accent }: {
   fill: string
   accent: string
 }) {
-  // Вместо крутящегося кружка — «дышащий» бренд-значок: мягкий пульс масштаба и
-  // свечения (по-эппловски). fill больше не нужен, но оставлен в сигнатуре для совместимости.
+  // Вместо крутящегося кружка — сам бренд-значок плавно парит (вверх-вниз + лёгкий
+  // наклон), как живой объект. Без пульса масштаба. fill оставлен для совместимости.
   void fill
   return (
-    <div style={{ minHeight: '100vh', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ animation: 'brandBreathe 1.7s cubic-bezier(.4,0,.6,1) infinite', willChange: 'transform, filter' }}>
-        <AppIcon app={app} size={68} />
+    <div style={{ minHeight: '100vh', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', perspective: 600 }}>
+      <div style={{ animation: 'brandFloat 2.4s cubic-bezier(.45,0,.55,1) infinite', willChange: 'transform' }}>
+        <AppIcon app={app} size={70} />
       </div>
-      <style>{`@keyframes brandBreathe{0%,100%{transform:scale(1);filter:drop-shadow(0 0 5px ${accent}33)}50%{transform:scale(1.08);filter:drop-shadow(0 0 18px ${accent}88)}}`}</style>
+      <style>{`@keyframes brandFloat{0%{transform:translateY(6px) rotate(-2.5deg)}50%{transform:translateY(-8px) rotate(2.5deg)}100%{transform:translateY(6px) rotate(-2.5deg)}}`}</style>
     </div>
   )
 }

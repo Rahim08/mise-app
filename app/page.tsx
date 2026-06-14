@@ -1,13 +1,24 @@
 'use client'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { db } from '@/lib/db'
 
 export default function Home() {
   const router = useRouter()
+  const [src, setSrc] = useState('/landing.html')
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session?.user) { router.replace('/dashboard'); return }
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (data.session?.user) {
+        // НЕ редиректим владельца на дашборд — показываем лендинг. В навбаре вместо
+        // «Войти» подставим имя ресторана (тап → дашборд). Имя передаём в iframe параметром.
+        try {
+          const { data: rest } = await db.from('restaurants').select('name').limit(1)
+          const name = Array.isArray(rest) ? rest[0]?.name : (rest as any)?.name
+          if (name) setSrc('/landing.html?account=' + encodeURIComponent(name))
+        } catch {}
+        return
+      }
       // Возвращающийся сотрудник с живым токеном → сразу на свой хаб приложений (/join),
       // а не на маркетинговый лендинг. /join сам откроет единственное приложение или покажет сетку.
       try {
@@ -21,6 +32,6 @@ export default function Home() {
   }, [])
 
   return (
-    <iframe src="/landing.html" style={{ width: '100%', height: '100vh', border: 'none', display: 'block' }} />
+    <iframe src={src} style={{ width: '100%', height: '100vh', border: 'none', display: 'block' }} />
   )
 }
