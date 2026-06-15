@@ -144,18 +144,24 @@ export function NativeOnboarding() {
   }
 
   const init = async () => {
+    // Вернувшийся сотрудник с живым токеном → сразу в приложение (локальная проверка, мгновенно).
     try {
-      // Владелец с активной Supabase-сессией → сразу в дашборд.
-      const { data } = await supabase.auth.getUser()
-      if (data.user) {
-        const { data: rest } = await db.from('restaurants').select('id').eq('owner_id', data.user.id).single()
-        if (rest?.id) { router.replace('/dashboard'); return }
-      }
-      // Вернувшийся сотрудник с живым токеном → в своё приложение.
       const rid = localStorage.getItem('mise_restaurant_id')
       if (rid && tokenValid()) {
         const raw = localStorage.getItem('mise_staff_' + rid)
-        if (raw) { try { const s = JSON.parse(raw); goToApp(s.apps, rid); return } catch {} }
+        if (raw) { const s = JSON.parse(raw); goToApp(s.apps, rid); return }
+      }
+    } catch {}
+    // Владелец с активной Supabase-сессией → в дашборд. С таймаутом, чтобы не зависнуть
+    // на чёрном экране, если сеть недоступна — тогда просто показываем приветствие.
+    try {
+      const withTimeout = <T,>(p: Promise<T>, ms: number) =>
+        Promise.race([p, new Promise<null>(r => setTimeout(() => r(null), ms))])
+      const got = await withTimeout(supabase.auth.getUser(), 2500)
+      const user = (got as any)?.data?.user
+      if (user) {
+        const rest = await withTimeout(db.from('restaurants').select('id').eq('owner_id', user.id).single(), 2500)
+        if ((rest as any)?.data?.id) { router.replace('/dashboard'); return }
       }
     } catch {}
     setPhase('welcome')
