@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
 import { Wordmark, AppIcon } from '@/components/brand'
+import { useTheme } from '@/hooks/useTheme'
 
 const APPS = [
   { id: 'manager',   name: 'Mise Manager',   color: '#007aff', path: '/manager' },
@@ -26,6 +27,7 @@ type Phase = 'loading' | 'pin' | 'app_select' | 'error'
 
 export default function JoinPage() {
   const router = useRouter()
+  const t = useTheme()
   const [phase, setPhase] = useState<Phase>('loading')
   const [restaurant, setRestaurant] = useState<any>(null)
   const [staffMember, setStaffMember] = useState<any>(null)
@@ -138,36 +140,43 @@ export default function JoinPage() {
     setPhase('pin')
   }
 
+  const screen: React.CSSProperties = {
+    minHeight: '100vh', background: t.bg,
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+    fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif',
+    WebkitFontSmoothing: 'antialiased', position: 'relative', userSelect: 'none',
+  }
+
   // ── LOADING ──
   if (phase === 'loading') return (
-    <div style={S.screen}>
-      <Wordmark size={32} color="#1c1c1e" />
-      <div style={{ color: '#aeaeb2', fontSize: '.85rem', marginTop: 16 }}>Загрузка...</div>
+    <div style={screen}>
+      <Wordmark size={32} color={t.text} />
+      <div style={{ color: t.text3, fontSize: '.85rem', marginTop: 16 }}>Загрузка...</div>
     </div>
   )
 
   // ── ERROR ──
   if (phase === 'error') return (
-    <div style={S.screen}>
-      <div style={{ width: 64, height: 64, borderRadius: 16, background: 'rgba(255,59,48,.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-        <svg width="30" height="30" fill="none" stroke="#ff3b30" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+    <div style={screen}>
+      <div style={{ width: 64, height: 64, borderRadius: 16, background: `${t.red}1a`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+        <svg width="30" height="30" fill="none" stroke={t.red} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
       </div>
-      <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 8 }}>Ошибка</div>
-      <div style={{ color: '#6d6d72', fontSize: '.88rem', textAlign: 'center', maxWidth: 260 }}>{errorMsg}</div>
+      <div style={{ fontWeight: 700, fontSize: '1.1rem', color: t.text, marginBottom: 8 }}>Ошибка</div>
+      <div style={{ color: t.text2, fontSize: '.88rem', textAlign: 'center', maxWidth: 260 }}>{errorMsg}</div>
     </div>
   )
 
   // ── PIN ENTRY ──
   if (phase === 'pin') return (
-    <div style={S.screen}>
+    <div style={screen}>
       <div style={{ marginBottom: 36, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
         {restaurant?.logo_url ? (
-          <img src={restaurant.logo_url} alt="logo" style={{ width: 72, height: 72, borderRadius: 18, objectFit: 'cover', boxShadow: '0 4px 16px rgba(0,0,0,.12)' }} />
+          <img src={restaurant.logo_url} alt="logo" style={{ width: 72, height: 72, borderRadius: 18, objectFit: 'cover', boxShadow: t.sh }} />
         ) : (
-          <AppIcon app="mise" size={72} />
+          <Wordmark size={44} color={t.text} />
         )}
-        <div style={{ fontWeight: 700, fontSize: '1.2rem', color: '#1c1c1e' }}>{restaurant?.name}</div>
-        <div style={{ fontSize: '.82rem', color: '#aeaeb2' }}>Введите PIN для входа</div>
+        <div style={{ fontWeight: 700, fontSize: '1.2rem', color: t.text }}>{restaurant?.name}</div>
+        <div style={{ fontSize: '.82rem', color: t.text3 }}>Введите PIN для входа</div>
       </div>
 
       {/* PIN dots */}
@@ -179,8 +188,8 @@ export default function JoinPage() {
           <div key={i} style={{
             width: 14, height: 14, borderRadius: '50%',
             background: pin.length > i
-              ? (pinError ? '#ff3b30' : '#007aff')
-              : 'rgba(60,60,67,.2)',
+              ? (pinError ? t.red : t.blue)
+              : t.fill,
             transition: 'background .15s, transform .15s',
             transform: pin.length > i ? 'scale(1.15)' : 'scale(1)',
           }} />
@@ -188,7 +197,7 @@ export default function JoinPage() {
       </div>
 
       {pinError && (
-        <div style={{ color: '#ff3b30', fontSize: '.82rem', fontWeight: 500, marginBottom: -28, marginTop: -36 }}>
+        <div style={{ color: t.red, fontSize: '.82rem', fontWeight: 500, marginBottom: -28, marginTop: -36 }}>
           Неверный PIN
         </div>
       )}
@@ -201,12 +210,12 @@ export default function JoinPage() {
             disabled={checking || k === ''}
             style={{
               width: 76, height: 76, borderRadius: '50%',
-              background: k === '' ? 'transparent' : k === '⌫' ? 'rgba(0,0,0,.04)' : '#fff',
+              background: k === '' ? 'transparent' : k === '⌫' ? t.fill2 : t.surface,
               border: 'none',
-              boxShadow: k === '' ? 'none' : k === '⌫' ? 'none' : '0 2px 8px rgba(0,0,0,.07)',
+              boxShadow: k === '' || k === '⌫' ? 'none' : t.sh,
               fontSize: k === '⌫' ? '1.4rem' : '1.5rem',
               fontWeight: 400,
-              color: k === '⌫' ? '#6d6d72' : '#1c1c1e',
+              color: k === '⌫' ? t.text2 : t.text,
               cursor: k === '' ? 'default' : 'pointer',
               fontFamily: '-apple-system,sans-serif',
               opacity: checking ? .5 : 1,
@@ -223,7 +232,7 @@ export default function JoinPage() {
       </div>
 
       <div style={{ position: 'absolute', bottom: 32, display: 'flex', alignItems: 'center', gap: 8, opacity: .35 }}>
-        <Wordmark size={16} color="#1c1c1e" />
+        <Wordmark size={16} color={t.text} />
       </div>
 
       <style>{`
@@ -242,15 +251,15 @@ export default function JoinPage() {
   if (phase === 'app_select') {
     const apps = APPS.filter(a => (staffMember?.apps || []).includes(a.id))
     return (
-      <div style={{ ...S.screen, justifyContent: 'flex-start', paddingTop: 72 }}>
+      <div style={{ ...screen, justifyContent: 'flex-start', paddingTop: 72 }}>
         <div style={{ marginBottom: 40, textAlign: 'center' }}>
           {restaurant?.logo_url ? (
-            <img src={restaurant.logo_url} alt="logo" style={{ width: 60, height: 60, borderRadius: 15, objectFit: 'cover', marginBottom: 14, boxShadow: '0 4px 14px rgba(0,0,0,.1)' }} />
+            <img src={restaurant.logo_url} alt="logo" style={{ width: 60, height: 60, borderRadius: 15, objectFit: 'cover', marginBottom: 14, boxShadow: t.sh }} />
           ) : (
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}><AppIcon app="mise" size={60} /></div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}><Wordmark size={40} color={t.text} /></div>
           )}
-          <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1c1c1e', marginBottom: 4 }}>{restaurant?.name}</div>
-          <div style={{ fontSize: '.82rem', color: '#6d6d72' }}>
+          <div style={{ fontWeight: 700, fontSize: '1.1rem', color: t.text, marginBottom: 4 }}>{restaurant?.name}</div>
+          <div style={{ fontSize: '.82rem', color: t.text2 }}>
             {staffMember?.is_owner ? 'Владелец' : staffMember?.name}
           </div>
         </div>
@@ -260,8 +269,8 @@ export default function JoinPage() {
             <button key={app.id} onClick={() => openApp(app.path)} style={{
               width: '100%', padding: '18px 20px',
               borderRadius: 16, border: 'none',
-              background: '#fff',
-              boxShadow: '0 2px 12px rgba(0,0,0,.07)',
+              background: t.surface,
+              boxShadow: t.sh,
               display: 'flex', alignItems: 'center', gap: 14,
               cursor: 'pointer', fontFamily: 'inherit',
               WebkitTapHighlightColor: 'transparent',
@@ -272,38 +281,23 @@ export default function JoinPage() {
             >
               <AppIcon app={app.id as any} size={44} />
               <div style={{ textAlign: 'left', flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: '.95rem', color: '#1c1c1e' }}>{app.name}</div>
+                <div style={{ fontWeight: 700, fontSize: '.95rem', color: t.text }}>{app.name}</div>
               </div>
-              <div style={{ color: '#c7c7cc', fontSize: '1.2rem', fontWeight: 300 }}>›</div>
+              <div style={{ color: t.text3, fontSize: '1.2rem', fontWeight: 300 }}>›</div>
             </button>
           ))}
         </div>
 
-        <button onClick={logout} style={{ marginTop: 36, background: 'none', border: 'none', color: '#aeaeb2', fontSize: '.8rem', cursor: 'pointer', fontFamily: 'inherit', padding: '8px 20px', WebkitTapHighlightColor: 'transparent' }}>
+        <button onClick={logout} style={{ marginTop: 36, background: 'none', border: 'none', color: t.text3, fontSize: '.8rem', cursor: 'pointer', fontFamily: 'inherit', padding: '8px 20px', WebkitTapHighlightColor: 'transparent' }}>
           Сменить пользователя
         </button>
 
         <div style={{ position: 'absolute', bottom: 32, display: 'flex', alignItems: 'center', gap: 8, opacity: .35 }}>
-          <Wordmark size={16} color="#1c1c1e" />
+          <Wordmark size={16} color={t.text} />
         </div>
       </div>
     )
   }
 
   return null
-}
-
-const S: Record<string, any> = {
-  screen: {
-    minHeight: '100vh',
-    background: '#f2f2f7',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif',
-    WebkitFontSmoothing: 'antialiased',
-    position: 'relative',
-    userSelect: 'none',
-  }
 }
