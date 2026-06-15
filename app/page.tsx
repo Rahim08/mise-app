@@ -3,11 +3,18 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
+import { isNativeApp } from '@/lib/native'
+import { NativeOnboarding } from '@/components/NativeOnboarding'
 
 export default function Home() {
   const router = useRouter()
   const [src, setSrc] = useState('/landing.html')
+  // 'detect' пока не знаем платформу; 'native' → онбординг приложения; 'web' → лендинг.
+  const [mode, setMode] = useState<'detect' | 'native' | 'web'>('detect')
+
   useEffect(() => {
+    if (isNativeApp()) { setMode('native'); return }
+    setMode('web')
     supabase.auth.getSession().then(async ({ data }) => {
       if (data.session?.user) {
         // НЕ редиректим владельца на дашборд — показываем лендинг. В навбаре вместо
@@ -30,6 +37,9 @@ export default function Home() {
       } catch {}
     })
   }, [])
+
+  if (mode === 'detect') return <div style={{ position: 'fixed', inset: 0, background: '#000' }} />
+  if (mode === 'native') return <NativeOnboarding />
 
   return (
     <iframe src={src} style={{ width: '100%', height: '100vh', border: 'none', display: 'block' }} />
