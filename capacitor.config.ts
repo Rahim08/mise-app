@@ -11,7 +11,10 @@ const config: CapacitorConfig = {
   // не зависит от готовности Capacitor-моста при загрузке внешнего URL.
   appendUserAgent: 'MiseApp',
   server: {
-    url: 'https://misesuite.com',
+    // Грузим www напрямую: apex misesuite.com отдаёт 308-редирект, на котором
+    // WKWebView рвёт загрузку главного фрейма («Frame load interrupted», code 102)
+    // и не инициализирует Capacitor-мост.
+    url: 'https://www.misesuite.com',
     cleartext: false,
   },
   ios: {
