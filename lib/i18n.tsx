@@ -7,13 +7,14 @@
 // Переводы сгенерированы ИИ один раз; источник правды — en/ru, остальные правятся по месту.
 import { useSyncExternalStore } from 'react'
 
+// Порядок: English первым (дефолт), далее по алфавиту родного названия.
 export const SUPPORTED_LOCALES = [
   { code: 'en', native: 'English' },
-  { code: 'ru', native: 'Русский' },
-  { code: 'it', native: 'Italiano' },
-  { code: 'fr', native: 'Français' },
   { code: 'az', native: 'Azərbaycan' },
+  { code: 'fr', native: 'Français' },
+  { code: 'it', native: 'Italiano' },
   { code: 'tr', native: 'Türkçe' },
+  { code: 'ru', native: 'Русский' },
   { code: 'uk', native: 'Українська' },
   { code: 'kk', native: 'Қазақша' },
 ] as const
@@ -28,6 +29,9 @@ function detect(): Locale {
   if (typeof window === 'undefined') return DEFAULT_LOCALE
   const saved = localStorage.getItem(LS_KEY)
   if (saved && isLocale(saved)) return saved
+  // Язык по стране (cookie ставит proxy по гео-IP) — раньше системного языка браузера.
+  const geo = document.cookie.match(/(?:^|; )mise_geo=([^;]+)/)?.[1]
+  if (geo && isLocale(geo)) return geo
   // navigator.languages в WKWebView отражает язык системы iPhone
   for (const tag of navigator.languages || [navigator.language]) {
     const code = tag.slice(0, 2).toLowerCase()

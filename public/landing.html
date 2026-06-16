@@ -865,7 +865,7 @@ const ctaObserver = new IntersectionObserver(entries => {
 const ctaEl = document.querySelector('.big-cta'); if (ctaEl) ctaObserver.observe(ctaEl);
 
 // ─ i18n ─
-const LANGS = [['en','English','EN'],['ru','Русский','RU'],['it','Italiano','IT'],['fr','Français','FR'],['az','Azərbaycan','AZ'],['tr','Türkçe','TR'],['uk','Українська','UK'],['kk','Қазақша','KK']];
+const LANGS = [['en','English','EN'],['az','Azərbaycan','AZ'],['fr','Français','FR'],['it','Italiano','IT'],['tr','Türkçe','TR'],['ru','Русский','RU'],['uk','Українська','UK'],['kk','Қазақша','KK']];
 const T = {
   ru:{
     'n.apps':'Приложения','n.team':'Команда','n.how':'Как работает','n.p':'Цены','n.cta':'Войти',
@@ -1180,7 +1180,9 @@ function setLang(lang) {
   let lang = 'en';
   try {
     const saved = localStorage.getItem('mise_lang');
+    const geo = (document.cookie.match(/(?:^|; )mise_geo=([^;]+)/) || [])[1];
     if (saved && supported.includes(saved)) lang = saved;
+    else if (geo && supported.includes(geo)) lang = geo;   // язык по стране (cookie от proxy)
     else {
       const navs = navigator.languages || [navigator.language || 'en'];
       for (const n of navs){ const c = (n || '').slice(0,2).toLowerCase(); if (supported.includes(c)){ lang = c; break; } }
