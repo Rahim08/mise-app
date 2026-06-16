@@ -7,6 +7,8 @@ import SwiftUI
 
 enum Lang: String, CaseIterable, Sendable {
     case en, ru, it, fr, az, tr, uk, kk
+    /// Порядок выбора: English первым (дефолт), далее по алфавиту родного названия.
+    static let ordered: [Lang] = [.en, .az, .fr, .it, .tr, .ru, .uk, .kk]
     var native: String {
         switch self {
         case .en: return "English"

@@ -190,7 +190,7 @@ struct SettingsView: View {
                 Color.black.ignoresSafeArea()
                 List {
                     Section(t("settings.lang")) {
-                        ForEach(Lang.allCases, id: \.self) { l in
+                        ForEach(Lang.ordered, id: \.self) { l in
                             Button { L10n.shared.setLang(l) } label: {
                                 HStack {
                                     Text(l.native).foregroundStyle(.white)
