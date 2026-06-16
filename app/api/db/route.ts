@@ -25,7 +25,7 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   staff:                { read: [], write: [] },
   employees:            { read: ['manager', 'analytics', 'people'], write: [] }, // people: свой расчёт зарплаты
   expense_categories:   { read: ['manager', 'analytics'], write: [] },
-  shifts:               { read: ['manager', 'analytics'], write: ['manager'] },
+  shifts:               { read: ['manager', 'analytics', 'people'], write: ['manager'] }, // people: чек-лист привязан к открытой смене
   shift_expenses:       { read: ['manager', 'analytics'], write: ['manager'] },
   shift_absences:       { read: ['manager', 'analytics', 'people'], write: ['manager'] },
   inkassations:         { read: ['manager', 'analytics'], write: ['manager'] },
