@@ -434,6 +434,15 @@ private struct StockTab: View {
                 }
             }
         }
+        if !m.inStock.isEmpty {
+            HStack {
+                Text(t("st.totalStock")).font(.system(size: 13)).foregroundStyle(.white.opacity(0.55))
+                Spacer()
+                Text(grams(m.inStock.reduce(0) { $0 + $1.quantity_g })).font(.system(size: 16, weight: .heavy)).foregroundStyle(BrandKit.stash)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        }
         if m.filteredStock.isEmpty {
             Text(t("empty")).font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 40)
         } else {

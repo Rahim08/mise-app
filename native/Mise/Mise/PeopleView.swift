@@ -251,6 +251,21 @@ final class PeopleModel {
         schedules.removeAll { $0.id == id }
         try? await DB.from("staff_schedules").delete().eq("id", id).run()
     }
+    /// Пакетное добавление: один сотрудник на несколько дат с одним временем.
+    func createSchedules(staffId: String, dates: [String], start: String, end: String, note: String) async -> Bool {
+        guard !staffId.isEmpty else { flash(t("pe.pickStaff")); return false }
+        guard !dates.isEmpty else { flash(t("pe.pickDates")); return false }
+        var inserts: [[String: Any]] = []
+        for d in dates {
+            var v: [String: Any] = ["restaurant_id": rid, "staff_id": staffId, "date": d, "shift_start": start, "shift_end": end]
+            if !note.isEmpty { v["note"] = note }
+            inserts.append(v)
+        }
+        try? await DB.from("staff_schedules").insert(inserts).run()
+        flash(t("pe.copied", ["n": "\(inserts.count)"]))
+        await loadSchedule()
+        return true
+    }
     func copyLastWeek() async {
         let cal = Calendar.current
         let weekday = cal.component(.weekday, from: Date())
@@ -1427,7 +1442,7 @@ private struct ScheduleEditSheet: View {
     @Bindable var m: PeopleModel
     @Environment(\.dismiss) private var dismiss
     @State private var staffId = ""
-    @State private var day = Date()
+    @State private var dates: Set<DateComponents> = []
     @State private var start = Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: Date()) ?? Date()
     @State private var end = Calendar.current.date(bySettingHour: 22, minute: 0, second: 0, of: Date()) ?? Date()
     @State private var note = ""
@@ -1447,8 +1462,10 @@ private struct ScheduleEditSheet: View {
                             ForEach(m.dir) { Text($0.name).tag($0.id) }
                         }
                     }
-                    Section(t("an.date")) {
-                        DatePicker(t("an.day"), selection: $day, displayedComponents: .date)
+                    // Несколько дат сразу: выбрать сотрудника → отметить дни → одно время на все.
+                    Section(dates.isEmpty ? t("pe.dates") : t("pe.datesN", ["n": "\(dates.count)"])) {
+                        MultiDatePicker(t("pe.dates"), selection: $dates)
+                            .frame(maxHeight: 320)
                     }
                     Section(t("pe.time")) {
                         DatePicker(t("pe.start"), selection: $start, displayedComponents: .hourAndMinute)
@@ -1466,8 +1483,9 @@ private struct ScheduleEditSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(t("save")) {
                         let s = timeFmt.string(from: start), e = timeFmt.string(from: end)
+                        let keys = dates.compactMap { Calendar.current.date(from: $0).map { m.key($0) } }.sorted()
                         Task {
-                            if await m.createSchedule(staffId: staffId, date: m.key(day), start: s, end: e, note: note) { dismiss() }
+                            if await m.createSchedules(staffId: staffId, dates: keys, start: s, end: e, note: note) { dismiss() }
                         }
                     }
                 }

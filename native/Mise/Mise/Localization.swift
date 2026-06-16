@@ -429,4 +429,8 @@ let STRINGS: [String: [Lang: String]] = [
     "ob.geoCta":         tr("Allow location", "Разрешить геолокацию", "Consenti posizione", "Autoriser la localisation", "Məkana icazə ver", "Konuma izin ver", "Дозволити геолокацію", "Геолокацияға рұқсат"),
     "ob.notNow":         tr("Not now", "Не сейчас", "Non ora", "Pas maintenant", "İndi yox", "Şimdi değil", "Не зараз", "Қазір емес"),
     "comingSoon":        tr("This module is coming to the native app soon", "Модуль скоро появится в нативной версии", "Questo modulo arriverà presto nell’app nativa", "Ce module arrive bientôt dans l’app native", "Bu modul tezliklə tətbiqdə olacaq", "Bu modül yakında uygulamada", "Модуль скоро з’явиться в застосунку", "Бұл модуль жақында қолданбада"),
+    "st.totalStock":     tr("Total in stock", "Всего на складе", "Totale in magazzino", "Total en stock", "Anbarda cəmi", "Stokta toplam", "Усього на складі", "Қоймада барлығы"),
+    "pe.pickDates":      tr("Select dates", "Выберите даты", "Seleziona le date", "Choisissez les dates", "Tarixləri seçin", "Tarihleri seçin", "Виберіть дати", "Күндерді таңдаңыз"),
+    "pe.dates":          tr("Dates", "Даты", "Date", "Dates", "Tarixlər", "Tarihler", "Дати", "Күндер"),
+    "pe.datesN":         tr("Selected: {n}", "Выбрано: {n}", "Selezionati: {n}", "Sélectionnés : {n}", "Seçildi: {n}", "Seçildi: {n}", "Вибрано: {n}", "Таңдалды: {n}"),
 ]
