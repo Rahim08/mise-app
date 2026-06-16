@@ -259,7 +259,7 @@ final class AnalyticsModel {
     var qtyFree: Int { Int(hookahRows.filter { $0.is_free == true }.reduce(0) { $0 + ($1.quantity ?? 0) }) }
     var revMonth: Double { hookahRows.filter { $0.is_free != true }.reduce(0) { $0 + ($1.quantity ?? 0) * ($1.price ?? hkPrice) } }
     var usedMonthG: Double { hookahRows.reduce(0) { $0 + rowG($1) } }
-    var venueG: Double { max(0, issuedG - allHookah.reduce(0) { $0 + rowG($1) }) }
+    var venueG: Double { issuedG - allHookah.reduce(0) { $0 + rowG($1) } }
     struct TypeRow: Identifiable { let id: String; let name: String; let paid: Int; let free: Int }
     var byType: [TypeRow] {
         var m: [String: (Int, Int)] = [:]
@@ -275,7 +275,7 @@ final class AnalyticsModel {
     private func typeName(_ id: String) -> String { types.first { $0.id == id }?.name ?? "—" }
 
     var venueStockG: Double { stockG }                                  // на складе
-    var venueAtPlaceG: Double { max(0, issuedG - allHookah.reduce(0) { $0 + rowG($1) }) } // в заведении: выдано − списано
+    var venueAtPlaceG: Double { issuedG - allHookah.reduce(0) { $0 + rowG($1) } } // в заведении: выдано − продано (может быть минус)
 
     struct TypeLine: Identifiable { let id: String; let name: String; let paid: Int; let free: Int; let grams: Double; let revenue: Double }
     struct DayHookah: Identifiable { let id: String; let date: String; let qty: Int; let free: Int; let revenue: Double; let types: [TypeLine] }
@@ -444,18 +444,18 @@ private struct PeriodTab: View {
     private var isMonth: Bool { m.periodMode == "month" }
     var body: some View {
         Picker("", selection: $m.periodMode) {
-            Text("День").tag("day"); Text("Неделя").tag("week"); Text("Месяц").tag("month")
+            Text(t("an.day")).tag("day"); Text(t("an.week")).tag("week"); Text(t("an.month")).tag("month")
         }.pickerStyle(.segmented)
 
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-            stat("Доход", cur(m.pIncome), BrandKit.analytics, isMonth ? m.pct(m.totalIncome, m.prevIncome) : nil)
-            stat("Расход", cur(m.pExpense), BrandKit.menu, isMonth ? m.pct(m.totalExpense, m.prevExpense) : nil)
-            stat("Касса", cur(m.pClosing), BrandKit.manager, nil)
-            stat("Инкассация", cur(m.cumulativeInkass), BrandKit.stash, nil)
+            stat(t("an.income"), cur(m.pIncome), BrandKit.analytics, isMonth ? m.pct(m.totalIncome, m.prevIncome) : nil)
+            stat(t("an.expense"), cur(m.pExpense), BrandKit.menu, isMonth ? m.pct(m.totalExpense, m.prevExpense) : nil)
+            stat(t("tab.kassa"), cur(m.pClosing), BrandKit.manager, nil)
+            stat(t("mg.inkass"), cur(m.cumulativeInkass), BrandKit.stash, nil)
         }
         if m.periodMode != "day" && !m.dailyIncome.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text("ДОХОД ПО ДНЯМ").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+                Text(t("an.incomeByDay")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
                 Chart(m.dailyIncome) { d in
                     BarMark(x: .value("День", d.day), y: .value("Доход", d.income))
                         .foregroundStyle(BrandKit.analytics)
@@ -470,7 +470,7 @@ private struct PeriodTab: View {
         }
         if !m.catMap.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                Text("ТОП РАСХОДОВ").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+                Text(t("an.topExpenses")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
                     .padding(.bottom, 8)
                 ForEach(Array(m.catMap.enumerated()), id: \.offset) { i, c in
                     HStack {
@@ -509,12 +509,12 @@ private struct SalaryTab: View {
     @State private var expanded: String?
     var body: some View {
         VStack(spacing: 10) {
-            Text("ФОНД ЗАРПЛАТЫ · К ВЫПЛАТЕ").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+            Text(t("an.payrollFund")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
             Text(cur(m.salTotal)).font(.system(size: 30, weight: .heavy)).foregroundStyle(BrandKit.analytics)
             HStack(spacing: 0) {
-                miniTotal("Наличными", cur(m.salCash), BrandKit.analytics)
+                miniTotal(t("byCash"), cur(m.salCash), BrandKit.analytics)
                 Divider().frame(height: 30).overlay(Color.white.opacity(0.12))
-                miniTotal("На карту", cur(m.salCard), BrandKit.manager)
+                miniTotal(t("toCard"), cur(m.salCard), BrandKit.manager)
             }
         }
         .frame(maxWidth: .infinity).padding(.vertical, 18)
@@ -535,9 +535,9 @@ private struct SalaryTab: View {
                 .buttonStyle(.plain)
                 if expanded == r.id {
                     VStack(spacing: 8) {
-                        detail("Оклад", cur(r.salary))
-                        if r.abs > 0 { detail("Пропуски (\(r.abs))", "−" + cur(r.deduct)) }
-                        detail("Наличными", cur(r.cash))
+                        detail(t("baseSalary"), cur(r.salary))
+                        if r.abs > 0 { detail(t("absencesN", ["n": "\(r.abs)"]), "−" + cur(r.deduct)) }
+                        detail(t("byCash"), cur(r.cash))
                         CardInputRow(empId: r.id, current: r.card) { amt in
                             Task { await m.saveMonthlyCard(r.id, amt) }
                         }
@@ -575,21 +575,20 @@ private struct CardInputRow: View {
 
     var body: some View {
         HStack {
-            Text("На карту в этом месяце").font(.system(size: 13)).foregroundStyle(.white.opacity(0.5))
+            Text(t("an.cardThisMonth")).font(.system(size: 13)).foregroundStyle(.white.opacity(0.5))
             Spacer()
-            HStack(spacing: 2) {
-                Text("€").foregroundStyle(.white.opacity(0.4))
+            HStack(spacing: 6) {
+                Text(Money.symbol).foregroundStyle(.white.opacity(0.4))
                 TextField("0", text: $text)
                     .keyboardType(.numberPad).multilineTextAlignment(.trailing)
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(BrandKit.manager)
-                    .frame(width: 70).focused($focused)
-                    .toolbar {
-                        ToolbarItemGroup(placement: .keyboard) {
-                            Spacer()
-                            Button("Готово") { onSave(Double(text) ?? 0); focused = false }
-                                .fontWeight(.semibold)
-                        }
-                    }
+                    .frame(width: 60).focused($focused)
+                // Явная кнопка «Готово» рядом с полем при фокусе (надёжнее keyboard-тулбара,
+                // который в ForEach внутри TabView не всегда показывался).
+                if focused {
+                    Button(t("done")) { onSave(Double(text) ?? 0); focused = false }
+                        .font(.system(size: 13, weight: .bold)).foregroundStyle(BrandKit.analytics)
+                }
             }
             .padding(.vertical, 6).padding(.horizontal, 10)
             .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
@@ -607,23 +606,23 @@ private struct HookahTab: View {
     @Bindable var m: AnalyticsModel
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-            stat("Продано", "\(m.qtyMonth)", BrandKit.stash)
-            stat("Выручка", cur(m.revMonth), BrandKit.analytics)
-            stat("Бесплатно", "\(m.qtyFree)", BrandKit.people)
-            stat("Табак", kg(m.usedMonthG), BrandKit.manager)
+            stat(t("st.sold"), "\(m.qtyMonth)", BrandKit.stash)
+            stat(t("st.revenue"), cur(m.revMonth), BrandKit.analytics)
+            stat(t("st.free"), "\(m.qtyFree)", BrandKit.people)
+            stat(t("st.tobacco"), kg(m.usedMonthG), BrandKit.manager)
         }
         // Где какой объём табака: на складе и в заведении
         HStack(spacing: 10) {
-            volCard("На складе", m.venueStockG, BrandKit.manager)
-            volCard("В заведении", m.venueAtPlaceG, BrandKit.stash)
+            volCard(t("an.inStock"), m.venueStockG, BrandKit.manager)
+            volCard(t("an.atVenue"), m.venueAtPlaceG, BrandKit.stash)
         }
 
         // Смены по дням: дата · количество · сумма; раскрытие → по видам
         if m.hookahByDay.isEmpty {
-            Text("Смен кальянщика в этом месяце нет")
+            Text(t("an.noHookahShifts"))
                 .font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 20)
         } else {
-            Text("СМЕНЫ ПО ДНЯМ").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+            Text(t("an.shiftsByDay")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
             ForEach(m.hookahByDay) { day in DayRow(day: day) }
         }
@@ -653,16 +652,16 @@ private struct KassaTab: View {
     @Bindable var m: AnalyticsModel
     var body: some View {
         Picker("", selection: $m.kassaMode) {
-            Text("Касса").tag("kassa"); Text("Инкассация").tag("inkass")
+            Text(t("tab.kassa")).tag("kassa"); Text(t("mg.inkass")).tag("inkass")
         }.pickerStyle(.segmented)
 
         if m.kassaMode == "kassa" {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-                stat("Остаток", cur(m.shifts.last?.closing_balance ?? 0), BrandKit.manager)
-                stat("Последний доход", cur(m.shifts.last?.income ?? 0), BrandKit.analytics)
+                stat(t("an.balance"), cur(m.shifts.last?.closing_balance ?? 0), BrandKit.manager)
+                stat(t("an.lastIncome"), cur(m.shifts.last?.income ?? 0), BrandKit.analytics)
             }
             if m.filledShifts.count > 1 {
-                chartCard("ОСТАТОК КАССЫ") {
+                chartCard(t("an.tillBalance")) {
                     Chart(m.filledShifts) { s in
                         LineMark(x: .value("Дата", s.date), y: .value("Касса", s.closing_balance ?? 0))
                             .foregroundStyle(BrandKit.manager).interpolationMethod(.catmullRom)
@@ -675,16 +674,16 @@ private struct KassaTab: View {
                 }
             }
             if m.filledShifts.isEmpty {
-                Text("Нет данных по сменам").font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 30)
+                Text(t("an.noShiftData")).font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 30)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("ПО ДНЯМ").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
+                    Text(t("an.byDay")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
                     HStack {
-                        Text("Дата").frame(width: 44, alignment: .leading)
-                        Text("Вход").frame(maxWidth: .infinity, alignment: .trailing)
-                        Text("Доход").frame(maxWidth: .infinity, alignment: .trailing)
-                        Text("Расход").frame(maxWidth: .infinity, alignment: .trailing)
-                        Text("Касса").frame(maxWidth: .infinity, alignment: .trailing)
+                        Text(t("an.date")).frame(width: 44, alignment: .leading)
+                        Text(t("an.inCol")).frame(maxWidth: .infinity, alignment: .trailing)
+                        Text(t("an.income")).frame(maxWidth: .infinity, alignment: .trailing)
+                        Text(t("an.expense")).frame(maxWidth: .infinity, alignment: .trailing)
+                        Text(t("tab.kassa")).frame(maxWidth: .infinity, alignment: .trailing)
                     }
                     .font(.system(size: 11)).foregroundStyle(.white.opacity(0.35)).padding(.bottom, 6)
                     ForEach(Array(m.filledShifts.enumerated()), id: \.element.id) { i, s in
@@ -705,11 +704,11 @@ private struct KassaTab: View {
             let salToday = (m.payrollTotal / Double(m.daysInMonth) * Double(m.daysPassed)).rounded()
             let diff = m.totalInkass - salToday
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-                stat("Всего инкассации", cur(m.totalInkass), BrandKit.stash)
-                stat("ЗП на сегодня", cur(salToday), diff >= 0 ? BrandKit.analytics : BrandKit.menu)
+                stat(t("an.totalInkass"), cur(m.totalInkass), BrandKit.stash)
+                stat(t("an.salaryToday"), cur(salToday), diff >= 0 ? BrandKit.analytics : BrandKit.menu)
             }
             if m.shiftsWithInk.isEmpty {
-                Text("Инкассаций нет").font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 30)
+                Text(t("an.noInkass")).font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 30)
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(m.shiftsWithInk.enumerated()), id: \.element.id) { i, s in
@@ -757,7 +756,7 @@ private struct DayRow: View {
                 HStack {
                     Text(dayLabelRu(day.date)).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                     Spacer()
-                    Text("\(day.qty) шт").font(.system(size: 14)).foregroundStyle(.white.opacity(0.6))
+                    Text(t("an.pcs", ["n": "\(day.qty)"])).font(.system(size: 14)).foregroundStyle(.white.opacity(0.6))
                     Text(cur(day.revenue)).font(.system(size: 15, weight: .bold)).foregroundStyle(BrandKit.analytics)
                     Image(systemName: open ? "chevron.up" : "chevron.down").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
                 }
@@ -796,15 +795,16 @@ private func dayLabelRu(_ ymd: String) -> String {
 private struct ForecastTab: View {
     @Bindable var m: AnalyticsModel
     @State private var goalText = ""
+    @FocusState private var goalFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(m.isCurrentMonth ? "ПРОГНОЗ НА МЕСЯЦ" : "ВЫРУЧКА ЗА МЕСЯЦ")
+            Text(m.isCurrentMonth ? t("an.forecastMonth") : t("an.revenueMonth"))
                 .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
             Text(cur(m.isCurrentMonth ? m.projected : m.totalIncome))
                 .font(.system(size: 34, weight: .heavy)).foregroundStyle(.white)
             if m.isCurrentMonth {
-                Text("при текущем темпе \(cur(m.dailyAvg.rounded()))/день")
+                Text(t("an.atPace", ["v": cur(m.dailyAvg.rounded())]))
                     .font(.system(size: 13)).foregroundStyle(.white.opacity(0.45))
             }
         }
@@ -812,23 +812,28 @@ private struct ForecastTab: View {
         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
 
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-            mini("С начала месяца", cur(m.totalIncome), BrandKit.manager)
-            mini("В среднем/день", cur(m.dailyAvg.rounded()), BrandKit.stash)
-            mini("Прошлый месяц", cur(m.prevIncome), BrandKit.people)
+            mini(t("an.sinceMonthStart"), cur(m.totalIncome), BrandKit.manager)
+            mini(t("an.avgPerDay"), cur(m.dailyAvg.rounded()), BrandKit.stash)
+            mini(t("an.prevMonth"), cur(m.prevIncome), BrandKit.people)
         }
 
         VStack(alignment: .leading, spacing: 12) {
-            Text("ЦЕЛЬ НА МЕСЯЦ").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+            Text(t("an.monthGoal")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
             HStack {
-                Text("Цель выручки").font(.system(size: 14)).foregroundStyle(.white)
+                Text(t("an.revenueGoal")).font(.system(size: 14)).foregroundStyle(.white)
                 Spacer()
-                Text("€").foregroundStyle(.white.opacity(0.4))
+                if goalFocused {
+                    Button(t("done")) { Task { await m.saveGoal(Double(goalText) ?? 0) }; goalFocused = false }
+                        .font(.system(size: 13, weight: .bold)).foregroundStyle(BrandKit.analytics)
+                }
+                Text(Money.symbol).foregroundStyle(.white.opacity(0.4))
                 TextField("0", text: $goalText)
                     .keyboardType(.numberPad).multilineTextAlignment(.trailing)
                     .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 110).padding(.vertical, 7).padding(.horizontal, 10)
+                    .frame(width: 100).padding(.vertical, 7).padding(.horizontal, 10)
                     .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
-                    .onSubmit { Task { await m.saveGoal(Double(goalText) ?? 0) } }
+                    .focused($goalFocused)
+                    .onChange(of: goalFocused) { _, f in if !f { Task { await m.saveGoal(Double(goalText) ?? 0) } } }
             }
             if m.revGoal > 0 {
                 GeometryReader { geo in
@@ -840,14 +845,14 @@ private struct ForecastTab: View {
                 }
                 .frame(height: 8)
                 HStack {
-                    Text("\(Int(m.goalPct))% · \(cur(m.totalIncome)) из \(cur(m.revGoal))")
+                    Text(t("an.goalProgress", ["pct": "\(Int(m.goalPct))", "cur": cur(m.totalIncome), "goal": cur(m.revGoal)]))
                         .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
                     Spacer()
                     if m.isCurrentMonth && m.daysLeft > 0 {
-                        Text(m.onTrack ? "В графике" : "нужно \(cur(m.needPerDay.rounded()))/день")
+                        Text(m.onTrack ? t("an.onTrack") : t("an.needPerDay", ["v": cur(m.needPerDay.rounded())]))
                             .font(.system(size: 12, weight: .semibold)).foregroundStyle(m.onTrack ? BrandKit.analytics : BrandKit.stash)
                     } else {
-                        Text(m.totalIncome >= m.revGoal ? "Цель достигнута" : "не хватило \(cur(m.revGoal - m.totalIncome))")
+                        Text(m.totalIncome >= m.revGoal ? t("an.goalReached") : t("an.short", ["v": cur(m.revGoal - m.totalIncome)]))
                             .font(.system(size: 12, weight: .semibold)).foregroundStyle(m.totalIncome >= m.revGoal ? BrandKit.analytics : BrandKit.menu)
                     }
                 }

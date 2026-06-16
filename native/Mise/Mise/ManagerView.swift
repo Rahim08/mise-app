@@ -43,6 +43,7 @@ final class ManagerModel {
         return f
     }()
     func key(_ d: Date) -> String { dfKey.string(from: d) }
+    private func activity(_ s: Shift) -> Double { (s.income ?? 0) + (s.total_expense ?? 0) + (s.inkassation ?? 0) }
 
     struct Calc {
         var inc = 0.0, card = 0.0, ink = 0.0
@@ -92,10 +93,13 @@ final class ManagerModel {
         defer { loading = false }
         let dateStr = key(date)
         let shifts = (try? await DB.from("shifts").select()
-            .eq("date", dateStr).order("created_at").limit(1).list(Shift.self)) ?? []
+            .eq("date", dateStr).order("created_at").list(Shift.self)) ?? []
         let opening = await prevClosing(before: date)
 
-        guard var sh = shifts.first else {
+        // На случай дублей на одну дату (до миграции shifts-date-fix.sql) берём смену
+        // с наибольшими данными, чтобы не показывать пустую/«открыть смену».
+        let best = shifts.max { activity($0) < activity($1) } ?? shifts.first
+        guard var sh = best else {
             shift = nil; locked = false
             income = ""; incomeCard = ""; inkSum = ""; inkExpense = ""; inkReason = ""
             inkSalary = ""; inkSalaryNote = ""
@@ -155,8 +159,8 @@ final class ManagerModel {
         let opening = await prevClosing(before: currentDate)
         // Защита от дублей: если смена на эту дату уже есть — используем её, не создаём новую.
         let existing = (try? await DB.from("shifts").select()
-            .eq("date", key(currentDate)).order("created_at").limit(1).list(Shift.self)) ?? []
-        if existing.first != nil {
+            .eq("date", key(currentDate)).order("created_at").list(Shift.self)) ?? []
+        if !existing.isEmpty {
             await loadDay(currentDate)
             return
         }
@@ -169,7 +173,7 @@ final class ManagerModel {
             sh.opening_balance = opening
             shift = sh
             await loadAbsences(key(currentDate))
-            flash("Смена открыта")
+            flash(t("mg.shiftOpened"))
         } else {
             await loadDay(currentDate)
         }
@@ -242,9 +246,9 @@ final class ManagerModel {
         do {
             try await persist()
             locked = true
-            flash("Смена сохранена")
+            flash(t("mg.shiftSaved"))
         } catch {
-            flash("Не сохранилось: \(error.localizedDescription)")
+            flash(t("saveFailed", ["err": error.localizedDescription]))
         }
         saving = false
     }
@@ -359,11 +363,11 @@ private struct ManagerBody: View {
                 RoundedRectangle(cornerRadius: 22, style: .continuous).fill(accent.opacity(0.14)).frame(width: 80, height: 80)
                 Image(systemName: "clock").font(.system(size: 34, weight: .light)).foregroundStyle(accent)
             }
-            Text("Смена не открыта").font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
-            Text("Откройте смену, чтобы вести кассу за этот день")
+            Text(t("mg.noShift")).font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
+            Text(t("mg.noShiftHint"))
                 .font(.system(size: 14)).foregroundStyle(.white.opacity(0.5)).multilineTextAlignment(.center)
             Button { Task { await m.openShift() } } label: {
-                Text("Открыть смену").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                Text(t("mg.openShift")).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
                     .padding(.horizontal, 40).padding(.vertical, 16)
                     .background(accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
@@ -379,14 +383,14 @@ private struct ManagerBody: View {
         ZStack(alignment: .top) {
             VStack(spacing: 14) {
                 staffSection
-                sectionTitle("Касса")
+                sectionTitle(t("mg.cash"))
                 card {
-                    fieldRow("Наличные", text: $m.income)
+                    fieldRow(t("mg.cashIncome"), text: $m.income)
                     divider
-                    fieldRow("Безнал (карта)", text: $m.incomeCard)
+                    fieldRow(t("mg.cardIncome"), text: $m.incomeCard)
                 }
                 if !m.categories.isEmpty {
-                    sectionTitle("Расходы")
+                    sectionTitle(t("mg.expenses"))
                     card {
                         ForEach(Array(m.categories.enumerated()), id: \.element.id) { i, cat in
                             fieldRow(cat.name, text: binding(\.catAmounts, cat.id))
@@ -394,15 +398,15 @@ private struct ManagerBody: View {
                         }
                     }
                 }
-                sectionTitle("Инкассация")
+                sectionTitle(t("mg.inkass"))
                 card {
-                    fieldRow("Сумма инкассации", text: $m.inkSum)
+                    fieldRow(t("mg.inkSum"), text: $m.inkSum)
                     divider
-                    fieldRow("Расход из инкассации", text: $m.inkExpense)
+                    fieldRow(t("mg.inkExpense"), text: $m.inkExpense)
                     divider
-                    textRow("Причина расхода", text: $m.inkReason)
+                    textRow(t("mg.inkReason"), text: $m.inkReason)
                     divider
-                    fieldRow("Зарплата", text: $m.inkSalary)
+                    fieldRow(t("mg.salary"), text: $m.inkSalary)
                 }
                 summary(c)
             }
@@ -419,19 +423,19 @@ private struct ManagerBody: View {
         VStack(spacing: 10) {
             HStack(spacing: 7) {
                 Image(systemName: "lock.fill").font(.system(size: 14, weight: .bold))
-                Text("Смена закрыта").font(.system(size: 16, weight: .bold))
+                Text(t("mg.shiftClosed")).font(.system(size: 16, weight: .bold))
             }
             .foregroundStyle(.white)
-            Text("Касса за день сохранена")
+            Text(t("mg.shiftSavedSub"))
                 .font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
             Button { withAnimation(.easeInOut(duration: 0.2)) { m.locked = false } } label: {
-                Label("Открыть для редактирования", systemImage: "pencil")
+                Label(t("mg.openForEdit"), systemImage: "pencil")
                     .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                     .padding(.horizontal, 22).padding(.vertical, 13)
                     .background(accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .padding(.top, 2)
-            Text("Изменения пересчитают кассу следующих дней")
+            Text(t("mg.cascadeNote"))
                 .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
         }
@@ -446,7 +450,7 @@ private struct ManagerBody: View {
     private var staffSection: some View {
         Group {
             if !m.employees.isEmpty {
-                sectionTitle("Сотрудники")
+                sectionTitle(t("mg.staff"))
                 card {
                     ForEach(Array(m.employees.enumerated()), id: \.element.id) { i, emp in
                         HStack(spacing: 10) {
@@ -460,7 +464,7 @@ private struct ManagerBody: View {
                                 .foregroundStyle(m.absences.contains(emp.id) ? .white.opacity(0.35) : .white)
                                 .strikethrough(m.absences.contains(emp.id))
                             if m.autoAbsences.contains(emp.id) && m.absences.contains(emp.id) {
-                                Text("АВТО").font(.system(size: 9, weight: .heavy)).foregroundStyle(BrandKit.stash)
+                                Text(t("mg.auto")).font(.system(size: 9, weight: .heavy)).foregroundStyle(BrandKit.stash)
                                     .padding(.horizontal, 5).padding(.vertical, 2)
                                     .background(BrandKit.stash.opacity(0.16), in: RoundedRectangle(cornerRadius: 5))
                             }
@@ -477,19 +481,19 @@ private struct ManagerBody: View {
 
     private func summary(_ c: ManagerModel.Calc) -> some View {
         VStack(spacing: 0) {
-            sumRow("Остаток на начало", money(c.opening))
-            sumRow("Наличная выручка", money(c.inc))
-            sumRow("Расходы", "−" + money(c.totalExp).replacingOccurrences(of: "−", with: ""))
+            sumRow(t("mg.openingBalance"), money(c.opening))
+            sumRow(t("mg.cashRevenue"), money(c.inc))
+            sumRow(t("mg.expenses"), "−" + money(c.totalExp).replacingOccurrences(of: "−", with: ""))
             Divider().overlay(Color.white.opacity(0.12)).padding(.vertical, 4)
             HStack {
-                Text("Касса на конец").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                Text(t("mg.closingBalance")).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
                 Spacer()
                 Text(money(c.balance)).font(.system(size: 20, weight: .heavy))
                     .foregroundStyle(c.balance < 0 ? .red : .green)
             }
             .padding(.top, 2)
             if c.inkNet != 0 {
-                sumRow("Инкассация (итог)", money(c.inkNet)).padding(.top, 6)
+                sumRow(t("mg.inkNet"), money(c.inkNet)).padding(.top, 6)
             }
         }
         .padding(16)
@@ -501,14 +505,14 @@ private struct ManagerBody: View {
         Group {
             if m.locked {
                 Button { m.locked = false } label: {
-                    Label("Редактировать", systemImage: "pencil")
+                    Label(t("edit"), systemImage: "pencil")
                         .font(.system(size: 16, weight: .semibold)).foregroundStyle(accent)
                         .frame(maxWidth: .infinity).padding(.vertical, 15)
                         .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
             } else {
                 Button { Task { await m.save() } } label: {
-                    Text(m.saving ? "Сохранение…" : "Сохранить смену")
+                    Text(m.saving ? t("saving") : t("mg.saveShift"))
                         .font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).padding(.vertical, 16)
                         .background(accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))

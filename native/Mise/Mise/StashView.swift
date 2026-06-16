@@ -116,9 +116,9 @@ final class StashModel {
                 }
             }
             if !rows.isEmpty { try await DB.from("hookah_sales").insert(rows).run() }
-            flash("Смена сохранена · \(paidTotal) продано" + (freeTotal > 0 ? " · \(freeTotal) беспл." : ""))
+            flash(t("st.shiftSaved", ["p": "\(paidTotal)"]) + (freeTotal > 0 ? t("st.shiftSavedFree", ["f": "\(freeTotal)"]) : ""))
         } catch {
-            flash("Не сохранилось: \(error.localizedDescription)")
+            flash(t("saveFailed", ["err": error.localizedDescription]))
         }
     }
 
@@ -167,14 +167,14 @@ final class StashModel {
 
     func saveMovement(_ rows: [MovRow], reason: String) async -> Bool {
         let filled = rows.filter { !$0.brand.isEmpty && !$0.flavor.isEmpty && (Double($0.grams) ?? 0) > 0 }
-        if filled.isEmpty { flash("Заполните хотя бы одну строку"); return false }
+        if filled.isEmpty { flash(t("st.fillRow")); return false }
         for r in filled where movMode != "in" {
             guard let item = stock.first(where: { $0.brand == r.brand && $0.flavor == r.flavor }) else {
-                flash("\(r.brand) · \(r.flavor) — нет на складе"); return false
+                flash(t("st.notInStock", ["b": r.brand, "fl": r.flavor])); return false
             }
-            if (Double(r.grams) ?? 0) > item.quantity_g { flash("\(r.brand) · \(r.flavor): только \(grams(item.quantity_g))"); return false }
+            if (Double(r.grams) ?? 0) > item.quantity_g { flash(t("st.onlyLeft", ["b": r.brand, "fl": r.flavor, "g": grams(item.quantity_g)])); return false }
         }
-        if movMode == "writeoff" && reason.trimmingCharacters(in: .whitespaces).isEmpty { flash("Укажите причину списания"); return false }
+        if movMode == "writeoff" && reason.trimmingCharacters(in: .whitespaces).isEmpty { flash(t("st.writeoffReason")); return false }
         saving = true; defer { saving = false }
         let batchId = UUID().uuidString
         let fresh = (try? await DB.from("tobacco_stock").select().list(StockItem.self)) ?? stock
@@ -196,7 +196,7 @@ final class StashModel {
             }
         }
         await loadWarehouse()
-        flash("Сохранено: \(filled.count)")
+        flash(t("st.saved", ["n": "\(filled.count)"]))
         return true
     }
 
@@ -300,8 +300,8 @@ private struct ShiftTab: View {
             ProgressView().tint(.white).padding(.top, 40)
         } else if m.types.isEmpty {
             VStack(spacing: 6) {
-                Text("Виды кальянов не заданы").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
-                Text("Добавьте их в дашборде: Настройки → Кальян")
+                Text(t("st.noTypes")).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
+                Text(t("st.noTypesHint"))
                     .font(.system(size: 13)).foregroundStyle(.white.opacity(0.5)).multilineTextAlignment(.center)
             }
             .padding(.top, 50)
@@ -322,7 +322,7 @@ private struct ShiftTab: View {
                 Text(longDate(m.currentDate)).font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                 if !m.isToday {
                     Button { Task { m.currentDate = Date(); await m.loadShift() } } label: {
-                        Text("К сегодня").font(.system(size: 11, weight: .semibold)).foregroundStyle(BrandKit.manager)
+                        Text(t("st.toToday")).font(.system(size: 11, weight: .semibold)).foregroundStyle(BrandKit.manager)
                     }
                 }
             }
@@ -333,10 +333,10 @@ private struct ShiftTab: View {
 
     private var stats: some View {
         let items: [(String, String, Color)] = {
-            var a: [(String, String, Color)] = [("Продано", "\(m.paidTotal)", BrandKit.stash),
-                                                ("Бесплатно", "\(m.freeTotal)", BrandKit.people)]
-            if m.canSeeMoney { a.append(("Выручка", eur(m.revenue), BrandKit.analytics)) }
-            a.append(("Табак", grams(m.gramsUsed), BrandKit.manager))
+            var a: [(String, String, Color)] = [(t("st.sold"), "\(m.paidTotal)", BrandKit.stash),
+                                                (t("st.free"), "\(m.freeTotal)", BrandKit.people)]
+            if m.canSeeMoney { a.append((t("st.revenue"), eur(m.revenue), BrandKit.analytics)) }
+            a.append((t("st.tobacco"), grams(m.gramsUsed), BrandKit.manager))
             return a
         }()
         return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: m.canSeeMoney ? 2 : 3), spacing: 8) {
@@ -353,7 +353,7 @@ private struct ShiftTab: View {
 
     private var modeSeg: some View {
         Picker("", selection: $m.mode) {
-            Text("Продажа").tag("paid"); Text("Бесплатно").tag("free")
+            Text(t("st.sale")).tag("paid"); Text(t("st.free")).tag("free")
         }
         .pickerStyle(.segmented)
     }
@@ -397,7 +397,7 @@ private struct ShiftTab: View {
 
     private var saveBtn: some View {
         Button { Task { await m.saveShift() } } label: {
-            Text(m.saving ? "Сохранение…" : "Сохранить смену")
+            Text(m.saving ? t("saving") : t("mg.saveShift"))
                 .font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
                 .frame(maxWidth: .infinity).padding(.vertical, 16)
                 .background(BrandKit.stash, in: RoundedRectangle(cornerRadius: 16))
@@ -421,13 +421,13 @@ private struct StockTab: View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").font(.system(size: 13)).foregroundStyle(.white.opacity(0.4))
-                TextField("Поиск", text: $m.search).font(.system(size: 15)).foregroundStyle(.white)
+                TextField(t("st.search"), text: $m.search).font(.system(size: 15)).foregroundStyle(.white)
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
             .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
             if m.lowCount > 0 {
                 Button { m.showLowOnly.toggle() } label: {
-                    Text("\(m.lowCount) мало").font(.system(size: 13, weight: .semibold))
+                    Text(t("st.low", ["n": "\(m.lowCount)"])).font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(m.showLowOnly ? .black : BrandKit.stash)
                         .padding(.horizontal, 12).padding(.vertical, 9)
                         .background(m.showLowOnly ? BrandKit.stash : BrandKit.stash.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
@@ -435,7 +435,7 @@ private struct StockTab: View {
             }
         }
         if m.filteredStock.isEmpty {
-            Text("Пусто").font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 40)
+            Text(t("empty")).font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 40)
         } else {
             ForEach(m.stockByBrand, id: \.0) { brand, items in
                 VStack(alignment: .leading, spacing: 0) {
@@ -474,18 +474,18 @@ private struct MovementsTab: View {
 
     var body: some View {
         Picker("", selection: $m.movMode) {
-            Text("Приход").tag("in"); Text("Выдача").tag("out"); Text("Списание").tag("writeoff")
+            Text(t("st.in")).tag("in"); Text(t("st.out")).tag("out"); Text(t("st.writeoff")).tag("writeoff")
         }.pickerStyle(.segmented)
 
         Button { showAdd = true } label: {
-            Label("Добавить движение", systemImage: "plus")
+            Label(t("st.addMovement"), systemImage: "plus")
                 .font(.system(size: 15, weight: .semibold)).foregroundStyle(BrandKit.stash)
                 .frame(maxWidth: .infinity).padding(.vertical, 13)
                 .background(BrandKit.stash.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
         }
 
         if m.movementBatches.isEmpty {
-            Text("Нет движений").font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 30)
+            Text(t("st.noMovements")).font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 30)
         } else {
             ForEach(m.movementBatches, id: \.0) { batchId, items in
                 MovementBatchRow(items: items)
@@ -506,7 +506,7 @@ private struct MovementBatchRow: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(movDate(items.first?.created_at)).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-                        Text("\(items.count) позиц.").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                        Text(t("st.positions", ["n": "\(items.count)"])).font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
                     }
                     Spacer()
                     Text((isIn ? "+" : "−") + grams(total))
@@ -556,36 +556,36 @@ private struct AddMovementSheet: View {
                 ScrollView {
                     VStack(spacing: 12) {
                         Picker("", selection: $m.movMode) {
-                            Text("Приход").tag("in"); Text("Выдача").tag("out"); Text("Списание").tag("writeoff")
+                            Text(t("st.in")).tag("in"); Text(t("st.out")).tag("out"); Text(t("st.writeoff")).tag("writeoff")
                         }.pickerStyle(.segmented)
 
                         ForEach($rows) { $row in
                             VStack(spacing: 8) {
-                                TextField("Бренд", text: $row.brand).textFieldStyle(.plain)
+                                TextField(t("st.brand"), text: $row.brand).textFieldStyle(.plain)
                                     .padding(10).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
-                                TextField("Вкус", text: $row.flavor).textFieldStyle(.plain)
+                                TextField(t("st.flavor"), text: $row.flavor).textFieldStyle(.plain)
                                     .padding(10).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
-                                TextField("Граммы", text: $row.grams).keyboardType(.numberPad)
+                                TextField(t("st.grams"), text: $row.grams).keyboardType(.numberPad)
                                     .padding(10).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
                             }
                             .padding(12).background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
                         }
                         Button { rows.append(.init()) } label: {
-                            Label("Ещё строка", systemImage: "plus").font(.system(size: 14, weight: .medium)).foregroundStyle(BrandKit.stash)
+                            Label(t("st.moreRow"), systemImage: "plus").font(.system(size: 14, weight: .medium)).foregroundStyle(BrandKit.stash)
                         }
                         if m.movMode == "writeoff" {
-                            TextField("Причина списания", text: $reason).textFieldStyle(.plain)
+                            TextField(t("st.writeoffReasonField"), text: $reason).textFieldStyle(.plain)
                                 .padding(10).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
                         }
                     }
                     .padding(16)
                 }
             }
-            .navigationTitle("Движение").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(t("st.movement")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Сохранить") {
+                    Button(t("save")) {
                         Task { if await m.saveMovement(rows, reason: reason) { dismiss() } }
                     }.disabled(m.saving)
                 }
@@ -602,7 +602,7 @@ private struct InventoryTab: View {
     @Bindable var m: StashModel
     var body: some View {
         if m.inventories.isEmpty {
-            Text("Инвентаризаций пока нет").font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 40)
+            Text(t("st.noInventories")).font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 40)
         } else {
             ForEach(m.inventories) { inv in InventoryRow(inv: inv) }
         }
@@ -620,7 +620,7 @@ private struct InventoryRow: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(shortDateTime(inv.created_at)).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-                        Text("\((inv.items ?? []).count) расхождений").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                        Text(t("st.discrepancies", ["n": "\((inv.items ?? []).count)"])).font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
                     }
                     Spacer()
                     Text((net > 0 ? "+" : "") + grams(net))
