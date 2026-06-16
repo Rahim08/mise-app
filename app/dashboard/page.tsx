@@ -772,9 +772,26 @@ function HookahSettingsCard() {
   const [types, setTypes] = useState<any[]>([])
   const [edit, setEdit] = useState<{ id?: string; name: string; price: string; portion: string; brands: string } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [cats, setCats] = useState<string[]>([])
+  const [newCat, setNewCat] = useState('')
 
-  const load = () => db.from('hookah_types').select('*').eq('is_active', true).order('created_at').then(({ data }: any) => setTypes(data || []))
+  const load = () => {
+    db.from('hookah_types').select('*').eq('is_active', true).order('created_at').then(({ data }: any) => setTypes(data || []))
+    db.from('restaurant_settings').select('free_hookah_categories').then(({ data }: any) => setCats(data?.[0]?.free_hookah_categories || []))
+  }
   useEffect(() => { load() }, [])
+
+  // Категории бесплатных кальянов — кальянщик выбирает из них в Stash.
+  const saveCats = async (next: string[]) => {
+    setCats(next)
+    const res = await db.from('restaurant_settings').update({ free_hookah_categories: next })
+    if (res.error) { alert(tr('dash.notSaved') + res.error.message); load() }
+  }
+  const addCat = () => {
+    const v = newCat.trim()
+    if (!v || cats.includes(v)) { setNewCat(''); return }
+    saveCats([...cats, v]); setNewCat('')
+  }
 
   const save = async () => {
     if (!edit || !edit.name.trim()) { alert(tr('dash.enterTitle')); return }
@@ -830,6 +847,24 @@ function HookahSettingsCard() {
       ) : (
         <Btn variant="ghost" onClick={() => setEdit({ name: '', price: '', portion: '20', brands: '' })}>{tr('dash.addHookahType')}</Btn>
       )}
+
+      {/* Категории бесплатных кальянов */}
+      <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)', marginTop: 20 }}>{tr('dash.freeCats')}</div>
+      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', margin: '2px 0 12px' }}>{tr('dash.freeCatsSub')}</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+        {cats.map(c => (
+          <span key={c} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: 'var(--fill)', borderRadius: 999, fontSize: '.8rem', color: 'var(--tx)' }}>
+            {c}
+            <button onClick={() => saveCats(cats.filter(x => x !== c))} style={{ background: 'none', border: 'none', color: '#ff3b30', fontSize: '.95rem', lineHeight: 1, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>×</button>
+          </span>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input value={newCat} onChange={e => setNewCat(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addCat() }}
+          placeholder={tr('dash.freeCatPh')}
+          style={{ flex: 1, padding: '9px 12px', background: 'var(--fill)', border: '1px solid var(--bd)', borderRadius: 10, color: 'var(--tx)', fontSize: '.85rem', fontFamily: 'inherit' }} />
+        <Btn variant="gray" onClick={addCat}>{tr('dash.add')}</Btn>
+      </div>
     </Card>
   )
 }

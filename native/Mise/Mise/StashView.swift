@@ -1,6 +1,7 @@
 import SwiftUI
 
-private let FREE_CATS = ["Сотрудники", "Владелец", "Менеджер", "Гость", "Дегустация"]
+// Дефолт категорий бесплатных кальянов (если владелец не задал свои в дашборде).
+private let DEFAULT_FREE_CATS = ["Сотрудники", "Владелец", "Менеджер", "Гость", "Дегустация"]
 
 private func grams(_ g: Double) -> String {
     let f = NumberFormatter(); f.numberStyle = .decimal; f.groupingSeparator = " "; f.maximumFractionDigits = 0
@@ -25,7 +26,8 @@ final class StashModel {
     var paid: [String: String] = [:]
     var free: [String: [String: String]] = [:]
     var mode = "paid"
-    var freeCat = FREE_CATS[0]
+    var freeCats: [String] = DEFAULT_FREE_CATS   // категории бесплатных — настраиваются владельцем в дашборде
+    var freeCat = DEFAULT_FREE_CATS[0]
     var venueBase = 0.0
     var shiftLoading = true
     var saving = false
@@ -58,6 +60,12 @@ final class StashModel {
         async let sales = (try? DB.from("hookah_sales")
             .select("hookah_type_id, quantity, portion_g, is_free, date, flavor").list(HookahSale.self)) ?? []
         async let outs = (try? DB.from("tobacco_movements").select("quantity_g").eq("type", "out").list(Movement.self)) ?? []
+        // Категории бесплатных кальянов из настроек заведения (дашборд → Настройки → Кальян).
+        nonisolated struct FreeCatsSettings: Codable { let free_hookah_categories: [String]? }
+        if let cats = try? await DB.from("restaurant_settings").select("free_hookah_categories").limit(1).list(FreeCatsSettings.self).first?.free_hookah_categories, !cats.isEmpty {
+            freeCats = cats
+            if !freeCats.contains(freeCat) { freeCat = freeCats.first ?? freeCat }
+        }
         types = await tps
         var p: [String: String] = [:], fr: [String: [String: String]] = [:]
         var pastGrams = 0.0
@@ -65,7 +73,7 @@ final class StashModel {
             if r.date == dateStr, let id = r.hookah_type_id {
                 let q = Int(r.quantity ?? 0)
                 if r.is_free == true {
-                    let cat = r.flavor ?? FREE_CATS[0]
+                    let cat = r.flavor ?? (freeCats.first ?? "")
                     fr[id, default: [:]][cat] = String((Int(fr[id]?[cat] ?? "") ?? 0) + q)
                 } else {
                     p[id] = String((Int(p[id] ?? "") ?? 0) + q)
@@ -80,7 +88,7 @@ final class StashModel {
 
     func paidOf(_ id: String) -> Int { Int(paid[id] ?? "") ?? 0 }
     func freeOf(_ id: String, _ cat: String) -> Int { Int(free[id]?[cat] ?? "") ?? 0 }
-    func freeTotalOf(_ id: String) -> Int { FREE_CATS.reduce(0) { $0 + freeOf(id, $1) } }
+    func freeTotalOf(_ id: String) -> Int { freeCats.reduce(0) { $0 + freeOf(id, $1) } }
     func inputVal(_ id: String) -> String {
         mode == "paid" ? (paid[id] ?? "") : (free[id]?[freeCat] ?? "")
     }
@@ -107,7 +115,7 @@ final class StashModel {
                     rows.append(["hookah_type_id": tp.id, "quantity": p, "date": dateStr,
                                  "price": tp.price ?? 0, "portion_g": tp.portion_g ?? 0, "is_free": false])
                 }
-                for cat in FREE_CATS {
+                for cat in freeCats {
                     let f = freeOf(tp.id, cat)
                     if f > 0 {
                         rows.append(["hookah_type_id": tp.id, "quantity": f, "date": dateStr,
@@ -362,7 +370,7 @@ private struct ShiftTab: View {
         if m.mode == "free" {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(FREE_CATS, id: \.self) { cat in
+                    ForEach(m.freeCats, id: \.self) { cat in
                         Button { m.freeCat = cat } label: {
                             Text(cat).font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(m.freeCat == cat ? .black : .white)
