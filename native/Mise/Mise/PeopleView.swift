@@ -6,8 +6,8 @@ private let PEOPLE_ACCENT = BrandKit.people
 private func eur(_ v: Double) -> String { Money.s(v) }
 
 private let STATUS_ORDER = ["todo", "in_progress", "done"]
-private let STATUS_LABEL = ["todo": "К выполнению", "in_progress": "В работе", "done": "Готово"]
-private func prioLabel(_ p: String?) -> String { ["high": "Высокий", "medium": "Средний", "low": "Низкий"][p ?? "medium"] ?? "Средний" }
+@MainActor private func statusLabel(_ s: String) -> String { t("pe.st." + (s == "in_progress" ? "inprogress" : s)) }
+@MainActor private func prioLabel(_ p: String?) -> String { t("pe.prio." + (p ?? "medium")) }
 private func prioColor(_ p: String?) -> Color { ["high": BrandKit.menu, "medium": BrandKit.stash, "low": Color.white.opacity(0.4)][p ?? "medium"] ?? BrandKit.stash }
 
 // MARK: - Модель People (логика app/people/page.tsx)
@@ -115,7 +115,7 @@ final class PeopleModel {
     func canDelete(_ t: StaffTask) -> Bool { isManager || t.created_by == myId }
 
     func createTask(title: String, desc: String, assignee: String, priority: String, due: String) async -> Bool {
-        guard !title.trimmingCharacters(in: .whitespaces).isEmpty, !assignee.isEmpty else { flash("Введите название и исполнителя"); return false }
+        guard !title.trimmingCharacters(in: .whitespaces).isEmpty, !assignee.isEmpty else { flash(t("pe.taskNeedTitle")); return false }
         var base: [String: Any] = [
             "restaurant_id": rid, "title": title, "priority": priority, "status": "todo",
             "created_by": myId == "owner" ? NSNull() : myId,
@@ -126,7 +126,7 @@ final class PeopleModel {
         if assignee.hasPrefix("role:") {
             let role = String(assignee.dropFirst(5))
             targets = dir.filter { $0.role == role }.map(\.id)
-            if targets.isEmpty { flash("Нет активных сотрудников этой роли"); return false }
+            if targets.isEmpty { flash(t("pe.noRoleStaff")); return false }
         }
         for tid in targets {
             var v = base; v["assigned_to"] = tid
@@ -137,7 +137,7 @@ final class PeopleModel {
                 ]).run()
             }
         }
-        flash(targets.count > 1 ? "Задача создана для \(targets.count)" : "Задача создана")
+        flash(targets.count > 1 ? t("pe.taskCreatedN", ["n": "\(targets.count)"]) : t("pe.taskCreated"))
         await loadTasks()
         return true
     }
@@ -161,14 +161,14 @@ final class PeopleModel {
     var newReportsCount: Int { isManager ? reports.filter { ($0.status ?? "new") == "new" }.count : 0 }
 
     func createReport(type: String, title: String, desc: String) async -> Bool {
-        guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { flash("Введите заголовок"); return false }
+        guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { flash(t("pe.reportNeedTitle")); return false }
         var v: [String: Any] = [
             "restaurant_id": rid, "type": type, "title": title, "status": "new",
             "author_id": myId == "owner" || myId.isEmpty ? NSNull() : myId,
         ]
         if !desc.isEmpty { v["description"] = desc }
         try? await DB.from("staff_reports").insert(v).run()
-        flash("Заявка отправлена")
+        flash(t("pe.reportSent"))
         await loadReports()
         return true
     }
@@ -238,12 +238,12 @@ final class PeopleModel {
 
     // Менеджер строит график: добавление / удаление смен + копирование прошлой недели.
     func createSchedule(staffId: String, date: String, start: String, end: String, note: String) async -> Bool {
-        guard !staffId.isEmpty else { flash("Выберите сотрудника"); return false }
+        guard !staffId.isEmpty else { flash(t("pe.pickStaff")); return false }
         var v: [String: Any] = ["restaurant_id": rid, "staff_id": staffId, "date": date,
                                 "shift_start": start, "shift_end": end]
         if !note.isEmpty { v["note"] = note }
         try? await DB.from("staff_schedules").insert(v).run()
-        flash("Смена добавлена")
+        flash(t("pe.shiftAdded"))
         await loadSchedule()
         return true
     }
@@ -259,7 +259,7 @@ final class PeopleModel {
         let lastSun = cal.date(byAdding: .day, value: -1, to: monday)!
         let prev = (try? await DB.from("staff_schedules").select()
             .gte("date", key(lastMon)).lte("date", key(lastSun)).list(Schedule.self)) ?? []
-        guard !prev.isEmpty else { flash("На прошлой неделе смен нет"); return }
+        guard !prev.isEmpty else { flash(t("pe.noPrevWeek")); return }
         var inserts: [[String: Any]] = []
         for s in prev {
             guard let d = df.date(from: s.date), let nd = cal.date(byAdding: .day, value: 7, to: d) else { continue }
@@ -270,7 +270,7 @@ final class PeopleModel {
             inserts.append(v)
         }
         if !inserts.isEmpty { try? await DB.from("staff_schedules").insert(inserts).run() }
-        flash("Скопировано смен: \(inserts.count)")
+        flash(t("pe.copied", ["n": "\(inserts.count)"]))
         await loadSchedule()
     }
 
@@ -298,14 +298,14 @@ final class PeopleModel {
         guard todayRec == nil else { return }
         checking = true; defer { checking = false }
         if let g = geo, g.attendance_enabled == true, let lat = g.latitude, let lng = g.longitude {
-            guard let coord = await LocationOneShot().current() else { flash("Нет доступа к геолокации"); return }
-            if distanceMeters(coord, lat, lng) > (g.geo_radius_m ?? 150) { flash("Вы вне зоны заведения"); return }
+            guard let coord = await LocationOneShot().current() else { flash(t("pe.noGeo")); return }
+            if distanceMeters(coord, lat, lng) > (g.geo_radius_m ?? 150) { flash(t("pe.outOfZone")); return }
         }
         try? await DB.from("attendance_records").insert([
             "restaurant_id": rid, "staff_id": myId, "date": todayKey,
             "check_in_at": ISO8601DateFormatter().string(from: Date()), "status": "present", "source": "manual",
         ]).run()
-        flash("Приход отмечен")
+        flash(t("pe.checkedIn"))
         await loadAttendance()
     }
 
@@ -341,7 +341,7 @@ final class PeopleModel {
             try? await DB.from("staff_schedules").update(["staff_id": tid]).eq("id", sid).run()
         }
         await patchSwap(r, "approved")
-        flash("Обмен одобрен")
+        flash(t("pe.swapApproved"))
     }
 
     // MARK: чек-листы
@@ -390,7 +390,7 @@ final class PeopleModel {
     func completion(_ list: ShiftChecklist) -> ChecklistCompletion? { completions.first { $0.checklist_id == list.id } }
 
     func toggleChecklistItem(_ list: ShiftChecklist, _ idx: Int) async {
-        guard let sid = openShiftId else { flash("Сначала откройте смену в Manager"); return }
+        guard let sid = openShiftId else { flash(t("pe.openShiftFirst")); return }
         let items = list.items ?? []
         var state = completion(list)?.items_state ?? Array(repeating: false, count: items.count)
         while state.count < items.count { state.append(false) }
@@ -413,7 +413,7 @@ final class PeopleModel {
 
     func saveChecklistTemplate(id: String?, role: String?, items: [String]) async {
         let clean = items.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        guard !clean.isEmpty else { flash("Добавьте хотя бы один пункт"); return }
+        guard !clean.isEmpty else { flash(t("pe.addItem")); return }
         let roleVal: Any = role ?? NSNull()
         if let id {
             try? await DB.from("shift_checklists").update(["items": clean, "role": roleVal]).eq("id", id).run()
@@ -422,7 +422,7 @@ final class PeopleModel {
                 "restaurant_id": rid, "type": clType, "items": clean, "role": roleVal,
             ]).run()
         }
-        flash("Чек-лист сохранён")
+        flash(t("pe.checklistSaved"))
         await loadChecklists()
     }
     func deleteChecklist(_ id: String) async {
@@ -440,14 +440,14 @@ final class PeopleModel {
         techLoaded = true
     }
     func saveTechCard(id: String?, name: String, category: String, items: [String]) async {
-        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { flash("Введите название"); return }
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { flash(t("pe.needName")); return }
         let clean = items.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         if let id {
             try? await DB.from("tech_cards").update(["name": name, "category": category, "items": clean]).eq("id", id).run()
         } else {
             try? await DB.from("tech_cards").insert(["restaurant_id": rid, "name": name, "category": category, "items": clean]).run()
         }
-        flash("Сохранено")
+        flash(t("pe.saved"))
         await loadTechCards()
     }
     func deleteTechCard(_ id: String) async {
@@ -460,7 +460,7 @@ final class PeopleModel {
         swapScheds.filter { $0.staff_id == myId && $0.date >= todayKey }.sorted { $0.date < $1.date }
     }
     func createSwap(scheduleId: String, targetId: String, note: String) async -> Bool {
-        guard !scheduleId.isEmpty, !targetId.isEmpty else { flash("Выберите смену и коллегу"); return false }
+        guard !scheduleId.isEmpty, !targetId.isEmpty else { flash(t("pe.pickShiftPeer")); return false }
         let noteVal: Any = note.isEmpty ? NSNull() : note
         try? await DB.from("shift_swap_requests").insert([
             "restaurant_id": rid, "schedule_id": scheduleId, "requester_id": myId,
@@ -470,7 +470,7 @@ final class PeopleModel {
             "restaurant_id": rid, "staff_id": targetId, "type": "swap_request",
             "title": "Запрос на обмен", "body": "\(myName) предлагает обмен сменой",
         ]).run()
-        flash("Запрос отправлен")
+        flash(t("pe.requestSent"))
         await loadSwaps()
         return true
     }
@@ -723,8 +723,8 @@ private struct TasksTab: View {
 
     var body: some View {
         Picker("", selection: $m.tasksSeg) {
-            Text("Задачи").tag("tasks")
-            Text(m.newReportsCount > 0 ? "Заявки · \(m.newReportsCount)" : "Заявки").tag("reports")
+            Text(t("tab.tasks")).tag("tasks")
+            Text(m.newReportsCount > 0 ? t("pe.reportsN", ["n": "\(m.newReportsCount)"]) : t("pe.reports")).tag("reports")
         }.pickerStyle(.segmented)
 
         if m.tasksSeg == "reports" {
@@ -737,23 +737,23 @@ private struct TasksTab: View {
     @ViewBuilder private var tasksContent: some View {
         // Любой сотрудник может поставить задачу коллеге/сменщику (раньше — только менеджер).
         Button { showForm = true } label: {
-            Label("Новая задача", systemImage: "plus")
+            Label(t("pe.newTask"), systemImage: "plus")
                 .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                 .frame(maxWidth: .infinity).padding(.vertical, 14)
                 .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
         }
         if m.visibleTasks.isEmpty {
-            Text("Задач пока нет").font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
+            Text(t("pe.noTasks")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
         } else {
             ForEach(["todo", "in_progress"], id: \.self) { st in
                 let group = m.tasks(st)
-                if !group.isEmpty { taskGroup(STATUS_LABEL[st] ?? "", group) }
+                if !group.isEmpty { taskGroup(statusLabel(st), group) }
             }
             let done = m.tasks("done")
             if !done.isEmpty {
                 Button { withAnimation(.easeInOut(duration: 0.18)) { showDone.toggle() } } label: {
                     HStack {
-                        Text("ВЫПОЛНЕННОЕ · \(done.count)")
+                        Text(t("pe.doneN", ["n": "\(done.count)"]))
                             .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
                         Spacer()
                         Image(systemName: showDone ? "chevron.up" : "chevron.down")
@@ -812,7 +812,7 @@ private struct TasksTab: View {
                     Text("· \(m.staffName(task.assigned_to))").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
                     if !done {
                         Button { Task { await m.setStatus(task, task.status == "todo" ? "in_progress" : "todo") } } label: {
-                            Text(task.status == "todo" ? "В работу" : "Вернуть")
+                            Text(task.status == "todo" ? t("pe.toWork") : t("pe.return"))
                                 .font(.system(size: 11, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
                         }
                     }
@@ -846,34 +846,34 @@ private struct TaskFormSheet: View {
                 Color.black.ignoresSafeArea()
                 Form {
                     Section {
-                        TextField("Название", text: $title)
-                        TextField("Описание (необязательно)", text: $desc, axis: .vertical).lineLimit(2...4)
+                        TextField(t("pe.fTitle"), text: $title)
+                        TextField(t("pe.descOptional"), text: $desc, axis: .vertical).lineLimit(2...4)
                     }
-                    Section("Исполнитель") {
-                        Picker("Кому", selection: $assignee) {
+                    Section(t("pe.assigneeSection")) {
+                        Picker(t("pe.assignee"), selection: $assignee) {
                             Text("—").tag("")
                             ForEach(m.dir) { Text($0.name).tag($0.id) }
                         }
                     }
-                    Section("Приоритет") {
-                        Picker("Приоритет", selection: $priority) {
-                            Text("Низкий").tag("low"); Text("Средний").tag("medium"); Text("Высокий").tag("high")
+                    Section(t("pe.priority")) {
+                        Picker(t("pe.priority"), selection: $priority) {
+                            Text(t("pe.prio.low")).tag("low"); Text(t("pe.prio.medium")).tag("medium"); Text(t("pe.prio.high")).tag("high")
                         }.pickerStyle(.segmented)
                     }
                     Section {
-                        Toggle("Срок", isOn: $hasDue)
+                        Toggle(t("pe.due"), isOn: $hasDue)
                         if hasDue {
-                            DatePicker("Дата", selection: $dueDate, displayedComponents: .date)
+                            DatePicker(t("an.date"), selection: $dueDate, displayedComponents: .date)
                         }
                     }
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle("Новая задача").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(t("pe.newTaskTitle")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Создать") {
+                    Button(t("create")) {
                         let due = hasDue ? m.key(dueDate) : ""
                         Task { if await m.createTask(title: title, desc: desc, assignee: assignee, priority: priority, due: due) { dismiss() } }
                     }
@@ -893,7 +893,10 @@ private let REPORT_TYPES: [(String, String, String)] = [
     ("breakdown", "Поломка", "wrench.and.screwdriver"),
     ("other", "Другое", "text.bubble"),
 ]
-private func reportTypeLabel(_ t: String?) -> String { REPORT_TYPES.first { $0.0 == t }?.1 ?? "Заявка" }
+@MainActor private func reportTypeLabel(_ code: String?) -> String {
+    let c = ["suggestion", "order", "breakdown", "other"].contains(code ?? "") ? code! : "other"
+    return t("pe.rt." + c)
+}
 private func reportTypeIcon(_ t: String?) -> String { REPORT_TYPES.first { $0.0 == t }?.2 ?? "text.bubble" }
 private func reportTypeColor(_ t: String?) -> Color {
     ["suggestion": BrandKit.analytics, "order": BrandKit.stash, "breakdown": BrandKit.menu][t ?? ""] ?? BrandKit.people
@@ -909,13 +912,13 @@ private struct ReportsTab: View {
                 ProgressView().tint(.white).padding(.top, 40)
             } else {
                 Button { showForm = true } label: {
-                    Label("Новая заявка", systemImage: "paperplane")
+                    Label(t("pe.newReport"), systemImage: "paperplane")
                         .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                         .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
                 }
                 if m.visibleReports.isEmpty {
-                    Text(m.isManager ? "Заявок пока нет" : "Вы ещё не отправляли заявок")
+                    Text(m.isManager ? t("pe.noReports") : t("pe.noReportsMine"))
                         .font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 40)
                 } else {
                     ForEach(m.visibleReports) { r in card(r) }
@@ -950,10 +953,10 @@ private struct ReportsTab: View {
                 Spacer()
                 if m.isManager && !resolved {
                     if (r.status ?? "new") == "new" {
-                        Button("Просмотрено") { Task { await m.setReportStatus(r, "reviewed") } }
+                        Button(t("pe.reviewed")) { Task { await m.setReportStatus(r, "reviewed") } }
                             .font(.system(size: 12, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
                     }
-                    Button("Решено") { Task { await m.setReportStatus(r, "resolved") } }
+                    Button(t("pe.resolved")) { Task { await m.setReportStatus(r, "resolved") } }
                         .font(.system(size: 12, weight: .semibold)).foregroundStyle(BrandKit.analytics)
                 }
                 if m.canDeleteReport(r) {
@@ -966,7 +969,7 @@ private struct ReportsTab: View {
         .padding(14).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
     }
     private func reportStatusLabel(_ s: String?) -> String {
-        ["new": "Новая", "reviewed": "Просмотрено", "resolved": "Решено"][s ?? "new"] ?? "Новая"
+        ["new": t("pe.repNew"), "reviewed": t("pe.reviewed"), "resolved": t("pe.resolved")][s ?? "new"] ?? t("pe.repNew")
     }
     private func reportStatusColor(_ s: String?) -> Color {
         ["reviewed": BrandKit.manager, "resolved": BrandKit.analytics][s ?? ""] ?? BrandKit.stash
@@ -985,23 +988,23 @@ private struct ReportFormSheet: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 Form {
-                    Section("Тип") {
-                        Picker("Тип", selection: $type) {
-                            ForEach(REPORT_TYPES, id: \.0) { Text($0.1).tag($0.0) }
+                    Section(t("pe.type")) {
+                        Picker(t("pe.type"), selection: $type) {
+                            ForEach(REPORT_TYPES, id: \.0) { Text(t("pe.rt." + $0.0)).tag($0.0) }
                         }.pickerStyle(.menu)
                     }
                     Section {
-                        TextField("Кратко", text: $title)
-                        TextField("Подробности (необязательно)", text: $desc, axis: .vertical).lineLimit(2...5)
+                        TextField(t("pe.repShort"), text: $title)
+                        TextField(t("pe.detailsOptional"), text: $desc, axis: .vertical).lineLimit(2...5)
                     }
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle("Заявка менеджеру").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(t("pe.reportToManager")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Отправить") {
+                    Button(t("send")) {
                         Task { if await m.createReport(type: type, title: title, desc: desc) { dismiss() } }
                     }
                 }
@@ -1022,20 +1025,23 @@ private struct PeopleSalaryTab: View {
         if !m.salaryLoaded {
             ProgressView().tint(.white).padding(.top, 40)
         } else if m.salaryRows.isEmpty {
-            Text("Нет данных по зарплате").font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
+            Text(t("pe.noSalary")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
         } else if !m.isManager, let r = m.salaryRows.first {
-            heroCard(title: "К выплате", total: r.total, card: r.card, cash: r.cash)
+            heroCard(title: t("pe.toPay"), total: r.total, card: r.card, cash: r.cash)
             breakdown(r)
         } else {
-            heroCard(title: "Фонд зарплаты · к выплате", total: m.salaryFund,
+            heroCard(title: t("an.payrollFund"), total: m.salaryFund,
                      card: m.salaryRows.reduce(0) { $0 + $1.card }, cash: m.salaryRows.reduce(0) { $0 + $1.cash })
             ForEach(m.salaryRows) { r in
+                let absPart = r.absences > 0 ? " · −\(r.absences)" : ""
+                let cardPart = r.card > 0 ? " · " + t("pe.cardShort") + " " + eur(r.card) : ""
+                let subtitle = t("baseSalary") + " " + eur(r.salary) + absPart + cardPart
                 VStack(spacing: 0) {
                     Button { withAnimation(.easeInOut(duration: 0.18)) { open = open == r.id ? nil : r.id } } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(r.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-                                Text("Оклад \(eur(r.salary))" + (r.absences > 0 ? " · −\(r.absences)" : "") + (r.card > 0 ? " · карта \(eur(r.card))" : ""))
+                                Text(subtitle)
                                     .font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
                             }
                             Spacer()
@@ -1057,8 +1063,8 @@ private struct PeopleSalaryTab: View {
             Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.85))
             Text(eur(total)).font(.system(size: 36, weight: .heavy)).foregroundStyle(.white)
             HStack(spacing: 16) {
-                if card > 0 { Text("на карту \(eur(card))").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9)) }
-                Text("наличными \(eur(cash))").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+                if card > 0 { Text(t("toCard") + " " + eur(card)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9)) }
+                Text(t("byCash") + " " + eur(cash)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(20)
@@ -1068,10 +1074,10 @@ private struct PeopleSalaryTab: View {
 
     private func breakdown(_ r: PeopleModel.SalRow) -> some View {
         VStack(spacing: 8) {
-            line("Оклад", eur(r.salary), .white)
-            if r.deduct > 0 { line("Вычет (\(r.absences))", "−" + eur(r.deduct), BrandKit.menu) }
-            if r.card > 0 { line("На карту", eur(r.card), BrandKit.manager) }
-            line("Наличными", eur(r.cash), BrandKit.analytics)
+            line(t("baseSalary"), eur(r.salary), .white)
+            if r.deduct > 0 { line(t("pe.deductN", ["n": "\(r.absences)"]), "−" + eur(r.deduct), BrandKit.menu) }
+            if r.card > 0 { line(t("toCard"), eur(r.card), BrandKit.manager) }
+            line(t("byCash"), eur(r.cash), BrandKit.analytics)
         }
     }
     private func line(_ l: String, _ v: String, _ c: Color) -> some View {
@@ -1086,8 +1092,8 @@ private struct ShiftsHubTab: View {
     @Bindable var m: PeopleModel
     var body: some View {
         Picker("", selection: $m.shiftsView) {
-            Text("Смены").tag("shifts")
-            Text("Обмены").tag("swaps")
+            Text(t("tab.shifts")).tag("shifts")
+            Text(t("pe.swaps")).tag("swaps")
         }.pickerStyle(.segmented)
 
         if m.shiftsView == "swaps" {
@@ -1134,10 +1140,10 @@ private struct AttendanceTab: View {
             if let rec = m.todayRec {
                 VStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill").font(.system(size: 40)).foregroundStyle(BrandKit.analytics)
-                    Text("Вы на смене").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
-                    Text("Приход в \(clock(rec.check_in_at))").font(.system(size: 13)).foregroundStyle(.white.opacity(0.5))
+                    Text(t("pe.onShift")).font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+                    Text(t("pe.arrivedAt", ["t": clock(rec.check_in_at)])).font(.system(size: 13)).foregroundStyle(.white.opacity(0.5))
                     if rec.status == "late", let l = rec.late_minutes, l > 0 {
-                        Text("Опоздание +\(l) мин").font(.system(size: 12, weight: .semibold)).foregroundStyle(BrandKit.stash)
+                        Text(t("pe.lateMin", ["n": "\(l)"])).font(.system(size: 12, weight: .semibold)).foregroundStyle(BrandKit.stash)
                     }
                 }
                 .frame(maxWidth: .infinity).padding(20)
@@ -1146,7 +1152,7 @@ private struct AttendanceTab: View {
                 Button { Task { await m.checkIn() } } label: {
                     HStack {
                         if m.checking { ProgressView().tint(.white) }
-                        else { Image(systemName: "location.fill"); Text("Я пришёл") }
+                        else { Image(systemName: "location.fill"); Text(t("pe.iCame")) }
                     }
                     .font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
                     .frame(maxWidth: .infinity).padding(.vertical, 18)
@@ -1162,7 +1168,7 @@ private struct AttendanceTab: View {
         Group {
             if !m.attendance.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("ИСТОРИЯ").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
+                    Text(t("pe.historyCaps")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
                     ForEach(Array(m.attendance.enumerated()), id: \.element.id) { i, r in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
@@ -1172,8 +1178,8 @@ private struct AttendanceTab: View {
                             }
                             Spacer()
                             if r.status == "late", let l = r.late_minutes {
-                                badge("+\(l)м", BrandKit.stash)
-                            } else { badge("Вовремя", BrandKit.analytics) }
+                                badge(t("pe.lateBadge", ["n": "\(l)"]), BrandKit.stash)
+                            } else { badge(t("pe.onTime"), BrandKit.analytics) }
                         }
                         .padding(.vertical, 11).padding(.horizontal, 14)
                         if i < m.attendance.count - 1 { Divider().overlay(Color.white.opacity(0.07)).padding(.leading, 14) }
@@ -1187,7 +1193,7 @@ private struct AttendanceTab: View {
 
     private var managerView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("СЕГОДНЯ").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
+            Text(t("pe.todayCaps")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
             ForEach(Array(m.dir.enumerated()), id: \.element.id) { i, s in
                 let rec = m.attendance.first { $0.staff_id == s.id && $0.date == m.todayKey }
                 HStack {
@@ -1196,9 +1202,9 @@ private struct AttendanceTab: View {
                     if let rec {
                         Text(clock(rec.check_in_at) + (rec.check_out_at != nil ? "–\(clock(rec.check_out_at))" : ""))
                             .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-                        if rec.status == "late", let l = rec.late_minutes { badge("+\(l)м", BrandKit.stash) }
+                        if rec.status == "late", let l = rec.late_minutes { badge(t("pe.lateBadge", ["n": "\(l)"]), BrandKit.stash) }
                     } else {
-                        Text("не пришёл").font(.system(size: 13)).foregroundStyle(.white.opacity(0.35))
+                        Text(t("pe.notCame")).font(.system(size: 13)).foregroundStyle(.white.opacity(0.35))
                     }
                 }
                 .padding(.vertical, 12).padding(.horizontal, 14)
@@ -1227,7 +1233,7 @@ private struct SwapsTab: View {
             } else {
                 if !m.isManager {
                     Button { showCreate = true } label: {
-                        Label("Предложить обмен", systemImage: "arrow.left.arrow.right")
+                        Label(t("pe.proposeSwap"), systemImage: "arrow.left.arrow.right")
                             .font(.system(size: 15, weight: .bold)).foregroundStyle(m.myUpcomingScheds.isEmpty ? .white.opacity(0.4) : .white)
                             .frame(maxWidth: .infinity).padding(.vertical, 14)
                             .background(m.myUpcomingScheds.isEmpty ? Color.white.opacity(0.06) : PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
@@ -1235,12 +1241,12 @@ private struct SwapsTab: View {
                     .disabled(m.myUpcomingScheds.isEmpty)
                 }
                 Picker("", selection: $m.swapSeg) {
-                    Text(m.isManager ? "На утверждение" : "Входящие").tag("incoming")
-                    Text(m.isManager ? "Все" : "Исходящие").tag("outgoing")
+                    Text(m.isManager ? t("pe.toApprove") : t("pe.incoming")).tag("incoming")
+                    Text(m.isManager ? t("pe.all") : t("pe.outgoing")).tag("outgoing")
                 }.pickerStyle(.segmented)
                 let list = listFor()
                 if list.isEmpty {
-                    Text("Запросов на обмен нет").font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
+                    Text(t("pe.noSwaps")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
                 } else {
                     ForEach(list) { r in card(r) }
                 }
@@ -1261,7 +1267,7 @@ private struct SwapsTab: View {
         let iAmRequester = r.requester_id == m.myId
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(sc != nil ? "\(dayLabel(sc!.date)) · \(hhmm(sc!.shift_start))–\(hhmm(sc!.shift_end))" : "Смена")
+                Text(sc != nil ? "\(dayLabel(sc!.date)) · \(hhmm(sc!.shift_start))–\(hhmm(sc!.shift_end))" : t("pe.shiftWord"))
                     .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                 Spacer()
                 Text(swapStatusLabel(r.status)).font(.system(size: 11, weight: .bold)).foregroundStyle(swapStatusColor(r.status))
@@ -1273,15 +1279,15 @@ private struct SwapsTab: View {
 
             if r.status == "pending_peer" && iAmTarget {
                 HStack(spacing: 8) {
-                    actBtn("Принять", true) { Task { await m.swapPeerAccept(r) } }
-                    actBtn("Отклонить", false) { Task { await m.swapPeerDecline(r) } }
+                    actBtn(t("pe.accept"), true) { Task { await m.swapPeerAccept(r) } }
+                    actBtn(t("pe.declineBtn"), false) { Task { await m.swapPeerDecline(r) } }
                 }
             } else if r.status == "pending_peer" && iAmRequester {
-                actBtn("Отменить запрос", false) { Task { await m.swapCancel(r) } }
+                actBtn(t("pe.cancelReq"), false) { Task { await m.swapCancel(r) } }
             } else if r.status == "peer_accepted" && m.isManager {
                 HStack(spacing: 8) {
-                    actBtn("Одобрить", true) { Task { await m.swapApprove(r) } }
-                    actBtn("Отклонить", false) { Task { await m.swapReject(r) } }
+                    actBtn(t("pe.approve"), true) { Task { await m.swapApprove(r) } }
+                    actBtn(t("pe.declineBtn"), false) { Task { await m.swapReject(r) } }
                 }
             }
         }
@@ -1297,8 +1303,8 @@ private struct SwapsTab: View {
         }
     }
     private func swapStatusLabel(_ s: String?) -> String {
-        ["pending_peer": "Ждёт коллегу", "peer_accepted": "Ждёт менеджера", "approved": "Одобрено",
-         "rejected": "Отклонено", "peer_declined": "Отклонено", "cancelled": "Отменено"][s ?? ""] ?? "—"
+        ["pending_peer": t("pe.swap.pendingPeer"), "peer_accepted": t("pe.swap.peerAccepted"), "approved": t("pe.swap.approved"),
+         "rejected": t("pe.swap.rejected"), "peer_declined": t("pe.swap.rejected"), "cancelled": t("pe.swap.cancelled")][s ?? ""] ?? "—"
     }
     private func swapStatusColor(_ s: String?) -> Color {
         ["approved": BrandKit.analytics, "rejected": BrandKit.menu, "peer_declined": BrandKit.menu,
@@ -1318,31 +1324,31 @@ private struct SwapCreateSheet: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 Form {
-                    Section("Моя смена") {
-                        Picker("Смена", selection: $scheduleId) {
+                    Section(t("pe.myShift")) {
+                        Picker(t("pe.shiftWord"), selection: $scheduleId) {
                             Text("—").tag("")
                             ForEach(m.myUpcomingScheds) { s in
                                 Text("\(dayLabel(s.date)) · \(hhmm(s.shift_start))–\(hhmm(s.shift_end))").tag(s.id)
                             }
                         }
                     }
-                    Section("Кому предложить") {
-                        Picker("Коллега", selection: $targetId) {
+                    Section(t("pe.toWhom")) {
+                        Picker(t("pe.colleague"), selection: $targetId) {
                             Text("—").tag("")
                             ForEach(m.dir.filter { $0.id != m.myId }) { Text($0.name).tag($0.id) }
                         }
                     }
-                    Section("Комментарий") {
-                        TextField("Необязательно", text: $note, axis: .vertical).lineLimit(1...3)
+                    Section(t("pe.comment")) {
+                        TextField(t("pe.optional"), text: $note, axis: .vertical).lineLimit(1...3)
                     }
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle("Предложить обмен").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(t("pe.proposeSwap")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Отправить") {
+                    Button(t("send")) {
                         Task { if await m.createSwap(scheduleId: scheduleId, targetId: targetId, note: note) { dismiss() } }
                     }
                 }
@@ -1365,7 +1371,7 @@ private struct ShiftsTab: View {
         } else {
             if m.isManager { managerControls }
             if m.schedByDate.isEmpty {
-                Text(m.isManager ? "Расписание на эту неделю пустое" : "У вас нет смен на этой неделе")
+                Text(m.isManager ? t("pe.scheduleEmptyMgr") : t("pe.scheduleEmptyStaff"))
                     .font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).multilineTextAlignment(.center).padding(.top, 40)
             } else {
                 ForEach(m.schedByDate, id: \.0) { date, items in
@@ -1401,13 +1407,13 @@ private struct ShiftsTab: View {
     private var managerControls: some View {
         HStack(spacing: 10) {
             Button { showAdd = true } label: {
-                Label("Добавить смену", systemImage: "plus")
+                Label(t("pe.addShift"), systemImage: "plus")
                     .font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
                     .frame(maxWidth: .infinity).padding(.vertical, 12)
                     .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 12))
             }
             Button { Task { await m.copyLastWeek() } } label: {
-                Label("Прошлая неделя", systemImage: "doc.on.doc")
+                Label(t("pe.lastWeek"), systemImage: "doc.on.doc")
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
                     .frame(maxWidth: .infinity).padding(.vertical, 12)
                     .background(PEOPLE_ACCENT.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
@@ -1435,30 +1441,30 @@ private struct ScheduleEditSheet: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 Form {
-                    Section("Сотрудник") {
-                        Picker("Кто", selection: $staffId) {
+                    Section(t("pe.staffOne")) {
+                        Picker(t("pe.who"), selection: $staffId) {
                             Text("—").tag("")
                             ForEach(m.dir) { Text($0.name).tag($0.id) }
                         }
                     }
-                    Section("Дата") {
-                        DatePicker("День", selection: $day, displayedComponents: .date)
+                    Section(t("an.date")) {
+                        DatePicker(t("an.day"), selection: $day, displayedComponents: .date)
                     }
-                    Section("Время") {
-                        DatePicker("Начало", selection: $start, displayedComponents: .hourAndMinute)
-                        DatePicker("Конец", selection: $end, displayedComponents: .hourAndMinute)
+                    Section(t("pe.time")) {
+                        DatePicker(t("pe.start"), selection: $start, displayedComponents: .hourAndMinute)
+                        DatePicker(t("pe.end"), selection: $end, displayedComponents: .hourAndMinute)
                     }
-                    Section("Заметка") {
-                        TextField("Необязательно", text: $note)
+                    Section(t("pe.note")) {
+                        TextField(t("pe.optional"), text: $note)
                     }
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle("Новая смена").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(t("pe.newShift")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Сохранить") {
+                    Button(t("save")) {
                         let s = timeFmt.string(from: start), e = timeFmt.string(from: end)
                         Task {
                             if await m.createSchedule(staffId: staffId, date: m.key(day), start: s, end: e, note: note) { dismiss() }
@@ -1478,10 +1484,10 @@ private struct ZalTab: View {
     @Bindable var m: PeopleModel
     var body: some View {
         Picker("", selection: $m.opsView) {
-            Text("Стоп").tag("stop")
-            Text(m.activeOrders.isEmpty ? "Заказы" : "Заказы · \(m.activeOrders.count)").tag("orders")
-            Text("Чек-листы").tag("check")
-            if m.canTech { Text("Техкарты").tag("tech") }
+            Text(t("pe.stop")).tag("stop")
+            Text(m.activeOrders.isEmpty ? t("pe.orders") : t("pe.ordersN", ["n": "\(m.activeOrders.count)"])).tag("orders")
+            Text(t("pe.checklists")).tag("check")
+            if m.canTech { Text(t("pe.techcards")).tag("tech") }
         }.pickerStyle(.segmented)
         switch m.opsView {
         case "orders": OrdersInbox(m: m)
@@ -1508,24 +1514,24 @@ private struct ChecklistsTab: View {
             } else {
                 if m.openShiftId == nil { inactiveBanner }
                 Picker("", selection: $m.clType) {
-                    Text("Открытие").tag("open"); Text("Закрытие").tag("close")
+                    Text(t("pe.open")).tag("open"); Text(t("pe.close")).tag("close")
                 }.pickerStyle(.segmented)
                 let lists = m.relevantChecklists()
                 if lists.isEmpty {
-                    Text("Чек-листы не заданы").font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 40)
+                    Text(t("pe.noChecklists")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 40)
                 } else {
                     ForEach(lists) { list in section(list) }
                 }
                 if m.isManager {
                     Button { edit = ChecklistEdit(listId: nil, role: nil, items: [""]) } label: {
-                        Label("Чек-лист для цеха", systemImage: "plus")
+                        Label(t("pe.checklistForRole"), systemImage: "plus")
                             .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
                             .frame(maxWidth: .infinity).padding(.vertical, 13)
                             .background(RoundedRectangle(cornerRadius: 14).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5])).foregroundStyle(.white.opacity(0.2)))
                     }
                     .padding(.top, 4)
                     Button { showHistory = true } label: {
-                        Label("История чек-листов", systemImage: "clock.arrow.circlepath")
+                        Label(t("pe.checklistHistory"), systemImage: "clock.arrow.circlepath")
                             .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
                             .frame(maxWidth: .infinity).padding(.vertical, 12)
                     }
@@ -1541,8 +1547,8 @@ private struct ChecklistsTab: View {
         HStack(spacing: 10) {
             Image(systemName: "clock.badge.exclamationmark").font(.system(size: 18)).foregroundStyle(BrandKit.stash)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Смена не открыта").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-                Text("Откройте смену в Manager, чтобы вести чек-лист")
+                Text(t("mg.noShift")).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                Text(t("pe.checklistNoShiftHint"))
                     .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
             }
             Spacer()
@@ -1556,11 +1562,11 @@ private struct ChecklistsTab: View {
         let done = items.indices.filter { $0 < state.count && state[$0] }.count
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("\(roleTitle(list.role)) · \(done)/\(items.count)".uppercased())
+                Text("\(roleTitle(list.role)) · \(done)/\(items.count)")
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(list.role != nil ? PEOPLE_ACCENT : .white.opacity(0.45)).kerning(0.5)
                 Spacer()
                 if done == items.count && !items.isEmpty {
-                    Text("ГОТОВО").font(.system(size: 11, weight: .bold)).foregroundStyle(BrandKit.analytics)
+                    Text(t("pe.readyCaps")).font(.system(size: 11, weight: .bold)).foregroundStyle(BrandKit.analytics)
                         .padding(.horizontal, 8).padding(.vertical, 2).background(BrandKit.analytics.opacity(0.16), in: Capsule())
                 }
                 if m.isManager {
@@ -1598,15 +1604,17 @@ private struct ChecklistsTab: View {
     }
 
     private func roleTitle(_ role: String?) -> String {
-        guard let role else { return "Общий" }
-        return ["kitchen": "Кухня", "bar": "Бар", "hookah": "Кальян", "waiter": "Зал", "host": "Хостес", "cleaner": "Уборка"][role] ?? role
+        guard let role else { return t("pe.role.general") }
+        let known = ["kitchen", "bar", "hookah", "waiter", "host", "cleaner"]
+        return known.contains(role) ? t("pe.role." + role) : role
     }
 }
 
-private let CHECKLIST_ROLES: [(String?, String)] = [
-    (nil, "Общий"), ("kitchen", "Кухня"), ("bar", "Бар"), ("hookah", "Кальян"),
-    ("waiter", "Зал"), ("host", "Хостес"), ("cleaner", "Уборка"),
-]
+private let CHECKLIST_ROLE_CODES: [String?] = [nil, "kitchen", "bar", "hookah", "waiter", "host", "cleaner"]
+@MainActor private func checklistRoleLabel(_ role: String?) -> String {
+    guard let role else { return t("pe.role.general") }
+    return t("pe.role." + role)
+}
 
 private struct ChecklistEditSheet: View {
     @Bindable var m: PeopleModel
@@ -1618,25 +1626,25 @@ private struct ChecklistEditSheet: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 Form {
-                    Section("Цех") {
-                        Picker("Цех", selection: Binding(get: { edit.role ?? "" }, set: { edit.role = $0.isEmpty ? nil : $0 })) {
-                            ForEach(CHECKLIST_ROLES, id: \.1) { Text($0.1).tag($0.0 ?? "") }
+                    Section(t("pe.workshop")) {
+                        Picker(t("pe.workshop"), selection: Binding(get: { edit.role ?? "" }, set: { edit.role = $0.isEmpty ? nil : $0 })) {
+                            ForEach(CHECKLIST_ROLE_CODES, id: \.self) { code in Text(checklistRoleLabel(code)).tag(code ?? "") }
                         }
                     }
-                    Section("Пункты") {
+                    Section(t("pe.items")) {
                         ForEach(edit.items.indices, id: \.self) { i in
-                            TextField("Пункт \(i + 1)", text: $edit.items[i])
+                            TextField(t("pe.itemN", ["n": "\(i + 1)"]), text: $edit.items[i])
                         }
-                        Button { edit.items.append("") } label: { Label("Ещё пункт", systemImage: "plus") }
+                        Button { edit.items.append("") } label: { Label(t("pe.moreItem"), systemImage: "plus") }
                     }
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle(m.clType == "open" ? "Чек-лист открытия" : "Чек-лист закрытия").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(m.clType == "open" ? t("pe.checklistOpenTitle") : t("pe.checklistCloseTitle")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Сохранить") {
+                    Button(t("save")) {
                         Task { await m.saveChecklistTemplate(id: edit.listId, role: edit.role, items: edit.items); dismiss() }
                     }
                 }
@@ -1659,7 +1667,7 @@ private struct ChecklistHistorySheet: View {
                         if !m.clHistoryLoaded {
                             ProgressView().tint(.white).padding(.top, 40)
                         } else if m.historyByDate.isEmpty {
-                            Text("История пуста").font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 60)
+                            Text(t("pe.historyEmpty")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 60)
                         } else {
                             ForEach(m.historyByDate, id: \.0) { date, comps in dayCard(date, comps) }
                         }
@@ -1667,8 +1675,8 @@ private struct ChecklistHistorySheet: View {
                     .padding(16)
                 }
             }
-            .navigationTitle("История чек-листов").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() } } }
+            .navigationTitle(t("pe.checklistHistory")).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(t("done")) { dismiss() } } }
             .toolbarBackground(.black, for: .navigationBar)
             .preferredColorScheme(.dark)
         }
@@ -1695,7 +1703,7 @@ private struct ChecklistHistorySheet: View {
                     .foregroundStyle(allDone ? BrandKit.analytics : BrandKit.stash)
             }
             if missed.isEmpty {
-                Text("Всё выполнено").font(.system(size: 13)).foregroundStyle(BrandKit.analytics)
+                Text(t("pe.allDone")).font(.system(size: 13)).foregroundStyle(BrandKit.analytics)
             } else {
                 ForEach(Array(missed.enumerated()), id: \.offset) { _, it in
                     HStack(spacing: 8) {
@@ -1712,8 +1720,10 @@ private struct ChecklistHistorySheet: View {
 
 // MARK: Техкарты
 
-private let TC_CATS: [(String, String)] = [("dish", "Блюдо"), ("prep", "Заготовка"), ("stoplist", "Другое")]
-private func tcCatLabel(_ c: String?) -> String { TC_CATS.first { $0.0 == c }?.1 ?? (c ?? "—") }
+private let TC_CAT_CODES = ["dish", "prep", "stoplist"]
+@MainActor private func tcCatLabel(_ c: String?) -> String {
+    switch c { case "dish": return t("pe.tc.dish"); case "prep": return t("pe.tc.prep"); case "stoplist": return t("pe.tc.other"); default: return c ?? "—" }
+}
 
 private struct TechCardsTab: View {
     @Bindable var m: PeopleModel
@@ -1735,14 +1745,14 @@ private struct TechCardsTab: View {
             } else {
                 if m.isManager {
                     Button { edit = TechEdit(cardId: nil, name: "", category: "dish", items: [""]) } label: {
-                        Label("Новая техкарта", systemImage: "plus")
+                        Label(t("pe.newTech"), systemImage: "plus")
                             .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                             .frame(maxWidth: .infinity).padding(.vertical, 14)
                             .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
                     }
                 }
                 if m.techCards.isEmpty {
-                    Text("Техкарт пока нет").font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
+                    Text(t("pe.noTech")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
                 } else {
                     ForEach(m.techCards) { c in card(c) }
                 }
@@ -1760,7 +1770,7 @@ private struct TechCardsTab: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(c.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-                        Text("\(tcCatLabel(c.category)) · \(items.count) шагов").font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+                        Text("\(tcCatLabel(c.category)) · \(t("pe.stepsCount", ["n": "\(items.count)"]))").font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
                     }
                     Spacer()
                     Image(systemName: opened ? "chevron.up" : "chevron.down").font(.system(size: 12)).foregroundStyle(.white.opacity(0.4))
@@ -1778,9 +1788,9 @@ private struct TechCardsTab: View {
                     }
                     if m.isManager {
                         HStack(spacing: 8) {
-                            Button("Изменить") { edit = TechEdit(cardId: c.id, name: c.name, category: c.category ?? "dish", items: items.isEmpty ? [""] : items) }
+                            Button(t("edit")) { edit = TechEdit(cardId: c.id, name: c.name, category: c.category ?? "dish", items: items.isEmpty ? [""] : items) }
                                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
-                            Button("Удалить") { Task { await m.deleteTechCard(c.id) } }
+                            Button(t("delete")) { Task { await m.deleteTechCard(c.id) } }
                                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(BrandKit.menu)
                         }
                         .padding(.top, 4)
@@ -1803,26 +1813,26 @@ private struct TechCardSheet: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 Form {
-                    Section { TextField("Название", text: $edit.name) }
-                    Section("Тип") {
-                        Picker("Тип", selection: $edit.category) {
-                            ForEach(TC_CATS, id: \.0) { Text($0.1).tag($0.0) }
+                    Section { TextField(t("pe.techName"), text: $edit.name) }
+                    Section(t("pe.type")) {
+                        Picker(t("pe.type"), selection: $edit.category) {
+                            ForEach(TC_CAT_CODES, id: \.self) { code in Text(tcCatLabel(code)).tag(code) }
                         }.pickerStyle(.segmented)
                     }
-                    Section("Шаги") {
+                    Section(t("pe.steps")) {
                         ForEach(edit.items.indices, id: \.self) { i in
-                            TextField("Шаг \(i + 1)", text: $edit.items[i])
+                            TextField(t("pe.stepN", ["n": "\(i + 1)"]), text: $edit.items[i])
                         }
-                        Button { edit.items.append("") } label: { Label("Ещё шаг", systemImage: "plus") }
+                        Button { edit.items.append("") } label: { Label(t("pe.moreStep"), systemImage: "plus") }
                     }
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle(edit.cardId == nil ? "Новая техкарта" : "Техкарта").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(edit.cardId == nil ? t("pe.newTech") : t("pe.techTitle")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Сохранить") {
+                    Button(t("save")) {
                         Task { await m.saveTechCard(id: edit.cardId, name: edit.name, category: edit.category, items: edit.items); dismiss() }
                     }
                 }
@@ -1837,15 +1847,15 @@ private struct OrdersInbox: View {
     @Bindable var m: PeopleModel
     var body: some View {
         Picker("", selection: $m.ordersSeg) {
-            Text(m.activeOrders.isEmpty ? "Активные" : "Активные · \(m.activeOrders.count)").tag("active")
-            Text("Завершённые").tag("done")
+            Text(m.activeOrders.isEmpty ? t("pe.active") : t("pe.activeN", ["n": "\(m.activeOrders.count)"])).tag("active")
+            Text(t("pe.finished")).tag("done")
         }.pickerStyle(.segmented)
 
         let list = m.ordersSeg == "active" ? m.activeOrders : m.finishedOrders
         if !m.ordersLoaded {
             ProgressView().tint(.white).padding(.top, 40)
         } else if list.isEmpty {
-            Text(m.ordersSeg == "active" ? "Активных заказов нет" : "Пусто")
+            Text(m.ordersSeg == "active" ? t("pe.noActive") : t("empty"))
                 .font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
         } else {
             ForEach(list) { o in OrderCard(m: m, o: o) }
@@ -1866,12 +1876,12 @@ private struct OrderCard: View {
                 itemsSection
                 Divider().overlay(Color.white.opacity(0.08))
                 HStack {
-                    Text("\(Int(o.total ?? 0)) €").font(.system(size: 15, weight: .heavy)).foregroundStyle(.white)
+                    Text(eur(o.total ?? 0)).font(.system(size: 15, weight: .heavy)).foregroundStyle(.white)
                     Spacer()
                     buttons
                 }
             } else if active {
-                HStack { Spacer(); Button("Иду") { Task { await m.setOrderStatus(o, "done") } }
+                HStack { Spacer(); Button(t("pe.coming")) { Task { await m.setOrderStatus(o, "done") } }
                     .buttonStyle(.borderedProminent).tint(PEOPLE_ACCENT) }
             }
         }
@@ -1882,9 +1892,9 @@ private struct OrderCard: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            if isCall { Text("Зовут официанта").font(.system(size: 15, weight: .bold)).foregroundStyle(.white) }
+            if isCall { Text(t("pe.callWaiter")).font(.system(size: 15, weight: .bold)).foregroundStyle(.white) }
             if let tn = o.table_number {
-                Text("Стол \(tn)").font(.system(size: 12, weight: .heavy)).foregroundStyle(.white)
+                Text(t("pe.tableN", ["n": "\(tn)"])).font(.system(size: 12, weight: .heavy)).foregroundStyle(.white)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(isCall ? BrandKit.stash : PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 7))
             }
@@ -1902,7 +1912,7 @@ private struct OrderCard: View {
                 Text(itemLine(it)).font(.system(size: 14)).foregroundStyle(.white)
                 Spacer()
                 if let p = it.price {
-                    Text("\(Int(p * (it.qty ?? 1))) €").font(.system(size: 13)).foregroundStyle(.white.opacity(0.4))
+                    Text(eur(p * (it.qty ?? 1))).font(.system(size: 13)).foregroundStyle(.white.opacity(0.4))
                 }
             }
         }
@@ -1918,21 +1928,21 @@ private struct OrderCard: View {
     @ViewBuilder private var buttons: some View {
         HStack(spacing: 8) {
             if o.status == "new" {
-                Button("Отмена") { Task { await m.setOrderStatus(o, "cancelled") } }
+                Button(t("cancel")) { Task { await m.setOrderStatus(o, "cancelled") } }
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
             }
             if o.status == "new" {
-                Button("Готовим") { Task { await m.setOrderStatus(o, "in_progress") } }
+                Button(t("pe.cooking")) { Task { await m.setOrderStatus(o, "in_progress") } }
                     .buttonStyle(.borderedProminent).tint(PEOPLE_ACCENT).controlSize(.small)
             } else if o.status == "in_progress" {
-                Button("Готово") { Task { await m.setOrderStatus(o, "done") } }
+                Button(t("pe.readyBtn")) { Task { await m.setOrderStatus(o, "done") } }
                     .buttonStyle(.borderedProminent).tint(PEOPLE_ACCENT).controlSize(.small)
             }
         }
     }
 
     private func statusLabel(_ s: String?) -> String {
-        ["new": "Новый", "in_progress": "Готовится", "done": "Готов", "cancelled": "Отменён"][s ?? "new"] ?? "Новый"
+        ["new": t("pe.order.new"), "in_progress": t("pe.order.inProgress"), "done": t("pe.order.done"), "cancelled": t("pe.order.cancelled")][s ?? "new"] ?? t("pe.order.new")
     }
     private func statusColor(_ s: String?) -> Color {
         ["new": BrandKit.stash, "in_progress": BrandKit.manager, "done": BrandKit.analytics, "cancelled": Color.white.opacity(0.4)][s ?? "new"] ?? BrandKit.stash
@@ -1949,13 +1959,13 @@ private struct StopTab: View {
         if !m.menuLoaded {
             ProgressView().tint(.white).padding(.top, 40)
         } else if m.menu.isEmpty {
-            Text("Меню пустое").font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
+            Text(t("pe.menuEmpty")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
         } else {
             HStack {
-                Text("СТОП-ЛИСТ").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+                Text(t("pe.stopList")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
                 Spacer()
                 if m.stopCount > 0 {
-                    Text("\(m.stopCount) в стопе").font(.system(size: 11, weight: .bold)).foregroundStyle(BrandKit.menu)
+                    Text(t("pe.inStopN", ["n": "\(m.stopCount)"])).font(.system(size: 11, weight: .bold)).foregroundStyle(BrandKit.menu)
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(BrandKit.menu.opacity(0.16), in: Capsule())
                 }
@@ -1973,7 +1983,7 @@ private struct StopTab: View {
                             Toggle("", isOn: Binding(get: { avail }, set: { _ in Task { await m.toggleItem(item) } }))
                                 .labelsHidden().tint(BrandKit.analytics)
                         } else {
-                            Text(avail ? "В меню" : "В стопе").font(.system(size: 12, weight: .semibold))
+                            Text(avail ? t("pe.inMenu") : t("pe.inStop")).font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(avail ? BrandKit.analytics : BrandKit.menu)
                         }
                     }

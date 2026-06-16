@@ -423,12 +423,12 @@ private struct AnalyticsBody: View {
             NavigationStack {
                 ZStack {
                     Color.black.ignoresSafeArea()
-                    DatePicker("Дата", selection: Binding(get: { m.currentDate }, set: { d in Task { await m.setDate(d) } }),
+                    DatePicker(t("an.date"), selection: Binding(get: { m.currentDate }, set: { d in Task { await m.setDate(d) } }),
                                displayedComponents: .date)
                         .datePickerStyle(.graphical).tint(BrandKit.analytics).padding()
                 }
-                .navigationTitle("Выбор дня").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Готово") { showDatePicker = false } } }
+                .navigationTitle(t("an.pickDay")).navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button(t("done")) { showDatePicker = false } } }
                 .toolbarBackground(.black, for: .navigationBar)
                 .preferredColorScheme(.dark)
             }

@@ -25,10 +25,10 @@ private struct WelcomeView: View {
     @Environment(AppModel.self) private var model
 
     private let features: [(String, CGFloat, CGFloat)] = [
-        ("Смены и касса", 0.20, 0.16), ("Выручка в реальном времени", 0.70, 0.22),
-        ("Склад табака", 0.24, 0.34), ("Расписание команды", 0.74, 0.36),
-        ("Зарплаты без таблиц", 0.18, 0.62), ("QR-меню", 0.78, 0.60),
-        ("Инвентаризация", 0.30, 0.74), ("Кальянная смена", 0.70, 0.74),
+        ("ob.feat1", 0.20, 0.16), ("ob.feat2", 0.70, 0.22),
+        ("ob.feat3", 0.24, 0.34), ("ob.feat4", 0.74, 0.36),
+        ("ob.feat5", 0.18, 0.62), ("ob.feat6", 0.78, 0.60),
+        ("ob.feat7", 0.30, 0.74), ("ob.feat8", 0.70, 0.74),
     ]
 
     var body: some View {
@@ -54,10 +54,10 @@ private struct FloatingFeatures: View {
     var body: some View {
         GeometryReader { geo in
             TimelineView(.animation) { ctx in
-                let t = ctx.date.timeIntervalSinceReferenceDate
+                let now = ctx.date.timeIntervalSinceReferenceDate
                 ForEach(Array(items.enumerated()), id: \.offset) { i, item in
-                    let phase = (sin(t * 0.6 + Double(i) * 1.3) + 1) / 2
-                    Text(item.0)
+                    let phase = (sin(now * 0.6 + Double(i) * 1.3) + 1) / 2
+                    Text(t(item.0))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white.opacity(0.06 + phase * 0.26))
                         .position(x: geo.size.width * item.1, y: geo.size.height * item.2)
@@ -78,10 +78,10 @@ private struct ConnectView: View {
         VStack(spacing: 0) {
             Spacer()
             VStack(spacing: 10) {
-                Text("Отсканируйте QR заведения")
+                Text(t("ob.scanTitle"))
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(.white)
-                Text("Индивидуальный QR-код вам покажет владелец — в дашборде Mise, раздел «Доступ».")
+                Text(t("ob.scanHint"))
                     .font(.system(size: 14))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white.opacity(0.55))
@@ -91,7 +91,7 @@ private struct ConnectView: View {
 
             ZStack {
                 if denied {
-                    Text("Нет доступа к камере. Разрешите его в Настройках → Mise → Камера.")
+                    Text(t("ob.noCamera"))
                         .font(.system(size: 14))
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.white.opacity(0.55))
@@ -108,7 +108,7 @@ private struct ConnectView: View {
 
             Spacer()
             Button { model.goWelcome() } label: {
-                Text("Назад").font(.system(size: 15, weight: .medium))
+                Text(t("back")).font(.system(size: 15, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
             }
             .padding(.bottom, 28)
@@ -226,12 +226,12 @@ private struct PermissionsView: View {
 
     private struct Perm { let symbol, title, desc, cta: String }
     private let perms = [
-        Perm(symbol: "faceid", title: "Вход по Face ID",
-             desc: "Следующий вход — без ввода PIN, мгновенно и безопасно.", cta: "Включить Face ID"),
-        Perm(symbol: "bell.badge.fill", title: "Уведомления",
-             desc: "Новые заказы, заканчивающийся табак, конец смены — вовремя.", cta: "Разрешить уведомления"),
-        Perm(symbol: "location.fill", title: "Геолокация",
-             desc: "Отметка «Я пришёл» на смене работает по месту заведения.", cta: "Разрешить геолокацию"),
+        Perm(symbol: "faceid", title: t("ob.faceTitle"),
+             desc: t("ob.faceDesc"), cta: t("ob.faceCta")),
+        Perm(symbol: "bell.badge.fill", title: t("ob.notifTitle"),
+             desc: t("ob.notifDesc"), cta: t("ob.notifCta")),
+        Perm(symbol: "location.fill", title: t("ob.geoTitle"),
+             desc: t("ob.geoDesc"), cta: t("ob.geoCta")),
     ]
 
     var body: some View {
@@ -263,7 +263,7 @@ private struct PermissionsView: View {
                 Button { Task { await allow() } } label: { PrimaryLabel(p.cta) }
                     .disabled(busy)
                 Button { advance() } label: {
-                    Text("Не сейчас").font(.system(size: 15, weight: .medium))
+                    Text(t("ob.notNow")).font(.system(size: 15, weight: .medium))
                         .foregroundStyle(.white.opacity(0.6))
                 }
             }

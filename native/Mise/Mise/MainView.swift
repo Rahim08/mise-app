@@ -233,7 +233,7 @@ private struct ComingSoon: View {
                     Image(systemName: module.symbol).font(.system(size: 34)).foregroundStyle(module.color)
                 }
                 Text("Mise \(module.title)").font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
-                Text("Модуль скоро появится в нативной версии")
+                Text(t("comingSoon"))
                     .font(.system(size: 14)).foregroundStyle(.white.opacity(0.5)).multilineTextAlignment(.center)
             }
             .padding(40)
