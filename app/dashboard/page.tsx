@@ -1242,7 +1242,7 @@ function OverviewTab({ restaurant, onGo }: { restaurant: Restaurant | null; onGo
       const today = fmtDay(new Date())
       const dayStartISO = new Date(new Date().setHours(0, 0, 0, 0)).toISOString()
       const [shiftRes, hookahRes, ordersRes, staffRes, anyShiftRes] = await Promise.all([
-        db.from('shifts').select('*').eq('restaurant_id', restaurant.id).eq('date', today).order('created_at', { ascending: false }).limit(1),
+        db.from('shifts').select('*').eq('restaurant_id', restaurant.id).eq('date', today).order('opened_at', { ascending: false }).limit(1),
         appOk('stash') ? db.from('hookah_sales').select('quantity, price, is_free, date').eq('date', today) : Promise.resolve({ data: [] }),
         appOk('menu') ? db.from('menu_orders').select('id, status, created_at').gte('created_at', dayStartISO) : Promise.resolve({ data: [] }),
         db.from('employees').select('id').eq('restaurant_id', restaurant.id).eq('is_active', true).limit(1),

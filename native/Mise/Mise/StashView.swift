@@ -171,13 +171,46 @@ final class StashModel {
         return batches.sorted { ($0.value.first?.created_at ?? "") > ($1.value.first?.created_at ?? "") }
     }
 
+    // MARK: подсказки бренда/вкуса (память склада — логика app/tobacco/page.tsx)
+
+    private func norm(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+
+    /// Все известные бренды (включая нулевой остаток — это «память»).
+    var allBrands: [String] {
+        Array(Set(stock.map(\.brand))).filter { !$0.isEmpty }.sorted { $0.lowercased() < $1.lowercased() }
+    }
+    /// Все известные вкусы.
+    var allFlavors: [String] {
+        Array(Set(stock.map(\.flavor))).filter { !$0.isEmpty }.sorted { $0.lowercased() < $1.lowercased() }
+    }
+    /// Бренды, что есть в наличии (для выдачи/списания — выдать можно только то, что на складе).
+    var outBrands: [String] {
+        Array(Set(stock.filter { $0.quantity_g > 0 }.map(\.brand))).filter { !$0.isEmpty }.sorted { $0.lowercased() < $1.lowercased() }
+    }
+    func brandSuggestions(_ outOnly: Bool) -> [String] { outOnly ? outBrands : allBrands }
+    /// Вкусы для выбранного бренда (для выдачи — только с остатком > 0).
+    func flavorsForBrand(_ brand: String, outOnly: Bool) -> [String] {
+        let nb = norm(brand)
+        let matched = stock.filter { norm($0.brand) == nb && (!outOnly || $0.quantity_g > 0) }.map(\.flavor)
+        let list = matched.isEmpty && !outOnly && brand.isEmpty ? allFlavors : matched
+        return Array(Set(list)).filter { !$0.isEmpty }.sorted { $0.lowercased() < $1.lowercased() }
+    }
+    /// Остаток по бренду+вкусу (для подсказки «Доступно»). Нечувствительно к регистру/пробелам.
+    func stockOf(_ brand: String, _ flavor: String) -> StockItem? {
+        let nb = norm(brand), nf = norm(flavor)
+        return stock.first { norm($0.brand) == nb && norm($0.flavor) == nf }
+    }
+
     struct MovRow: Identifiable { let id = UUID(); var brand = ""; var flavor = ""; var grams = "" }
 
     func saveMovement(_ rows: [MovRow], reason: String) async -> Bool {
-        let filled = rows.filter { !$0.brand.isEmpty && !$0.flavor.isEmpty && (Double($0.grams) ?? 0) > 0 }
+        // Тримим ввод, чтобы лишние пробелы не плодили дубли на складе.
+        let filled = rows
+            .map { MovRow(brand: $0.brand.trimmingCharacters(in: .whitespaces), flavor: $0.flavor.trimmingCharacters(in: .whitespaces), grams: $0.grams) }
+            .filter { !$0.brand.isEmpty && !$0.flavor.isEmpty && (Double($0.grams) ?? 0) > 0 }
         if filled.isEmpty { flash(t("st.fillRow")); return false }
         for r in filled where movMode != "in" {
-            guard let item = stock.first(where: { $0.brand == r.brand && $0.flavor == r.flavor }) else {
+            guard let item = stockOf(r.brand, r.flavor) else {
                 flash(t("st.notInStock", ["b": r.brand, "fl": r.flavor])); return false
             }
             if (Double(r.grams) ?? 0) > item.quantity_g { flash(t("st.onlyLeft", ["b": r.brand, "fl": r.flavor, "g": grams(item.quantity_g)])); return false }
@@ -189,9 +222,12 @@ final class StashModel {
         let defReason = reason.isEmpty ? (movMode == "in" ? "Поставка" : movMode == "out" ? "Выдача в зал" : "Списание") : reason
         for r in filled {
             let qty = Double(r.grams) ?? 0
-            let existing = fresh.first { $0.brand == r.brand && $0.flavor == r.flavor }
+            // Нечувствительный к регистру/пробелам поиск + канонические бренд/вкус из склада — не плодим дубли.
+            let existing = fresh.first { norm($0.brand) == norm(r.brand) && norm($0.flavor) == norm(r.flavor) }
+            let brand = existing?.brand ?? r.brand
+            let flavor = existing?.flavor ?? r.flavor
             try? await DB.from("tobacco_movements").insert([
-                "restaurant_id": rid, "brand": r.brand, "flavor": r.flavor, "quantity_g": qty,
+                "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty,
                 "type": movMode, "batch_id": batchId, "reason": defReason,
             ]).run()
             if let ex = existing {
@@ -199,7 +235,7 @@ final class StashModel {
                 try? await DB.from("tobacco_stock").update(["quantity_g": ex.quantity_g + delta]).eq("id", ex.id).run()
             } else if movMode == "in" {
                 try? await DB.from("tobacco_stock").insert([
-                    "restaurant_id": rid, "brand": r.brand, "flavor": r.flavor, "quantity_g": qty, "flavor_name": r.flavor,
+                    "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty, "flavor_name": flavor,
                 ]).run()
             }
         }
@@ -560,6 +596,53 @@ private func movDate(_ iso: String?) -> String {
     return f.string(from: d)
 }
 
+/// Поле ввода с подсказками (бренд/вкус). Аналог AutoInput из app/tobacco/page.tsx.
+private struct AutoField: View {
+    let placeholder: String
+    @Binding var text: String
+    var suggestions: [String]
+    var disabled = false
+    var onPick: (() -> Void)? = nil
+    @FocusState private var focused: Bool
+
+    private var filtered: [String] {
+        let q = text.trimmingCharacters(in: .whitespaces).lowercased()
+        return Array(Set(suggestions))
+            .filter { q.isEmpty || $0.lowercased().contains(q) }
+            .filter { $0.lowercased() != q }
+            .sorted { $0.lowercased() < $1.lowercased() }
+            .prefix(6)
+            .map { $0 }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain).focused($focused).disabled(disabled)
+                .padding(10).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+                .foregroundStyle(disabled ? .white.opacity(0.3) : .white)
+            if focused && !filtered.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(filtered.enumerated()), id: \.element) { idx, s in
+                        Button { text = s; onPick?(); focused = false } label: {
+                            HStack {
+                                Text(s).font(.system(size: 15)).foregroundStyle(.white)
+                                Spacer()
+                            }
+                            .padding(.vertical, 10).padding(.horizontal, 12)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if idx < filtered.count - 1 { Divider().overlay(Color.white.opacity(0.08)) }
+                    }
+                }
+                .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.top, 4)
+            }
+        }
+    }
+}
+
 private struct AddMovementSheet: View {
     @Bindable var m: StashModel
     @Environment(\.dismiss) private var dismiss
@@ -577,13 +660,26 @@ private struct AddMovementSheet: View {
                         }.pickerStyle(.segmented)
 
                         ForEach($rows) { $row in
+                            let outOnly = m.movMode != "in"
+                            let avail = m.stockOf(row.brand, row.flavor)
                             VStack(spacing: 8) {
-                                TextField(t("st.brand"), text: $row.brand).textFieldStyle(.plain)
-                                    .padding(10).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
-                                TextField(t("st.flavor"), text: $row.flavor).textFieldStyle(.plain)
-                                    .padding(10).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
+                                // Бренд: подсказки из памяти склада (для выдачи/списания — только то, что в наличии).
+                                AutoField(placeholder: t("st.brand"), text: $row.brand,
+                                          suggestions: m.brandSuggestions(outOnly),
+                                          onPick: { row.flavor = "" })
+                                // Вкус: подсказки исходя из выбранного бренда.
+                                AutoField(placeholder: t("st.flavor"), text: $row.flavor,
+                                          suggestions: m.flavorsForBrand(row.brand, outOnly: outOnly),
+                                          disabled: outOnly && row.brand.trimmingCharacters(in: .whitespaces).isEmpty)
                                 TextField(t("st.grams"), text: $row.grams).keyboardType(.numberPad)
                                     .padding(10).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
+                                if let a = avail, !row.flavor.isEmpty {
+                                    HStack {
+                                        Text("\(t("st.available")): \(grams(a.quantity_g))")
+                                            .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                                        Spacer()
+                                    }
+                                }
                             }
                             .padding(12).background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
                         }

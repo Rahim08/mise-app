@@ -84,7 +84,7 @@ final class ManagerModel {
     private func prevClosing(before date: Date) async -> Double {
         let y = Calendar.current.date(byAdding: .day, value: -1, to: date)!
         let rows = (try? await DB.from("shifts").select("closing_balance")
-            .eq("date", key(y)).order("created_at", ascending: false).limit(1).list(ClosingOnly.self)) ?? []
+            .eq("date", key(y)).order("opened_at", ascending: false).limit(1).list(ClosingOnly.self)) ?? []
         return rows.first?.closing_balance ?? 0
     }
 
@@ -93,7 +93,7 @@ final class ManagerModel {
         defer { loading = false }
         let dateStr = key(date)
         let shifts = (try? await DB.from("shifts").select()
-            .eq("date", dateStr).order("created_at").list(Shift.self)) ?? []
+            .eq("date", dateStr).order("opened_at").list(Shift.self)) ?? []
         let opening = await prevClosing(before: date)
 
         // На случай дублей на одну дату (до миграции shifts-date-fix.sql) берём смену
@@ -159,7 +159,7 @@ final class ManagerModel {
         let opening = await prevClosing(before: currentDate)
         // Защита от дублей: если смена на эту дату уже есть — используем её, не создаём новую.
         let existing = (try? await DB.from("shifts").select()
-            .eq("date", key(currentDate)).order("created_at").list(Shift.self)) ?? []
+            .eq("date", key(currentDate)).order("opened_at").list(Shift.self)) ?? []
         if !existing.isEmpty {
             await loadDay(currentDate)
             return
@@ -230,7 +230,7 @@ final class ManagerModel {
             try await DB.from("inkassations").insert([
                 "shift_id": sh.id, "restaurant_id": rid, "date": key(currentDate),
                 "amount": c.ink, "expense": num(inkExpense), "reason": inkReason,
-                "salary": c.salary, "salary_note": inkSalaryNote, "balance": c.balance,
+                "salary": c.salary, "salary_note": inkSalaryNote, "total": c.inkNet,
             ]).run()
         }
         // best-effort: подтвердить прогулы дня (привязать к смене, снять авто-черновик)

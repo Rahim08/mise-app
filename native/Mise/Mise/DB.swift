@@ -4,7 +4,7 @@ import Foundation
 /// Аутентификация через cookie-токен PIN-сессии (URLSession хранит его сам).
 /// Скоупинг по ресторану и авторизация по приложению форсируются на сервере.
 ///
-///   DB.from("shifts").select().eq("date", "2026-06-15").order("created_at").list(Shift.self)
+///   DB.from("shifts").select().eq("date", "2026-06-15").order("opened_at").list(Shift.self)
 ///   DB.from("shifts").insert(["status": "open"]).single(Shift.self)
 enum DB {
     static func from(_ table: String) -> DBQuery { DBQuery(table) }

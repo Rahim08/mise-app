@@ -17,7 +17,7 @@ WITH ranked AS (
          row_number() OVER (
            PARTITION BY restaurant_id, (date::date)
            ORDER BY (COALESCE(income,0) + COALESCE(total_expense,0) + COALESCE(inkassation,0)) DESC,
-                    created_at ASC
+                    opened_at ASC
          ) AS rn
   FROM shifts
 ),

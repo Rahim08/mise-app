@@ -127,10 +127,10 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     setLoading(true)
     const dateStr = fmtDate(date)
     // Resilient to duplicate (restaurant_id, date) rows: take one instead of erroring on maybeSingle.
-    const { data: shList } = await db.from('shifts').select('*').eq('restaurant_id', rid).eq('date', dateStr).order('created_at', { ascending: true }).limit(1)
+    const { data: shList } = await db.from('shifts').select('*').eq('restaurant_id', rid).eq('date', dateStr).order('opened_at', { ascending: true }).limit(1)
     const sh = (Array.isArray(shList) ? shList[0] : shList) || null
     const yesterday = new Date(date); yesterday.setDate(yesterday.getDate() - 1)
-    const { data: prevList } = await db.from('shifts').select('closing_balance').eq('restaurant_id', rid).eq('date', fmtDate(yesterday)).order('created_at', { ascending: false }).limit(1)
+    const { data: prevList } = await db.from('shifts').select('closing_balance').eq('restaurant_id', rid).eq('date', fmtDate(yesterday)).order('opened_at', { ascending: false }).limit(1)
     const openingBalance = (Array.isArray(prevList) ? prevList[0] : prevList)?.closing_balance || 0
 
     if (sh) {
@@ -176,7 +176,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       const { data: { user } } = await supabase.auth.getUser()
 
       const yesterday = new Date(currentDate); yesterday.setDate(yesterday.getDate() - 1)
-      const { data: prevList } = await db.from('shifts').select('closing_balance').eq('restaurant_id', restaurantId).eq('date', fmtDate(yesterday)).order('created_at', { ascending: false }).limit(1)
+      const { data: prevList } = await db.from('shifts').select('closing_balance').eq('restaurant_id', restaurantId).eq('date', fmtDate(yesterday)).order('opened_at', { ascending: false }).limit(1)
       const openingBalance = (Array.isArray(prevList) ? prevList[0] : prevList)?.closing_balance || 0
       const { data: sh, error } = await db.from('shifts').insert({
         restaurant_id: restaurantId, date: fmtDate(currentDate),
@@ -234,7 +234,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   // everything reloads exactly as entered.
   const persistShift = async (sh = shift, dateForInk = currentDate) => {
     if (!sh) return
-    const { inc, card, ink, totalExp, balance, salary } = calc()
+    const { inc, card, ink, totalExp, balance, salary, inkNet } = calc()
     // db.from не бросает исключений — ошибку надо проверять явно, иначе ввод молча теряется
     // (например, если миграция features-2026-06 не применена и колонки income_card нет).
     const { error: upErr } = await db.from('shifts').update({ income: inc, income_card: card, inkassation: ink, total_expense: totalExp, closing_balance: balance }).eq('id', sh.id)
@@ -257,7 +257,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       await db.from('inkassations').insert({
         shift_id: sh.id, restaurant_id: restaurantId, date: fmtDate(dateForInk),
         amount: ink, expense: parseFloat(inkExpense) || 0, reason: inkReason,
-        salary, salary_note: inkSalaryNote || null, balance
+        salary, salary_note: inkSalaryNote || null, total: inkNet
       })
     }
     // Подтверждаем прогулы этого дня: привязываем к смене и снимаем «черновик» (source→manager),

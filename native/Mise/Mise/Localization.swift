@@ -180,6 +180,7 @@ let STRINGS: [String: [Lang: String]] = [
     "st.brand":         tr("Brand", "Бренд", "Marca", "Marque", "Marka", "Marka", "Бренд", "Бренд"),
     "st.flavor":        tr("Flavor", "Вкус", "Gusto", "Saveur", "Dad", "Aroma", "Смак", "Дәм"),
     "st.grams":         tr("Grams", "Граммы", "Grammi", "Grammes", "Qram", "Gram", "Грами", "Грамм"),
+    "st.available":     tr("Available", "Доступно", "Disponibile", "Disponible", "Mövcud", "Mevcut", "Доступно", "Қолжетімді"),
     "st.moreRow":       tr("One more row", "Ещё строка", "Altra riga", "Une ligne de plus", "Daha bir sətir", "Bir satır daha", "Ще рядок", "Тағы жол"),
     "st.writeoffReasonField": tr("Write-off reason", "Причина списания", "Motivo dello scarico", "Motif de la radiation", "Silinmə səbəbi", "Düşüm nedeni", "Причина списання", "Есептен шығару себебі"),
     "st.movement":      tr("Movement", "Движение", "Movimento", "Mouvement", "Hərəkət", "Hareket", "Рух", "Қозғалыс"),

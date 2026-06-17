@@ -369,7 +369,7 @@ final class PeopleModel {
         // чек-лист активен, а его прохождение пишется по shift_id этой смены. Новая смена
         // (новый день/новый shift_id) → чистые галочки.
         let sh = (try? await DB.from("shifts").select("id, status, date")
-            .eq("date", key(Date())).order("created_at", ascending: false).limit(1).list(ShiftRef.self)) ?? []
+            .eq("date", key(Date())).order("opened_at", ascending: false).limit(1).list(ShiftRef.self)) ?? []
         openShiftId = sh.first?.id
         if let cls = try? await DB.from("shift_checklists").select().list(ShiftChecklist.self) { checklists = cls }
         if let sid = openShiftId {
