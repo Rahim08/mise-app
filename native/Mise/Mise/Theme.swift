@@ -42,6 +42,9 @@ extension Color {
             opacity: alpha
         )
     }
+
+    /// Адаптивный фон: чёрный в тёмной теме, белый в светлой.
+    static let miseBg = Color(UIColor.systemBackground)
 }
 
 /// Бренд Mise: тёмные glow-иконки приложений + типографический вордмарк «mise»

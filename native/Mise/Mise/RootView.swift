@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @State private var model = AppModel()
+    @State private var l10n = L10n.shared
 
     var body: some View {
         Group {
@@ -14,6 +15,7 @@ struct RootView: View {
                 OnboardingView()
             }
         }
+        .preferredColorScheme(l10n.colorScheme)
         .environment(model)
         .task { await model.start() }
     }

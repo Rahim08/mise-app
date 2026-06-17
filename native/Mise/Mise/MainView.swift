@@ -23,7 +23,7 @@ struct MainView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.miseBg.ignoresSafeArea()
             if let id = app.currentApp, let mod = miseModules[id] {
                 AppContainer(module: mod)
                     .transition(.opacity)
@@ -58,7 +58,7 @@ private struct LauncherView: View {
                 Spacer()
                 Button { showSettings = true } label: {
                     Image(systemName: "gearshape.fill")
-                        .font(.system(size: 17)).foregroundStyle(.white.opacity(0.6))
+                        .font(.system(size: 17)).foregroundStyle(.primary.opacity(0.6))
                 }
             }
             .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 4)
@@ -66,9 +66,9 @@ private struct LauncherView: View {
 
             VStack(spacing: 4) {
                 Text(app.restaurant?.name ?? "")
-                    .font(.system(size: 24, weight: .bold)).foregroundStyle(.white)
+                    .font(.system(size: 24, weight: .bold)).foregroundStyle(.primary)
                 Text(app.staff?.isOwner == true ? t("role.owner") : (app.staff?.name ?? ""))
-                    .font(.system(size: 14)).foregroundStyle(.white.opacity(0.5))
+                    .font(.system(size: 14)).foregroundStyle(.primary.opacity(0.5))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 22)
@@ -94,14 +94,14 @@ private struct LauncherView: View {
                 Image(systemName: mod.symbol).font(.system(size: 24)).foregroundStyle(mod.color)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(mod.title).font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
-                Text(t("mod.\(mod.id).sub")).font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+                Text(mod.title).font(.system(size: 17, weight: .bold)).foregroundStyle(.primary)
+                Text(t("mod.\(mod.id).sub")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
                     .lineLimit(2, reservesSpace: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
 
@@ -122,10 +122,10 @@ private struct AppContainer: View {
                 } label: {
                     HStack(spacing: 6) {
                         Wordmark(size: 19, color: .white, animated: false, accent: module.color)
-                        Text(module.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
+                        Text(module.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
                         if canSwitch {
                             Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.primary.opacity(0.4))
                         }
                     }
                 }
@@ -135,12 +135,12 @@ private struct AppContainer: View {
                 Spacer()
 
                 Button { showSettings = true } label: {
-                    Image(systemName: "gearshape.fill").font(.system(size: 15)).foregroundStyle(.white.opacity(0.45))
+                    Image(systemName: "gearshape.fill").font(.system(size: 15)).foregroundStyle(.primary.opacity(0.45))
                 }
                 .sheet(isPresented: $showSettings) { SettingsView() }
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
-            .background(Color.black)
+            .background(Color.miseBg)
             .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.08)).frame(height: 0.5) }
 
             body(for: module.id)
@@ -166,7 +166,7 @@ struct AppTabPage<Content: View>: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.miseBg.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 12) { content }
                     .padding(16).padding(.bottom, 24)
@@ -187,15 +187,29 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.miseBg.ignoresSafeArea()
                 List {
                     Section(t("settings.lang")) {
                         ForEach(Lang.ordered, id: \.self) { l in
                             Button { L10n.shared.setLang(l) } label: {
                                 HStack {
-                                    Text(l.native).foregroundStyle(.white)
+                                    Text(l.native).foregroundStyle(.primary)
                                     Spacer()
                                     if L10n.shared.lang == l {
+                                        Image(systemName: "checkmark").foregroundStyle(BrandKit.analytics)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Section(t("settings.theme")) {
+                        ForEach(AppTheme.allCases, id: \.self) { th in
+                            Button { L10n.shared.theme = th } label: {
+                                HStack {
+                                    Label(themeLabel(th), systemImage: themeIcon(th))
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    if L10n.shared.theme == th {
                                         Image(systemName: "checkmark").foregroundStyle(BrandKit.analytics)
                                     }
                                 }
@@ -212,8 +226,7 @@ struct SettingsView: View {
             }
             .navigationTitle(t("settings")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(t("done")) { dismiss() } } }
-            .toolbarBackground(.black, for: .navigationBar)
-            .preferredColorScheme(.dark)
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
             .confirmationDialog(t("logout.confirm"), isPresented: $confirmLogout, titleVisibility: .visible) {
                 Button(t("logout"), role: .destructive) { app.logout(); dismiss() }
                 Button(t("cancel"), role: .cancel) {}
@@ -222,19 +235,34 @@ struct SettingsView: View {
     }
 }
 
+private func themeLabel(_ th: AppTheme) -> String {
+    switch th {
+    case .system: return t("theme.system")
+    case .dark:   return t("theme.dark")
+    case .light:  return t("theme.light")
+    }
+}
+private func themeIcon(_ th: AppTheme) -> String {
+    switch th {
+    case .system: return "circle.lefthalf.filled"
+    case .dark:   return "moon.fill"
+    case .light:  return "sun.max.fill"
+    }
+}
+
 private struct ComingSoon: View {
     let module: MiseModule
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.miseBg.ignoresSafeArea()
             VStack(spacing: 14) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 22, style: .continuous).fill(module.color.opacity(0.16)).frame(width: 84, height: 84)
                     Image(systemName: module.symbol).font(.system(size: 34)).foregroundStyle(module.color)
                 }
-                Text("Mise \(module.title)").font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
+                Text("Mise \(module.title)").font(.system(size: 20, weight: .bold)).foregroundStyle(.primary)
                 Text(t("comingSoon"))
-                    .font(.system(size: 14)).foregroundStyle(.white.opacity(0.5)).multilineTextAlignment(.center)
+                    .font(.system(size: 14)).foregroundStyle(.primary.opacity(0.5)).multilineTextAlignment(.center)
             }
             .padding(40)
             .frame(maxHeight: .infinity)

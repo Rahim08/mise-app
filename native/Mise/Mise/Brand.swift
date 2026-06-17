@@ -60,8 +60,8 @@ struct Wordmark: View {
 struct SplashView: View {
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
-            Wordmark(size: 56, color: .white)
+            Color.miseBg.ignoresSafeArea()
+            Wordmark(size: 56)
         }
     }
 }

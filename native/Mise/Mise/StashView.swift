@@ -287,7 +287,7 @@ struct StashView: View {
     var body: some View {
         Group {
             if let m { StashBody(m: m) }
-            else { ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else { ProgressView().tint(.primary).frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
         .task {
             if m == nil {
@@ -322,7 +322,7 @@ private struct StashBody: View {
             .tint(BrandKit.stash)
 
             if let toast = m.toast {
-                Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
                     .padding(.horizontal, 18).padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: Capsule())
                     .padding(.bottom, 60)
@@ -341,12 +341,12 @@ private struct ShiftTab: View {
 
     var body: some View {
         if m.shiftLoading {
-            ProgressView().tint(.white).padding(.top, 40)
+            ProgressView().tint(.primary).padding(.top, 40)
         } else if m.types.isEmpty {
             VStack(spacing: 6) {
-                Text(t("st.noTypes")).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
+                Text(t("st.noTypes")).font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary)
                 Text(t("st.noTypesHint"))
-                    .font(.system(size: 13)).foregroundStyle(.white.opacity(0.5)).multilineTextAlignment(.center)
+                    .font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5)).multilineTextAlignment(.center)
             }
             .padding(.top, 50)
         } else {
@@ -363,7 +363,7 @@ private struct ShiftTab: View {
             navBtn("chevron.left") { Task { await m.shiftDay(-1) } }
             Spacer()
             VStack(spacing: 2) {
-                Text(longDate(m.currentDate)).font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                Text(longDate(m.currentDate)).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
                 if !m.isToday {
                     Button { Task { m.currentDate = Date(); await m.loadShift() } } label: {
                         Text(t("st.toToday")).font(.system(size: 11, weight: .semibold)).foregroundStyle(BrandKit.manager)
@@ -387,10 +387,10 @@ private struct ShiftTab: View {
             ForEach(items, id: \.0) { it in
                 VStack(spacing: 3) {
                     Text(it.1).font(.system(size: 17, weight: .heavy)).foregroundStyle(it.2)
-                    Text(it.0).font(.system(size: 11)).foregroundStyle(.white.opacity(0.45))
+                    Text(it.0).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.45))
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 12)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
             }
         }
     }
@@ -411,7 +411,7 @@ private struct ShiftTab: View {
                             Text(cat).font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(m.freeCat == cat ? .black : .white)
                                 .padding(.horizontal, 14).padding(.vertical, 8)
-                                .background(m.freeCat == cat ? BrandKit.people : Color.white.opacity(0.08), in: Capsule())
+                                .background(m.freeCat == cat ? BrandKit.people : Color.primary.opacity(0.08), in: Capsule())
                         }
                     }
                 }
@@ -421,28 +421,28 @@ private struct ShiftTab: View {
             ForEach(Array(m.types.enumerated()), id: \.element.id) { idx, tp in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(tp.name ?? "—").font(.system(size: 15, weight: .medium)).foregroundStyle(.white)
+                        Text(tp.name ?? "—").font(.system(size: 15, weight: .medium)).foregroundStyle(.primary)
                         Text("\(eur(tp.price ?? 0)) · \(grams(tp.portion_g ?? 0))")
-                            .font(.system(size: 12)).foregroundStyle(.white.opacity(0.4))
+                            .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
                     }
                     Spacer()
                     TextField("0", text: Binding(get: { m.inputVal(tp.id) }, set: { m.setQty(tp.id, $0) }))
                         .keyboardType(.numberPad).multilineTextAlignment(.center)
-                        .font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+                        .font(.system(size: 17, weight: .bold)).foregroundStyle(.primary)
                         .frame(width: 64).padding(.vertical, 8)
-                        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+                        .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
                 }
                 .padding(.vertical, 11).padding(.horizontal, 14)
-                if idx < m.types.count - 1 { Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 14) }
+                if idx < m.types.count - 1 { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 14) }
             }
         }
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
     }
 
     private var saveBtn: some View {
         Button { Task { await m.saveShift() } } label: {
             Text(m.saving ? t("saving") : t("mg.saveShift"))
-                .font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                .font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
                 .frame(maxWidth: .infinity).padding(.vertical, 16)
                 .background(BrandKit.stash, in: RoundedRectangle(cornerRadius: 16))
         }
@@ -451,8 +451,8 @@ private struct ShiftTab: View {
 
     private func navBtn(_ s: String, disabled: Bool = false, _ a: @escaping () -> Void) -> some View {
         Button(action: a) {
-            Image(systemName: s).font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
-                .frame(width: 36, height: 36).background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            Image(systemName: s).font(.system(size: 14, weight: .bold)).foregroundStyle(.primary)
+                .frame(width: 36, height: 36).background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
         }.disabled(disabled).opacity(disabled ? 0.4 : 1)
     }
 }
@@ -464,11 +464,11 @@ private struct StockTab: View {
     var body: some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").font(.system(size: 13)).foregroundStyle(.white.opacity(0.4))
-                TextField(t("st.search"), text: $m.search).font(.system(size: 15)).foregroundStyle(.white)
+                Image(systemName: "magnifyingglass").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.4))
+                TextField(t("st.search"), text: $m.search).font(.system(size: 15)).foregroundStyle(.primary)
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
             if m.lowCount > 0 {
                 Button { m.showLowOnly.toggle() } label: {
                     Text(t("st.low", ["n": "\(m.lowCount)"])).font(.system(size: 13, weight: .semibold))
@@ -480,40 +480,40 @@ private struct StockTab: View {
         }
         if !m.inStock.isEmpty {
             HStack {
-                Text(t("st.totalStock")).font(.system(size: 13)).foregroundStyle(.white.opacity(0.55))
+                Text(t("st.totalStock")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.55))
                 Spacer()
                 Text(grams(m.inStock.reduce(0) { $0 + $1.quantity_g })).font(.system(size: 16, weight: .heavy)).foregroundStyle(BrandKit.stash)
             }
             .padding(.horizontal, 14).padding(.vertical, 12)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
         }
         if m.filteredStock.isEmpty {
-            Text(t("empty")).font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 40)
+            Text(t("empty")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
         } else {
             ForEach(m.stockByBrand, id: \.0) { brand, items in
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
-                        Text(brand).font(.system(size: 13, weight: .bold)).foregroundStyle(.white.opacity(0.55))
+                        Text(brand).font(.system(size: 13, weight: .bold)).foregroundStyle(.primary.opacity(0.55))
                             .textCase(.uppercase)
                         Spacer()
                         Text(grams(items.reduce(0) { $0 + $1.quantity_g }))
-                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.4))
+                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.4))
                     }
                     .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 8)
                     ForEach(Array(items.enumerated()), id: \.element.id) { idx, s in
                         HStack {
-                            Text(s.flavor).font(.system(size: 15)).foregroundStyle(.white)
+                            Text(s.flavor).font(.system(size: 15)).foregroundStyle(.primary)
                             Spacer()
                             Text(grams(s.quantity_g))
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(m.isLow(s) ? BrandKit.stash : .white)
                         }
                         .padding(.vertical, 10).padding(.horizontal, 14)
-                        if idx < items.count - 1 { Divider().overlay(Color.white.opacity(0.06)).padding(.leading, 14) }
+                        if idx < items.count - 1 { Divider().overlay(Color.primary.opacity(0.06)).padding(.leading, 14) }
                     }
                 }
                 .padding(.bottom, 6)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
             }
         }
     }
@@ -538,7 +538,7 @@ private struct MovementsTab: View {
         }
 
         if m.movementBatches.isEmpty {
-            Text(t("st.noMovements")).font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 30)
+            Text(t("st.noMovements")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 30)
         } else {
             ForEach(m.movementBatches, id: \.0) { batchId, items in
                 MovementBatchRow(items: items)
@@ -558,14 +558,14 @@ private struct MovementBatchRow: View {
             Button { withAnimation(.easeInOut(duration: 0.18)) { open.toggle() } } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(movDate(items.first?.created_at)).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-                        Text(t("st.positions", ["n": "\(items.count)"])).font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                        Text(movDate(items.first?.created_at)).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
+                        Text(t("st.positions", ["n": "\(items.count)"])).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
                     }
                     Spacer()
                     Text((isIn ? "+" : "−") + grams(total))
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(isIn ? BrandKit.analytics : BrandKit.stash)
-                    Image(systemName: open ? "chevron.up" : "chevron.down").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                    Image(systemName: open ? "chevron.up" : "chevron.down").font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
                 }
                 .padding(14)
             }
@@ -574,19 +574,19 @@ private struct MovementBatchRow: View {
                 VStack(spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { idx, mv in
                         HStack {
-                            Text("\(mv.brand) · \(mv.flavor)").font(.system(size: 13)).foregroundStyle(.white.opacity(0.85))
+                            Text("\(mv.brand) · \(mv.flavor)").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.85))
                             Spacer()
                             Text((isIn ? "+" : "−") + grams(mv.quantity_g)).font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(isIn ? BrandKit.analytics : BrandKit.stash)
                         }
                         .padding(.vertical, 8).padding(.horizontal, 14)
-                        if idx < items.count - 1 { Divider().overlay(Color.white.opacity(0.06)).padding(.leading, 14) }
+                        if idx < items.count - 1 { Divider().overlay(Color.primary.opacity(0.06)).padding(.leading, 14) }
                     }
                 }
                 .padding(.bottom, 6)
             }
         }
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
@@ -619,24 +619,24 @@ private struct AutoField: View {
         VStack(spacing: 0) {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain).focused($focused).disabled(disabled)
-                .padding(10).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+                .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
                 .foregroundStyle(disabled ? .white.opacity(0.3) : .white)
             if focused && !filtered.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(Array(filtered.enumerated()), id: \.element) { idx, s in
                         Button { text = s; onPick?(); focused = false } label: {
                             HStack {
-                                Text(s).font(.system(size: 15)).foregroundStyle(.white)
+                                Text(s).font(.system(size: 15)).foregroundStyle(.primary)
                                 Spacer()
                             }
                             .padding(.vertical, 10).padding(.horizontal, 12)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        if idx < filtered.count - 1 { Divider().overlay(Color.white.opacity(0.08)) }
+                        if idx < filtered.count - 1 { Divider().overlay(Color.primary.opacity(0.08)) }
                     }
                 }
-                .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
                 .padding(.top, 4)
             }
         }
@@ -652,7 +652,7 @@ private struct AddMovementSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.miseBg.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 12) {
                         Picker("", selection: $m.movMode) {
@@ -672,23 +672,23 @@ private struct AddMovementSheet: View {
                                           suggestions: m.flavorsForBrand(row.brand, outOnly: outOnly),
                                           disabled: outOnly && row.brand.trimmingCharacters(in: .whitespaces).isEmpty)
                                 TextField(t("st.grams"), text: $row.grams).keyboardType(.numberPad)
-                                    .padding(10).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
+                                    .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.primary)
                                 if let a = avail, !row.flavor.isEmpty {
                                     HStack {
                                         Text("\(t("st.available")): \(grams(a.quantity_g))")
-                                            .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                                            .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
                                         Spacer()
                                     }
                                 }
                             }
-                            .padding(12).background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+                            .padding(12).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
                         }
                         Button { rows.append(.init()) } label: {
                             Label(t("st.moreRow"), systemImage: "plus").font(.system(size: 14, weight: .medium)).foregroundStyle(BrandKit.stash)
                         }
                         if m.movMode == "writeoff" {
                             TextField(t("st.writeoffReasonField"), text: $reason).textFieldStyle(.plain)
-                                .padding(10).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
+                                .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.primary)
                         }
                     }
                     .padding(16)
@@ -703,7 +703,7 @@ private struct AddMovementSheet: View {
                     }.disabled(m.saving)
                 }
             }
-            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
             .preferredColorScheme(.dark)
         }
     }
@@ -715,7 +715,7 @@ private struct InventoryTab: View {
     @Bindable var m: StashModel
     var body: some View {
         if m.inventories.isEmpty {
-            Text(t("st.noInventories")).font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 40)
+            Text(t("st.noInventories")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
         } else {
             ForEach(m.inventories) { inv in InventoryRow(inv: inv) }
         }
@@ -732,14 +732,14 @@ private struct InventoryRow: View {
             Button { withAnimation(.easeInOut(duration: 0.18)) { open.toggle() } } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(shortDateTime(inv.created_at)).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-                        Text(t("st.discrepancies", ["n": "\((inv.items ?? []).count)"])).font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                        Text(shortDateTime(inv.created_at)).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
+                        Text(t("st.discrepancies", ["n": "\((inv.items ?? []).count)"])).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
                     }
                     Spacer()
                     Text((net > 0 ? "+" : "") + grams(net))
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(net < 0 ? BrandKit.menu : BrandKit.analytics)
-                    Image(systemName: open ? "chevron.up" : "chevron.down").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                    Image(systemName: open ? "chevron.up" : "chevron.down").font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
                 }
                 .padding(14)
             }
@@ -749,19 +749,19 @@ private struct InventoryRow: View {
                     ForEach(Array((inv.items ?? []).enumerated()), id: \.offset) { idx, it in
                         let d = it.diff_g ?? 0
                         HStack {
-                            Text("\(it.brand ?? "") · \(it.flavor ?? "")").font(.system(size: 13)).foregroundStyle(.white.opacity(0.85))
+                            Text("\(it.brand ?? "") · \(it.flavor ?? "")").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.85))
                             Spacer()
                             Text((d > 0 ? "+" : "") + grams(d)).font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(d < 0 ? BrandKit.menu : BrandKit.analytics)
                         }
                         .padding(.vertical, 8).padding(.horizontal, 14)
-                        if idx < (inv.items ?? []).count - 1 { Divider().overlay(Color.white.opacity(0.06)).padding(.leading, 14) }
+                        if idx < (inv.items ?? []).count - 1 { Divider().overlay(Color.primary.opacity(0.06)).padding(.leading, 14) }
                     }
                 }
                 .padding(.bottom, 6)
             }
         }
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 

@@ -23,24 +23,55 @@ enum Lang: String, CaseIterable, Sendable {
     }
 }
 
+enum AppTheme: String, CaseIterable {
+    case system, dark, light
+}
+
 @MainActor
 @Observable
 final class L10n {
     static let shared = L10n()
     private let key = "mise_lang"
+    private let themeKey = "mise_theme"
 
     var lang: Lang {
         didSet { UserDefaults.standard.set(lang.rawValue, forKey: key); I18n.code = lang.rawValue }
     }
 
-    private init() {
-        if let saved = UserDefaults.standard.string(forKey: "mise_lang"), let l = Lang(rawValue: saved) {
-            lang = l
-        } else {
-            let sys = Locale.preferredLanguages.first?.prefix(2).lowercased() ?? "en"
-            lang = Lang(rawValue: String(sys)) ?? .en
+    var theme: AppTheme {
+        didSet { UserDefaults.standard.set(theme.rawValue, forKey: themeKey) }
+    }
+
+    /// SwiftUI colorScheme override (nil = system).
+    var colorScheme: ColorScheme? {
+        switch theme {
+        case .dark:   return .dark
+        case .light:  return .light
+        case .system: return nil
         }
-        I18n.code = lang.rawValue
+    }
+
+    private init() {
+        // lang
+        let savedLang = UserDefaults.standard.string(forKey: "mise_lang").flatMap { Lang(rawValue: $0) }
+        let sysLang = Lang(rawValue: String(Locale.preferredLanguages.first?.prefix(2).lowercased() ?? "en")) ?? .en
+        var resolvedLang = savedLang ?? sysLang
+
+        // theme
+        let savedTheme = UserDefaults.standard.string(forKey: "mise_theme").flatMap { AppTheme(rawValue: $0) }
+        var resolvedTheme = savedTheme ?? .dark
+
+        // DEBUG env overrides для скриншотов в симуляторе
+        #if DEBUG
+        if let envLang = ProcessInfo.processInfo.environment["MISE_DEMO_LANG"],
+           let l = Lang(rawValue: envLang) { resolvedLang = l }
+        if let envTheme = ProcessInfo.processInfo.environment["MISE_DEMO_THEME"],
+           let th = AppTheme(rawValue: envTheme) { resolvedTheme = th }
+        #endif
+
+        lang = resolvedLang
+        theme = resolvedTheme
+        I18n.code = resolvedLang.rawValue
     }
 
     func setLang(_ l: Lang) { lang = l }
@@ -83,6 +114,10 @@ let STRINGS: [String: [Lang: String]] = [
     // Настройки
     "settings":        tr("Settings", "Настройки", "Impostazioni", "Réglages", "Tənzimləmələr", "Ayarlar", "Налаштування", "Параметрлер"),
     "settings.lang":   tr("Language", "Язык", "Lingua", "Langue", "Dil", "Dil", "Мова", "Тіл"),
+    "settings.theme":  tr("Theme", "Тема", "Tema", "Thème", "Tema", "Tema", "Тема", "Тема"),
+    "theme.system":    tr("System", "Системная", "Sistema", "Système", "Sistem", "Sistem", "Системна", "Жүйелік"),
+    "theme.dark":      tr("Dark", "Тёмная", "Scuro", "Sombre", "Tünd", "Koyu", "Темна", "Қараңғы"),
+    "theme.light":     tr("Light", "Светлая", "Chiaro", "Clair", "İşıqlı", "Açık", "Світла", "Жарық"),
     "logout":          tr("Log out", "Выйти", "Esci", "Déconnexion", "Çıxış", "Çıkış yap", "Вийти", "Шығу"),
     "logout.confirm":  tr("Log out of venue?", "Выйти из заведения?", "Uscire dal locale?", "Quitter l’établissement ?", "Məkandan çıxılsın?", "Mekandan çıkılsın mı?", "Вийти із закладу?", "Орыннан шығу керек пе?"),
     "logout.msg":      tr("You’ll need to scan the QR and enter the PIN again.", "Понадобится снова отсканировать QR и ввести PIN.", "Dovrai scansionare di nuovo il QR e inserire il PIN.", "Vous devrez scanner le QR et saisir le PIN à nouveau.", "QR-u yenidən skan edib PIN daxil etməli olacaqsınız.", "QR'ı tekrar tarayıp PIN girmeniz gerekecek.", "Потрібно буде знову відсканувати QR і ввести PIN.", "QR-ды қайта сканерлеп, PIN енгізу қажет болады."),

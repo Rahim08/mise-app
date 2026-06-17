@@ -8,7 +8,7 @@ private func eur(_ v: Double) -> String { Money.s(v) }
 private let STATUS_ORDER = ["todo", "in_progress", "done"]
 @MainActor private func statusLabel(_ s: String) -> String { t("pe.st." + (s == "in_progress" ? "inprogress" : s)) }
 @MainActor private func prioLabel(_ p: String?) -> String { t("pe.prio." + (p ?? "medium")) }
-private func prioColor(_ p: String?) -> Color { ["high": BrandKit.menu, "medium": BrandKit.stash, "low": Color.white.opacity(0.4)][p ?? "medium"] ?? BrandKit.stash }
+private func prioColor(_ p: String?) -> Color { ["high": BrandKit.menu, "medium": BrandKit.stash, "low": Color.primary.opacity(0.4)][p ?? "medium"] ?? BrandKit.stash }
 
 // MARK: - Модель People (логика app/people/page.tsx)
 
@@ -647,7 +647,7 @@ struct PeopleView: View {
     var body: some View {
         Group {
             if let m { PeopleBody(m: m) }
-            else { ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else { ProgressView().tint(.primary).frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
         .task {
             if m == nil {
@@ -689,7 +689,7 @@ private struct PeopleBody: View {
             .tint(PEOPLE_ACCENT)
 
             if let toast = m.toast {
-                Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
                     .padding(.horizontal, 18).padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: Capsule())
                     .padding(.bottom, 60)
@@ -753,12 +753,12 @@ private struct TasksTab: View {
         // Любой сотрудник может поставить задачу коллеге/сменщику (раньше — только менеджер).
         Button { showForm = true } label: {
             Label(t("pe.newTask"), systemImage: "plus")
-                .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                .font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
                 .frame(maxWidth: .infinity).padding(.vertical, 14)
                 .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
         }
         if m.visibleTasks.isEmpty {
-            Text(t("pe.noTasks")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
+            Text(t("pe.noTasks")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)
         } else {
             ForEach(["todo", "in_progress"], id: \.self) { st in
                 let group = m.tasks(st)
@@ -769,10 +769,10 @@ private struct TasksTab: View {
                 Button { withAnimation(.easeInOut(duration: 0.18)) { showDone.toggle() } } label: {
                     HStack {
                         Text(t("pe.doneN", ["n": "\(done.count)"]))
-                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                         Spacer()
                         Image(systemName: showDone ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                            .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
                     }
                     .padding(.top, 6)
                 }
@@ -781,10 +781,10 @@ private struct TasksTab: View {
                     VStack(spacing: 0) {
                         ForEach(Array(done.enumerated()), id: \.element.id) { idx, task in
                             row(task)
-                            if idx < done.count - 1 { Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 50) }
+                            if idx < done.count - 1 { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 50) }
                         }
                     }
-                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
                 }
             }
         }
@@ -793,15 +793,15 @@ private struct TasksTab: View {
     private func taskGroup(_ title: String, _ group: [StaffTask]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("\(title) · \(group.count)".uppercased())
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                 .padding(.top, 6)
             VStack(spacing: 0) {
                 ForEach(Array(group.enumerated()), id: \.element.id) { idx, task in
                     row(task)
-                    if idx < group.count - 1 { Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 50) }
+                    if idx < group.count - 1 { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 50) }
                 }
             }
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
         }
     }
 
@@ -810,21 +810,21 @@ private struct TasksTab: View {
         return HStack(alignment: .top, spacing: 12) {
             Button { Task { await m.setStatus(task, done ? "todo" : "done") } } label: {
                 ZStack {
-                    Circle().stroke(done ? PEOPLE_ACCENT : Color.white.opacity(0.25), lineWidth: 2).frame(width: 22, height: 22)
+                    Circle().stroke(done ? PEOPLE_ACCENT : Color.primary.opacity(0.25), lineWidth: 2).frame(width: 22, height: 22)
                     if done { Circle().fill(PEOPLE_ACCENT).frame(width: 22, height: 22)
-                        Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white) }
+                        Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.primary) }
                 }
             }
             .buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 4) {
                 Text(task.title).font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(done ? 0.5 : 1)).strikethrough(done)
+                    .foregroundStyle(.primary.opacity(done ? 0.5 : 1)).strikethrough(done)
                 if let d = task.description, !d.isEmpty {
-                    Text(d).font(.system(size: 13)).foregroundStyle(.white.opacity(0.45))
+                    Text(d).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.45))
                 }
                 HStack(spacing: 8) {
                     Text(prioLabel(task.priority)).font(.system(size: 11, weight: .bold)).foregroundStyle(prioColor(task.priority))
-                    Text("· \(m.staffName(task.assigned_to))").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                    Text("· \(m.staffName(task.assigned_to))").font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
                     if !done {
                         Button { Task { await m.setStatus(task, task.status == "todo" ? "in_progress" : "todo") } } label: {
                             Text(task.status == "todo" ? t("pe.toWork") : t("pe.return"))
@@ -836,7 +836,7 @@ private struct TasksTab: View {
             Spacer(minLength: 0)
             if m.canDelete(task) {
                 Button { Task { await m.removeTask(task.id) } } label: {
-                    Image(systemName: "trash").font(.system(size: 14)).foregroundStyle(.white.opacity(0.3))
+                    Image(systemName: "trash").font(.system(size: 14)).foregroundStyle(.primary.opacity(0.3))
                 }
                 .buttonStyle(.plain)
             }
@@ -858,7 +858,7 @@ private struct TaskFormSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.miseBg.ignoresSafeArea()
                 Form {
                     Section {
                         TextField(t("pe.fTitle"), text: $title)
@@ -894,7 +894,7 @@ private struct TaskFormSheet: View {
                     }
                 }
             }
-            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
             .preferredColorScheme(.dark)
         }
     }
@@ -924,17 +924,17 @@ private struct ReportsTab: View {
     var body: some View {
         Group {
             if !m.reportsLoaded {
-                ProgressView().tint(.white).padding(.top, 40)
+                ProgressView().tint(.primary).padding(.top, 40)
             } else {
                 Button { showForm = true } label: {
                     Label(t("pe.newReport"), systemImage: "paperplane")
-                        .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                        .font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                         .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
                 }
                 if m.visibleReports.isEmpty {
                     Text(m.isManager ? t("pe.noReports") : t("pe.noReportsMine"))
-                        .font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 40)
+                        .font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
                 } else {
                     ForEach(m.visibleReports) { r in card(r) }
                 }
@@ -959,12 +959,12 @@ private struct ReportsTab: View {
                     .background(reportStatusColor(r.status).opacity(0.16), in: Capsule())
             }
             Text(r.title).font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(resolved ? 0.5 : 1)).strikethrough(resolved)
+                .foregroundStyle(.primary.opacity(resolved ? 0.5 : 1)).strikethrough(resolved)
             if let d = r.description, !d.isEmpty {
-                Text(d).font(.system(size: 13)).foregroundStyle(.white.opacity(0.55))
+                Text(d).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.55))
             }
             HStack(spacing: 10) {
-                Text(m.staffName(r.author_id)).font(.system(size: 12)).foregroundStyle(.white.opacity(0.4))
+                Text(m.staffName(r.author_id)).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
                 Spacer()
                 if m.isManager && !resolved {
                     if (r.status ?? "new") == "new" {
@@ -976,12 +976,12 @@ private struct ReportsTab: View {
                 }
                 if m.canDeleteReport(r) {
                     Button { Task { await m.deleteReport(r.id) } } label: {
-                        Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.white.opacity(0.3))
+                        Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3))
                     }
                 }
             }
         }
-        .padding(14).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .padding(14).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
     }
     private func reportStatusLabel(_ s: String?) -> String {
         ["new": t("pe.repNew"), "reviewed": t("pe.reviewed"), "resolved": t("pe.resolved")][s ?? "new"] ?? t("pe.repNew")
@@ -1001,7 +1001,7 @@ private struct ReportFormSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.miseBg.ignoresSafeArea()
                 Form {
                     Section(t("pe.type")) {
                         Picker(t("pe.type"), selection: $type) {
@@ -1024,7 +1024,7 @@ private struct ReportFormSheet: View {
                     }
                 }
             }
-            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
             .preferredColorScheme(.dark)
         }
     }
@@ -1038,9 +1038,9 @@ private struct PeopleSalaryTab: View {
 
     var body: some View {
         if !m.salaryLoaded {
-            ProgressView().tint(.white).padding(.top, 40)
+            ProgressView().tint(.primary).padding(.top, 40)
         } else if m.salaryRows.isEmpty {
-            Text(t("pe.noSalary")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
+            Text(t("pe.noSalary")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)
         } else if !m.isManager, let r = m.salaryRows.first {
             heroCard(title: t("pe.toPay"), total: r.total, card: r.card, cash: r.cash)
             breakdown(r)
@@ -1055,31 +1055,31 @@ private struct PeopleSalaryTab: View {
                     Button { withAnimation(.easeInOut(duration: 0.18)) { open = open == r.id ? nil : r.id } } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(r.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                                Text(r.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
                                 Text(subtitle)
-                                    .font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+                                    .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
                             }
                             Spacer()
                             Text(eur(r.total)).font(.system(size: 16, weight: .bold)).foregroundStyle(PEOPLE_ACCENT)
-                            Image(systemName: open == r.id ? "chevron.up" : "chevron.down").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                            Image(systemName: open == r.id ? "chevron.up" : "chevron.down").font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
                         }
                         .padding(14)
                     }
                     .buttonStyle(.plain)
                     if open == r.id { breakdown(r).padding(.horizontal, 14).padding(.bottom, 14) }
                 }
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
             }
         }
     }
 
     private func heroCard(title: String, total: Double, card: Double, cash: Double) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.85))
-            Text(eur(total)).font(.system(size: 36, weight: .heavy)).foregroundStyle(.white)
+            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.85))
+            Text(eur(total)).font(.system(size: 36, weight: .heavy)).foregroundStyle(.primary)
             HStack(spacing: 16) {
-                if card > 0 { Text(t("toCard") + " " + eur(card)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9)) }
-                Text(t("byCash") + " " + eur(cash)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+                if card > 0 { Text(t("toCard") + " " + eur(card)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.9)) }
+                Text(t("byCash") + " " + eur(cash)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.9))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(20)
@@ -1096,7 +1096,7 @@ private struct PeopleSalaryTab: View {
         }
     }
     private func line(_ l: String, _ v: String, _ c: Color) -> some View {
-        HStack { Text(l).font(.system(size: 13)).foregroundStyle(.white.opacity(0.55)); Spacer()
+        HStack { Text(l).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.55)); Spacer()
             Text(v).font(.system(size: 14, weight: .semibold)).foregroundStyle(c) }
     }
 }
@@ -1141,7 +1141,7 @@ private struct AttendanceTab: View {
     var body: some View {
         Group {
             if !m.attLoaded {
-                ProgressView().tint(.white).padding(.top, 40)
+                ProgressView().tint(.primary).padding(.top, 40)
             } else if m.isManager {
                 managerView
             } else {
@@ -1155,21 +1155,21 @@ private struct AttendanceTab: View {
             if let rec = m.todayRec {
                 VStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill").font(.system(size: 40)).foregroundStyle(BrandKit.analytics)
-                    Text(t("pe.onShift")).font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
-                    Text(t("pe.arrivedAt", ["t": clock(rec.check_in_at)])).font(.system(size: 13)).foregroundStyle(.white.opacity(0.5))
+                    Text(t("pe.onShift")).font(.system(size: 17, weight: .bold)).foregroundStyle(.primary)
+                    Text(t("pe.arrivedAt", ["t": clock(rec.check_in_at)])).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5))
                     if rec.status == "late", let l = rec.late_minutes, l > 0 {
                         Text(t("pe.lateMin", ["n": "\(l)"])).font(.system(size: 12, weight: .semibold)).foregroundStyle(BrandKit.stash)
                     }
                 }
                 .frame(maxWidth: .infinity).padding(20)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
             } else {
                 Button { Task { await m.checkIn() } } label: {
                     HStack {
-                        if m.checking { ProgressView().tint(.white) }
+                        if m.checking { ProgressView().tint(.primary) }
                         else { Image(systemName: "location.fill"); Text(t("pe.iCame")) }
                     }
-                    .font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+                    .font(.system(size: 17, weight: .bold)).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity).padding(.vertical, 18)
                     .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 16))
                 }
@@ -1183,13 +1183,13 @@ private struct AttendanceTab: View {
         Group {
             if !m.attendance.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(t("pe.historyCaps")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
+                    Text(t("pe.historyCaps")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
                     ForEach(Array(m.attendance.enumerated()), id: \.element.id) { i, r in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(dayLabel(r.date ?? "")).font(.system(size: 14)).foregroundStyle(.white)
+                                Text(dayLabel(r.date ?? "")).font(.system(size: 14)).foregroundStyle(.primary)
                                 Text(clock(r.check_in_at) + (r.check_out_at != nil ? "–\(clock(r.check_out_at))" : ""))
-                                    .font(.system(size: 12)).foregroundStyle(.white.opacity(0.4))
+                                    .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
                             }
                             Spacer()
                             if r.status == "late", let l = r.late_minutes {
@@ -1197,37 +1197,37 @@ private struct AttendanceTab: View {
                             } else { badge(t("pe.onTime"), BrandKit.analytics) }
                         }
                         .padding(.vertical, 11).padding(.horizontal, 14)
-                        if i < m.attendance.count - 1 { Divider().overlay(Color.white.opacity(0.07)).padding(.leading, 14) }
+                        if i < m.attendance.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 14) }
                     }
                 }
                 .padding(.top, 8)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
             }
         }
     }
 
     private var managerView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(t("pe.todayCaps")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
+            Text(t("pe.todayCaps")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
             ForEach(Array(m.dir.enumerated()), id: \.element.id) { i, s in
                 let rec = m.attendance.first { $0.staff_id == s.id && $0.date == m.todayKey }
                 HStack {
-                    Text(s.name).font(.system(size: 15)).foregroundStyle(.white)
+                    Text(s.name).font(.system(size: 15)).foregroundStyle(.primary)
                     Spacer()
                     if let rec {
                         Text(clock(rec.check_in_at) + (rec.check_out_at != nil ? "–\(clock(rec.check_out_at))" : ""))
-                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
                         if rec.status == "late", let l = rec.late_minutes { badge(t("pe.lateBadge", ["n": "\(l)"]), BrandKit.stash) }
                     } else {
-                        Text(t("pe.notCame")).font(.system(size: 13)).foregroundStyle(.white.opacity(0.35))
+                        Text(t("pe.notCame")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.35))
                     }
                 }
                 .padding(.vertical, 12).padding(.horizontal, 14)
-                if i < m.dir.count - 1 { Divider().overlay(Color.white.opacity(0.07)).padding(.leading, 14) }
+                if i < m.dir.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 14) }
             }
         }
         .padding(.top, 8)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
     }
 
     private func badge(_ s: String, _ c: Color) -> some View {
@@ -1244,14 +1244,14 @@ private struct SwapsTab: View {
     var body: some View {
         Group {
             if !m.swapsLoaded {
-                ProgressView().tint(.white).padding(.top, 40)
+                ProgressView().tint(.primary).padding(.top, 40)
             } else {
                 if !m.isManager {
                     Button { showCreate = true } label: {
                         Label(t("pe.proposeSwap"), systemImage: "arrow.left.arrow.right")
                             .font(.system(size: 15, weight: .bold)).foregroundStyle(m.myUpcomingScheds.isEmpty ? .white.opacity(0.4) : .white)
                             .frame(maxWidth: .infinity).padding(.vertical, 14)
-                            .background(m.myUpcomingScheds.isEmpty ? Color.white.opacity(0.06) : PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
+                            .background(m.myUpcomingScheds.isEmpty ? Color.primary.opacity(0.06) : PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
                     }
                     .disabled(m.myUpcomingScheds.isEmpty)
                 }
@@ -1261,7 +1261,7 @@ private struct SwapsTab: View {
                 }.pickerStyle(.segmented)
                 let list = listFor()
                 if list.isEmpty {
-                    Text(t("pe.noSwaps")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
+                    Text(t("pe.noSwaps")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)
                 } else {
                     ForEach(list) { r in card(r) }
                 }
@@ -1283,14 +1283,14 @@ private struct SwapsTab: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(sc != nil ? "\(dayLabel(sc!.date)) · \(hhmm(sc!.shift_start))–\(hhmm(sc!.shift_end))" : t("pe.shiftWord"))
-                    .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                    .font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
                 Spacer()
                 Text(swapStatusLabel(r.status)).font(.system(size: 11, weight: .bold)).foregroundStyle(swapStatusColor(r.status))
                     .padding(.horizontal, 8).padding(.vertical, 3).background(swapStatusColor(r.status).opacity(0.16), in: Capsule())
             }
             Text("\(m.staffName(r.requester_id)) → \(m.staffName(r.target_id))")
-                .font(.system(size: 13)).foregroundStyle(.white.opacity(0.5))
-            if let n = r.note, !n.isEmpty { Text("«\(n)»").font(.system(size: 13)).foregroundStyle(.white.opacity(0.7)) }
+                .font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5))
+            if let n = r.note, !n.isEmpty { Text("«\(n)»").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.7)) }
 
             if r.status == "pending_peer" && iAmTarget {
                 HStack(spacing: 8) {
@@ -1306,7 +1306,7 @@ private struct SwapsTab: View {
                 }
             }
         }
-        .padding(14).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .padding(14).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
     }
 
     private func actBtn(_ title: String, _ primary: Bool, _ a: @escaping () -> Void) -> some View {
@@ -1314,7 +1314,7 @@ private struct SwapsTab: View {
             Text(title).font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(primary ? .white : .white.opacity(0.7))
                 .frame(maxWidth: .infinity).padding(.vertical, 11)
-                .background(primary ? PEOPLE_ACCENT : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .background(primary ? PEOPLE_ACCENT : Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
         }
     }
     private func swapStatusLabel(_ s: String?) -> String {
@@ -1323,7 +1323,7 @@ private struct SwapsTab: View {
     }
     private func swapStatusColor(_ s: String?) -> Color {
         ["approved": BrandKit.analytics, "rejected": BrandKit.menu, "peer_declined": BrandKit.menu,
-         "cancelled": Color.white.opacity(0.4)][s ?? ""] ?? BrandKit.stash
+         "cancelled": Color.primary.opacity(0.4)][s ?? ""] ?? BrandKit.stash
     }
 }
 
@@ -1337,7 +1337,7 @@ private struct SwapCreateSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.miseBg.ignoresSafeArea()
                 Form {
                     Section(t("pe.myShift")) {
                         Picker(t("pe.shiftWord"), selection: $scheduleId) {
@@ -1368,7 +1368,7 @@ private struct SwapCreateSheet: View {
                     }
                 }
             }
-            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
             .preferredColorScheme(.dark)
         }
     }
@@ -1382,36 +1382,36 @@ private struct ShiftsTab: View {
 
     var body: some View {
         if !m.schedLoaded {
-            ProgressView().tint(.white).padding(.top, 40)
+            ProgressView().tint(.primary).padding(.top, 40)
         } else {
             if m.isManager { managerControls }
             if m.schedByDate.isEmpty {
                 Text(m.isManager ? t("pe.scheduleEmptyMgr") : t("pe.scheduleEmptyStaff"))
-                    .font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).multilineTextAlignment(.center).padding(.top, 40)
+                    .font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).multilineTextAlignment(.center).padding(.top, 40)
             } else {
                 ForEach(m.schedByDate, id: \.0) { date, items in
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(dayLabel(date).uppercased()).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+                        Text(dayLabel(date).uppercased()).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                             .padding(.bottom, 8)
                         VStack(spacing: 0) {
                             ForEach(Array(items.enumerated()), id: \.element.id) { idx, s in
                                 HStack {
-                                    Text(m.staffName(s.staff_id)).font(.system(size: 15)).foregroundStyle(.white)
+                                    Text(m.staffName(s.staff_id)).font(.system(size: 15)).foregroundStyle(.primary)
                                     Spacer()
                                     Text("\(hhmm(s.shift_start))–\(hhmm(s.shift_end))")
                                         .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
                                     if m.isManager {
                                         Button { Task { await m.deleteSchedule(s.id) } } label: {
-                                            Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.white.opacity(0.3))
+                                            Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3))
                                         }
                                         .padding(.leading, 8)
                                     }
                                 }
                                 .padding(.vertical, 11).padding(.horizontal, 14)
-                                if idx < items.count - 1 { Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 14) }
+                                if idx < items.count - 1 { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 14) }
                             }
                         }
-                        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
                     }
                     .padding(.bottom, 4)
                 }
@@ -1423,7 +1423,7 @@ private struct ShiftsTab: View {
         HStack(spacing: 10) {
             Button { showAdd = true } label: {
                 Label(t("pe.addShift"), systemImage: "plus")
-                    .font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
+                    .font(.system(size: 14, weight: .bold)).foregroundStyle(.primary)
                     .frame(maxWidth: .infinity).padding(.vertical, 12)
                     .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 12))
             }
@@ -1454,7 +1454,7 @@ private struct ScheduleEditSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.miseBg.ignoresSafeArea()
                 Form {
                     Section(t("pe.staffOne")) {
                         Picker(t("pe.who"), selection: $staffId) {
@@ -1490,7 +1490,7 @@ private struct ScheduleEditSheet: View {
                     }
                 }
             }
-            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
             .preferredColorScheme(.dark)
         }
     }
@@ -1528,7 +1528,7 @@ private struct ChecklistsTab: View {
     var body: some View {
         Group {
             if !m.checklistsLoaded {
-                ProgressView().tint(.white).padding(.top, 40)
+                ProgressView().tint(.primary).padding(.top, 40)
             } else {
                 if m.openShiftId == nil { inactiveBanner }
                 Picker("", selection: $m.clType) {
@@ -1536,7 +1536,7 @@ private struct ChecklistsTab: View {
                 }.pickerStyle(.segmented)
                 let lists = m.relevantChecklists()
                 if lists.isEmpty {
-                    Text(t("pe.noChecklists")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 40)
+                    Text(t("pe.noChecklists")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
                 } else {
                     ForEach(lists) { list in section(list) }
                 }
@@ -1545,12 +1545,12 @@ private struct ChecklistsTab: View {
                         Label(t("pe.checklistForRole"), systemImage: "plus")
                             .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
                             .frame(maxWidth: .infinity).padding(.vertical, 13)
-                            .background(RoundedRectangle(cornerRadius: 14).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5])).foregroundStyle(.white.opacity(0.2)))
+                            .background(RoundedRectangle(cornerRadius: 14).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5])).foregroundStyle(.primary.opacity(0.2)))
                     }
                     .padding(.top, 4)
                     Button { showHistory = true } label: {
                         Label(t("pe.checklistHistory"), systemImage: "clock.arrow.circlepath")
-                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
+                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
                             .frame(maxWidth: .infinity).padding(.vertical, 12)
                     }
                 }
@@ -1565,9 +1565,9 @@ private struct ChecklistsTab: View {
         HStack(spacing: 10) {
             Image(systemName: "clock.badge.exclamationmark").font(.system(size: 18)).foregroundStyle(BrandKit.stash)
             VStack(alignment: .leading, spacing: 2) {
-                Text(t("mg.noShift")).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                Text(t("mg.noShift")).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
                 Text(t("pe.checklistNoShiftHint"))
-                    .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                    .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
             }
             Spacer()
         }
@@ -1592,7 +1592,7 @@ private struct ChecklistsTab: View {
                         Image(systemName: "pencil").font(.system(size: 13)).foregroundStyle(PEOPLE_ACCENT)
                     }
                     Button { Task { await m.deleteChecklist(list.id) } } label: {
-                        Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.white.opacity(0.3))
+                        Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3))
                     }
                 }
             }
@@ -1603,20 +1603,20 @@ private struct ChecklistsTab: View {
                     Button { Task { await m.toggleChecklistItem(list, i) } } label: {
                         HStack(spacing: 12) {
                             ZStack {
-                                Circle().stroke(on ? PEOPLE_ACCENT : Color.white.opacity(0.25), lineWidth: 2).frame(width: 22, height: 22)
+                                Circle().stroke(on ? PEOPLE_ACCENT : Color.primary.opacity(0.25), lineWidth: 2).frame(width: 22, height: 22)
                                 if on { Circle().fill(PEOPLE_ACCENT).frame(width: 22, height: 22)
-                                    Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white) }
+                                    Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.primary) }
                             }
-                            Text(text).font(.system(size: 15)).foregroundStyle(.white.opacity(on ? 0.5 : 1)).strikethrough(on)
+                            Text(text).font(.system(size: 15)).foregroundStyle(.primary.opacity(on ? 0.5 : 1)).strikethrough(on)
                             Spacer()
                         }
                         .padding(.vertical, 12).padding(.horizontal, 14)
                     }
                     .buttonStyle(.plain)
-                    if i < items.count - 1 { Divider().overlay(Color.white.opacity(0.07)).padding(.leading, 48) }
+                    if i < items.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 48) }
                 }
             }
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
         }
         .padding(.top, 4)
     }
@@ -1642,7 +1642,7 @@ private struct ChecklistEditSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.miseBg.ignoresSafeArea()
                 Form {
                     Section(t("pe.workshop")) {
                         Picker(t("pe.workshop"), selection: Binding(get: { edit.role ?? "" }, set: { edit.role = $0.isEmpty ? nil : $0 })) {
@@ -1667,7 +1667,7 @@ private struct ChecklistEditSheet: View {
                     }
                 }
             }
-            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
             .preferredColorScheme(.dark)
         }
     }
@@ -1679,13 +1679,13 @@ private struct ChecklistHistorySheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.miseBg.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 12) {
                         if !m.clHistoryLoaded {
-                            ProgressView().tint(.white).padding(.top, 40)
+                            ProgressView().tint(.primary).padding(.top, 40)
                         } else if m.historyByDate.isEmpty {
-                            Text(t("pe.historyEmpty")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 60)
+                            Text(t("pe.historyEmpty")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 60)
                         } else {
                             ForEach(m.historyByDate, id: \.0) { date, comps in dayCard(date, comps) }
                         }
@@ -1695,7 +1695,7 @@ private struct ChecklistHistorySheet: View {
             }
             .navigationTitle(t("pe.checklistHistory")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(t("done")) { dismiss() } } }
-            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
             .preferredColorScheme(.dark)
         }
         .task { if !m.clHistoryLoaded { await m.loadChecklistHistory() } }
@@ -1715,7 +1715,7 @@ private struct ChecklistHistorySheet: View {
         let allDone = total > 0 && done == total
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(dayLabel(date)).font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                Text(dayLabel(date)).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
                 Spacer()
                 Text("\(done)/\(total)").font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(allDone ? BrandKit.analytics : BrandKit.stash)
@@ -1726,13 +1726,13 @@ private struct ChecklistHistorySheet: View {
                 ForEach(Array(missed.enumerated()), id: \.offset) { _, it in
                     HStack(spacing: 8) {
                         Image(systemName: "xmark.circle").font(.system(size: 13)).foregroundStyle(BrandKit.menu)
-                        Text(it).font(.system(size: 13)).foregroundStyle(.white.opacity(0.7))
+                        Text(it).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.7))
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .padding(14).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
@@ -1759,18 +1759,18 @@ private struct TechCardsTab: View {
     var body: some View {
         Group {
             if !m.techLoaded {
-                ProgressView().tint(.white).padding(.top, 40)
+                ProgressView().tint(.primary).padding(.top, 40)
             } else {
                 if m.isManager {
                     Button { edit = TechEdit(cardId: nil, name: "", category: "dish", items: [""]) } label: {
                         Label(t("pe.newTech"), systemImage: "plus")
-                            .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                            .font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
                             .frame(maxWidth: .infinity).padding(.vertical, 14)
                             .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
                     }
                 }
                 if m.techCards.isEmpty {
-                    Text(t("pe.noTech")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
+                    Text(t("pe.noTech")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)
                 } else {
                     ForEach(m.techCards) { c in card(c) }
                 }
@@ -1787,11 +1787,11 @@ private struct TechCardsTab: View {
             Button { withAnimation(.easeInOut(duration: 0.18)) { openId = opened ? nil : c.id } } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(c.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-                        Text("\(tcCatLabel(c.category)) · \(t("pe.stepsCount", ["n": "\(items.count)"]))").font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+                        Text(c.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+                        Text("\(tcCatLabel(c.category)) · \(t("pe.stepsCount", ["n": "\(items.count)"]))").font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
                     }
                     Spacer()
-                    Image(systemName: opened ? "chevron.up" : "chevron.down").font(.system(size: 12)).foregroundStyle(.white.opacity(0.4))
+                    Image(systemName: opened ? "chevron.up" : "chevron.down").font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
                 }
                 .padding(14)
             }
@@ -1801,7 +1801,7 @@ private struct TechCardsTab: View {
                     ForEach(Array(items.enumerated()), id: \.offset) { i, step in
                         HStack(alignment: .top, spacing: 10) {
                             Text("\(i + 1)").font(.system(size: 12, weight: .heavy)).foregroundStyle(PEOPLE_ACCENT).frame(width: 18, alignment: .leading)
-                            Text(step).font(.system(size: 14)).foregroundStyle(.white.opacity(0.8))
+                            Text(step).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.8))
                         }
                     }
                     if m.isManager {
@@ -1817,7 +1817,7 @@ private struct TechCardsTab: View {
                 .padding(.horizontal, 14).padding(.bottom, 14)
             }
         }
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -1829,7 +1829,7 @@ private struct TechCardSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.miseBg.ignoresSafeArea()
                 Form {
                     Section { TextField(t("pe.techName"), text: $edit.name) }
                     Section(t("pe.type")) {
@@ -1855,7 +1855,7 @@ private struct TechCardSheet: View {
                     }
                 }
             }
-            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
             .preferredColorScheme(.dark)
         }
     }
@@ -1871,10 +1871,10 @@ private struct OrdersInbox: View {
 
         let list = m.ordersSeg == "active" ? m.activeOrders : m.finishedOrders
         if !m.ordersLoaded {
-            ProgressView().tint(.white).padding(.top, 40)
+            ProgressView().tint(.primary).padding(.top, 40)
         } else if list.isEmpty {
             Text(m.ordersSeg == "active" ? t("pe.noActive") : t("empty"))
-                .font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
+                .font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)
         } else {
             ForEach(list) { o in OrderCard(m: m, o: o) }
         }
@@ -1892,9 +1892,9 @@ private struct OrderCard: View {
             header
             if !isCall {
                 itemsSection
-                Divider().overlay(Color.white.opacity(0.08))
+                Divider().overlay(Color.primary.opacity(0.08))
                 HStack {
-                    Text(eur(o.total ?? 0)).font(.system(size: 15, weight: .heavy)).foregroundStyle(.white)
+                    Text(eur(o.total ?? 0)).font(.system(size: 15, weight: .heavy)).foregroundStyle(.primary)
                     Spacer()
                     buttons
                 }
@@ -1904,19 +1904,19 @@ private struct OrderCard: View {
             }
         }
         .padding(14)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
         .overlay(alignment: .leading) { if isCall { Rectangle().fill(BrandKit.stash).frame(width: 3) } }
     }
 
     private var header: some View {
         HStack(spacing: 8) {
-            if isCall { Text(t("pe.callWaiter")).font(.system(size: 15, weight: .bold)).foregroundStyle(.white) }
+            if isCall { Text(t("pe.callWaiter")).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary) }
             if let tn = o.table_number {
-                Text(t("pe.tableN", ["n": "\(tn)"])).font(.system(size: 12, weight: .heavy)).foregroundStyle(.white)
+                Text(t("pe.tableN", ["n": "\(tn)"])).font(.system(size: 12, weight: .heavy)).foregroundStyle(.primary)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(isCall ? BrandKit.stash : PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 7))
             }
-            Text(orderTime(o.created_at)).font(.system(size: 12)).foregroundStyle(.white.opacity(0.4))
+            Text(orderTime(o.created_at)).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
             Spacer()
             Text(statusLabel(o.status)).font(.system(size: 11, weight: .bold)).foregroundStyle(statusColor(o.status))
                 .padding(.horizontal, 8).padding(.vertical, 3)
@@ -1927,10 +1927,10 @@ private struct OrderCard: View {
     private var itemsSection: some View {
         ForEach(Array((o.items ?? []).enumerated()), id: \.offset) { _, it in
             HStack {
-                Text(itemLine(it)).font(.system(size: 14)).foregroundStyle(.white)
+                Text(itemLine(it)).font(.system(size: 14)).foregroundStyle(.primary)
                 Spacer()
                 if let p = it.price {
-                    Text(eur(p * (it.qty ?? 1))).font(.system(size: 13)).foregroundStyle(.white.opacity(0.4))
+                    Text(eur(p * (it.qty ?? 1))).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.4))
                 }
             }
         }
@@ -1947,7 +1947,7 @@ private struct OrderCard: View {
         HStack(spacing: 8) {
             if o.status == "new" {
                 Button(t("cancel")) { Task { await m.setOrderStatus(o, "cancelled") } }
-                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
             }
             if o.status == "new" {
                 Button(t("pe.cooking")) { Task { await m.setOrderStatus(o, "in_progress") } }
@@ -1963,7 +1963,7 @@ private struct OrderCard: View {
         ["new": t("pe.order.new"), "in_progress": t("pe.order.inProgress"), "done": t("pe.order.done"), "cancelled": t("pe.order.cancelled")][s ?? "new"] ?? t("pe.order.new")
     }
     private func statusColor(_ s: String?) -> Color {
-        ["new": BrandKit.stash, "in_progress": BrandKit.manager, "done": BrandKit.analytics, "cancelled": Color.white.opacity(0.4)][s ?? "new"] ?? BrandKit.stash
+        ["new": BrandKit.stash, "in_progress": BrandKit.manager, "done": BrandKit.analytics, "cancelled": Color.primary.opacity(0.4)][s ?? "new"] ?? BrandKit.stash
     }
     private func orderTime(_ iso: String?) -> String {
         guard let d = parseISO(iso) else { return "" }
@@ -1975,12 +1975,12 @@ private struct StopTab: View {
     @Bindable var m: PeopleModel
     var body: some View {
         if !m.menuLoaded {
-            ProgressView().tint(.white).padding(.top, 40)
+            ProgressView().tint(.primary).padding(.top, 40)
         } else if m.menu.isEmpty {
-            Text(t("pe.menuEmpty")).font(.system(size: 15)).foregroundStyle(.white.opacity(0.4)).padding(.top, 50)
+            Text(t("pe.menuEmpty")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)
         } else {
             HStack {
-                Text(t("pe.stopList")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+                Text(t("pe.stopList")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                 Spacer()
                 if m.stopCount > 0 {
                     Text(t("pe.inStopN", ["n": "\(m.stopCount)"])).font(.system(size: 11, weight: .bold)).foregroundStyle(BrandKit.menu)
@@ -1993,8 +1993,8 @@ private struct StopTab: View {
                     let avail = item.is_available ?? true
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(item.name).font(.system(size: 15)).foregroundStyle(.white.opacity(avail ? 1 : 0.4)).strikethrough(!avail)
-                            if let p = item.price { Text(eur(p)).font(.system(size: 12)).foregroundStyle(.white.opacity(0.4)) }
+                            Text(item.name).font(.system(size: 15)).foregroundStyle(.primary.opacity(avail ? 1 : 0.4)).strikethrough(!avail)
+                            if let p = item.price { Text(eur(p)).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4)) }
                         }
                         Spacer()
                         if m.canStop {
@@ -2006,10 +2006,10 @@ private struct StopTab: View {
                         }
                     }
                     .padding(.vertical, 10).padding(.horizontal, 14)
-                    if idx < m.menu.count - 1 { Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 14) }
+                    if idx < m.menu.count - 1 { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 14) }
                 }
             }
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
         }
     }
 }

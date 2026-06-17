@@ -352,7 +352,7 @@ struct AnalyticsView: View {
     var body: some View {
         Group {
             if let m { AnalyticsBody(m: m) }
-            else { ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else { ProgressView().tint(.primary).frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
         .task {
             if m == nil {
@@ -373,7 +373,7 @@ private struct AnalyticsBody: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.miseBg.ignoresSafeArea()
             VStack(spacing: 0) {
                 monthNav
                 TabView(selection: $m.tab) {
@@ -391,7 +391,7 @@ private struct AnalyticsBody: View {
                 .tint(BrandKit.analytics)
             }
             if m.loading {
-                ProgressView().tint(.white)
+                ProgressView().tint(.primary)
             }
         }
     }
@@ -399,37 +399,37 @@ private struct AnalyticsBody: View {
     private var monthNav: some View {
         HStack {
             Button { Task { await m.navigate(-1) } } label: {
-                Image(systemName: "chevron.left").foregroundStyle(.white).frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                Image(systemName: "chevron.left").foregroundStyle(.primary).frame(width: 36, height: 36)
+                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             }
             Spacer()
             Button { if m.navTappableForDate { showDatePicker = true } } label: {
                 HStack(spacing: 6) {
-                    Text(m.navLabel).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                    Text(m.navLabel).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
                     if m.navTappableForDate {
-                        Image(systemName: "calendar").font(.system(size: 12)).foregroundStyle(.white.opacity(0.4))
+                        Image(systemName: "calendar").font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
                     }
                 }
             }
             .buttonStyle(.plain).disabled(!m.navTappableForDate)
             Spacer()
             Button { Task { await m.navigate(1) } } label: {
-                Image(systemName: "chevron.right").foregroundStyle(.white).frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                Image(systemName: "chevron.right").foregroundStyle(.primary).frame(width: 36, height: 36)
+                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             }
         }
         .padding(.horizontal, 16).padding(.bottom, 6)
         .sheet(isPresented: $showDatePicker) {
             NavigationStack {
                 ZStack {
-                    Color.black.ignoresSafeArea()
+                    Color.miseBg.ignoresSafeArea()
                     DatePicker(t("an.date"), selection: Binding(get: { m.currentDate }, set: { d in Task { await m.setDate(d) } }),
                                displayedComponents: .date)
                         .datePickerStyle(.graphical).tint(BrandKit.analytics).padding()
                 }
                 .navigationTitle(t("an.pickDay")).navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button(t("done")) { showDatePicker = false } } }
-                .toolbarBackground(.black, for: .navigationBar)
+                .toolbarBackground(Color.miseBg, for: .navigationBar)
                 .preferredColorScheme(.dark)
             }
             .presentationDetents([.medium])
@@ -455,41 +455,41 @@ private struct PeriodTab: View {
         }
         if m.periodMode != "day" && !m.dailyIncome.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text(t("an.incomeByDay")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+                Text(t("an.incomeByDay")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                 Chart(m.dailyIncome) { d in
                     BarMark(x: .value("День", d.day), y: .value("Доход", d.income))
                         .foregroundStyle(BrandKit.analytics)
                         .cornerRadius(3)
                 }
-                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 6)) { v in AxisValueLabel().foregroundStyle(.white.opacity(0.4)) } }
-                .chartYAxis { AxisMarks { _ in AxisValueLabel().foregroundStyle(.white.opacity(0.4)) } }
+                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 6)) { v in AxisValueLabel().foregroundStyle(.primary.opacity(0.4)) } }
+                .chartYAxis { AxisMarks { _ in AxisValueLabel().foregroundStyle(.primary.opacity(0.4)) } }
                 .frame(height: 160)
             }
             .padding(14).frame(maxWidth: .infinity)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
         }
         if !m.catMap.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                Text(t("an.topExpenses")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+                Text(t("an.topExpenses")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                     .padding(.bottom, 8)
                 ForEach(Array(m.catMap.enumerated()), id: \.offset) { i, c in
                     HStack {
-                        Text(c.0).font(.system(size: 15)).foregroundStyle(.white)
+                        Text(c.0).font(.system(size: 15)).foregroundStyle(.primary)
                         Spacer()
-                        Text(cur(c.1)).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                        Text(cur(c.1)).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
                     }
                     .padding(.vertical, 10)
-                    if i < m.catMap.count - 1 { Divider().overlay(Color.white.opacity(0.08)) }
+                    if i < m.catMap.count - 1 { Divider().overlay(Color.primary.opacity(0.08)) }
                 }
             }
             .padding(14)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
         }
     }
 
     private func stat(_ label: String, _ value: String, _ color: Color, _ pct: Double?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+            Text(label).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
             Text(value).font(.system(size: 22, weight: .heavy)).foregroundStyle(color).minimumScaleFactor(0.6).lineLimit(1)
             if let p = pct {
                 Text((p >= 0 ? "▲ " : "▼ ") + String(format: "%.0f%%", abs(p)))
@@ -498,7 +498,7 @@ private struct PeriodTab: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -509,26 +509,26 @@ private struct SalaryTab: View {
     @State private var expanded: String?
     var body: some View {
         VStack(spacing: 10) {
-            Text(t("an.payrollFund")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+            Text(t("an.payrollFund")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
             Text(cur(m.salTotal)).font(.system(size: 30, weight: .heavy)).foregroundStyle(BrandKit.analytics)
             HStack(spacing: 0) {
                 miniTotal(t("byCash"), cur(m.salCash), BrandKit.analytics)
-                Divider().frame(height: 30).overlay(Color.white.opacity(0.12))
+                Divider().frame(height: 30).overlay(Color.primary.opacity(0.12))
                 miniTotal(t("toCard"), cur(m.salCard), BrandKit.manager)
             }
         }
         .frame(maxWidth: .infinity).padding(.vertical, 18)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
 
         ForEach(m.salaryRows) { r in
             VStack(spacing: 0) {
                 Button { withAnimation(.easeInOut(duration: 0.18)) { expanded = expanded == r.id ? nil : r.id } } label: {
                     HStack {
-                        Text(r.name).font(.system(size: 15, weight: .medium)).foregroundStyle(.white)
+                        Text(r.name).font(.system(size: 15, weight: .medium)).foregroundStyle(.primary)
                         Spacer()
-                        Text(cur(r.total)).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                        Text(cur(r.total)).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
                         Image(systemName: expanded == r.id ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                            .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
                     }
                     .padding(14)
                 }
@@ -546,20 +546,20 @@ private struct SalaryTab: View {
                     .padding(.horizontal, 14).padding(.bottom, 14)
                 }
             }
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
         }
     }
     private func detail(_ l: String, _ v: String) -> some View {
         HStack {
-            Text(l).font(.system(size: 13)).foregroundStyle(.white.opacity(0.5))
+            Text(l).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5))
             Spacer()
-            Text(v).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.85))
+            Text(v).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary.opacity(0.85))
         }
     }
     private func miniTotal(_ l: String, _ v: String, _ c: Color) -> some View {
         VStack(spacing: 2) {
             Text(v).font(.system(size: 16, weight: .bold)).foregroundStyle(c)
-            Text(l).font(.system(size: 11)).foregroundStyle(.white.opacity(0.45))
+            Text(l).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.45))
         }
         .frame(maxWidth: .infinity)
     }
@@ -575,10 +575,10 @@ private struct CardInputRow: View {
 
     var body: some View {
         HStack {
-            Text(t("an.cardThisMonth")).font(.system(size: 13)).foregroundStyle(.white.opacity(0.5))
+            Text(t("an.cardThisMonth")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5))
             Spacer()
             HStack(spacing: 6) {
-                Text(Money.symbol).foregroundStyle(.white.opacity(0.4))
+                Text(Money.symbol).foregroundStyle(.primary.opacity(0.4))
                 TextField("0", text: $text)
                     .keyboardType(.numberPad).multilineTextAlignment(.trailing)
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(BrandKit.manager)
@@ -591,7 +591,7 @@ private struct CardInputRow: View {
                 }
             }
             .padding(.vertical, 6).padding(.horizontal, 10)
-            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
         }
         .onAppear { text = current > 0 ? String(Int(current)) : "" }
         .onChange(of: focused) { _, isFocused in
@@ -620,9 +620,9 @@ private struct HookahTab: View {
         // Смены по дням: дата · количество · сумма; раскрытие → по видам
         if m.hookahByDay.isEmpty {
             Text(t("an.noHookahShifts"))
-                .font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 20)
+                .font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 20)
         } else {
-            Text(t("an.shiftsByDay")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+            Text(t("an.shiftsByDay")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
             ForEach(m.hookahByDay) { day in DayRow(day: day) }
         }
@@ -631,18 +631,18 @@ private struct HookahTab: View {
     private func volCard(_ label: String, _ g: Double, _ color: Color) -> some View {
         VStack(spacing: 3) {
             Text(kg(g)).font(.system(size: 20, weight: .heavy)).foregroundStyle(color)
-            Text(label).font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+            Text(label).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
         }
         .frame(maxWidth: .infinity).padding(.vertical, 14)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
     }
     private func stat(_ label: String, _ value: String, _ color: Color) -> some View {
         VStack(spacing: 3) {
             Text(value).font(.system(size: 20, weight: .heavy)).foregroundStyle(color).minimumScaleFactor(0.6).lineLimit(1)
-            Text(label).font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+            Text(label).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
         }
         .frame(maxWidth: .infinity).padding(.vertical, 14)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
@@ -669,15 +669,15 @@ private struct KassaTab: View {
                             .foregroundStyle(BrandKit.manager)
                     }
                     .chartXAxis(.hidden)
-                    .chartYAxis { AxisMarks { _ in AxisValueLabel().foregroundStyle(.white.opacity(0.4)) } }
+                    .chartYAxis { AxisMarks { _ in AxisValueLabel().foregroundStyle(.primary.opacity(0.4)) } }
                     .frame(height: 150)
                 }
             }
             if m.filledShifts.isEmpty {
-                Text(t("an.noShiftData")).font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 30)
+                Text(t("an.noShiftData")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 30)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(t("an.byDay")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
+                    Text(t("an.byDay")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
                     HStack {
                         Text(t("an.date")).frame(width: 44, alignment: .leading)
                         Text(t("an.inCol")).frame(maxWidth: .infinity, alignment: .trailing)
@@ -685,20 +685,20 @@ private struct KassaTab: View {
                         Text(t("an.expense")).frame(maxWidth: .infinity, alignment: .trailing)
                         Text(t("tab.kassa")).frame(maxWidth: .infinity, alignment: .trailing)
                     }
-                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.35)).padding(.bottom, 6)
+                    .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.35)).padding(.bottom, 6)
                     ForEach(Array(m.filledShifts.enumerated()), id: \.element.id) { i, s in
                         HStack {
-                            Text(dd(s.date)).frame(width: 44, alignment: .leading).foregroundStyle(.white.opacity(0.5))
+                            Text(dd(s.date)).frame(width: 44, alignment: .leading).foregroundStyle(.primary.opacity(0.5))
                             cell((s.opening_balance ?? 0) > 0 ? cur(s.opening_balance ?? 0) : "—", BrandKit.manager)
                             cell((s.income ?? 0) > 0 ? cur(s.income ?? 0) : "—", BrandKit.analytics)
                             cell((s.total_expense ?? 0) > 0 ? cur(s.total_expense ?? 0) : "—", BrandKit.menu)
                             cell(cur(s.closing_balance ?? 0), BrandKit.manager, bold: true)
                         }
                         .font(.system(size: 12)).padding(.vertical, 9)
-                        if i < m.filledShifts.count - 1 { Divider().overlay(Color.white.opacity(0.07)) }
+                        if i < m.filledShifts.count - 1 { Divider().overlay(Color.primary.opacity(0.07)) }
                     }
                 }
-                .padding(14).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+                .padding(14).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
             }
         } else {
             let salToday = (m.payrollTotal / Double(m.daysInMonth) * Double(m.daysPassed)).rounded()
@@ -708,20 +708,20 @@ private struct KassaTab: View {
                 stat(t("an.salaryToday"), cur(salToday), diff >= 0 ? BrandKit.analytics : BrandKit.menu)
             }
             if m.shiftsWithInk.isEmpty {
-                Text(t("an.noInkass")).font(.system(size: 14)).foregroundStyle(.white.opacity(0.4)).padding(.top, 30)
+                Text(t("an.noInkass")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 30)
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(m.shiftsWithInk.enumerated()), id: \.element.id) { i, s in
                         HStack {
-                            Text(dd(s.date)).foregroundStyle(.white.opacity(0.5))
+                            Text(dd(s.date)).foregroundStyle(.primary.opacity(0.5))
                             Spacer()
                             Text(cur(s.inkassation ?? 0)).font(.system(size: 14, weight: .semibold)).foregroundStyle(BrandKit.stash)
                         }
                         .font(.system(size: 13)).padding(.vertical, 10).padding(.horizontal, 14)
-                        if i < m.shiftsWithInk.count - 1 { Divider().overlay(Color.white.opacity(0.07)).padding(.leading, 14) }
+                        if i < m.shiftsWithInk.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 14) }
                     }
                 }
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
             }
         }
     }
@@ -733,17 +733,17 @@ private struct KassaTab: View {
     private func stat(_ label: String, _ value: String, _ color: Color) -> some View {
         VStack(spacing: 3) {
             Text(value).font(.system(size: 20, weight: .heavy)).foregroundStyle(color).minimumScaleFactor(0.6).lineLimit(1)
-            Text(label).font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+            Text(label).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
         }
         .frame(maxWidth: .infinity).padding(.vertical, 14)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
     }
     private func chartCard<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+            Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
             content()
         }
-        .padding(14).frame(maxWidth: .infinity).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .padding(14).frame(maxWidth: .infinity).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -754,11 +754,11 @@ private struct DayRow: View {
         VStack(spacing: 0) {
             Button { withAnimation(.easeInOut(duration: 0.18)) { open.toggle() } } label: {
                 HStack {
-                    Text(dayLabelRu(day.date)).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                    Text(dayLabelRu(day.date)).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
                     Spacer()
-                    Text(t("an.pcs", ["n": "\(day.qty)"])).font(.system(size: 14)).foregroundStyle(.white.opacity(0.6))
+                    Text(t("an.pcs", ["n": "\(day.qty)"])).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.6))
                     Text(cur(day.revenue)).font(.system(size: 15, weight: .bold)).foregroundStyle(BrandKit.analytics)
-                    Image(systemName: open ? "chevron.up" : "chevron.down").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4))
+                    Image(systemName: open ? "chevron.up" : "chevron.down").font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
                 }
                 .padding(14)
             }
@@ -767,10 +767,10 @@ private struct DayRow: View {
                 VStack(spacing: 8) {
                     ForEach(day.types) { t in
                         HStack(spacing: 8) {
-                            Text(t.name).font(.system(size: 14, weight: .medium)).foregroundStyle(.white)
+                            Text(t.name).font(.system(size: 14, weight: .medium)).foregroundStyle(.primary)
                             Spacer(minLength: 4)
                             Text("\(t.paid)× · \(kg(t.grams))" + (t.free > 0 ? " · +\(t.free)" : ""))
-                                .font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+                                .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
                             Text(cur(t.revenue)).font(.system(size: 14, weight: .semibold)).foregroundStyle(BrandKit.analytics)
                                 .frame(minWidth: 56, alignment: .trailing)
                         }
@@ -779,7 +779,7 @@ private struct DayRow: View {
                 .padding(.horizontal, 14).padding(.bottom, 14)
             }
         }
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
@@ -800,16 +800,16 @@ private struct ForecastTab: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(m.isCurrentMonth ? t("an.forecastMonth") : t("an.revenueMonth"))
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
             Text(cur(m.isCurrentMonth ? m.projected : m.totalIncome))
-                .font(.system(size: 34, weight: .heavy)).foregroundStyle(.white)
+                .font(.system(size: 34, weight: .heavy)).foregroundStyle(.primary)
             if m.isCurrentMonth {
                 Text(t("an.atPace", ["v": cur(m.dailyAvg.rounded())]))
-                    .font(.system(size: 13)).foregroundStyle(.white.opacity(0.45))
+                    .font(.system(size: 13)).foregroundStyle(.primary.opacity(0.45))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(18)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
 
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
             mini(t("an.sinceMonthStart"), cur(m.totalIncome), BrandKit.manager)
@@ -818,27 +818,27 @@ private struct ForecastTab: View {
         }
 
         VStack(alignment: .leading, spacing: 12) {
-            Text(t("an.monthGoal")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).kerning(0.5)
+            Text(t("an.monthGoal")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
             HStack {
-                Text(t("an.revenueGoal")).font(.system(size: 14)).foregroundStyle(.white)
+                Text(t("an.revenueGoal")).font(.system(size: 14)).foregroundStyle(.primary)
                 Spacer()
                 if goalFocused {
                     Button(t("done")) { Task { await m.saveGoal(Double(goalText) ?? 0) }; goalFocused = false }
                         .font(.system(size: 13, weight: .bold)).foregroundStyle(BrandKit.analytics)
                 }
-                Text(Money.symbol).foregroundStyle(.white.opacity(0.4))
+                Text(Money.symbol).foregroundStyle(.primary.opacity(0.4))
                 TextField("0", text: $goalText)
                     .keyboardType(.numberPad).multilineTextAlignment(.trailing)
-                    .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                    .font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
                     .frame(width: 100).padding(.vertical, 7).padding(.horizontal, 10)
-                    .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+                    .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
                     .focused($goalFocused)
                     .onChange(of: goalFocused) { _, f in if !f { Task { await m.saveGoal(Double(goalText) ?? 0) } } }
             }
             if m.revGoal > 0 {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.1)).frame(height: 8)
+                        Capsule().fill(Color.primary.opacity(0.1)).frame(height: 8)
                         Capsule().fill(m.onTrack ? BrandKit.analytics : BrandKit.stash)
                             .frame(width: geo.size.width * m.goalPct / 100, height: 8)
                     }
@@ -846,7 +846,7 @@ private struct ForecastTab: View {
                 .frame(height: 8)
                 HStack {
                     Text(t("an.goalProgress", ["pct": "\(Int(m.goalPct))", "cur": cur(m.totalIncome), "goal": cur(m.revGoal)]))
-                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                        .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
                     Spacer()
                     if m.isCurrentMonth && m.daysLeft > 0 {
                         Text(m.onTrack ? t("an.onTrack") : t("an.needPerDay", ["v": cur(m.needPerDay.rounded())]))
@@ -858,17 +858,17 @@ private struct ForecastTab: View {
                 }
             }
         }
-        .padding(16).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .padding(16).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
         .onAppear { goalText = m.revGoal > 0 ? String(Int(m.revGoal)) : "" }
     }
 
     private func mini(_ label: String, _ value: String, _ color: Color) -> some View {
         VStack(spacing: 3) {
             Text(value).font(.system(size: 15, weight: .heavy)).foregroundStyle(color).minimumScaleFactor(0.5).lineLimit(1)
-            Text(label).font(.system(size: 10)).foregroundStyle(.white.opacity(0.45)).multilineTextAlignment(.center)
+            Text(label).font(.system(size: 10)).foregroundStyle(.primary.opacity(0.45)).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 12)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

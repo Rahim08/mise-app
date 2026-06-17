@@ -294,7 +294,7 @@ struct ManagerView: View {
             if let m {
                 ManagerBody(m: m)
             } else {
-                ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
+                ProgressView().tint(.primary).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .task {
@@ -313,7 +313,7 @@ private struct ManagerBody: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            Color.miseBg.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 14) {
                     dateRow
@@ -330,7 +330,7 @@ private struct ManagerBody: View {
 
             if let toast = m.toast {
                 Text(toast)
-                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
                     .padding(.horizontal, 18).padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: Capsule())
                     .padding(.top, 8)
@@ -347,14 +347,14 @@ private struct ManagerBody: View {
             circleBtn("chevron.left") { Task { await m.changeDate(-1) } }
             VStack(spacing: 2) {
                 Text(displayDate(m.currentDate))
-                    .font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+                    .font(.system(size: 17, weight: .bold)).foregroundStyle(.primary)
                 Text(dow(m.currentDate)).font(.system(size: 13, weight: .medium)).foregroundStyle(accent)
             }
             .frame(maxWidth: .infinity)
             circleBtn("chevron.right") { Task { await m.changeDate(1) } }
         }
         .padding(14)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var emptyState: some View {
@@ -363,11 +363,11 @@ private struct ManagerBody: View {
                 RoundedRectangle(cornerRadius: 22, style: .continuous).fill(accent.opacity(0.14)).frame(width: 80, height: 80)
                 Image(systemName: "clock").font(.system(size: 34, weight: .light)).foregroundStyle(accent)
             }
-            Text(t("mg.noShift")).font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
+            Text(t("mg.noShift")).font(.system(size: 20, weight: .bold)).foregroundStyle(.primary)
             Text(t("mg.noShiftHint"))
-                .font(.system(size: 14)).foregroundStyle(.white.opacity(0.5)).multilineTextAlignment(.center)
+                .font(.system(size: 14)).foregroundStyle(.primary.opacity(0.5)).multilineTextAlignment(.center)
             Button { Task { await m.openShift() } } label: {
-                Text(t("mg.openShift")).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                Text(t("mg.openShift")).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
                     .padding(.horizontal, 40).padding(.vertical, 16)
                     .background(accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
@@ -425,23 +425,23 @@ private struct ManagerBody: View {
                 Image(systemName: "lock.fill").font(.system(size: 14, weight: .bold))
                 Text(t("mg.shiftClosed")).font(.system(size: 16, weight: .bold))
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(.primary)
             Text(t("mg.shiftSavedSub"))
-                .font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
+                .font(.system(size: 13)).foregroundStyle(.primary.opacity(0.6))
             Button { withAnimation(.easeInOut(duration: 0.2)) { m.locked = false } } label: {
                 Label(t("mg.openForEdit"), systemImage: "pencil")
-                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
                     .padding(.horizontal, 22).padding(.vertical, 13)
                     .background(accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .padding(.top, 2)
             Text(t("mg.cascadeNote"))
-                .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
                 .multilineTextAlignment(.center)
         }
         .padding(22)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
         .padding(.horizontal, 24)
         .padding(.top, 60)
         .transition(.opacity)
@@ -484,9 +484,9 @@ private struct ManagerBody: View {
             sumRow(t("mg.openingBalance"), money(c.opening))
             sumRow(t("mg.cashRevenue"), money(c.inc))
             sumRow(t("mg.expenses"), "−" + money(c.totalExp).replacingOccurrences(of: "−", with: ""))
-            Divider().overlay(Color.white.opacity(0.12)).padding(.vertical, 4)
+            Divider().overlay(Color.primary.opacity(0.12)).padding(.vertical, 4)
             HStack {
-                Text(t("mg.closingBalance")).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                Text(t("mg.closingBalance")).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
                 Spacer()
                 Text(money(c.balance)).font(.system(size: 20, weight: .heavy))
                     .foregroundStyle(c.balance < 0 ? .red : .green)
@@ -497,7 +497,7 @@ private struct ManagerBody: View {
             }
         }
         .padding(16)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .padding(.top, 4)
     }
 
@@ -513,7 +513,7 @@ private struct ManagerBody: View {
             } else {
                 Button { Task { await m.save() } } label: {
                     Text(m.saving ? t("saving") : t("mg.saveShift"))
-                        .font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                        .font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
                         .frame(maxWidth: .infinity).padding(.vertical, 16)
                         .background(accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
@@ -531,7 +531,7 @@ private struct ManagerBody: View {
 
     private func sectionTitle(_ s: String) -> some View {
         HStack {
-            Text(s.uppercased()).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.45))
+            Text(s.uppercased()).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45))
                 .kerning(0.5)
             Spacer()
         }
@@ -540,14 +540,14 @@ private struct ManagerBody: View {
 
     private func card<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         VStack(spacing: 0) { content() }
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private var divider: some View { Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 14) }
+    private var divider: some View { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 14) }
 
     private func fieldRow(_ label: String, text: Binding<String>) -> some View {
         HStack {
-            Text(label).font(.system(size: 15)).foregroundStyle(.white)
+            Text(label).font(.system(size: 15)).foregroundStyle(.primary)
             Spacer()
             amountField(text)
         }
@@ -556,10 +556,10 @@ private struct ManagerBody: View {
 
     private func textRow(_ label: String, text: Binding<String>) -> some View {
         HStack {
-            Text(label).font(.system(size: 15)).foregroundStyle(.white)
+            Text(label).font(.system(size: 15)).foregroundStyle(.primary)
             Spacer()
             TextField("", text: text)
-                .font(.system(size: 15)).foregroundStyle(.white.opacity(0.85))
+                .font(.system(size: 15)).foregroundStyle(.primary.opacity(0.85))
                 .multilineTextAlignment(.trailing).frame(maxWidth: 160)
         }
         .padding(.vertical, 11).padding(.horizontal, 14)
@@ -569,26 +569,26 @@ private struct ManagerBody: View {
         TextField("€ 0", text: text)
             .keyboardType(.decimalPad)
             .multilineTextAlignment(.trailing)
-            .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+            .font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
             .frame(width: 96)
             .padding(.vertical, 7).padding(.horizontal, 10)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func sumRow(_ label: String, _ value: String) -> some View {
         HStack {
-            Text(label).font(.system(size: 14)).foregroundStyle(.white.opacity(0.55))
+            Text(label).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.55))
             Spacer()
-            Text(value).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+            Text(value).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
         }
         .padding(.vertical, 3)
     }
 
     private func circleBtn(_ symbol: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+            Image(systemName: symbol).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
                 .frame(width: 40, height: 40)
-                .background(Color.white.opacity(0.08), in: Circle())
+                .background(Color.primary.opacity(0.08), in: Circle())
         }
     }
 }
