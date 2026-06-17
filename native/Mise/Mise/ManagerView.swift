@@ -447,9 +447,8 @@ private struct ManagerBody: View {
         .transition(.opacity)
     }
 
-    private var staffSection: some View {
-        Group {
-            if !m.employees.isEmpty {
+    @ViewBuilder private var staffSection: some View {
+        if !m.employees.isEmpty {
                 sectionTitle(t("mg.staff"))
                 card {
                     ForEach(Array(m.employees.enumerated()), id: \.element.id) { i, emp in
@@ -457,11 +456,11 @@ private struct ManagerBody: View {
                             Button { Task { await m.toggleAbsence(emp.id) } } label: {
                                 Image(systemName: m.absences.contains(emp.id) ? "xmark.circle.fill" : "circle")
                                     .font(.system(size: 20))
-                                    .foregroundStyle(m.absences.contains(emp.id) ? .red : .white.opacity(0.25))
+                                    .foregroundStyle(m.absences.contains(emp.id) ? Color.red : Color.primary.opacity(0.25))
                             }
                             Text(emp.name)
                                 .font(.system(size: 15))
-                                .foregroundStyle(m.absences.contains(emp.id) ? .white.opacity(0.35) : .white)
+                                .foregroundStyle(m.absences.contains(emp.id) ? Color.primary.opacity(0.35) : Color.primary)
                                 .strikethrough(m.absences.contains(emp.id))
                             if m.autoAbsences.contains(emp.id) && m.absences.contains(emp.id) {
                                 Text(t("mg.auto")).font(.system(size: 9, weight: .heavy)).foregroundStyle(BrandKit.stash)
@@ -475,7 +474,6 @@ private struct ManagerBody: View {
                         if i < m.employees.count - 1 { divider }
                     }
                 }
-            }
         }
     }
 

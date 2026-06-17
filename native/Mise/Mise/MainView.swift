@@ -54,7 +54,7 @@ private struct LauncherView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Wordmark(size: 24, color: .white)
+                Wordmark(size: 24)
                 Spacer()
                 Button { showSettings = true } label: {
                     Image(systemName: "gearshape.fill")
@@ -121,7 +121,7 @@ private struct AppContainer: View {
                     if canSwitch { app.backToLauncher() }
                 } label: {
                     HStack(spacing: 6) {
-                        Wordmark(size: 19, color: .white, animated: false, accent: module.color)
+                        Wordmark(size: 19, animated: false, accent: module.color)
                         Text(module.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
                         if canSwitch {
                             Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))

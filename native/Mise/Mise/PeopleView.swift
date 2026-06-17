@@ -1424,12 +1424,14 @@ private struct ShiftsTab: View {
             Button { showAdd = true } label: {
                 Label(t("pe.addShift"), systemImage: "plus")
                     .font(.system(size: 14, weight: .bold)).foregroundStyle(.primary)
+                    .minimumScaleFactor(0.7).lineLimit(1)
                     .frame(maxWidth: .infinity).padding(.vertical, 12)
                     .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 12))
             }
             Button { Task { await m.copyLastWeek() } } label: {
                 Label(t("pe.lastWeek"), systemImage: "doc.on.doc")
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
+                    .minimumScaleFactor(0.7).lineLimit(1)
                     .frame(maxWidth: .infinity).padding(.vertical, 12)
                     .background(PEOPLE_ACCENT.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
             }
