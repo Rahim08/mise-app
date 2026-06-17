@@ -103,7 +103,7 @@ export default function MiseBrandExplorer() {
   const [activeTheme, setActiveTheme] = useState("dark")
   const [size, setSize] = useState(56)
 
-  const theme = themes.find(t => t.id === activeTheme)
+  const theme = themes.find(t => t.id === activeTheme) ?? themes[0]
   const Logo = LOGOS[activeConcept]
 
   return (

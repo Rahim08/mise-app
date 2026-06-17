@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { sendPaymentReceiptEmail } from '@/lib/email'
 
 // Stripe moved current_period_end onto subscription items in newer API versions.
 // Read item-level first, fall back to the (legacy) top-level field, never crash on Invalid Date.
@@ -51,6 +52,16 @@ export async function POST(req: NextRequest) {
         subscription_id: sub.id,
         ...(endsAt ? { subscription_ends_at: endsAt } : {}),
       })
+
+      // Отправляем receipt email владельцу
+      try {
+        const { data: owner } = await supabase.auth.admin.getUserById(restaurantId)
+        const ownerEmail = owner?.user?.email
+        if (ownerEmail) {
+          const price = obj.amount_total ? `${(obj.amount_total / 100).toFixed(0)} ${(obj.currency || 'usd').toUpperCase()}` : undefined
+          await sendPaymentReceiptEmail(ownerEmail, plan || 'Pro', price)
+        }
+      } catch {}
 
       // Повторный чекаут (смена плана, дабл-клик, «не увидел подписку — оформил ещё раз»)
       // создаёт ВТОРУЮ подписку у того же customer → двойное списание.

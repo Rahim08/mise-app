@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
       const stats: Record<string, any> = {}
       for (const r of rests || []) {
         const [lastShift, shiftsCount, movCount, empCount] = await Promise.all([
-          admin.from('shifts').select('created_at').eq('restaurant_id', r.id).order('created_at', { ascending: false }).limit(1),
+          admin.from('shifts').select('opened_at').eq('restaurant_id', r.id).order('opened_at', { ascending: false }).limit(1),
           admin.from('shifts').select('id', { count: 'exact', head: true }).eq('restaurant_id', r.id),
           admin.from('tobacco_movements').select('id', { count: 'exact', head: true }).eq('restaurant_id', r.id),
           admin.from('employees').select('id', { count: 'exact', head: true }).eq('restaurant_id', r.id).eq('is_active', true),
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
           shifts: shiftsCount.count || 0,
           movements: movCount.count || 0,
           employees: empCount.count || 0,
-          lastActive: lastShift.data?.[0]?.created_at || null,
+          lastActive: lastShift.data?.[0]?.opened_at || null,
         }
       }
       // Owner emails (to identify/contact clients)

@@ -7,8 +7,8 @@
 
 -- 1. INSPECT — see which days have duplicates and how much data each row holds.
 SELECT restaurant_id, date, count(*) AS rows,
-       array_agg(id ORDER BY created_at) AS shift_ids,
-       array_agg(income ORDER BY created_at) AS incomes
+       array_agg(id ORDER BY opened_at) AS shift_ids,
+       array_agg(income ORDER BY opened_at) AS incomes
 FROM shifts
 GROUP BY restaurant_id, date
 HAVING count(*) > 1
@@ -23,7 +23,7 @@ WITH ranked AS (
          row_number() OVER (
            PARTITION BY restaurant_id, date
            ORDER BY (coalesce(income,0) + coalesce(total_expense,0) + coalesce(inkassation,0)) DESC,
-                    created_at ASC
+                    opened_at ASC
          ) AS rn
   FROM shifts
 ),

@@ -13,6 +13,7 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
+  const [appleLoading, setAppleLoading] = useState(false)
   const [error, setError] = useState('')
   const [showPass, setShowPass] = useState(false)
 
@@ -45,6 +46,14 @@ export default function Login() {
     })
   }
 
+  const handleApple = async () => {
+    setAppleLoading(true)
+    await supabase.auth.signInWithOAuth({
+      provider: 'apple',
+      options: { redirectTo: `${window.location.origin}/dashboard` }
+    })
+  }
+
   const handleKeyDown = (e: any) => {
     if (e.key === 'Enter') handleLogin()
   }
@@ -72,13 +81,12 @@ export default function Login() {
           <span>{googleLoading ? t('auth.login.googleLoading') : t('auth.login.google')}</span>
         </button>
 
-        {/* Apple — disabled until developer account */}
-        <button disabled style={{ ...S.socialBtn, opacity: .45, cursor: 'not-allowed', marginTop: 10, background: '#1c1c1e', color: '#fff' }}>
+        <button onClick={handleApple} disabled={appleLoading} style={{ ...S.socialBtn, opacity: appleLoading ? .7 : 1, marginTop: 10, background: '#1c1c1e', color: '#fff' }}>
           <svg width="17" height="17" viewBox="0 0 17 17" fill="none">
             <path d="M14.05 9.02c-.02-2.04 1.67-3.02 1.74-3.07-1.05-1.54-2.67-1.76-3.24-1.78-1.38-.14-2.7.81-3.4.81-.7 0-1.78-.79-2.93-.77-1.51.02-2.9.88-3.68 2.23-1.57 2.72-.4 6.74 1.13 8.94.75 1.08 1.64 2.29 2.81 2.25 1.13-.05 1.56-.73 2.93-.73 1.37 0 1.76.73 2.95.71 1.21-.02 1.98-1.1 2.73-2.18.86-1.25 1.21-2.46 1.23-2.52-.03-.01-2.35-.9-2.37-3.59z" fill="white"/>
             <path d="M11.62 2.67C12.23 1.93 12.64.93 12.52 0c-.87.04-1.92.58-2.54 1.31-.56.64-1.05 1.67-.92 2.65.97.07 1.96-.49 2.56-1.29z" fill="white"/>
           </svg>
-          <span>{t('auth.login.appleSoon')}</span>
+          <span>{appleLoading ? t('auth.login.googleLoading') : 'Continue with Apple'}</span>
         </button>
 
         {/* Divider */}
