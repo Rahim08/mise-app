@@ -753,7 +753,7 @@ private struct TasksTab: View {
         // Любой сотрудник может поставить задачу коллеге/сменщику (раньше — только менеджер).
         Button { showForm = true } label: {
             Label(t("pe.newTask"), systemImage: "plus")
-                .font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
+                .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                 .frame(maxWidth: .infinity).padding(.vertical, 14)
                 .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
         }
@@ -1075,11 +1075,11 @@ private struct PeopleSalaryTab: View {
 
     private func heroCard(title: String, total: Double, card: Double, cash: Double) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.85))
-            Text(eur(total)).font(.system(size: 36, weight: .heavy)).foregroundStyle(.primary)
+            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.8))
+            Text(eur(total)).font(.system(size: 36, weight: .heavy)).foregroundStyle(.white)
             HStack(spacing: 16) {
-                if card > 0 { Text(t("toCard") + " " + eur(card)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.9)) }
-                Text(t("byCash") + " " + eur(cash)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.9))
+                if card > 0 { Text(t("toCard") + " " + eur(card)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9)) }
+                Text(t("byCash") + " " + eur(cash)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(20)
@@ -1423,7 +1423,7 @@ private struct ShiftsTab: View {
         HStack(spacing: 10) {
             Button { showAdd = true } label: {
                 Label(t("pe.addShift"), systemImage: "plus")
-                    .font(.system(size: 14, weight: .bold)).foregroundStyle(.primary)
+                    .font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
                     .minimumScaleFactor(0.7).lineLimit(1)
                     .frame(maxWidth: .infinity).padding(.vertical, 12)
                     .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 12))

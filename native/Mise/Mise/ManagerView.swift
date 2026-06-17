@@ -511,7 +511,7 @@ private struct ManagerBody: View {
             } else {
                 Button { Task { await m.save() } } label: {
                     Text(m.saving ? t("saving") : t("mg.saveShift"))
-                        .font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
+                        .font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).padding(.vertical, 16)
                         .background(accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }

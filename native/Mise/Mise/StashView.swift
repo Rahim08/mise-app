@@ -442,7 +442,7 @@ private struct ShiftTab: View {
     private var saveBtn: some View {
         Button { Task { await m.saveShift() } } label: {
             Text(m.saving ? t("saving") : t("mg.saveShift"))
-                .font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
+                .font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
                 .frame(maxWidth: .infinity).padding(.vertical, 16)
                 .background(BrandKit.stash, in: RoundedRectangle(cornerRadius: 16))
         }
