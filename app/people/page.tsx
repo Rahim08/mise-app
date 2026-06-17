@@ -1293,7 +1293,7 @@ function OrdersInbox({ currency, accent, t, toast }: { currency: string; accent:
                   <span style={{ fontSize: 15, fontWeight: 800, color: t.text }}>{Number(o.total || 0).toFixed(2)} {currency}</span>
                   <div style={{ display: 'flex', gap: 8 }}>
                     {o.status === 'new' && <button onClick={() => setStatus(o, 'cancelled')} style={btnB2(t)}>{tr('pe.cancel')}</button>}
-                    {st.next && <button onClick={() => setStatus(o, st.next!)} style={{ ...btnB2(t), background: accent, color: '#fff' }}>{tr(st.nextLabel)}</button>}
+                    {st.next && <button onClick={() => setStatus(o, st.next!)} style={{ ...btnB2(t), background: accent, color: '#fff' }}>{tr(st.nextLabel ?? '')}</button>}
                   </div>
                 </div>
               </div>
