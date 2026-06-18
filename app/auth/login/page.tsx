@@ -40,18 +40,22 @@ export default function Login() {
 
   const handleGoogle = async () => {
     setGoogleLoading(true)
-    await supabase.auth.signInWithOAuth({
+    setError('')
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: `${window.location.origin}/auth/callback?next=/dashboard` }
     })
+    if (error) { setError('Google: ' + error.message); setGoogleLoading(false) }
   }
 
   const handleApple = async () => {
     setAppleLoading(true)
-    await supabase.auth.signInWithOAuth({
+    setError('')
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: 'apple',
       options: { redirectTo: `${window.location.origin}/auth/callback?next=/dashboard` }
     })
+    if (error) { setError('Apple: ' + error.message); setAppleLoading(false) }
   }
 
   const handleKeyDown = (e: any) => {
