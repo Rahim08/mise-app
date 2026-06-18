@@ -61,7 +61,7 @@ export default function Register() {
     setGoogleLoading(true)
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/auth/callback?next=/dashboard` }
+      options: { redirectTo: `${window.location.origin}/auth/callback` }
     })
   }
 
@@ -69,7 +69,7 @@ export default function Register() {
     setAppleLoading(true)
     await supabase.auth.signInWithOAuth({
       provider: 'apple',
-      options: { redirectTo: `${window.location.origin}/auth/callback?next=/dashboard` }
+      options: { redirectTo: `${window.location.origin}/auth/callback` }
     })
   }
 
