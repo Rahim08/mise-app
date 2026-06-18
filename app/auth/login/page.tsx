@@ -41,29 +41,21 @@ export default function Login() {
   const handleGoogle = async () => {
     setGoogleLoading(true)
     setError('')
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/auth/callback`, skipBrowserRedirect: true }
+      options: { redirectTo: `${window.location.origin}/auth/callback` }
     })
-    setGoogleLoading(false)
-    if (error) { setError('Google error: ' + error.message); return }
-    if (data?.url) {
-      setError('DEBUG URL (скопируй и открой в новой вкладке): ' + data.url)
-    }
+    if (error) { setError(error.message); setGoogleLoading(false) }
   }
 
   const handleApple = async () => {
     setAppleLoading(true)
     setError('')
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: 'apple',
-      options: { redirectTo: `${window.location.origin}/auth/callback`, skipBrowserRedirect: true }
+      options: { redirectTo: `${window.location.origin}/auth/callback` }
     })
-    setAppleLoading(false)
-    if (error) { setError('Apple error: ' + error.message); return }
-    if (data?.url) {
-      setError('DEBUG URL (скопируй и открой в новой вкладке): ' + data.url)
-    }
+    if (error) { setError(error.message); setAppleLoading(false) }
   }
 
   const handleKeyDown = (e: any) => {
