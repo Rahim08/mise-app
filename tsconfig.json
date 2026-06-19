@@ -27,7 +27,8 @@
         "./*"
       ]
     },
-    "noImplicitAny": false
+    "noImplicitAny": false,
+    "strictNullChecks": true
   },
   "include": [
     "next-env.d.ts",
@@ -39,6 +40,7 @@
   ],
   "exclude": [
     "node_modules",
-    "mise-app"
+    "mise-app",
+    "pos/server"
   ]
 }
