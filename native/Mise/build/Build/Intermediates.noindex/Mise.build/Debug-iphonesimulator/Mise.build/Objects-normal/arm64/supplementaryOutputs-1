@@ -1,0 +1,23 @@
+{
+  "/Users/rahim/mise-app/native/Mise/Mise/API.swift" : {
+    "const-values" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/API.swiftconstvalues",
+    "dependencies" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/API.d",
+    "diagnostics" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/API.dia",
+    "object" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/API.o",
+    "swift-dependencies" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/API.swiftdeps"
+  },
+  "/Users/rahim/mise-app/native/Mise/Mise/AnalyticsView.swift" : {
+    "const-values" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/AnalyticsView.swiftconstvalues",
+    "dependencies" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/AnalyticsView.d",
+    "diagnostics" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/AnalyticsView.dia",
+    "object" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/AnalyticsView.o",
+    "swift-dependencies" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/AnalyticsView.swiftdeps"
+  },
+  "/Users/rahim/mise-app/native/Mise/Mise/AppModel.swift" : {
+    "const-values" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/AppModel.swiftconstvalues",
+    "dependencies" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/AppModel.d",
+    "diagnostics" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/AppModel.dia",
+    "object" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/AppModel.o",
+    "swift-dependencies" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/AppModel.swiftdeps"
+  }
+}

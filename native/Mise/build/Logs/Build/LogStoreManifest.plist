@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>logFormatVersion</key>
+	<integer>12</integer>
+	<key>logs</key>
+	<dict>
+		<key>2867D012-4A25-4E4B-8768-588154666EB3</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>2867D012-4A25-4E4B-8768-588154666EB3.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>E</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>1</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>0</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>Mise project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Mise</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project Mise with scheme Mise and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>803391172.55578101</real>
+			<key>timeStoppedRecording</key>
+			<real>803391179.41379702</real>
+			<key>title</key>
+			<string>Building project Mise with scheme Mise and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>2867D012-4A25-4E4B-8768-588154666EB3</string>
+		</dict>
+		<key>745015D6-3DF3-41FA-8675-6B57C6833226</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>745015D6-3DF3-41FA-8675-6B57C6833226.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>E</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>1</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>1</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>Mise project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Mise</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project Mise with scheme Mise and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>803393033.70849395</real>
+			<key>timeStoppedRecording</key>
+			<real>803393044.99238896</real>
+			<key>title</key>
+			<string>Building project Mise with scheme Mise and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>745015D6-3DF3-41FA-8675-6B57C6833226</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

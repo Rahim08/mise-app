@@ -38,6 +38,7 @@ final class StashModel {
     var inventories: [Inventory] = []
     var search = ""
     var showLowOnly = false
+    var showOutOfStock = false
     var movMode = "in"
 
     init(rid: String, canSeeMoney: Bool) { self.rid = rid; self.canSeeMoney = canSeeMoney }
@@ -148,12 +149,17 @@ final class StashModel {
     }
 
     func isLow(_ s: StockItem) -> Bool { s.quantity_g > 0 && s.quantity_g <= (s.min_quantity_g ?? 200) }
+    func stockColor(_ s: StockItem) -> Color {
+        s.quantity_g == 0 ? BrandKit.menu : isLow(s) ? BrandKit.stash : BrandKit.analytics
+    }
     var inStock: [StockItem] { stock.filter { $0.quantity_g > 0 } }
     var lowCount: Int { inStock.filter(isLow).count }
+    var outOfStockCount: Int { stock.filter { $0.quantity_g == 0 }.count }
     var filteredStock: [StockItem] {
-        inStock
+        let base = showOutOfStock ? stock.filter { $0.quantity_g == 0 } : inStock
+        return base
             .filter { search.isEmpty || "\($0.brand) \($0.flavor)".lowercased().contains(search.lowercased()) }
-            .filter { !showLowOnly || isLow($0) }
+            .filter { !showLowOnly || (!showOutOfStock && isLow($0)) }
     }
     /// Склад по брендам: бренд → список вкусов (для карточек бренда в «Наличии»).
     var stockByBrand: [(String, [StockItem])] {
@@ -244,6 +250,21 @@ final class StashModel {
         return true
     }
 
+    struct InvRow { let id: String; let brand: String; let flavor: String; let expected: Double; let actual: Double }
+
+    func saveInventory(_ rows: [InvRow]) async -> Bool {
+        let disc = rows.filter { abs($0.actual - $0.expected) > 0.001 }
+        if disc.isEmpty { flash(t("st.invEmpty")); return false }
+        saving = true; defer { saving = false }
+        let items: [[String: Any]] = disc.map { r in
+            ["brand": r.brand, "flavor": r.flavor, "expected_g": r.expected, "actual_g": r.actual, "diff_g": r.actual - r.expected]
+        }
+        try? await DB.from("tobacco_inventories").insert(["restaurant_id": rid, "items": items]).run()
+        await loadWarehouse()
+        flash(t("st.saved", ["n": "\(disc.count)"]))
+        return true
+    }
+
     func flash(_ m: String) {
         toast = m
         Task { try? await Task.sleep(nanoseconds: 2_400_000_000); if toast == m { toast = nil } }
@@ -306,6 +327,7 @@ struct StashView: View {
 private struct StashBody: View {
     @Bindable var m: StashModel
     @State private var showAddMov = false
+    @State private var showAddInv = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -316,7 +338,7 @@ private struct StashBody: View {
                     .tabItem { Label(t("tab.stock"), systemImage: "tray.full.fill") }.tag("stock")
                 AppTabPage(refresh: { await m.loadWarehouse() }) { MovementsTab(m: m, showAdd: $showAddMov) }
                     .tabItem { Label(t("tab.movements"), systemImage: "arrow.left.arrow.right") }.tag("movements")
-                AppTabPage(refresh: { await m.loadWarehouse() }) { InventoryTab(m: m) }
+                AppTabPage(refresh: { await m.loadWarehouse() }) { InventoryTab(m: m, showAdd: $showAddInv) }
                     .tabItem { Label(t("tab.inventory"), systemImage: "checklist") }.tag("inventory")
             }
             .tint(BrandKit.stash)
@@ -331,6 +353,7 @@ private struct StashBody: View {
         }
         .animation(.easeInOut(duration: 0.2), value: m.toast)
         .sheet(isPresented: $showAddMov) { AddMovementSheet(m: m) }
+        .sheet(isPresented: $showAddInv) { AddInventorySheet(m: m) }
     }
 }
 
@@ -452,7 +475,7 @@ private struct ShiftTab: View {
     private func navBtn(_ s: String, disabled: Bool = false, _ a: @escaping () -> Void) -> some View {
         Button(action: a) {
             Image(systemName: s).font(.system(size: 14, weight: .bold)).foregroundStyle(.primary)
-                .frame(width: 36, height: 36).background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                .frame(width: 36, height: 36)
         }.disabled(disabled).opacity(disabled ? 0.4 : 1)
     }
 }
@@ -470,11 +493,19 @@ private struct StockTab: View {
             .padding(.horizontal, 12).padding(.vertical, 9)
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
             if m.lowCount > 0 {
-                Button { m.showLowOnly.toggle() } label: {
+                Button { m.showOutOfStock = false; m.showLowOnly.toggle() } label: {
                     Text(t("st.low", ["n": "\(m.lowCount)"])).font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(m.showLowOnly ? .black : BrandKit.stash)
+                        .foregroundStyle(m.showLowOnly && !m.showOutOfStock ? .black : BrandKit.stash)
                         .padding(.horizontal, 12).padding(.vertical, 9)
-                        .background(m.showLowOnly ? BrandKit.stash : BrandKit.stash.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
+                        .background(m.showLowOnly && !m.showOutOfStock ? BrandKit.stash : BrandKit.stash.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+            if m.outOfStockCount > 0 {
+                Button { m.showLowOnly = false; m.showOutOfStock.toggle() } label: {
+                    Text(t("st.outOfStock", ["n": "\(m.outOfStockCount)"])).font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(m.showOutOfStock ? .white : BrandKit.menu)
+                        .padding(.horizontal, 12).padding(.vertical, 9)
+                        .background(m.showOutOfStock ? BrandKit.menu : BrandKit.menu.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
                 }
             }
         }
@@ -506,7 +537,7 @@ private struct StockTab: View {
                             Spacer()
                             Text(grams(s.quantity_g))
                                 .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(m.isLow(s) ? BrandKit.stash : .white)
+                                .foregroundStyle(m.stockColor(s))
                         }
                         .padding(.vertical, 10).padding(.horizontal, 14)
                         if idx < items.count - 1 { Divider().overlay(Color.primary.opacity(0.06)).padding(.leading, 14) }
@@ -709,13 +740,87 @@ private struct AddMovementSheet: View {
     }
 }
 
+// MARK: Создание инвентаризации
+
+private struct AddInventorySheet: View {
+    @Bindable var m: StashModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var actuals: [String: String] = [:]
+
+    private var items: [StockItem] {
+        m.stock.sorted { "\($0.brand)\($0.flavor)" < "\($1.brand)\($1.flavor)" }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.miseBg.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 10) {
+                        ForEach(items) { s in
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("\(s.brand) · \(s.flavor)").font(.system(size: 14)).foregroundStyle(.primary)
+                                    Text(t("st.invExpected") + ": " + grams(s.quantity_g))
+                                        .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
+                                }
+                                Spacer()
+                                TextField(grams(s.quantity_g), text: Binding(
+                                    get: { actuals[s.id] ?? "" },
+                                    set: { actuals[s.id] = $0 }
+                                ))
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+                                .frame(width: 76)
+                                .padding(.horizontal, 8).padding(.vertical, 6)
+                                .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                            }
+                            .padding(.horizontal, 14).padding(.vertical, 10)
+                            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle(t("st.doInventory")).navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(t("save")) {
+                        Task {
+                            let rows = items.map { s in
+                                StashModel.InvRow(
+                                    id: s.id, brand: s.brand, flavor: s.flavor,
+                                    expected: s.quantity_g,
+                                    actual: Double(actuals[s.id] ?? "") ?? s.quantity_g
+                                )
+                            }
+                            if await m.saveInventory(rows) { dismiss() }
+                        }
+                    }.disabled(m.saving)
+                }
+            }
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
+            .preferredColorScheme(.dark)
+        }
+    }
+}
+
 // MARK: Инвентарь
 
 private struct InventoryTab: View {
     @Bindable var m: StashModel
+    @Binding var showAdd: Bool
     var body: some View {
+        Button { showAdd = true } label: {
+            Label(t("st.doInventory"), systemImage: "checklist")
+                .font(.system(size: 15, weight: .semibold)).foregroundStyle(BrandKit.stash)
+                .frame(maxWidth: .infinity).padding(.vertical, 13)
+                .background(BrandKit.stash.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+        }
         if m.inventories.isEmpty {
-            Text(t("st.noInventories")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
+            Text(t("st.noInventories")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 30)
         } else {
             ForEach(m.inventories) { inv in InventoryRow(inv: inv) }
         }

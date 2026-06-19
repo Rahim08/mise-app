@@ -399,9 +399,9 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Mise;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Камера нужна, чтобы отсканировать QR-код вашего заведения.";
-				INFOPLIST_KEY_NSFaceIDUsageDescription = "Face ID используется для быстрого входа без ввода PIN.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Геолокация нужна для отметки «Я пришёл» на смене по месту заведения.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Used to scan the venue QR code during setup.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Enables quick login without entering a PIN.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Used only when you tap \"I\'m here\" to confirm arrival at your workplace. Location is read once at check-in — no background tracking.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -435,9 +435,9 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Mise;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Камера нужна, чтобы отсканировать QR-код вашего заведения.";
-				INFOPLIST_KEY_NSFaceIDUsageDescription = "Face ID используется для быстрого входа без ввода PIN.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Геолокация нужна для отметки «Я пришёл» на смене по месту заведения.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Used to scan the venue QR code during setup.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Enables quick login without entering a PIN.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Used only when you tap \"I\'m here\" to confirm arrival at your workplace. Location is read once at check-in — no background tracking.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

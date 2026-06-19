@@ -1,0 +1,23 @@
+{
+  "/Users/rahim/mise-app/native/Mise/Mise/Biometrics.swift" : {
+    "const-values" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/Biometrics.swiftconstvalues",
+    "dependencies" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/Biometrics.d",
+    "diagnostics" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/Biometrics.dia",
+    "object" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/Biometrics.o",
+    "swift-dependencies" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/Biometrics.swiftdeps"
+  },
+  "/Users/rahim/mise-app/native/Mise/Mise/Brand.swift" : {
+    "const-values" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/Brand.swiftconstvalues",
+    "dependencies" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/Brand.d",
+    "diagnostics" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/Brand.dia",
+    "object" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/Brand.o",
+    "swift-dependencies" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/Brand.swiftdeps"
+  },
+  "/Users/rahim/mise-app/native/Mise/Mise/DB.swift" : {
+    "const-values" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/DB.swiftconstvalues",
+    "dependencies" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/DB.d",
+    "diagnostics" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/DB.dia",
+    "object" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/DB.o",
+    "swift-dependencies" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Debug-iphonesimulator/Mise.build/Objects-normal/arm64/DB.swiftdeps"
+  }
+}

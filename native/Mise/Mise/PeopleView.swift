@@ -1166,10 +1166,10 @@ private struct AttendanceTab: View {
             } else {
                 Button { Task { await m.checkIn() } } label: {
                     HStack {
-                        if m.checking { ProgressView().tint(.primary) }
+                        if m.checking { ProgressView().tint(.white) }
                         else { Image(systemName: "location.fill"); Text(t("pe.iCame")) }
                     }
-                    .font(.system(size: 17, weight: .bold)).foregroundStyle(.primary)
+                    .font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
                     .frame(maxWidth: .infinity).padding(.vertical, 18)
                     .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 16))
                 }
@@ -1184,24 +1184,25 @@ private struct AttendanceTab: View {
             if !m.attendance.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(t("pe.historyCaps")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
-                    ForEach(Array(m.attendance.enumerated()), id: \.element.id) { i, r in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(dayLabel(r.date ?? "")).font(.system(size: 14)).foregroundStyle(.primary)
-                                Text(clock(r.check_in_at) + (r.check_out_at != nil ? "–\(clock(r.check_out_at))" : ""))
-                                    .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
+                    VStack(spacing: 0) {
+                        ForEach(Array(m.attendance.enumerated()), id: \.element.id) { i, r in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(dayLabel(r.date ?? "")).font(.system(size: 14)).foregroundStyle(.primary)
+                                    Text(clock(r.check_in_at) + (r.check_out_at != nil ? "–\(clock(r.check_out_at))" : ""))
+                                        .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
+                                }
+                                Spacer()
+                                if r.status == "late", let l = r.late_minutes {
+                                    badge(t("pe.lateBadge", ["n": "\(l)"]), BrandKit.stash)
+                                } else { badge(t("pe.onTime"), BrandKit.analytics) }
                             }
-                            Spacer()
-                            if r.status == "late", let l = r.late_minutes {
-                                badge(t("pe.lateBadge", ["n": "\(l)"]), BrandKit.stash)
-                            } else { badge(t("pe.onTime"), BrandKit.analytics) }
+                            .padding(.vertical, 11).padding(.horizontal, 14)
+                            if i < m.attendance.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 14) }
                         }
-                        .padding(.vertical, 11).padding(.horizontal, 14)
-                        if i < m.attendance.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 14) }
                     }
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
                 }
-                .padding(.top, 8)
-                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
             }
         }
     }

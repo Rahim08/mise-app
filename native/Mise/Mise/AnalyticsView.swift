@@ -400,7 +400,6 @@ private struct AnalyticsBody: View {
         HStack {
             Button { Task { await m.navigate(-1) } } label: {
                 Image(systemName: "chevron.left").foregroundStyle(.primary).frame(width: 36, height: 36)
-                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             }
             Spacer()
             Button { if m.navTappableForDate { showDatePicker = true } } label: {
@@ -415,7 +414,6 @@ private struct AnalyticsBody: View {
             Spacer()
             Button { Task { await m.navigate(1) } } label: {
                 Image(systemName: "chevron.right").foregroundStyle(.primary).frame(width: 36, height: 36)
-                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             }
         }
         .padding(.horizontal, 16).padding(.bottom, 6)

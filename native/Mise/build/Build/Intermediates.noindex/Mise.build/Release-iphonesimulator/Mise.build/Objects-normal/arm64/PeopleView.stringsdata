@@ -1,0 +1,168 @@
+{
+  "source": "/Users/rahim/mise-app/native/Mise/Mise/PeopleView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 740
+        }
+      },
+      {
+        "comment": "",
+        "key": "· %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 827
+        }
+      },
+      {
+        "comment": "",
+        "key": "—",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 869
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 1109
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1258
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ → %@",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1291
+        }
+      },
+      {
+        "comment": "",
+        "key": "«%@»",
+        "location": {
+          "startingColumn": 50,
+          "startingLine": 1293
+        }
+      },
+      {
+        "comment": "",
+        "key": "—",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1344
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ · %@–%@",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 1346
+        }
+      },
+      {
+        "comment": "",
+        "key": "—",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1352
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@–%@",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 1401
+        }
+      },
+      {
+        "comment": "",
+        "key": "—",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1461
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 1504
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1534
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ · %lld/%lld",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1583
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld/%lld",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1720
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ · %@",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1791
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1803
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 1867
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 2001
+        }
+      }
+    ]
+  },
+  "version": 1
+}

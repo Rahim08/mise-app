@@ -1,0 +1,12 @@
+{
+  "/Users/rahim/mise-app/native/Mise/Mise/AnalyticsView.swift" : {
+    "abi-baseline-json" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Release-iphonesimulator/Mise.build/Objects-normal/arm64/Mise.abi.json",
+    "const-values" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Release-iphonesimulator/Mise.build/Objects-normal/arm64/Mise-primary.swiftconstvalues",
+    "dependencies" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Release-iphonesimulator/Mise.build/Objects-normal/arm64/Mise-primary.d",
+    "diagnostics" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Release-iphonesimulator/Mise.build/Objects-normal/arm64/Mise-primary.dia",
+    "objc-header" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Release-iphonesimulator/Mise.build/Objects-normal/arm64/Mise-Swift.h",
+    "swiftdoc" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Release-iphonesimulator/Mise.build/Objects-normal/arm64/Mise.swiftdoc",
+    "swiftmodule" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Release-iphonesimulator/Mise.build/Objects-normal/arm64/Mise.swiftmodule",
+    "swiftsourceinfo" : "/Users/rahim/mise-app/native/Mise/build/Build/Intermediates.noindex/Mise.build/Release-iphonesimulator/Mise.build/Objects-normal/arm64/Mise.swiftsourceinfo"
+  }
+}

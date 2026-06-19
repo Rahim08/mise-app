@@ -1,0 +1,16 @@
+{
+  "source": "/Users/rahim/mise-app/native/Mise/Mise/MainView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Mise %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 235
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -262,9 +262,11 @@ private struct PermissionsView: View {
             VStack(spacing: 10) {
                 Button { Task { await allow() } } label: { PrimaryLabel(p.cta) }
                     .disabled(busy)
-                Button { advance() } label: {
-                    Text(t("ob.notNow")).font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.6))
+                if step < perms.count - 1 {
+                    Button { advance() } label: {
+                        Text(t("ob.notNow")).font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
                 }
             }
             .padding(.horizontal, 24)

@@ -1,0 +1,24 @@
+{
+  "source": "/Users/rahim/mise-app/native/Mise/Mise/Brand.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "mis",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 48
+        }
+      },
+      {
+        "comment": "",
+        "key": "e",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 52
+        }
+      }
+    ]
+  },
+  "version": 1
+}

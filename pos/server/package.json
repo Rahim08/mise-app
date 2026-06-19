@@ -1,0 +1,19 @@
+{
+  "name": "mise-pos-server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts",
+    "setup": "bun run src/db/schema.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "bonjour-service": "^1.2.1",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "bun-types": "latest",
+    "@types/uuid": "^10.0.0"
+  }
+}

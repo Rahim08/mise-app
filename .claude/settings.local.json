@@ -46,7 +46,29 @@
       "Bash(curl -s -o /dev/null -w '%{http_code}' https://mise-app-omega.vercel.app/people)",
       "Bash(curl -s -o /dev/null -w '%{http_code}' -X POST https://mise-app-omega.vercel.app/api/db -H 'Content-Type: application/json' -d '{\"table\":\"shifts\",\"op\":\"select\"}')",
       "Bash(curl -s -o /dev/null -w '%{http_code}' -X POST https://mise-app-omega.vercel.app/api/auth/restaurant-info -H 'Content-Type: application/json' -d '{}')",
-      "Bash(grep -n \"setCatAmounts\\({ ...catAmounts\\\\|setEmpExtras\\({ ...empExtras\\\\|hasVal\\\\|catNotes\\\\[cat.id\\\\]\" app/manager/page.tsx)"
+      "Bash(grep -n \"setCatAmounts\\({ ...catAmounts\\\\|setEmpExtras\\({ ...empExtras\\\\|hasVal\\\\|catNotes\\\\[cat.id\\\\]\" app/manager/page.tsx)",
+      "Bash(git diff *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'fix\\(native\\): сортировка смен по opened_at, инкассация по total, локализация Stash *)",
+      "Bash(xcodebuild -scheme Mise -configuration Release -derivedDataPath build -destination 'generic/platform=iOS Simulator' build)",
+      "Bash(xcrun simctl *)",
+      "Bash(xcodebuild -scheme Mise -configuration Debug -derivedDataPath build -destination 'platform=iOS Simulator,name=iPhone 17' build)",
+      "Bash(SIMCTL_CHILD_MISE_DEMO_UI=1 xcrun simctl launch \"iPhone 17\" com.mise.Mise)",
+      "Bash(open -a Simulator)",
+      "Bash(SIMCTL_CHILD_MISE_DEMO_UI=1 SIMCTL_CHILD_MISE_DEMO_APP=manager xcrun simctl launch E5A88E8B-3552-43D5-ACAE-EA060AFAC7F7 com.mise.Mise)",
+      "Bash(npm run *)",
+      "Bash(git push *)",
+      "Bash(git commit *)",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(git stash *)",
+      "Bash(git config *)",
+      "Bash(grep -n \"func navBtn\\\\|navBtn\\\\|background.*0\\\\.08.*RoundedRectangle\\\\|RoundedRectangle.*10\\\\\\)$\" /Users/rahim/mise-app/native/Mise/Mise/StashView.swift)",
+      "Bash(xcodebuild -scheme Mise -destination 'platform=iOS Simulator,name=iPhone 16' build)",
+      "Bash(xcodebuild -scheme Mise -destination 'generic/platform=iOS Simulator' build)",
+      "Bash(xargs ls -la)",
+      "Bash(git -C /Users/rahim/mise-app log --oneline f72ff9b -1)",
+      "Bash(git -C /Users/rahim/mise-app show f72ff9b --name-only --format=\"\")"
     ]
   }
 }

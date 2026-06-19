@@ -367,7 +367,7 @@ private struct ManagerBody: View {
             Text(t("mg.noShiftHint"))
                 .font(.system(size: 14)).foregroundStyle(.primary.opacity(0.5)).multilineTextAlignment(.center)
             Button { Task { await m.openShift() } } label: {
-                Text(t("mg.openShift")).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
+                Text(t("mg.openShift")).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
                     .padding(.horizontal, 40).padding(.vertical, 16)
                     .background(accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
@@ -430,7 +430,7 @@ private struct ManagerBody: View {
                 .font(.system(size: 13)).foregroundStyle(.primary.opacity(0.6))
             Button { withAnimation(.easeInOut(duration: 0.2)) { m.locked = false } } label: {
                 Label(t("mg.openForEdit"), systemImage: "pencil")
-                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                     .padding(.horizontal, 22).padding(.vertical, 13)
                     .background(accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
@@ -586,7 +586,6 @@ private struct ManagerBody: View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
                 .frame(width: 40, height: 40)
-                .background(Color.primary.opacity(0.08), in: Circle())
         }
     }
 }

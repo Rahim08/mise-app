@@ -1,0 +1,88 @@
+{
+  "source": "/Users/rahim/mise-app/native/Mise/Mise/AnalyticsView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 446
+        }
+      },
+      {
+        "comment": "",
+        "key": "День",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 460
+        }
+      },
+      {
+        "comment": "",
+        "key": "Доход",
+        "location": {
+          "startingColumn": 69,
+          "startingLine": 460
+        }
+      },
+      {
+        "comment": "",
+        "key": "0",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 582
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 654
+        }
+      },
+      {
+        "comment": "",
+        "key": "Дата",
+        "location": {
+          "startingColumn": 44,
+          "startingLine": 666
+        }
+      },
+      {
+        "comment": "",
+        "key": "Касса",
+        "location": {
+          "startingColumn": 75,
+          "startingLine": 666
+        }
+      },
+      {
+        "comment": "",
+        "key": "Дата",
+        "location": {
+          "startingColumn": 45,
+          "startingLine": 668
+        }
+      },
+      {
+        "comment": "",
+        "key": "Касса",
+        "location": {
+          "startingColumn": 76,
+          "startingLine": 668
+        }
+      },
+      {
+        "comment": "",
+        "key": "0",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 830
+        }
+      }
+    ]
+  },
+  "version": 1
+}
