@@ -44,11 +44,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // profiles.restaurant_id has no ON DELETE CASCADE → must delete before restaurant
+    const rid = restaurant.id
+
+    // Explicit deletion order mirrors demo-seed.sql — not all tables have ON DELETE CASCADE
+    const tables = [
+      'hookah_sales', 'tobacco_movements', 'tobacco_stock',
+      'shift_expenses', 'shift_absences', 'inkassations',
+      'monthly_card_amounts', 'attendance_records', 'staff_schedules',
+      'notifications', 'menu_orders', 'menu_items', 'menu_categories',
+      'menu_settings', 'expense_categories', 'hookah_types',
+      'shifts', 'staff', 'employees', 'restaurant_settings',
+    ]
+    for (const table of tables) {
+      const { error } = await supabaseAdmin.from(table).delete().eq('restaurant_id', rid)
+      if (error) return NextResponse.json({ error: `step:delete_${table}`, detail: error.message }, { status: 500 })
+    }
+
+    // profiles has no CASCADE on restaurant_id
     const { error: profilesError } = await supabaseAdmin
       .from('profiles')
       .delete()
-      .or(`id.eq.${user.id},restaurant_id.eq.${restaurant.id}`)
+      .or(`id.eq.${user.id},restaurant_id.eq.${rid}`)
     if (profilesError) {
       return NextResponse.json({ error: 'step:delete_profiles', detail: profilesError.message }, { status: 500 })
     }
@@ -56,12 +72,11 @@ export async function POST(req: NextRequest) {
     const { error: restaurantDeleteError } = await supabaseAdmin
       .from('restaurants')
       .delete()
-      .eq('id', restaurant.id)
+      .eq('id', rid)
     if (restaurantDeleteError) {
       return NextResponse.json({ error: 'step:delete_restaurant', detail: restaurantDeleteError.message }, { status: 500 })
     }
   } else {
-    // No restaurant — still clean up any orphaned profile row
     await supabaseAdmin.from('profiles').delete().eq('id', user.id)
   }
 
