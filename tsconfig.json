@@ -40,7 +40,6 @@
   ],
   "exclude": [
     "node_modules",
-    "mise-app",
-    "pos/server"
+    "mise-app"
   ]
 }
