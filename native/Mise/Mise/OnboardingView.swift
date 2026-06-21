@@ -5,16 +5,16 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.miseBg.ignoresSafeArea()
             switch model.phase {
             case .welcome:     WelcomeView()
             case .connect:     ConnectView()
             case .pin:         PinView()
             case .permissions: PermissionsView()
-            default:           Color.black
+            default:           Color.miseBg
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(L10n.shared.colorScheme)
         .animation(.easeInOut(duration: 0.28), value: model.phase)
     }
 }
@@ -27,11 +27,11 @@ private struct WelcomeView: View {
     var body: some View {
         VStack {
             Spacer()
-            Wordmark(size: 72, color: .white)
+            Wordmark(size: 72)
             Text(t("onb.tagline"))
                 .font(.system(size: 16, weight: .medium))
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(.secondary)
                 .padding(.top, 18)
             Spacer()
             Button { model.goConnect() } label: { PrimaryLabel(t("onb.login")) }
@@ -53,11 +53,11 @@ private struct ConnectView: View {
             VStack(spacing: 10) {
                 Text(t("ob.scanTitle"))
                     .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Text(t("ob.scanHint"))
                     .font(.system(size: 14))
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(.secondary)
                     .padding(.horizontal, 28)
             }
             .padding(.bottom, 24)
@@ -67,7 +67,7 @@ private struct ConnectView: View {
                     Text(t("ob.noCamera"))
                         .font(.system(size: 14))
                         .multilineTextAlignment(.center)
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(.secondary)
                         .padding(.horizontal, 28)
                 } else {
                     QRScannerView(onResult: { code in
@@ -82,7 +82,7 @@ private struct ConnectView: View {
             Spacer()
             Button { model.goWelcome() } label: {
                 Text(t("back")).font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.secondary)
             }
             .padding(.bottom, 28)
         }
@@ -94,7 +94,7 @@ private struct ScanFrame: View {
         GeometryReader { geo in
             let s = min(geo.size.width, geo.size.height) * 0.64
             RoundedRectangle(cornerRadius: 16)
-                .stroke(.white.opacity(0.9), lineWidth: 3)
+                .stroke(.primary.opacity(0.85), lineWidth: 3)
                 .frame(width: s, height: s)
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
@@ -115,7 +115,7 @@ private struct PinView: View {
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
-            Wordmark(size: 40, color: .white)
+            Wordmark(size: 40)
             if let raw = model.restaurant?.logo_url, let url = URL(string: raw) {
                 AsyncImage(url: url) { img in
                     img.resizable().scaledToFit()
@@ -125,16 +125,16 @@ private struct PinView: View {
                 .padding(.top, 14)
             }
             Text(model.restaurant?.name ?? "")
-                .font(.system(size: 19, weight: .bold)).foregroundStyle(.white)
+                .font(.system(size: 19, weight: .bold)).foregroundStyle(.primary)
                 .padding(.top, 10)
             Text(t("pin.enter"))
-                .font(.system(size: 13)).foregroundStyle(.white.opacity(0.55))
+                .font(.system(size: 13)).foregroundStyle(.secondary)
                 .padding(.top, 4)
 
             HStack(spacing: 18) {
                 ForEach(0..<4, id: \.self) { i in
                     Circle()
-                        .fill(pin.count > i ? (error ? Color.red : Color.white) : Color.white.opacity(0.2))
+                        .fill(pin.count > i ? (error ? Color.red : Color.primary) : Color.primary.opacity(0.2))
                         .frame(width: 14, height: 14)
                         .scaleEffect(pin.count > i ? 1.15 : 1)
                 }
@@ -154,7 +154,7 @@ private struct PinView: View {
             Spacer()
             Button { model.goConnect() } label: {
                 Text(t("pin.change")).font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(.secondary)
             }
             .padding(.bottom, 28)
         }
@@ -179,6 +179,7 @@ private struct PinView: View {
     private func tap(_ k: String) {
         if k == "⌫" { if !pin.isEmpty { pin.removeLast() }; return }
         guard !k.isEmpty, pin.count < 4, !checking else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         error = false
         pin.append(k)
         if pin.count == 4 {
@@ -188,8 +189,10 @@ private struct PinView: View {
                 let ok = await model.checkPin(entered)
                 checking = false
                 if ok {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
                     model.proceedAfterPin()
                 } else {
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
                     error = true; shake.toggle()
                     try? await Task.sleep(nanoseconds: 500_000_000)
                     pin = ""
@@ -205,9 +208,9 @@ private struct KeyLabel: View {
     var body: some View {
         ZStack {
             if !k.isEmpty {
-                Circle().fill(k == "⌫" ? Color.clear : Color.white.opacity(0.08))
+                Circle().fill(k == "⌫" ? Color.clear : Color.primary.opacity(0.08))
             }
-            Text(k).font(.system(size: k == "⌫" ? 22 : 28, weight: .regular)).foregroundStyle(.white)
+            Text(k).font(.system(size: k == "⌫" ? 22 : 28, weight: .regular)).foregroundStyle(.primary)
         }
         .frame(width: 74, height: 74)
     }
@@ -238,19 +241,19 @@ private struct PermissionsView: View {
             VStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(.white.opacity(0.07))
+                        .fill(.primary.opacity(0.07))
                         .frame(width: 88, height: 88)
                     Image(systemName: p.symbol)
                         .font(.system(size: 38, weight: .regular))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                 }
-                Text(p.title).font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
+                Text(p.title).font(.system(size: 22, weight: .bold)).foregroundStyle(.primary)
                 Text(p.desc).font(.system(size: 15)).multilineTextAlignment(.center)
-                    .foregroundStyle(.white.opacity(0.55)).padding(.horizontal, 28)
+                    .foregroundStyle(.secondary).padding(.horizontal, 28)
             }
             HStack(spacing: 6) {
                 ForEach(0..<perms.count, id: \.self) { i in
-                    Circle().fill(i == step ? Color.white : Color.white.opacity(0.22))
+                    Circle().fill(i == step ? Color.primary : Color.primary.opacity(0.22))
                         .frame(width: 7, height: 7)
                 }
             }
@@ -262,7 +265,7 @@ private struct PermissionsView: View {
                 if step < perms.count - 1 {
                     Button { advance() } label: {
                         Text(t("ob.notNow")).font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -295,9 +298,9 @@ struct PrimaryLabel: View {
     var body: some View {
         Text(title)
             .font(.system(size: 17, weight: .semibold))
-            .foregroundStyle(.black)
+            .foregroundStyle(Color(UIColor.systemBackground))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 17)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(Color.primary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }

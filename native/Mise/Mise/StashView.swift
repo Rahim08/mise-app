@@ -213,11 +213,14 @@ final class StashModel {
     var aiMovRows: [MovRow]? = nil
     var shouldOpenMovSheet = false
 
-    func handleAI(_ message: String) async {
+    func handleAI(_ message: String) async -> String? {
         let ctx = allBrands.prefix(30).joined(separator: ", ")
-        if let result = try? await API.aiChat(module: "stash", message: message, context: ctx),
-           let type = result["type"] as? String, type == "prefill",
-           let raw = result["rows"] as? [[String: Any]] {
+        do {
+            let result = try await API.aiChat(module: "stash", message: message, context: ctx)
+            guard let type = result["type"] as? String, type == "prefill",
+                  let raw = result["rows"] as? [[String: Any]] else {
+                flash(t("ai.noData")); return nil
+            }
             let rows = raw.compactMap { d -> MovRow? in
                 guard let b = d["brand"] as? String, let fl = d["flavor"] as? String,
                       let g = d["grams"] as? String else { return nil }
@@ -227,8 +230,20 @@ final class StashModel {
                 aiMovRows = rows
                 shouldOpenMovSheet = true
                 flash(t("ai.applied"))
+            } else {
+                flash(t("ai.noData"))
             }
+        } catch let err as APIError {
+            switch err {
+            case .http(403, _): flash(t("ai.err403"))
+            case .http(500, _): flash(t("ai.err500"))
+            case .http(502, _): flash(t("ai.err502"))
+            default: flash(t("ai.errGeneric"))
+            }
+        } catch {
+            flash(t("ai.errGeneric"))
         }
+        return nil
     }
 
     func saveMovement(_ rows: [MovRow], reason: String) async -> Bool {
@@ -331,9 +346,20 @@ struct StashView: View {
 
     var body: some View {
         Group {
-            if let m { StashBody(m: m, aiEnabled: app.aiEnabled) }
-            else { ProgressView().tint(.primary).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            if let m {
+                StashBody(m: m, aiEnabled: app.aiEnabled)
+                    .transition(.opacity)
+            } else {
+                ZStack {
+                    Color.miseBg.ignoresSafeArea()
+                    ScrollView {
+                        ShiftTabSkeleton().padding(16).padding(.bottom, 24)
+                    }
+                }
+                .transition(.opacity)
+            }
         }
+        .animation(.easeOut(duration: 0.3), value: m == nil)
         .task {
             if m == nil {
                 let model = StashModel(rid: app.restaurant?.id ?? "", canSeeMoney: app.canSeeMoney)
@@ -367,6 +393,7 @@ private struct StashBody: View {
                     .tabItem { Label(t("tab.inventory"), systemImage: "checklist") }.tag("inventory")
             }
             .tint(BrandKit.stash)
+            .sensoryFeedback(.selection, trigger: m.tab)
 
             if let toast = m.toast {
                 Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
@@ -395,22 +422,30 @@ private struct ShiftTab: View {
     @Bindable var m: StashModel
 
     var body: some View {
-        if m.shiftLoading {
-            ProgressView().tint(.primary).padding(.top, 40)
-        } else if m.types.isEmpty {
-            VStack(spacing: 6) {
-                Text(t("st.noTypes")).font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary)
-                Text(t("st.noTypesHint"))
-                    .font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5)).multilineTextAlignment(.center)
+        Group {
+            if m.shiftLoading {
+                ShiftTabSkeleton()
+                    .transition(.opacity)
+            } else if m.types.isEmpty {
+                VStack(spacing: 6) {
+                    Text(t("st.noTypes")).font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary)
+                    Text(t("st.noTypesHint"))
+                        .font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5)).multilineTextAlignment(.center)
+                }
+                .padding(.top, 50)
+                .transition(.opacity)
+            } else {
+                VStack(spacing: 12) {
+                    dayNav
+                    stats
+                    modeSeg
+                    typesList
+                    saveBtn
+                }
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            .padding(.top, 50)
-        } else {
-            dayNav
-            stats
-            modeSeg
-            typesList
-            saveBtn
         }
+        .animation(.spring(duration: 0.45, bounce: 0.08), value: m.shiftLoading)
     }
 
     private var dayNav: some View {
@@ -552,6 +587,7 @@ private struct StockTab: View {
         }
         if m.filteredStock.isEmpty {
             Text(t("empty")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
+                .transition(.opacity)
         } else {
             ForEach(m.stockByBrand, id: \.0) { brand, items in
                 VStack(alignment: .leading, spacing: 0) {
@@ -577,6 +613,7 @@ private struct StockTab: View {
                 }
                 .padding(.bottom, 6)
                 .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+                .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
             }
         }
     }

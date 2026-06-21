@@ -76,8 +76,11 @@ private struct LauncherView: View {
             ScrollView {
                 LazyVGrid(columns: cols, spacing: 14) {
                     ForEach(app.availableApps.compactMap { miseModules[$0] }) { mod in
-                        Button { app.openApp(mod.id) } label: { tile(mod) }
-                            .buttonStyle(.plain)
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            app.openApp(mod.id)
+                        } label: { tile(mod) }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -164,15 +167,23 @@ struct AppTabPage<Content: View>: View {
     var refresh: (() async -> Void)? = nil
     @ViewBuilder var content: Content
 
+    @State private var appeared = false
+
     var body: some View {
         ZStack {
             Color.miseBg.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 12) { content }
                     .padding(16).padding(.bottom, 24)
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : 18)
             }
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await refresh?() }
+        }
+        .onAppear {
+            guard !appeared else { return }
+            withAnimation(.spring(duration: 0.45, bounce: 0.1)) { appeared = true }
         }
     }
 }

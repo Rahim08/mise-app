@@ -37,17 +37,21 @@ final class AnalyticsModel {
 
     var inkDetails: [String: Inkassation] = [:]
 
-    // AI
-    var aiReply: String? = nil
-    var aiProcessing = false
-
-    func handleAI(_ message: String) async {
-        aiProcessing = true
-        defer { aiProcessing = false }
+    func handleAI(_ message: String) async -> String? {
         let ctx = "Month income: \(Money.s(totalIncome)), expenses: \(Money.s(totalExpense)), shifts: \(shiftsRaw.count), inkass: \(Money.s(totalInkass))"
-        if let result = try? await API.aiChat(module: "analytics", message: message, context: ctx),
-           let reply = result["reply"] as? String {
-            aiReply = reply
+        do {
+            let result = try await API.aiChat(module: "analytics", message: message, context: ctx)
+            return result["reply"] as? String ?? t("ai.noReply")
+        } catch let err as APIError {
+            switch err {
+            case .http(401, _): return t("ai.err401")
+            case .http(403, _): return t("ai.err403")
+            case .http(500, _): return t("ai.err500")
+            case .http(502, _): return t("ai.err502")
+            default: return "\(t("ai.errGeneric")): \(err.localizedDescription)"
+            }
+        } catch {
+            return "\(t("ai.errGeneric")): \(error.localizedDescription)"
         }
     }
 
@@ -119,7 +123,7 @@ final class AnalyticsModel {
         // кальян all-time + склад
         async let allHk = try? DB.from("hookah_sales").select("quantity, portion_g").list(HookahSale.self)
         async let stock = try? DB.from("tobacco_stock").select("id, brand, flavor, quantity_g, min_quantity_g").list(StockItem.self)
-        async let movs = try? DB.from("tobacco_movements").select("quantity_g, type").list(Movement.self)
+        async let movs = try? DB.from("tobacco_movements").select().list(Movement.self)
         async let tps = try? DB.from("hookah_types").select("id, name").list(HookahType.self)
         allHookah = (await allHk) ?? allHookah
         stockRows = (await stock) ?? stockRows
@@ -380,9 +384,15 @@ struct AnalyticsView: View {
 
     var body: some View {
         Group {
-            if let m { AnalyticsBody(m: m, aiEnabled: app.aiEnabled) }
-            else { ProgressView().tint(.primary).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            if let m {
+                AnalyticsBody(m: m, aiEnabled: app.aiEnabled)
+                    .transition(.opacity)
+            } else {
+                AnalyticsSkeleton()
+                    .transition(.opacity)
+            }
         }
+        .animation(.easeOut(duration: 0.3), value: m == nil)
         .task {
             if m == nil {
                 let model = AnalyticsModel(rid: app.restaurant?.id ?? "")
@@ -419,33 +429,10 @@ private struct AnalyticsBody: View {
                         .tabItem { Label(t("tab.hookah"), systemImage: "flame.fill") }.tag("hookah")
                 }
                 .tint(BrandKit.analytics)
-            }
-            if m.loading {
-                ProgressView().tint(.primary)
+                .sensoryFeedback(.selection, trigger: m.tab)
             }
             if aiEnabled {
                 AIButton(module: "analytics") { msg in await m.handleAI(msg) }
-            }
-        }
-        .sheet(isPresented: Binding(get: { m.aiReply != nil }, set: { if !$0 { m.aiReply = nil } })) {
-            NavigationStack {
-                ZStack {
-                    Color.miseBg.ignoresSafeArea()
-                    ScrollView {
-                        Text(m.aiReply ?? "")
-                            .font(.system(size: 16)).foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(20)
-                    }
-                }
-                .navigationTitle("AI")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button(t("ai.close")) { m.aiReply = nil }
-                    }
-                }
-                .toolbarBackground(Color.miseBg, for: .navigationBar)
             }
         }
     }
@@ -767,7 +754,8 @@ private struct KassaTab: View {
                         Text(t("an.date")).frame(width: 44, alignment: .leading)
                         Text(t("mg.inkass")).frame(maxWidth: .infinity, alignment: .trailing)
                         Text(t("an.expense")).frame(maxWidth: .infinity, alignment: .trailing)
-                        Text(t("an.inkNet")).frame(maxWidth: .infinity, alignment: .trailing)
+                        Text(t("mg.inkReason")).frame(maxWidth: .infinity, alignment: .trailing)
+                        Text(t("an.inkNet")).frame(width: 60, alignment: .trailing)
                     }
                     .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.35))
                     .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
@@ -775,18 +763,16 @@ private struct KassaTab: View {
                     ForEach(Array(m.shiftsWithInk.enumerated()), id: \.element.id) { i, s in
                         let ink = m.inkDetails[s.id]
                         HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(dd(s.date)).foregroundStyle(.primary.opacity(0.5))
-                                if let r = ink?.reason, !r.isEmpty {
-                                    Text(r).font(.system(size: 10)).foregroundStyle(.primary.opacity(0.38))
-                                }
-                            }
-                            .frame(width: 52, alignment: .leading)
+                            Text(dd(s.date)).frame(width: 44, alignment: .leading).foregroundStyle(.primary.opacity(0.5))
                             Text(cur(s.inkassation ?? 0)).frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.stash)
                             Text((ink?.expense ?? 0) > 0 ? "−" + cur(ink?.expense ?? 0) : "—")
                                 .frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.menu)
+                            Text(ink?.reason?.isEmpty == false ? (ink?.reason ?? "—") : "—")
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .foregroundStyle(.primary.opacity(0.45))
+                                .lineLimit(1)
                             Text(cur(ink?.total ?? (s.inkassation ?? 0)))
-                                .frame(maxWidth: .infinity, alignment: .trailing).fontWeight(.semibold)
+                                .frame(width: 60, alignment: .trailing).fontWeight(.semibold)
                         }
                         .font(.system(size: 12)).padding(.vertical, 9).padding(.horizontal, 14)
                         if i < m.shiftsWithInk.count - 1 { Divider().overlay(Color.primary.opacity(0.07)) }

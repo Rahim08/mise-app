@@ -40,7 +40,11 @@ final class PeopleModel {
     // расписание
     var schedules: [Schedule] = []
     var schedLoaded = false
-    var shiftsView = "shifts" // shifts | attendance | swaps
+    var shiftsView = "shifts" // shifts | swaps
+    var calendarMonth: Date = {
+        Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: Date()))!
+    }()
+    var selectedCalDate: String? = nil
 
     // явка
     var attendance: [AttendanceRecord] = []
@@ -219,17 +223,27 @@ final class PeopleModel {
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedSchedule(); return }
         #endif
         let cal = Calendar.current
-        let today = Date()
-        let weekday = cal.component(.weekday, from: today)
-        let monday = cal.date(byAdding: .day, value: -((weekday + 5) % 7), to: today)!
-        let sunday = cal.date(byAdding: .day, value: 6, to: monday)!
+        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: calendarMonth))!
+        let lastDay = cal.date(byAdding: .day, value: -1,
+                               to: cal.date(byAdding: .month, value: 1, to: monthStart)!)!
         async let dirL = (try? DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)) ?? []
-        async let sch = (try? DB.from("staff_schedules").select().gte("date", key(monday)).lte("date", key(sunday)).list(Schedule.self)) ?? []
+        async let sch = (try? DB.from("staff_schedules").select().gte("date", key(monthStart)).lte("date", key(lastDay)).list(Schedule.self)) ?? []
         if dir.isEmpty { dir = await dirL } else { _ = await dirL }
         var rows = await sch
         if !isManager { rows = rows.filter { $0.staff_id == myId } }
         schedules = rows.sorted { $0.date < $1.date }
         schedLoaded = true
+    }
+
+    func prevMonth() async {
+        calendarMonth = Calendar.current.date(byAdding: .month, value: -1, to: calendarMonth)!
+        selectedCalDate = nil; schedLoaded = false
+        await loadSchedule()
+    }
+    func nextMonth() async {
+        calendarMonth = Calendar.current.date(byAdding: .month, value: 1, to: calendarMonth)!
+        selectedCalDate = nil; schedLoaded = false
+        await loadSchedule()
     }
     var schedByDate: [(String, [Schedule])] {
         var m: [String: [Schedule]] = [:]
@@ -650,9 +664,15 @@ struct PeopleView: View {
 
     var body: some View {
         Group {
-            if let m { PeopleBody(m: m) }
-            else { ProgressView().tint(.primary).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            if let m {
+                PeopleBody(m: m)
+                    .transition(.opacity)
+            } else {
+                PeopleSkeleton()
+                    .transition(.opacity)
+            }
         }
+        .animation(.easeOut(duration: 0.3), value: m == nil)
         .task {
             if m == nil {
                 let s = app.staff
@@ -691,6 +711,7 @@ private struct PeopleBody: View {
                     .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
             }
             .tint(PEOPLE_ACCENT)
+            .sensoryFeedback(.selection, trigger: m.tab)
 
             if let toast = m.toast {
                 Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
@@ -1185,7 +1206,10 @@ private struct AttendanceTab: View {
                 .frame(maxWidth: .infinity).padding(20)
                 .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
             } else {
-                Button { Task { await m.checkIn() } } label: {
+                Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    Task { await m.checkIn() }
+                } label: {
                     HStack {
                         if m.checking { ProgressView().tint(.white) }
                         else { Image(systemName: "location.fill"); Text(t("pe.iCame")) }
@@ -1234,25 +1258,27 @@ private struct AttendanceTab: View {
             : m.dir.filter { m.todayScheduledIds.contains($0.id) }
         return VStack(alignment: .leading, spacing: 0) {
             Text(t("pe.todayCaps")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
-            ForEach(Array(scheduled.enumerated()), id: \.element.id) { i, s in
-                let rec = m.attendance.first { $0.staff_id == s.id && $0.date == m.todayKey }
-                HStack {
-                    Text(s.name).font(.system(size: 15)).foregroundStyle(.primary)
-                    Spacer()
-                    if let rec {
-                        Text(clock(rec.check_in_at) + (rec.check_out_at != nil ? "–\(clock(rec.check_out_at))" : ""))
-                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
-                        if rec.status == "late", let l = rec.late_minutes { badge(t("pe.lateBadge", ["n": "\(l)"]), BrandKit.stash) }
-                    } else {
-                        Text(t("pe.notCame")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.35))
+            VStack(spacing: 0) {
+                ForEach(Array(scheduled.enumerated()), id: \.element.id) { i, s in
+                    let rec = m.attendance.first { $0.staff_id == s.id && $0.date == m.todayKey }
+                    HStack {
+                        Text(s.name).font(.system(size: 15)).foregroundStyle(.primary)
+                        Spacer()
+                        if let rec {
+                            Text(clock(rec.check_in_at) + (rec.check_out_at != nil ? "–\(clock(rec.check_out_at))" : ""))
+                                .font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
+                            if rec.status == "late", let l = rec.late_minutes { badge(t("pe.lateBadge", ["n": "\(l)"]), BrandKit.stash) }
+                        } else {
+                            Text(t("pe.notCame")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.35))
+                        }
                     }
+                    .padding(.vertical, 12).padding(.horizontal, 14)
+                    if i < scheduled.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 14) }
                 }
-                .padding(.vertical, 12).padding(.horizontal, 14)
-                if i < scheduled.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 14) }
             }
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
         }
         .padding(.top, 8)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
     }
 
     private func badge(_ s: String, _ c: Color) -> some View {
@@ -1401,6 +1427,145 @@ private struct SwapCreateSheet: View {
 
 // MARK: Смены (расписание)
 
+private struct ShiftsCalendar: View {
+    @Bindable var m: PeopleModel
+
+    private let cal = Calendar.current
+
+    private var monthStart: Date {
+        cal.date(from: cal.dateComponents([.year, .month], from: m.calendarMonth))!
+    }
+    private var daysInMonth: Int { cal.range(of: .day, in: .month, for: monthStart)!.count }
+    private var firstOffset: Int {
+        let wd = cal.component(.weekday, from: monthStart) // 1=Sun…7=Sat
+        return (wd + 5) % 7 // Mon→0 … Sun→6
+    }
+    private var monthLabel: String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "LLLL yyyy"
+        let map = ["ru": "ru_RU", "en": "en_US", "it": "it_IT", "fr": "fr_FR",
+                   "az": "az_AZ", "tr": "tr_TR", "uk": "uk_UA", "kk": "kk_KZ"]
+        fmt.locale = Locale(identifier: map[L10n.shared.lang.rawValue] ?? "en_US")
+        return fmt.string(from: monthStart).capitalized
+    }
+    private var scheduledDates: Set<String> { Set(m.schedules.map { $0.date }) }
+    private func dateStr(day: Int) -> String {
+        let comps = DateComponents(year: cal.component(.year, from: monthStart),
+                                   month: cal.component(.month, from: monthStart), day: day)
+        guard let d = cal.date(from: comps) else { return "" }
+        return m.key(d)
+    }
+    private var weekdayHeaders: [String] {
+        let s = cal.veryShortWeekdaySymbols // ["S","M","T","W","T","F","S"] starts Sun
+        return Array(s[1...]) + [s[0]]      // Mon first
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            // Month navigation
+            HStack {
+                Button { Task { await m.prevMonth() } } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+                        .frame(width: 32, height: 32)
+                }
+                Spacer()
+                Text(monthLabel).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
+                Spacer()
+                Button { Task { await m.nextMonth() } } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+                        .frame(width: 32, height: 32)
+                }
+            }
+
+            // Weekday headers
+            HStack(spacing: 0) {
+                ForEach(0..<7, id: \.self) { i in
+                    Text(weekdayHeaders[i])
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.primary.opacity(0.35))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+
+            // Day grid
+            let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
+            LazyVGrid(columns: columns, spacing: 4) {
+                ForEach(0..<(firstOffset + daysInMonth), id: \.self) { i in
+                    if i < firstOffset {
+                        Color.clear.frame(height: 36)
+                    } else {
+                        let day = i - firstOffset + 1
+                        let ds = dateStr(day: day)
+                        let isToday = ds == m.todayKey
+                        let hasShift = scheduledDates.contains(ds)
+                        let isSel = m.selectedCalDate == ds
+
+                        Button {
+                            withAnimation(.spring(duration: 0.2)) {
+                                m.selectedCalDate = isSel ? nil : ds
+                            }
+                        } label: {
+                            VStack(spacing: 3) {
+                                Text("\(day)")
+                                    .font(.system(size: 13, weight: isToday ? .bold : .regular))
+                                    .foregroundStyle(isSel ? .white : (isToday ? PEOPLE_ACCENT : .primary))
+                                Circle()
+                                    .fill(hasShift
+                                          ? (isSel ? Color.white.opacity(0.8) : PEOPLE_ACCENT)
+                                          : Color.clear)
+                                    .frame(width: 4, height: 4)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 36)
+                            .background(isSel ? PEOPLE_ACCENT
+                                        : (isToday ? PEOPLE_ACCENT.opacity(0.12) : Color.clear),
+                                        in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!hasShift)
+                    }
+                }
+            }
+
+            // Inline detail for selected day
+            if let sel = m.selectedCalDate {
+                let items = m.schedules.filter { $0.date == sel }
+                if !items.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { idx, s in
+                            HStack {
+                                if m.isManager {
+                                    Text(m.staffName(s.staff_id))
+                                        .font(.system(size: 14)).foregroundStyle(.primary)
+                                }
+                                Spacer()
+                                Text("\(hhmm(s.shift_start))–\(hhmm(s.shift_end))")
+                                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
+                                if m.isManager {
+                                    Button { Task { await m.deleteSchedule(s.id) } } label: {
+                                        Image(systemName: "trash")
+                                            .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.3))
+                                    }
+                                    .padding(.leading, 8)
+                                }
+                            }
+                            .padding(.vertical, 10).padding(.horizontal, 14)
+                            if idx < items.count - 1 {
+                                Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 14)
+                            }
+                        }
+                    }
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+        }
+        .padding(14)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 18))
+    }
+}
+
 private struct ShiftsTab: View {
     @Bindable var m: PeopleModel
     @State private var showAdd = false
@@ -1409,31 +1574,39 @@ private struct ShiftsTab: View {
         if !m.schedLoaded {
             ProgressView().tint(.primary).padding(.top, 40)
         } else {
+            ShiftsCalendar(m: m)
             if m.isManager { managerControls }
             if m.schedByDate.isEmpty {
                 Text(m.isManager ? t("pe.scheduleEmptyMgr") : t("pe.scheduleEmptyStaff"))
-                    .font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).multilineTextAlignment(.center).padding(.top, 40)
+                    .font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4))
+                    .multilineTextAlignment(.center).padding(.top, 20)
             } else {
                 ForEach(m.schedByDate, id: \.0) { date, items in
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(dayLabel(date).uppercased()).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
+                        Text(dayLabel(date).uppercased())
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                             .padding(.bottom, 8)
                         VStack(spacing: 0) {
                             ForEach(Array(items.enumerated()), id: \.element.id) { idx, s in
                                 HStack {
-                                    Text(m.staffName(s.staff_id)).font(.system(size: 15)).foregroundStyle(.primary)
+                                    Text(m.staffName(s.staff_id))
+                                        .font(.system(size: 15)).foregroundStyle(.primary)
                                     Spacer()
                                     Text("\(hhmm(s.shift_start))–\(hhmm(s.shift_end))")
                                         .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
                                     if m.isManager {
                                         Button { Task { await m.deleteSchedule(s.id) } } label: {
-                                            Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3))
+                                            Image(systemName: "trash")
+                                                .font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3))
                                         }
                                         .padding(.leading, 8)
                                     }
                                 }
                                 .padding(.vertical, 11).padding(.horizontal, 14)
-                                if idx < items.count - 1 { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 14) }
+                                if idx < items.count - 1 {
+                                    Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 14)
+                                }
                             }
                         }
                         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))

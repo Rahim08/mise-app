@@ -149,7 +149,7 @@ final class ManagerModel {
     // MARK: действия
 
     func changeDate(_ dir: Int) async {
-        if shift != nil && !locked { try? await persist() }
+        if shift != nil && !locked { _ = try? await persist() }
         currentDate = Calendar.current.date(byAdding: .day, value: dir, to: currentDate)!
         await loadDay(currentDate)
     }
@@ -277,20 +277,34 @@ final class ManagerModel {
     }
     #endif
 
-    func handleAI(_ message: String) async {
+    func handleAI(_ message: String) async -> String? {
         let empNames = employees.map(\.name).joined(separator: ", ")
         let catNames = categories.map(\.name).joined(separator: ", ")
         let ctx = "Employees: \(empNames). Expense categories: \(catNames)."
-        guard let result = try? await API.aiChat(module: "manager", message: message, context: ctx),
-              let type = result["type"] as? String, type == "prefill" else { return }
-        func str(_ key: String) -> String { (result[key] as? String) ?? "" }
-        if !str("income").isEmpty      { income = str("income") }
-        if !str("incomeCard").isEmpty  { incomeCard = str("incomeCard") }
-        if !str("inkSum").isEmpty      { inkSum = str("inkSum") }
-        if !str("inkExpense").isEmpty  { inkExpense = str("inkExpense") }
-        if !str("inkReason").isEmpty   { inkReason = str("inkReason") }
-        if !str("inkSalary").isEmpty   { inkSalary = str("inkSalary") }
-        flash(t("ai.applied"))
+        do {
+            let result = try await API.aiChat(module: "manager", message: message, context: ctx)
+            guard let type = result["type"] as? String, type == "prefill" else {
+                flash(t("ai.noData")); return nil
+            }
+            func str(_ key: String) -> String { (result[key] as? String) ?? "" }
+            if !str("income").isEmpty      { income = str("income") }
+            if !str("incomeCard").isEmpty  { incomeCard = str("incomeCard") }
+            if !str("inkSum").isEmpty      { inkSum = str("inkSum") }
+            if !str("inkExpense").isEmpty  { inkExpense = str("inkExpense") }
+            if !str("inkReason").isEmpty   { inkReason = str("inkReason") }
+            if !str("inkSalary").isEmpty   { inkSalary = str("inkSalary") }
+            flash(t("ai.applied"))
+        } catch let err as APIError {
+            switch err {
+            case .http(403, _): flash(t("ai.err403"))
+            case .http(500, _): flash(t("ai.err500"))
+            case .http(502, _): flash(t("ai.err502"))
+            default: flash(t("ai.errGeneric"))
+            }
+        } catch {
+            flash(t("ai.errGeneric"))
+        }
+        return nil
     }
 
     private func flash(_ m: String) {
@@ -309,10 +323,13 @@ struct ManagerView: View {
         Group {
             if let m {
                 ManagerBody(m: m, aiEnabled: app.aiEnabled)
+                    .transition(.opacity)
             } else {
-                ProgressView().tint(.primary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                ManagerSkeleton()
+                    .transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: 0.3), value: m == nil)
         .task {
             if m == nil {
                 let model = ManagerModel(rid: app.restaurant?.id ?? "")
@@ -334,14 +351,22 @@ private struct ManagerBody: View {
             ScrollView {
                 VStack(spacing: 14) {
                     dateRow
-                    if m.shift == nil {
-                        emptyState
-                    } else {
-                        shiftBody
+                    Group {
+                        if m.shift == nil {
+                            emptyState
+                                .transition(.opacity)
+                        } else {
+                            shiftBody
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
                     }
+                    .animation(.spring(duration: 0.4, bounce: 0.08), value: m.shift == nil)
                 }
                 .padding(16)
                 .padding(.bottom, 40)
+                .opacity(m.loading ? 0 : 1)
+                .offset(y: m.loading ? 18 : 0)
+                .animation(.spring(duration: 0.45, bounce: 0.1), value: m.loading)
             }
             .refreshable { await m.loadDay(m.currentDate) }
 

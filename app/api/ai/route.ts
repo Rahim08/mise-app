@@ -45,34 +45,51 @@ export async function POST(req: NextRequest) {
   const isAllowed = isPro || restaurant?.ai_enabled === true
   if (!isAllowed) return NextResponse.json({ error: 'ai_pro_only' }, { status: 403 })
 
-  const key = process.env.GEMINI_API_KEY
+  const key = process.env.GROQ_API_KEY
   if (!key) return NextResponse.json({ error: 'No API key' }, { status: 500 })
 
+  const groqUrl = 'https://api.groq.com/openai/v1/chat/completions'
+
+  async function groqChat(systemPrompt: string, userMessage: string): Promise<{ ok: boolean; text: string }> {
+    const r = await fetch(groqUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage },
+        ],
+        temperature: 0.2,
+        max_tokens: 512,
+      }),
+    })
+    const d = await r.json()
+    if (!r.ok) return { ok: false, text: d?.error?.message || 'AI request failed' }
+    return { ok: true, text: d.choices?.[0]?.message?.content ?? '' }
+  }
+
   const body = await req.json()
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`
 
   // Native iOS request: { module, message, context }
   if (body.module) {
     const { module, message, context } = body as { module: string; message: string; context?: string }
 
-    let prompt: string
+    let system: string
+    let user: string
     if (module === 'stash') {
-      prompt = `${STASH_SYSTEM}\n\n${context ? 'Known brands/flavors: ' + context + '\n\n' : ''}User: ${message}`
+      system = STASH_SYSTEM
+      user = `${context ? 'Known brands/flavors: ' + context + '\n\n' : ''}User: ${message}`
     } else if (module === 'manager') {
-      prompt = `${MANAGER_SYSTEM}\n\n${context ? 'Context: ' + context + '\n\n' : ''}User: ${message}`
+      system = MANAGER_SYSTEM
+      user = `${context ? 'Context: ' + context + '\n\n' : ''}User: ${message}`
     } else {
-      // analytics or unknown — plain text reply
-      prompt = `${context ? context + '\n\n' : ''}Question: ${message}\nAnswer concisely in 2-4 sentences in the same language as the question.`
+      system = 'You are a helpful restaurant analytics assistant. Answer concisely in 2-4 sentences in the same language as the question.'
+      user = `${context ? context + '\n\n' : ''}Question: ${message}`
     }
 
-    const r = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2, maxOutputTokens: 512 } }),
-    })
-    const d = await r.json()
-    if (!r.ok) return NextResponse.json({ error: d?.error?.message || 'AI request failed' }, { status: 502 })
-    const text: string = d.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+    const { ok, text } = await groqChat(system, user)
+    if (!ok) return NextResponse.json({ error: text }, { status: 502 })
 
     if (module === 'stash' || module === 'manager') {
       try {
@@ -87,14 +104,9 @@ export async function POST(req: NextRequest) {
 
   // Legacy web request: { messages, context }
   const { messages, context } = body
-  const prompt = `${context}\n\nВопрос: ${messages[messages.length - 1].text}`
-  const r = await fetch(geminiUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-  })
-  const d = await r.json()
-  if (!r.ok) return NextResponse.json({ error: d?.error?.message || 'AI request failed' }, { status: 502 })
-  const text = d.candidates?.[0]?.content?.parts?.[0]?.text || 'Нет ответа'
-  return NextResponse.json({ text })
+  const system = context ?? 'You are a helpful restaurant analytics assistant.'
+  const lastMsg = messages[messages.length - 1].text
+  const { ok, text } = await groqChat(system, lastMsg)
+  if (!ok) return NextResponse.json({ error: text }, { status: 502 })
+  return NextResponse.json({ text: text || 'Нет ответа' })
 }

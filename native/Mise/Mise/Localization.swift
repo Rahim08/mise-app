@@ -260,12 +260,19 @@ let STRINGS: [String: [Lang: String]] = [
     "an.byDay":          tr("BY DAY", "ПО ДНЯМ", "PER GIORNO", "PAR JOUR", "GÜNLƏR ÜZRƏ", "GÜNE GÖRE", "ПО ДНЯХ", "КҮНДЕР БОЙЫНША"),
     "an.inCol":          tr("In", "Вход", "Entrata", "Entrée", "Giriş", "Giriş", "Вхід", "Кіріс"),
     "an.totalInkass":    tr("Total collected", "Всего инкассации", "Totale prelievi", "Total encaissé", "Cəmi inkassasiya", "Toplam tahsilat", "Усього інкасації", "Барлық инкассация"),
-    "an.salaryToday":    tr("Salary to date", "ЗП на сегодня", "Stipendio a oggi", "Salaire à ce jour", "Bu günə maaş", "Bugüne maaş", "ЗП на сьогодні", "Бүгінге жалақы"),
+    "an.salaryToday":    tr("Accrued salary", "Зарплата н/д", "Stipendio maturato", "Salaire couru", "Hesablanmış maaş", "Tahakkuk eden maaş", "Нарахована зарплата", "Есептелген жалақы"),
     "an.noInkass":       tr("No collections", "Инкассаций нет", "Nessun prelievo", "Aucun encaissement", "İnkassasiya yoxdur", "Tahsilat yok", "Інкасацій немає", "Инкассация жоқ"),
     "an.inkNet":         tr("NET", "ИТОГО", "NETTO", "NET", "XALİS", "NET", "НЕТТО", "НЕТТО"),
 
     // AI
     "ai.send":          tr("Send", "Отправить", "Invia", "Envoyer", "Göndər", "Gönder", "Надіслати", "Жіберу"),
+    "ai.noReply":       tr("No reply from AI", "Нет ответа от AI", "Nessuna risposta AI", "Pas de réponse AI", "AI cavabı yoxdur", "AI yanıtı yok", "Немає відповіді AI", "AI жауабы жоқ"),
+    "ai.noData":        tr("AI couldn't extract data", "AI не смог распознать данные", "AI non ha estratto dati", "L'IA n'a pas pu extraire", "AI məlumat çıxara bilmədi", "AI veri çıkaramadı", "AI не зміг розпізнати дані", "AI деректерді алмады"),
+    "ai.err401":        tr("Authorization error — try logging in again", "Ошибка авторизации — попробуйте войти снова", "Errore autorizzazione", "Erreur d'autorisation", "İcazə xətası", "Yetkilendirme hatası", "Помилка авторизації", "Авторизация қатесі"),
+    "ai.err403":        tr("AI requires Pro plan or admin activation", "AI требует Pro-план или включение в панели", "AI richiede piano Pro", "L'IA nécessite un plan Pro", "AI Pro plan tələb edir", "AI Pro plan gerektirir", "AI потребує Pro-план", "AI Pro жоспарын талап етеді"),
+    "ai.err500":        tr("Server error — check API key in Vercel", "Ошибка сервера — проверьте API-ключ в Vercel", "Errore server", "Erreur serveur", "Server xətası", "Sunucu hatası", "Помилка сервера", "Сервер қатесі"),
+    "ai.err502":        tr("AI service error — check API key", "Ошибка AI-сервиса — проверьте API-ключ", "Errore servizio AI", "Erreur service IA", "AI xidmət xətası", "AI servis hatası", "Помилка AI-сервісу", "AI қызмет қатесі"),
+    "ai.errGeneric":    tr("AI error", "Ошибка AI", "Errore AI", "Erreur IA", "AI xətası", "AI hatası", "Помилка AI", "AI қатесі"),
     "ai.thinking":      tr("Processing...", "Обрабатываю...", "Elaboro...", "Traitement...", "İşlənir...", "İşleniyor...", "Обробляю...", "Өңдеймін..."),
     "ai.typeMessage":   tr("Type a message...", "Напишите сообщение...", "Scrivi messaggio...", "Tapez un message...", "Mesaj yazın...", "Mesaj yazın...", "Напишіть повідомлення...", "Хабар жазыңыз..."),
     "ai.applied":       tr("Fields filled", "Поля заполнены", "Campi compilati", "Champs remplis", "Sahələr dolduruldu", "Alanlar dolduruldu", "Поля заповнені", "Өрістер толтырылды"),
@@ -402,8 +409,8 @@ let STRINGS: [String: [Lang: String]] = [
     "pe.start":          tr("Start", "Начало", "Inizio", "Début", "Başlanğıc", "Başlangıç", "Початок", "Басы"),
     "pe.end":            tr("End", "Конец", "Fine", "Fin", "Son", "Bitiş", "Кінець", "Соңы"),
     "pe.newShift":       tr("New shift", "Новая смена", "Nuovo turno", "Nouveau service", "Yeni növbə", "Yeni vardiya", "Нова зміна", "Жаңа ауысым"),
-    "pe.scheduleEmptyMgr": tr("Schedule for this week is empty", "Расписание на эту неделю пустое", "Il programma di questa settimana è vuoto", "Le planning de cette semaine est vide", "Bu həftənin qrafiki boşdur", "Bu haftanın programı boş", "Розклад на цей тиждень порожній", "Осы аптаның кестесі бос"),
-    "pe.scheduleEmptyStaff": tr("You have no shifts this week", "У вас нет смен на этой неделе", "Non hai turni questa settimana", "Vous n’avez aucun service cette semaine", "Bu həftə növbəniz yoxdur", "Bu hafta vardiyanız yok", "У вас немає змін цього тижня", "Бұл аптада ауысымыңыз жоқ"),
+    "pe.scheduleEmptyMgr": tr("No schedule this month", "Расписание на этот месяц пустое", "Nessun programma questo mese", "Aucun planning ce mois-ci", "Bu ay qrafik yoxdur", "Bu ay program yok", "Розклад на цей місяць порожній", "Осы айда кесте жоқ"),
+    "pe.scheduleEmptyStaff": tr("You have no shifts this month", "У вас нет смен в этом месяце", "Non hai turni questo mese", "Vous n’avez aucun service ce mois-ci", "Bu ay növbəniz yoxdur", "Bu ay vardiyanız yok", "У вас немає змін цього місяця", "Бұл айда ауысымыңыз жоқ"),
 
     // People — зал / стоп / заказы / чек-листы / техкарты
     "pe.stop":           tr("Stop", "Стоп", "Stop", "Stop", "Stop", "Stop", "Стоп", "Стоп"),

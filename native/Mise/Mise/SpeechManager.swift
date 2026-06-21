@@ -11,6 +11,7 @@ import AVFoundation
 final class SpeechManager {
     var isListening = false
     var transcript = ""
+    var audioLevel: Float = 0  // 0–1, updated per audio buffer while listening
 
     private var recognizer: SFSpeechRecognizer?
     private var audioEngine = AVAudioEngine()
@@ -50,8 +51,15 @@ final class SpeechManager {
 
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak req] buf, _ in
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak req, weak self] buf, _ in
             req?.append(buf)
+            // RMS amplitude → 0–1 level for the pulse animation
+            if let data = buf.floatChannelData?[0] {
+                let n = Int(buf.frameLength)
+                let rms = (0..<n).reduce(Float(0)) { $0 + data[$1] * data[$1] }
+                let level = min(1.0, sqrt(rms / max(1, Float(n))) * 20)
+                Task { @MainActor [weak self] in self?.audioLevel = level }
+            }
         }
         audioEngine.prepare()
         do { try audioEngine.start() } catch { cleanup(); return false }
@@ -71,6 +79,7 @@ final class SpeechManager {
     func stop() -> String {
         cleanup()
         isListening = false
+        audioLevel = 0
         let result = transcript
         transcript = ""
         return result
