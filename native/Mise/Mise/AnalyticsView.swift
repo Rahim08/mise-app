@@ -31,6 +31,7 @@ final class AnalyticsModel {
     var shiftsRaw: [Shift] = []
     var prevShiftsRaw: [Shift] = []
     var expenses: [ShiftExpense] = []
+    var prevExpenses: [ShiftExpense] = []
     var employees: [Employee] = []
     var cardAmounts: [CardAmount] = []
     var absences: [Absence] = []
@@ -38,18 +39,69 @@ final class AnalyticsModel {
     var inkDetails: [String: Inkassation] = [:]
 
     func handleAI(_ message: String) async -> String? {
+        // expenses by category (current period)
+        var catTotals: [String: Double] = [:]
+        for e in expenses { catTotals[e.category_name ?? "—", default: 0] += e.amount ?? 0 }
+        let catLines = catTotals.sorted { $0.value > $1.value }
+            .map { "\($0.key): \(Money.s($0.value))" }.joined(separator: ", ")
+
+        // extras by employee (current period)
+        var empTotals: [String: Double] = [:]
+        for e in expenses {
+            guard let eid = e.employee_id else { continue }
+            let name = employees.first { $0.id == eid }?.name ?? eid
+            empTotals[name, default: 0] += e.amount ?? 0
+        }
+        let empLines = empTotals.sorted { $0.value > $1.value }
+            .map { "\($0.key): \(Money.s($0.value))" }.joined(separator: ", ")
+
+        // prev month expenses by category
+        var prevCatTotals: [String: Double] = [:]
+        for e in prevExpenses { prevCatTotals[e.category_name ?? "—", default: 0] += e.amount ?? 0 }
+        let prevCatLines = prevCatTotals.sorted { $0.value > $1.value }
+            .map { "\($0.key): \(Money.s($0.value))" }.joined(separator: ", ")
+
+        // inkassation details per shift
+        let inkLines = shiftsWithInk.map { s -> String in
+            let ink = inkDetails[s.id]
+            let rsn = ink?.reason.map { " (\($0))" } ?? ""
+            return "\(s.date): gross \(Money.s(s.inkassation ?? 0)), expense \(Money.s(ink?.expense ?? 0))\(rsn), net \(Money.s(ink?.total ?? (s.inkassation ?? 0)))"
+        }.joined(separator: "; ")
+
+        // hookah by type
+        let typeLines = byType.map { "\($0.name): \($0.paid) paid + \($0.free) free" }.joined(separator: ", ")
+
+        // tobacco warehouse stock
+        let stockLines = stockRows.map { "\($0.brand) \($0.flavor): \(kg($0.quantity_g))" }.joined(separator: ", ")
+
+        // employee salary breakdown
+        let salLines = salaryRows.map { r -> String in
+            var line = "\(r.name): salary \(Money.s(r.salary))"
+            if r.abs > 0 { line += ", absences \(r.abs) (-\(Money.s(r.deduct)))" }
+            line += ", net \(Money.s(r.total))"
+            return line
+        }.joined(separator: "; ")
+
         let last = shiftsRaw.last
         let lastDay = last.map { s in
-            "Last shift \(s.date ?? ""): income \(Money.s(s.income ?? 0)), expenses \(Money.s(s.total_expense ?? 0)), kassa \(Money.s(s.closing_balance ?? 0))."
+            "Last shift \(s.date): income \(Money.s(s.income ?? 0)), expenses \(Money.s(s.total_expense ?? 0)), kassa \(Money.s(s.closing_balance ?? 0))."
         } ?? "No shifts yet."
+
         let ctx = """
             Period: \(navLabel).
-            Monthly revenue: \(Money.s(totalIncome)), expenses: \(Money.s(totalExpense)).
-            Shifts total: \(shiftsRaw.count). \(lastDay)
-            Cash collections (inkassations): \(shiftsWithInk.count) times, gross \(Money.s(totalInkass)), net \(Money.s(totalInkassNet)).
-            Payroll fund: \(Money.s(payrollTotal)), employees: \(employees.count).
-            Hookah: \(qtyMonth) paid + \(qtyFree) free, revenue \(Money.s(revMonth)).
+            Revenue: \(Money.s(totalIncome)) (prev month: \(Money.s(prevIncome))).
+            Expenses: \(Money.s(totalExpense)) (prev month: \(Money.s(prevExpense))).
+            Expense breakdown this period: \(catLines.isEmpty ? "none" : catLines).
+            \(empLines.isEmpty ? "" : "Employee extras this period: \(empLines).")
+            Prev month expense breakdown: \(prevCatLines.isEmpty ? "none" : prevCatLines).
+            Shifts: \(shiftsRaw.count). \(lastDay)
+            Cash collections (\(shiftsWithInk.count)): \(inkLines.isEmpty ? "none" : inkLines).
+            Total inkass: gross \(Money.s(totalInkass)), net \(Money.s(totalInkassNet)).
+            Hookah this period: \(qtyMonth) paid + \(qtyFree) free, revenue \(Money.s(revMonth)). By type: \(typeLines.isEmpty ? "none" : typeLines).
+            Tobacco in venue: \(kg(venueAtPlaceG)). Warehouse stock: \(stockLines.isEmpty ? "none" : stockLines).
+            Payroll fund: \(Money.s(payrollTotal)). Per employee: \(salLines.isEmpty ? "none" : salLines).
             """
+
         do {
             let result = try await API.aiChat(module: "analytics", message: message, context: ctx)
             return result["reply"] as? String ?? t("ai.noReply")
@@ -124,6 +176,11 @@ final class AnalyticsModel {
                 inkDetails = d
             }
         } else { expenses = []; inkDetails = [:] }
+
+        let prevIds = prevShiftsRaw.map(\.id)
+        if !prevIds.isEmpty {
+            if let pe = try? await DB.from("shift_expenses").select().in("shift_id", prevIds).list(ShiftExpense.self) { prevExpenses = pe }
+        } else { prevExpenses = [] }
 
         // Инкассация копится: сумма нетто (total) из inkassations до конца выбранного месяца.
         nonisolated struct InkNetOnly: Codable, Sendable { let total: Double? }
