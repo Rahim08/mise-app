@@ -71,9 +71,17 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
 
-  // Native iOS request: { module, message, context }
+  // Native iOS request: { module, message, context, lang }
   if (body.module) {
-    const { module, message, context } = body as { module: string; message: string; context?: string }
+    const { module, message, context, lang } = body as { module: string; message: string; context?: string; lang?: string }
+
+    const langNames: Record<string, string> = {
+      ru: 'Russian', en: 'English', it: 'Italian', fr: 'French',
+      az: 'Azerbaijani', tr: 'Turkish', uk: 'Ukrainian', kk: 'Kazakh',
+    }
+    const langInstruction = lang && langNames[lang]
+      ? `Always respond in ${langNames[lang]}, regardless of the language of the context data. `
+      : 'Always respond in the same language as the user message. '
 
     let system: string
     let user: string
@@ -84,8 +92,8 @@ export async function POST(req: NextRequest) {
       system = MANAGER_SYSTEM
       user = `${context ? 'Context: ' + context + '\n\n' : ''}User: ${message}`
     } else {
-      system = 'You are a helpful restaurant analytics assistant. Answer concisely in 2-4 sentences in the same language as the question.'
-      user = `${context ? context + '\n\n' : ''}Question: ${message}`
+      system = `You are a concise restaurant analytics assistant. ${langInstruction}Give a direct answer in 1-2 short sentences. No preamble, no suggestions, just the answer.`
+      user = `${context ? 'Data: ' + context + '\n\n' : ''}Question: ${message}`
     }
 
     const { ok, text } = await groqChat(system, user)

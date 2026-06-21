@@ -42,7 +42,12 @@ enum API {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: Any] = ["module": module, "message": message, "context": context]
+        let body: [String: Any] = [
+            "module": module,
+            "message": message,
+            "context": context,
+            "lang": L10n.shared.lang.rawValue,
+        ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1, nil) }
