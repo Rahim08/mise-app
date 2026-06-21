@@ -79,9 +79,14 @@ export async function POST(req: NextRequest) {
       ru: 'Russian', en: 'English', it: 'Italian', fr: 'French',
       az: 'Azerbaijani', tr: 'Turkish', uk: 'Ukrainian', kk: 'Kazakh',
     }
-    const langInstruction = lang && langNames[lang]
-      ? `Always respond in ${langNames[lang]}, regardless of the language of the context data. `
-      : 'Always respond in the same language as the user message. '
+    // Fallback: detect language from message script when lang not provided
+    const detectedLang = lang ?? (
+      /[Ѐ-ӿ]/.test(message) ? 'ru' :
+      /[؀-ۿ]/.test(message) ? 'az' :
+      /[Ͱ-Ͽ]/.test(message) ? 'fr' : 'en'
+    )
+    const resolvedLang = langNames[detectedLang] ?? 'Russian'
+    const langInstruction = `Always respond in ${resolvedLang}, regardless of the language of the context data. `
 
     let system: string
     let user: string
