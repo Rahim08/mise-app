@@ -38,10 +38,15 @@ final class AnalyticsModel {
     var inkDetails: [String: Inkassation] = [:]
 
     func handleAI(_ message: String) async -> String? {
+        let last = shiftsRaw.last
+        let lastDay = last.map { s in
+            "Last shift \(s.date ?? ""): income \(Money.s(s.income ?? 0)), expenses \(Money.s(s.total_expense ?? 0)), kassa \(Money.s(s.closing_balance ?? 0))."
+        } ?? "No shifts yet."
         let ctx = """
             Period: \(navLabel).
-            Revenue: \(Money.s(totalIncome)), expenses: \(Money.s(totalExpense)).
-            Shifts: \(shiftsRaw.count). Cash collections (inkassations): \(shiftsWithInk.count) times, gross \(Money.s(totalInkass)), net \(Money.s(totalInkassNet)).
+            Monthly revenue: \(Money.s(totalIncome)), expenses: \(Money.s(totalExpense)).
+            Shifts total: \(shiftsRaw.count). \(lastDay)
+            Cash collections (inkassations): \(shiftsWithInk.count) times, gross \(Money.s(totalInkass)), net \(Money.s(totalInkassNet)).
             Payroll fund: \(Money.s(payrollTotal)), employees: \(employees.count).
             Hookah: \(qtyMonth) paid + \(qtyFree) free, revenue \(Money.s(revMonth)).
             """

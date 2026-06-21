@@ -19,8 +19,23 @@ final class SpeechManager {
     private var task: SFSpeechRecognitionTask?
 
     init() {
-        recognizer = SFSpeechRecognizer(locale: Locale.current)
+        recognizer = SFSpeechRecognizer(locale: Self.appLocale)
             ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+    }
+
+    private static var appLocale: Locale {
+        let id: String
+        switch L10n.shared.lang {
+        case .ru: id = "ru-RU"
+        case .en: id = "en-US"
+        case .it: id = "it-IT"
+        case .fr: id = "fr-FR"
+        case .az: id = "az-AZ"
+        case .tr: id = "tr-TR"
+        case .uk: id = "uk-UA"
+        case .kk: id = "kk-KZ"
+        }
+        return Locale(identifier: id)
     }
 
     /// Request both microphone + speech permissions. Returns true if both granted.
@@ -36,6 +51,9 @@ final class SpeechManager {
 
     /// Start listening. Returns false if permissions denied or recognizer unavailable.
     func start() async -> Bool {
+        // Refresh recognizer in case the app language changed since init
+        recognizer = SFSpeechRecognizer(locale: Self.appLocale)
+            ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
         guard await requestPermissions() else { return false }
         guard recognizer?.isAvailable == true else { return false }
 
