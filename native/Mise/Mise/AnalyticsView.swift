@@ -38,7 +38,13 @@ final class AnalyticsModel {
     var inkDetails: [String: Inkassation] = [:]
 
     func handleAI(_ message: String) async -> String? {
-        let ctx = "Month income: \(Money.s(totalIncome)), expenses: \(Money.s(totalExpense)), shifts: \(shiftsRaw.count), inkass: \(Money.s(totalInkass))"
+        let ctx = """
+            Period: \(navLabel).
+            Revenue: \(Money.s(totalIncome)), expenses: \(Money.s(totalExpense)).
+            Shifts: \(shiftsRaw.count). Cash collections (inkassations): \(shiftsWithInk.count) times, gross \(Money.s(totalInkass)), net \(Money.s(totalInkassNet)).
+            Payroll fund: \(Money.s(payrollTotal)), employees: \(employees.count).
+            Hookah: \(qtyMonth) paid + \(qtyFree) free, revenue \(Money.s(revMonth)).
+            """
         do {
             let result = try await API.aiChat(module: "analytics", message: message, context: ctx)
             return result["reply"] as? String ?? t("ai.noReply")
