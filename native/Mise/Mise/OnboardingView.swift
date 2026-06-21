@@ -24,13 +24,6 @@ struct OnboardingView: View {
 private struct WelcomeView: View {
     @Environment(AppModel.self) private var model
 
-    private let features: [(String, CGFloat, CGFloat)] = [
-        ("ob.feat1", 0.20, 0.16), ("ob.feat2", 0.70, 0.22),
-        ("ob.feat3", 0.24, 0.34), ("ob.feat4", 0.74, 0.36),
-        ("ob.feat5", 0.18, 0.62), ("ob.feat6", 0.78, 0.60),
-        ("ob.feat7", 0.30, 0.74), ("ob.feat8", 0.70, 0.74),
-    ]
-
     var body: some View {
         VStack {
             Spacer()
@@ -45,26 +38,6 @@ private struct WelcomeView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 28)
         }
-        .background(FloatingFeatures(items: features))
-    }
-}
-
-private struct FloatingFeatures: View {
-    let items: [(String, CGFloat, CGFloat)]
-    var body: some View {
-        GeometryReader { geo in
-            TimelineView(.animation) { ctx in
-                let now = ctx.date.timeIntervalSinceReferenceDate
-                ForEach(Array(items.enumerated()), id: \.offset) { i, item in
-                    let phase = (sin(now * 0.6 + Double(i) * 1.3) + 1) / 2
-                    Text(t(item.0))
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.06 + phase * 0.26))
-                        .position(x: geo.size.width * item.1, y: geo.size.height * item.2)
-                }
-            }
-        }
-        .allowsHitTesting(false)
     }
 }
 
@@ -143,6 +116,14 @@ private struct PinView: View {
         VStack(spacing: 0) {
             Spacer()
             Wordmark(size: 40, color: .white)
+            if let raw = model.restaurant?.logo_url, let url = URL(string: raw) {
+                AsyncImage(url: url) { img in
+                    img.resizable().scaledToFit()
+                } placeholder: { EmptyView() }
+                .frame(width: 72, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .padding(.top, 14)
+            }
             Text(model.restaurant?.name ?? "")
                 .font(.system(size: 19, weight: .bold)).foregroundStyle(.white)
                 .padding(.top, 10)
@@ -176,6 +157,22 @@ private struct PinView: View {
                     .foregroundStyle(.white.opacity(0.45))
             }
             .padding(.bottom, 28)
+        }
+        .alert(t("pin.deviceMismatch"), isPresented: Binding(
+            get: { model.deviceMismatch },
+            set: { if !$0 { model.deviceMismatch = false } }
+        )) {
+            Button(t("done"), role: .cancel) { model.deviceMismatch = false }
+        } message: {
+            Text(t("pin.deviceMismatchMsg"))
+        }
+        .alert(t("pin.deviceLimit"), isPresented: Binding(
+            get: { model.deviceLimitReached },
+            set: { if !$0 { model.deviceLimitReached = false } }
+        )) {
+            Button(t("done"), role: .cancel) { model.deviceLimitReached = false }
+        } message: {
+            Text(t("pin.deviceLimitMsg"))
         }
     }
 

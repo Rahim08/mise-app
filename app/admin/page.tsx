@@ -11,6 +11,7 @@ interface Restaurant {
   id: string; name: string; currency: string; owner_id: string
   subscription_status: string; subscription_plan: string
   subscription_ends_at: string | null; created_at: string
+  device_limit: number | null
 }
 interface Stats { shifts: number; movements: number; employees: number; lastActive: string | null }
 
@@ -50,6 +51,8 @@ export default function AdminPage() {
   // Привилегии: доступ к приложениям поверх тарифа + скидка %
   const [perks, setPerks] = useState<{ apps: string[]; discount: string }>({ apps: [], discount: '0' })
   const [perksSaved, setPerksSaved] = useState(false)
+  const [deviceLimit, setDeviceLimit] = useState<string>('')
+  const [deviceLimitSaved, setDeviceLimitSaved] = useState(false)
 
   const adminApi = (body: any) =>
     fetch('/api/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
@@ -75,6 +78,7 @@ export default function AdminPage() {
     setSelected(r)
     setSubForm({ status: r.subscription_status || 'active', plan: r.subscription_plan || 'business', ends_at: r.subscription_ends_at ? r.subscription_ends_at.slice(0, 10) : '' })
     setPerks({ apps: (r as any).comp_apps || [], discount: String((r as any).discount_pct || 0) })
+    setDeviceLimit(r.device_limit != null ? String(r.device_limit) : '')
     setEditSub(false); await loadNotes(r.id)
   }
 
@@ -83,6 +87,13 @@ export default function AdminPage() {
     await adminApi({ action: 'perks', restaurantId: selected.id, compApps: perks.apps, discountPct: parseInt(perks.discount) || 0 })
     setSelected({ ...(selected as any), comp_apps: perks.apps, discount_pct: parseInt(perks.discount) || 0 })
     setPerksSaved(true); setTimeout(() => setPerksSaved(false), 2000); await loadAll()
+  }
+  const saveDeviceLimit = async () => {
+    if (!selected) return
+    const dl = deviceLimit !== '' ? parseInt(deviceLimit) || null : null
+    await adminApi({ action: 'setDeviceLimit', restaurantId: selected.id, deviceLimit: deviceLimit !== '' ? deviceLimit : null })
+    setSelected({ ...selected, device_limit: dl })
+    setDeviceLimitSaved(true); setTimeout(() => setDeviceLimitSaved(false), 2000)
   }
   const saveNote = async () => {
     if (!note.trim() || !selected) return
@@ -286,6 +297,25 @@ export default function AdminPage() {
                   <span style={{ fontSize: '.68rem', color: t.text4 }}>в Stripe — купоном вручную</span>
                 </div>
                 <button onClick={savePerks} style={btn(t, 'primary')}>{perksSaved ? '✓ Сохранено' : 'Сохранить привилегии'}</button>
+              </div>
+
+              {/* Device limit override */}
+              <div style={{ borderTop: `1px solid ${t.sep2}`, paddingTop: 16, marginBottom: 16 }}>
+                <div style={{ fontSize: '.72rem', color: t.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>Лимит устройств</div>
+                <div style={{ fontSize: '.72rem', color: t.text4, marginBottom: 10 }}>
+                  По тарифу: starter=2 · business=5 · pro=10. Укажи число, чтобы переопределить вручную.
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input type="number" min={1} value={deviceLimit}
+                    onChange={e => setDeviceLimit(e.target.value)}
+                    placeholder={`по тарифу (${{ starter: 2, business: 5, pro: 10 }[selected.subscription_plan] ?? 5})`}
+                    style={{ width: 100, padding: '7px 10px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: '.85rem', color: t.text, background: t.fill2, fontFamily: 'inherit', outline: 'none', textAlign: 'right' }} />
+                  <span style={{ fontSize: '.78rem', color: t.text3 }}>устройств</span>
+                  {deviceLimit !== '' && (
+                    <button onClick={() => { setDeviceLimit(''); saveDeviceLimit() }} style={{ ...btn(t, 'gray'), padding: '7px 10px', fontSize: '.72rem' }}>Сбросить</button>
+                  )}
+                  <button onClick={saveDeviceLimit} style={btn(t, 'primary')}>{deviceLimitSaved ? '✓' : 'Сохранить'}</button>
+                </div>
               </div>
 
               {/* Stats */}

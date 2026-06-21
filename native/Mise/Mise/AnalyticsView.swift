@@ -35,6 +35,8 @@ final class AnalyticsModel {
     var cardAmounts: [CardAmount] = []
     var absences: [Absence] = []
 
+    var inkDetails: [String: Inkassation] = [:]
+
     var hookahRows: [HookahSale] = []
     var allHookah: [HookahSale] = []
     var stockRows: [StockItem] = []
@@ -87,16 +89,22 @@ final class AnalyticsModel {
         let ids = shiftsRaw.map(\.id)
         if !ids.isEmpty {
             if let e = try? await DB.from("shift_expenses").select().in("shift_id", ids).list(ShiftExpense.self) { expenses = e }
-        } else { expenses = [] }
+            if let inks = try? await DB.from("inkassations").select("shift_id, amount, expense, reason, total").in("shift_id", ids).list(Inkassation.self) {
+                var d: [String: Inkassation] = [:]
+                for ink in inks { if let sid = ink.shift_id { d[sid] = ink } }
+                inkDetails = d
+            }
+        } else { expenses = []; inkDetails = [:] }
 
-        // Инкассация копится: сумма всех инкассаций до конца выбранного месяца.
-        if let inkRows = try? await DB.from("shifts").select("inkassation").lte("date", key(monthEnd)).list(InkOnly.self) {
-            cumulativeInkass = inkRows.reduce(0) { $0 + ($1.inkassation ?? 0) }
+        // Инкассация копится: сумма нетто (total) из inkassations до конца выбранного месяца.
+        nonisolated struct InkNetOnly: Codable, Sendable { let total: Double? }
+        if let inkRows = try? await DB.from("inkassations").select("total").lte("date", key(monthEnd)).list(InkNetOnly.self) {
+            cumulativeInkass = inkRows.reduce(0) { $0 + ($1.total ?? 0) }
         }
 
         // кальян all-time + склад
         async let allHk = try? DB.from("hookah_sales").select("quantity, portion_g").list(HookahSale.self)
-        async let stock = try? DB.from("tobacco_stock").select("brand, flavor, quantity_g, min_quantity_g").list(StockItem.self)
+        async let stock = try? DB.from("tobacco_stock").select("id, brand, flavor, quantity_g, min_quantity_g").list(StockItem.self)
         async let movs = try? DB.from("tobacco_movements").select("quantity_g, type").list(Movement.self)
         async let tps = try? DB.from("hookah_types").select("id, name").list(HookahType.self)
         allHookah = (await allHk) ?? allHookah
@@ -210,6 +218,13 @@ final class AnalyticsModel {
     var pExpense: Double { periodShifts.reduce(0) { $0 + ($1.total_expense ?? 0) } }
     var pInkass: Double { periodShifts.reduce(0) { $0 + ($1.inkassation ?? 0) } }
     var pClosing: Double { periodShifts.last?.closing_balance ?? lastClosing }
+
+    var totalInkassNet: Double {
+        shiftsWithInk.reduce(0) { acc, s in
+            if let ink = inkDetails[s.id] { return acc + (ink.total ?? (s.inkassation ?? 0)) }
+            return acc + (s.inkassation ?? 0)
+        }
+    }
 
     struct DailyIncome: Identifiable { let id = UUID(); let day: Int; let income: Double }
     var dailyIncome: [DailyIncome] {
@@ -468,7 +483,7 @@ private struct PeriodTab: View {
         }
         if !m.catMap.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                Text(t("an.topExpenses")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
+                Text(m.periodMode == "day" ? t("an.expenses") : t("an.topExpenses")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                     .padding(.bottom, 8)
                 ForEach(Array(m.catMap.enumerated()), id: \.offset) { i, c in
                     HStack {
@@ -700,23 +715,42 @@ private struct KassaTab: View {
             }
         } else {
             let salToday = (m.payrollTotal / Double(m.daysInMonth) * Double(m.daysPassed)).rounded()
-            let diff = m.totalInkass - salToday
+            let diff = m.totalInkassNet - salToday
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-                stat(t("an.totalInkass"), cur(m.totalInkass), BrandKit.stash)
+                stat(t("an.totalInkass"), cur(m.totalInkassNet), BrandKit.stash)
                 stat(t("an.salaryToday"), cur(salToday), diff >= 0 ? BrandKit.analytics : BrandKit.menu)
             }
             if m.shiftsWithInk.isEmpty {
                 Text(t("an.noInkass")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 30)
             } else {
                 VStack(spacing: 0) {
+                    HStack {
+                        Text(t("an.date")).frame(width: 44, alignment: .leading)
+                        Text(t("mg.inkass")).frame(maxWidth: .infinity, alignment: .trailing)
+                        Text(t("an.expense")).frame(maxWidth: .infinity, alignment: .trailing)
+                        Text(t("an.inkNet")).frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.35))
+                    .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
+                    Divider().overlay(Color.primary.opacity(0.08))
                     ForEach(Array(m.shiftsWithInk.enumerated()), id: \.element.id) { i, s in
-                        HStack {
-                            Text(dd(s.date)).foregroundStyle(.primary.opacity(0.5))
-                            Spacer()
-                            Text(cur(s.inkassation ?? 0)).font(.system(size: 14, weight: .semibold)).foregroundStyle(BrandKit.stash)
+                        let ink = m.inkDetails[s.id]
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack {
+                                Text(dd(s.date)).frame(width: 44, alignment: .leading).foregroundStyle(.primary.opacity(0.5))
+                                Text(cur(s.inkassation ?? 0)).frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.stash)
+                                Text((ink?.expense ?? 0) > 0 ? "−" + cur(ink?.expense ?? 0) : "—")
+                                    .frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.menu)
+                                Text(cur(ink?.total ?? (s.inkassation ?? 0)))
+                                    .frame(maxWidth: .infinity, alignment: .trailing).fontWeight(.semibold)
+                            }
+                            if let r = ink?.reason, !r.isEmpty {
+                                Text(r).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.45))
+                                    .padding(.leading, 44).padding(.top, 2)
+                            }
                         }
-                        .font(.system(size: 13)).padding(.vertical, 10).padding(.horizontal, 14)
-                        if i < m.shiftsWithInk.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 14) }
+                        .font(.system(size: 12)).padding(.vertical, 9).padding(.horizontal, 14)
+                        if i < m.shiftsWithInk.count - 1 { Divider().overlay(Color.primary.opacity(0.07)) }
                     }
                 }
                 .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))

@@ -19,7 +19,7 @@ async function isAdmin(req: NextRequest): Promise<boolean> {
 export async function POST(req: NextRequest) {
   if (!await isAdmin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { action, restaurantId, note, status, plan, ends_at, endsAt, compApps, discountPct } = await req.json()
+  const { action, restaurantId, note, status, plan, ends_at, endsAt, compApps, discountPct, deviceLimit } = await req.json()
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
   switch (action) {
@@ -77,6 +77,11 @@ export async function POST(req: NextRequest) {
     }
     case 'freeze': {
       await admin.from('restaurants').update({ subscription_status: 'frozen' }).eq('id', restaurantId)
+      return NextResponse.json({ ok: true })
+    }
+    case 'setDeviceLimit': {
+      const dl = deviceLimit != null && deviceLimit !== '' ? Math.max(1, parseInt(deviceLimit) || 1) : null
+      await admin.from('restaurants').update({ device_limit: dl }).eq('id', restaurantId)
       return NextResponse.json({ ok: true })
     }
     default:

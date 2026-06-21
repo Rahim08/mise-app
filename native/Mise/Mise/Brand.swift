@@ -7,6 +7,8 @@ struct FlowingGradientText: View {
     let text: String
     var font: Font
 
+    @State private var phase: CGFloat = 0
+
     private var colors: [Color] {
         let g = BrandKit.eGradient
         return g + g.reversed()   // blue→…→pink→…→blue: мягко и без шва
@@ -18,18 +20,19 @@ struct FlowingGradientText: View {
             .foregroundStyle(.clear)
             .overlay {
                 GeometryReader { geo in
-                    TimelineView(.animation) { ctx in
-                        let cycle = 6.0
-                        let t = ctx.date.timeIntervalSinceReferenceDate
-                            .truncatingRemainder(dividingBy: cycle) / cycle
-                        let w = max(geo.size.width, 1)
-                        LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing)
-                            .frame(width: w * 3)
-                            .offset(x: -w * 2 * CGFloat(t))
-                    }
+                    let w = max(geo.size.width, 1)
+                    LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing)
+                        .frame(width: w * 3)
+                        .offset(x: -w * 2 * phase)
                 }
             }
             .mask(Text(text).font(font))
+            .onAppear {
+                phase = 0
+                withAnimation(.linear(duration: 6).repeatForever(autoreverses: false)) {
+                    phase = 1
+                }
+            }
     }
 }
 

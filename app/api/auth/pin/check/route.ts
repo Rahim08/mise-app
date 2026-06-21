@@ -93,8 +93,21 @@ export async function POST(req: NextRequest) {
     const match = await bcrypt.compare(pin, staff.pin_hash)
     if (match) {
       await clearAttempts(key)
-      // Bind device on first login (was done client-side; moved server-side for RLS).
+      // Enforce device binding: if staff already has a device_id and this request
+      // comes from a different device, block login.
+      if (staff.device_id && deviceId && deviceId !== staff.device_id) {
+        return NextResponse.json({ error: 'pin_device_mismatch' }, { status: 403 })
+      }
+      // Bind device on first login — check plan device limit first.
       if (deviceId && !staff.device_id) {
+        const PLAN_LIMITS: Record<string, number> = { starter: 2, business: 5, pro: 10 }
+        const { data: rest } = await supabase.from('restaurants').select('subscription_plan, device_limit').eq('id', restaurantId).single()
+        const planLimit = PLAN_LIMITS[rest?.subscription_plan ?? 'business'] ?? 5
+        const limit: number = rest?.device_limit ?? planLimit
+        const { count } = await supabase.from('staff').select('id', { count: 'exact', head: true }).eq('restaurant_id', restaurantId).not('device_id', 'is', null)
+        if ((count ?? 0) >= limit) {
+          return NextResponse.json({ error: 'device_limit_reached' }, { status: 403 })
+        }
         await supabase.from('staff').update({ device_id: deviceId }).eq('id', staff.id)
         staff.device_id = deviceId
       }

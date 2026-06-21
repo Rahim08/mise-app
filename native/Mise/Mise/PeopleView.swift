@@ -47,6 +47,7 @@ final class PeopleModel {
     var geo: GeoSettings?
     var attLoaded = false
     var checking = false
+    var todayScheduledIds: Set<String> = []
 
     // обмены
     var swaps: [SwapRequest] = []
@@ -301,6 +302,9 @@ final class PeopleModel {
         if isManager {
             attendance = (try? await DB.from("attendance_records").select().gte("date", key(monthStart)).order("date", ascending: false).limit(500).list(AttendanceRecord.self)) ?? []
             if dir.isEmpty { dir = (try? await DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)) ?? [] }
+            struct SchedStub: Codable { let staff_id: String }
+            let todayScheds = (try? await DB.from("staff_schedules").select("staff_id").eq("date", todayKey).list(SchedStub.self)) ?? []
+            todayScheduledIds = Set(todayScheds.map { $0.staff_id })
         } else {
             attendance = (try? await DB.from("attendance_records").select().eq("staff_id", myId).order("date", ascending: false).limit(62).list(AttendanceRecord.self)) ?? []
         }
@@ -864,10 +868,27 @@ private struct TaskFormSheet: View {
                         TextField(t("pe.fTitle"), text: $title)
                         TextField(t("pe.descOptional"), text: $desc, axis: .vertical).lineLimit(2...4)
                     }
-                    Section(t("pe.assigneeSection")) {
-                        Picker(t("pe.assignee"), selection: $assignee) {
-                            Text("—").tag("")
-                            ForEach(m.dir) { Text($0.name).tag($0.id) }
+                    if m.isManager {
+                        Section(t("pe.roleSection")) {
+                            Picker(t("pe.assignee"), selection: $assignee) {
+                                Text("—").tag("")
+                                ForEach(TASK_ROLE_CODES, id: \.self) { code in
+                                    Text(t("pe.role." + code) + " (\(t("pe.allRole")))").tag("role:" + code)
+                                }
+                            }
+                        }
+                        Section(t("pe.staffSection")) {
+                            Picker(t("pe.assignee"), selection: $assignee) {
+                                Text("—").tag("")
+                                ForEach(m.dir) { Text($0.name).tag($0.id) }
+                            }
+                        }
+                    } else {
+                        Section(t("pe.assigneeSection")) {
+                            Picker(t("pe.assignee"), selection: $assignee) {
+                                Text("—").tag("")
+                                ForEach(m.dir.filter { $0.role == m.myRole }) { Text($0.name).tag($0.id) }
+                            }
                         }
                     }
                     Section(t("pe.priority")) {
@@ -928,7 +949,7 @@ private struct ReportsTab: View {
             } else {
                 Button { showForm = true } label: {
                     Label(t("pe.newReport"), systemImage: "paperplane")
-                        .font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
+                        .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                         .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
                 }
@@ -1208,9 +1229,12 @@ private struct AttendanceTab: View {
     }
 
     private var managerView: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let scheduled = m.todayScheduledIds.isEmpty
+            ? m.dir
+            : m.dir.filter { m.todayScheduledIds.contains($0.id) }
+        return VStack(alignment: .leading, spacing: 0) {
             Text(t("pe.todayCaps")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
-            ForEach(Array(m.dir.enumerated()), id: \.element.id) { i, s in
+            ForEach(Array(scheduled.enumerated()), id: \.element.id) { i, s in
                 let rec = m.attendance.first { $0.staff_id == s.id && $0.date == m.todayKey }
                 HStack {
                     Text(s.name).font(.system(size: 15)).foregroundStyle(.primary)
@@ -1224,7 +1248,7 @@ private struct AttendanceTab: View {
                     }
                 }
                 .padding(.vertical, 12).padding(.horizontal, 14)
-                if i < m.dir.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 14) }
+                if i < scheduled.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 14) }
             }
         }
         .padding(.top, 8)
@@ -1351,7 +1375,7 @@ private struct SwapCreateSheet: View {
                     Section(t("pe.toWhom")) {
                         Picker(t("pe.colleague"), selection: $targetId) {
                             Text("—").tag("")
-                            ForEach(m.dir.filter { $0.id != m.myId }) { Text($0.name).tag($0.id) }
+                            ForEach(m.dir.filter { $0.id != m.myId && $0.role == m.myRole }) { Text($0.name).tag($0.id) }
                         }
                     }
                     Section(t("pe.comment")) {
@@ -1632,6 +1656,7 @@ private struct ChecklistsTab: View {
 }
 
 private let CHECKLIST_ROLE_CODES: [String?] = [nil, "kitchen", "bar", "hookah", "waiter", "host", "cleaner"]
+private let TASK_ROLE_CODES: [String] = ["kitchen", "bar", "hookah", "waiter", "host", "cleaner"]
 @MainActor private func checklistRoleLabel(_ role: String?) -> String {
     guard let role else { return t("pe.role.general") }
     return t("pe.role." + role)
@@ -1767,7 +1792,7 @@ private struct TechCardsTab: View {
                 if m.isManager {
                     Button { edit = TechEdit(cardId: nil, name: "", category: "dish", items: [""]) } label: {
                         Label(t("pe.newTech"), systemImage: "plus")
-                            .font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
+                            .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                             .frame(maxWidth: .infinity).padding(.vertical, 14)
                             .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
                     }

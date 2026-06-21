@@ -56,9 +56,11 @@ nonisolated struct AnalyticsSettings: Codable, Sendable {
 }
 
 nonisolated struct Inkassation: Codable, Sendable {
+    let shift_id: String?
     let amount: Double?
     let expense: Double?
     let reason: String?
+    let total: Double?
     let salary: Double?
     let salary_note: String?
 }

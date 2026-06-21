@@ -12,6 +12,8 @@ final class AppModel {
     var staff: ResolvedStaff?
     /// Открытое приложение в хабе (nil = показать список доступных приложений).
     var currentApp: String?
+    var deviceMismatch = false
+    var deviceLimitReached = false
 
     struct ResolvedStaff: Codable, Sendable {
         var id: String
@@ -120,6 +122,10 @@ final class AppModel {
             persist(r, resolved)
             return true
         } catch {
+            if case APIError.http(403, let msg) = error {
+                if msg == "device_limit_reached" { deviceLimitReached = true }
+                else { deviceMismatch = true }
+            }
             return false
         }
     }

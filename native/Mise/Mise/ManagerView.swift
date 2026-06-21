@@ -383,12 +383,6 @@ private struct ManagerBody: View {
         ZStack(alignment: .top) {
             VStack(spacing: 14) {
                 staffSection
-                sectionTitle(t("mg.cash"))
-                card {
-                    fieldRow(t("mg.cashIncome"), text: $m.income)
-                    divider
-                    fieldRow(t("mg.cardIncome"), text: $m.incomeCard)
-                }
                 if !m.categories.isEmpty {
                     sectionTitle(t("mg.expenses"))
                     card {
@@ -407,6 +401,12 @@ private struct ManagerBody: View {
                     textRow(t("mg.inkReason"), text: $m.inkReason)
                     divider
                     fieldRow(t("mg.salary"), text: $m.inkSalary)
+                }
+                sectionTitle(t("mg.cash"))
+                card {
+                    fieldRow(t("mg.cashIncome"), text: $m.income)
+                    divider
+                    fieldRow(t("mg.cardIncome"), text: $m.incomeCard)
                 }
                 summary(c)
             }
