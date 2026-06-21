@@ -268,6 +268,8 @@ final class StashModel {
             }
         }
         await loadWarehouse()
+        // Выдача в зал (out) меняет venueBase — нужно сразу пересчитать смену.
+        if movMode == "out" { await loadShift() }
         flash(t("st.saved", ["n": "\(filled.count)"]))
         return true
     }

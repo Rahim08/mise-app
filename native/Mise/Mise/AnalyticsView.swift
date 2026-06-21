@@ -774,19 +774,19 @@ private struct KassaTab: View {
                     Divider().overlay(Color.primary.opacity(0.08))
                     ForEach(Array(m.shiftsWithInk.enumerated()), id: \.element.id) { i, s in
                         let ink = m.inkDetails[s.id]
-                        VStack(alignment: .leading, spacing: 0) {
-                            HStack {
-                                Text(dd(s.date)).frame(width: 44, alignment: .leading).foregroundStyle(.primary.opacity(0.5))
-                                Text(cur(s.inkassation ?? 0)).frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.stash)
-                                Text((ink?.expense ?? 0) > 0 ? "−" + cur(ink?.expense ?? 0) : "—")
-                                    .frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.menu)
-                                Text(cur(ink?.total ?? (s.inkassation ?? 0)))
-                                    .frame(maxWidth: .infinity, alignment: .trailing).fontWeight(.semibold)
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(dd(s.date)).foregroundStyle(.primary.opacity(0.5))
+                                if let r = ink?.reason, !r.isEmpty {
+                                    Text(r).font(.system(size: 10)).foregroundStyle(.primary.opacity(0.38))
+                                }
                             }
-                            if let r = ink?.reason, !r.isEmpty {
-                                Text(r).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.45))
-                                    .padding(.leading, 44).padding(.top, 2)
-                            }
+                            .frame(width: 52, alignment: .leading)
+                            Text(cur(s.inkassation ?? 0)).frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.stash)
+                            Text((ink?.expense ?? 0) > 0 ? "−" + cur(ink?.expense ?? 0) : "—")
+                                .frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.menu)
+                            Text(cur(ink?.total ?? (s.inkassation ?? 0)))
+                                .frame(maxWidth: .infinity, alignment: .trailing).fontWeight(.semibold)
                         }
                         .font(.system(size: 12)).padding(.vertical, 9).padding(.horizontal, 14)
                         if i < m.shiftsWithInk.count - 1 { Divider().overlay(Color.primary.opacity(0.07)) }

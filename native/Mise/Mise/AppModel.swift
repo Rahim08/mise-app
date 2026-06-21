@@ -66,6 +66,9 @@ final class AppModel {
            tokenValid() {
             restaurant = r
             staff = s
+            // Обновляем restaurant info в фоне: кешированный объект может не иметь
+            // новых полей (subscription_plan, ai_enabled), добавленных после первого входа.
+            Task { await refreshRestaurant(rid: r.id) }
             // Это повторный вход уже настроенного устройства → после PIN сразу внутрь,
             // НЕ переспрашивать разрешения (их уже выдали при первой настройке).
             isReauth = true
@@ -83,6 +86,15 @@ final class AppModel {
 
     private func tokenValid() -> Bool {
         d.double(forKey: "mise_token_until") > Date().timeIntervalSince1970
+    }
+
+    private func refreshRestaurant(rid: String) async {
+        guard let resp = try? await API.postJSON("/api/auth/restaurant-info",
+                                                  body: ["restaurantId": rid],
+                                                  as: RestaurantInfoResponse.self),
+              let fresh = resp.restaurant else { return }
+        restaurant = fresh
+        if let data = try? JSONEncoder().encode(fresh) { d.set(data, forKey: "mise_restaurant") }
     }
 
     // MARK: онбординг
