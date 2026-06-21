@@ -277,6 +277,22 @@ final class ManagerModel {
     }
     #endif
 
+    func handleAI(_ message: String) async {
+        let empNames = employees.map(\.name).joined(separator: ", ")
+        let catNames = categories.map(\.name).joined(separator: ", ")
+        let ctx = "Employees: \(empNames). Expense categories: \(catNames)."
+        guard let result = try? await API.aiChat(module: "manager", message: message, context: ctx),
+              let type = result["type"] as? String, type == "prefill" else { return }
+        func str(_ key: String) -> String { (result[key] as? String) ?? "" }
+        if !str("income").isEmpty      { income = str("income") }
+        if !str("incomeCard").isEmpty  { incomeCard = str("incomeCard") }
+        if !str("inkSum").isEmpty      { inkSum = str("inkSum") }
+        if !str("inkExpense").isEmpty  { inkExpense = str("inkExpense") }
+        if !str("inkReason").isEmpty   { inkReason = str("inkReason") }
+        if !str("inkSalary").isEmpty   { inkSalary = str("inkSalary") }
+        flash(t("ai.applied"))
+    }
+
     private func flash(_ m: String) {
         toast = m
         Task { try? await Task.sleep(nanoseconds: 2_400_000_000); if toast == m { toast = nil } }
@@ -292,7 +308,7 @@ struct ManagerView: View {
     var body: some View {
         Group {
             if let m {
-                ManagerBody(m: m)
+                ManagerBody(m: m, aiEnabled: app.aiEnabled)
             } else {
                 ProgressView().tint(.primary).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -309,6 +325,7 @@ struct ManagerView: View {
 
 private struct ManagerBody: View {
     @Bindable var m: ManagerModel
+    let aiEnabled: Bool
     private let accent = BrandKit.manager
 
     var body: some View {
@@ -335,6 +352,10 @@ private struct ManagerBody: View {
                     .background(.ultraThinMaterial, in: Capsule())
                     .padding(.top, 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            if aiEnabled {
+                AIButton(module: "manager") { msg in await m.handleAI(msg) }
             }
         }
         .animation(.easeInOut(duration: 0.2), value: m.toast)

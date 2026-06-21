@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
   const { data } = await admin
     .from('restaurants')
-    .select('id, name, logo_url, currency, subscription_status, subscription_plan, owner_pin')
+    .select('id, name, logo_url, currency, subscription_status, subscription_plan, ai_enabled, owner_pin')
     .eq('id', restaurantId)
     .single()
 

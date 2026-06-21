@@ -23,6 +23,13 @@ final class AppModel {
         var role: String?
     }
 
+    /// AI доступен: Pro-тариф или ручное включение в админке.
+    var aiEnabled: Bool {
+        guard let r = restaurant else { return false }
+        if r.ai_enabled == true { return true }
+        return r.subscription_plan == "pro"
+    }
+
     /// Видит ли вошедший деньги/выручку (владелец и менеджер — да; кальянщик/официант — нет).
     var canSeeMoney: Bool {
         guard let s = staff else { return true }
@@ -44,7 +51,7 @@ final class AppModel {
         #if DEBUG
         // Визуальная проверка UI без реального входа: запуск с -MISE_DEMO_UI 1.
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" {
-            restaurant = Restaurant(id: "demo", name: "Mise Demo Lounge", logo_url: nil, currency: "€", has_owner_pin: false)
+            restaurant = Restaurant(id: "demo", name: "Mise Demo Lounge", logo_url: nil, currency: "€", has_owner_pin: false, subscription_plan: "pro", ai_enabled: true)
             staff = ResolvedStaff(id: "owner", name: "Владелец",
                                   apps: ["manager", "analytics", "stash", "people"], isOwner: true, role: nil)
             currentApp = ProcessInfo.processInfo.environment["MISE_DEMO_APP"]

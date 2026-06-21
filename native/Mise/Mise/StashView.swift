@@ -209,6 +209,28 @@ final class StashModel {
 
     struct MovRow: Identifiable { let id = UUID(); var brand = ""; var flavor = ""; var grams = "" }
 
+    // AI prefill: set by handleAI(), consumed by AddMovementSheet.
+    var aiMovRows: [MovRow]? = nil
+    var shouldOpenMovSheet = false
+
+    func handleAI(_ message: String) async {
+        let ctx = allBrands.prefix(30).joined(separator: ", ")
+        if let result = try? await API.aiChat(module: "stash", message: message, context: ctx),
+           let type = result["type"] as? String, type == "prefill",
+           let raw = result["rows"] as? [[String: Any]] {
+            let rows = raw.compactMap { d -> MovRow? in
+                guard let b = d["brand"] as? String, let fl = d["flavor"] as? String,
+                      let g = d["grams"] as? String else { return nil }
+                var r = MovRow(); r.brand = b; r.flavor = fl; r.grams = g; return r
+            }
+            if !rows.isEmpty {
+                aiMovRows = rows
+                shouldOpenMovSheet = true
+                flash(t("ai.applied"))
+            }
+        }
+    }
+
     func saveMovement(_ rows: [MovRow], reason: String) async -> Bool {
         // Тримим ввод, чтобы лишние пробелы не плодили дубли на складе.
         let filled = rows
@@ -307,7 +329,7 @@ struct StashView: View {
 
     var body: some View {
         Group {
-            if let m { StashBody(m: m) }
+            if let m { StashBody(m: m, aiEnabled: app.aiEnabled) }
             else { ProgressView().tint(.primary).frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
         .task {
@@ -326,6 +348,7 @@ struct StashView: View {
 
 private struct StashBody: View {
     @Bindable var m: StashModel
+    let aiEnabled: Bool
     @State private var showAddMov = false
     @State private var showAddInv = false
 
@@ -350,8 +373,15 @@ private struct StashBody: View {
                     .padding(.bottom, 60)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+
+            if aiEnabled {
+                AIButton(module: "stash") { msg in await m.handleAI(msg) }
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: m.toast)
+        .onChange(of: m.shouldOpenMovSheet) { _, open in
+            if open { showAddMov = true; m.shouldOpenMovSheet = false }
+        }
         .sheet(isPresented: $showAddMov) { AddMovementSheet(m: m) }
         .sheet(isPresented: $showAddInv) { AddInventorySheet(m: m) }
     }
@@ -736,6 +766,12 @@ private struct AddMovementSheet: View {
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
             .preferredColorScheme(.dark)
+            .onAppear {
+                if let pre = m.aiMovRows, !pre.isEmpty {
+                    rows = pre
+                    m.aiMovRows = nil
+                }
+            }
         }
     }
 }

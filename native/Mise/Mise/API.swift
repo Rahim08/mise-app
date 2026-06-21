@@ -36,6 +36,21 @@ enum API {
         return try? JSONDecoder().decode(E.self, from: data).error
     }
 
+    /// Запрос к AI-эндпоинту. Возвращает сырой словарь для разбора вызывающей стороной.
+    static func aiChat(module: String, message: String, context: String = "") async throws -> [String: Any] {
+        guard let url = URL(string: base + "/api/ai") else { throw APIError.badURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = ["module": module, "message": message, "context": context]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1, nil) }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.http(http.statusCode, serverMessage(data)) }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw APIError.decode }
+        return json
+    }
+
     /// Низкоуровневый запрос к шлюзу данных `/api/db` (см. DB.swift).
     /// Принимает произвольный JSON-payload, возвращает сырое тело ответа `{ data: ... }`.
     static func dbRequest(_ payload: [String: Any]) async throws -> Data {
@@ -59,6 +74,8 @@ struct Restaurant: Codable, Identifiable, Sendable {
     let logo_url: String?
     var currency: String?
     let has_owner_pin: Bool?
+    let subscription_plan: String?
+    let ai_enabled: Bool?
 }
 
 struct RestaurantInfoResponse: Codable, Sendable {

@@ -263,6 +263,13 @@ let STRINGS: [String: [Lang: String]] = [
     "an.salaryToday":    tr("Salary to date", "ЗП на сегодня", "Stipendio a oggi", "Salaire à ce jour", "Bu günə maaş", "Bugüne maaş", "ЗП на сьогодні", "Бүгінге жалақы"),
     "an.noInkass":       tr("No collections", "Инкассаций нет", "Nessun prelievo", "Aucun encaissement", "İnkassasiya yoxdur", "Tahsilat yok", "Інкасацій немає", "Инкассация жоқ"),
     "an.inkNet":         tr("NET", "ИТОГО", "NETTO", "NET", "XALİS", "NET", "НЕТТО", "НЕТТО"),
+
+    // AI
+    "ai.send":          tr("Send", "Отправить", "Invia", "Envoyer", "Göndər", "Gönder", "Надіслати", "Жіберу"),
+    "ai.thinking":      tr("Processing...", "Обрабатываю...", "Elaboro...", "Traitement...", "İşlənir...", "İşleniyor...", "Обробляю...", "Өңдеймін..."),
+    "ai.typeMessage":   tr("Type a message...", "Напишите сообщение...", "Scrivi messaggio...", "Tapez un message...", "Mesaj yazın...", "Mesaj yazın...", "Напишіть повідомлення...", "Хабар жазыңыз..."),
+    "ai.applied":       tr("Fields filled", "Поля заполнены", "Campi compilati", "Champs remplis", "Sahələr dolduruldu", "Alanlar dolduruldu", "Поля заповнені", "Өрістер толтырылды"),
+    "ai.close":         tr("Close", "Закрыть", "Chiudi", "Fermer", "Bağla", "Kapat", "Закрити", "Жабу"),
     "an.pcs":            tr("{n} pcs", "{n} шт", "{n} pz", "{n} pcs", "{n} əd", "{n} adet", "{n} шт", "{n} дана"),
     "an.forecastMonth":  tr("MONTH FORECAST", "ПРОГНОЗ НА МЕСЯЦ", "PREVISIONE MESE", "PRÉVISION DU MOIS", "AY PROQNOZU", "AY TAHMİNİ", "ПРОГНОЗ НА МІСЯЦЬ", "АЙЛЫҚ БОЛЖАМ"),
     "an.revenueMonth":   tr("MONTH REVENUE", "ВЫРУЧКА ЗА МЕСЯЦ", "RICAVO DEL MESE", "REVENU DU MOIS", "AYLIQ GƏLİR", "AYLIK GELİR", "ВИРУЧКА ЗА МІСЯЦЬ", "АЙЛЫҚ ТҮСІМ"),

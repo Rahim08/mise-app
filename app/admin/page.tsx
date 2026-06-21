@@ -11,7 +11,7 @@ interface Restaurant {
   id: string; name: string; currency: string; owner_id: string
   subscription_status: string; subscription_plan: string
   subscription_ends_at: string | null; created_at: string
-  device_limit: number | null
+  device_limit: number | null; ai_enabled: boolean
 }
 interface Stats { shifts: number; movements: number; employees: number; lastActive: string | null }
 
@@ -53,6 +53,8 @@ export default function AdminPage() {
   const [perksSaved, setPerksSaved] = useState(false)
   const [deviceLimit, setDeviceLimit] = useState<string>('')
   const [deviceLimitSaved, setDeviceLimitSaved] = useState(false)
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [aiSaved, setAiSaved] = useState(false)
 
   const adminApi = (body: any) =>
     fetch('/api/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
@@ -79,6 +81,7 @@ export default function AdminPage() {
     setSubForm({ status: r.subscription_status || 'active', plan: r.subscription_plan || 'business', ends_at: r.subscription_ends_at ? r.subscription_ends_at.slice(0, 10) : '' })
     setPerks({ apps: (r as any).comp_apps || [], discount: String((r as any).discount_pct || 0) })
     setDeviceLimit(r.device_limit != null ? String(r.device_limit) : '')
+    setAiEnabled(!!r.ai_enabled)
     setEditSub(false); await loadNotes(r.id)
   }
 
@@ -94,6 +97,13 @@ export default function AdminPage() {
     await adminApi({ action: 'setDeviceLimit', restaurantId: selected.id, deviceLimit: deviceLimit !== '' ? deviceLimit : null })
     setSelected({ ...selected, device_limit: dl })
     setDeviceLimitSaved(true); setTimeout(() => setDeviceLimitSaved(false), 2000)
+  }
+  const saveAI = async (enabled: boolean) => {
+    if (!selected) return
+    await adminApi({ action: 'setAI', restaurantId: selected.id, aiEnabled: enabled })
+    setSelected({ ...selected, ai_enabled: enabled })
+    setAiEnabled(enabled)
+    setAiSaved(true); setTimeout(() => setAiSaved(false), 2000)
   }
   const saveNote = async () => {
     if (!note.trim() || !selected) return
@@ -315,6 +325,22 @@ export default function AdminPage() {
                     <button onClick={() => { setDeviceLimit(''); saveDeviceLimit() }} style={{ ...btn(t, 'gray'), padding: '7px 10px', fontSize: '.72rem' }}>Сбросить</button>
                   )}
                   <button onClick={saveDeviceLimit} style={btn(t, 'primary')}>{deviceLimitSaved ? '✓' : 'Сохранить'}</button>
+                </div>
+              </div>
+
+              {/* AI assistant toggle */}
+              <div style={{ borderTop: `1px solid ${t.sep2}`, paddingTop: 16, marginBottom: 16 }}>
+                <div style={{ fontSize: '.72rem', color: t.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>ИИ-ассистент</div>
+                <div style={{ fontSize: '.72rem', color: t.text4, marginBottom: 10 }}>
+                  По умолчанию только Pro. Включи вручную для любого тарифа.
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <button onClick={() => saveAI(!aiEnabled)}
+                    style={{ width: 44, height: 26, borderRadius: 13, border: 'none', background: aiEnabled ? t.green : t.fill, cursor: 'pointer', position: 'relative', transition: 'background .2s' }}>
+                    <div style={{ position: 'absolute', top: 3, left: aiEnabled ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,.3)' }} />
+                  </button>
+                  <span style={{ fontSize: '.82rem', color: aiEnabled ? t.green : t.text3, fontWeight: 600 }}>{aiEnabled ? 'Включён' : 'Выключен'}</span>
+                  {aiSaved && <span style={{ fontSize: '.72rem', color: t.green }}>✓ Сохранено</span>}
                 </div>
               </div>
 

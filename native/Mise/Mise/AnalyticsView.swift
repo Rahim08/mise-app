@@ -37,6 +37,20 @@ final class AnalyticsModel {
 
     var inkDetails: [String: Inkassation] = [:]
 
+    // AI
+    var aiReply: String? = nil
+    var aiProcessing = false
+
+    func handleAI(_ message: String) async {
+        aiProcessing = true
+        defer { aiProcessing = false }
+        let ctx = "Month income: \(Money.s(totalIncome)), expenses: \(Money.s(totalExpense)), shifts: \(shiftsRaw.count), inkass: \(Money.s(totalInkass))"
+        if let result = try? await API.aiChat(module: "analytics", message: message, context: ctx),
+           let reply = result["reply"] as? String {
+            aiReply = reply
+        }
+    }
+
     var hookahRows: [HookahSale] = []
     var allHookah: [HookahSale] = []
     var stockRows: [StockItem] = []
@@ -366,7 +380,7 @@ struct AnalyticsView: View {
 
     var body: some View {
         Group {
-            if let m { AnalyticsBody(m: m) }
+            if let m { AnalyticsBody(m: m, aiEnabled: app.aiEnabled) }
             else { ProgressView().tint(.primary).frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
         .task {
@@ -384,6 +398,7 @@ struct AnalyticsView: View {
 
 private struct AnalyticsBody: View {
     @Bindable var m: AnalyticsModel
+    let aiEnabled: Bool
     @State private var showDatePicker = false
 
     var body: some View {
@@ -407,6 +422,30 @@ private struct AnalyticsBody: View {
             }
             if m.loading {
                 ProgressView().tint(.primary)
+            }
+            if aiEnabled {
+                AIButton(module: "analytics") { msg in await m.handleAI(msg) }
+            }
+        }
+        .sheet(isPresented: Binding(get: { m.aiReply != nil }, set: { if !$0 { m.aiReply = nil } })) {
+            NavigationStack {
+                ZStack {
+                    Color.miseBg.ignoresSafeArea()
+                    ScrollView {
+                        Text(m.aiReply ?? "")
+                            .font(.system(size: 16)).foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(20)
+                    }
+                }
+                .navigationTitle("AI")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(t("ai.close")) { m.aiReply = nil }
+                    }
+                }
+                .toolbarBackground(Color.miseBg, for: .navigationBar)
             }
         }
     }
