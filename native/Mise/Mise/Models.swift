@@ -28,7 +28,8 @@ nonisolated struct Shift: Codable, Identifiable, Sendable {
     var opening_balance: Double?
 }
 
-nonisolated struct ShiftExpense: Codable, Sendable {
+nonisolated struct ShiftExpense: Codable, Identifiable, Sendable {
+    let id: String
     let employee_id: String?
     let category_id: String?
     let category_name: String?
@@ -46,6 +47,7 @@ nonisolated struct CardAmount: Codable, Sendable {
 nonisolated struct Absence: Codable, Sendable {
     let employee_id: String?
     let source: String?
+    let date: String?
 }
 
 nonisolated struct AnalyticsSettings: Codable, Sendable {
@@ -221,9 +223,18 @@ nonisolated struct AttendanceRecord: Codable, Identifiable, Sendable {
 nonisolated struct SwapRequest: Codable, Identifiable, Sendable {
     let id: String
     let schedule_id: String?
+    let target_schedule_id: String?
     let requester_id: String?
     let target_id: String?
     var status: String?
+    let note: String?
+}
+
+nonisolated struct SalaryAdvance: Codable, Identifiable, Sendable {
+    let id: String
+    let employee_id: String?
+    let amount: Double?
+    let date: String?
     let note: String?
 }
 

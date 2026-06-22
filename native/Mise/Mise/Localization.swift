@@ -263,6 +263,12 @@ let STRINGS: [String: [Lang: String]] = [
     "an.salaryToday":    tr("Accrued salary", "Зарплата н/д", "Stipendio maturato", "Salaire couru", "Hesablanmış maaş", "Tahakkuk eden maaş", "Нарахована зарплата", "Есептелген жалақы"),
     "an.noInkass":       tr("No collections", "Инкассаций нет", "Nessun prelievo", "Aucun encaissement", "İnkassasiya yoxdur", "Tahsilat yok", "Інкасацій немає", "Инкассация жоқ"),
     "an.inkNet":         tr("NET", "ИТОГО", "NETTO", "NET", "XALİS", "NET", "НЕТТО", "НЕТТО"),
+    "an.cashShort":      tr("Cash", "Нал", "Cont.", "Esp.", "Nağd", "Nakit", "Гот.", "Нақ."),
+    "an.cardShort":      tr("Card", "Карта", "Carta", "Carte", "Kart", "Kart", "Карта", "Карта"),
+    "an.inkShort":       tr("Inkass.", "Инкасс.", "Prelievo", "Encaisse", "İnkass.", "Tahsilat", "Інкас.", "Инкасс."),
+    "an.advance":        tr("Advance", "Аванс", "Anticipo", "Avance", "Avans", "Avans", "Аванс", "Аванс"),
+    "an.addAdvance":     tr("Add advance", "Добавить аванс", "Aggiungi anticipo", "Ajouter avance", "Avans əlavə et", "Avans ekle", "Додати аванс", "Аванс қосу"),
+    "pe.theirShift":     tr("Their shift", "Смена коллеги", "Turno del collega", "Service du collègue", "Həmkarın növbəsi", "Meslektaşın vardiyası", "Зміна колеги", "Әріптестің ауысымы"),
 
     // AI
     "ai.send":          tr("Send", "Отправить", "Invia", "Envoyer", "Göndər", "Gönder", "Надіслати", "Жіберу"),

@@ -197,6 +197,7 @@ final class ManagerModel {
     private func persist() async throws -> Double? {
         guard let sh = shift else { return nil }
         let c = calc
+
         try await DB.from("shifts").update([
             "income": c.inc, "income_card": c.card, "inkassation": c.ink,
             "total_expense": c.totalExp, "closing_balance": c.balance,

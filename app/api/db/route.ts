@@ -28,9 +28,10 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   shifts:               { read: ['manager', 'analytics', 'people'], write: ['manager'] }, // people: чек-лист привязан к открытой смене
   shift_expenses:       { read: ['manager', 'analytics'], write: ['manager'] },
   shift_absences:       { read: ['manager', 'analytics', 'people'], write: ['manager'] },
-  inkassations:         { read: ['manager', 'analytics'], write: ['manager'] },
+  inkassations:         { read: ['manager', 'analytics'], write: ['manager', 'analytics'] },
   transactions:         { read: ['manager', 'analytics'], write: ['manager'] },
   monthly_card_amounts: { read: ['analytics', 'people'], write: ['analytics'] }, // помесячная сумма на карту правится в Analytics
+  salary_advances:      { read: ['analytics', 'people'], write: ['analytics'] }, // авансы по зарплате
   salary_records:       { read: ['analytics'], write: [] },
   tobacco_stock:        { read: ['stash', 'analytics'], write: ['stash'] }, // analytics: остаток склада на вкладке Кальян
   tobacco_movements:    { read: ['stash', 'analytics'], write: ['stash'] },

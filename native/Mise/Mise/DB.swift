@@ -32,6 +32,7 @@ final class DBQuery {
     @discardableResult func gte(_ c: String, _ v: Any) -> DBQuery { filter("gte", c, v) }
     @discardableResult func lte(_ c: String, _ v: Any) -> DBQuery { filter("lte", c, v) }
     @discardableResult func `in`(_ c: String, _ v: [Any]) -> DBQuery { filter("in", c, v) }
+    @discardableResult func ilike(_ c: String, _ v: Any) -> DBQuery { filter("ilike", c, v) }
 
     private func filter(_ op: String, _ c: String, _ v: Any) -> DBQuery {
         filters.append(["col": c, "op": op, "val": v]); return self

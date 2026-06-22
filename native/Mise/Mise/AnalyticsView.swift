@@ -37,6 +37,7 @@ final class AnalyticsModel {
     var absences: [Absence] = []
 
     var inkDetails: [String: Inkassation] = [:]
+    var advances: [SalaryAdvance] = []
 
     func handleAI(_ message: String) async -> String? {
         // expenses by category (current period)
@@ -182,6 +183,9 @@ final class AnalyticsModel {
             if let pe = try? await DB.from("shift_expenses").select().in("shift_id", prevIds).list(ShiftExpense.self) { prevExpenses = pe }
         } else { prevExpenses = [] }
 
+        if let adv = try? await DB.from("salary_advances").select()
+            .gte("date", key(monthStart)).lte("date", key(monthEnd)).list(SalaryAdvance.self) { advances = adv }
+
         // Инкассация копится: сумма нетто (total) из inkassations до конца выбранного месяца.
         nonisolated struct InkNetOnly: Codable, Sendable { let total: Double? }
         if let inkRows = try? await DB.from("inkassations").select("total").lte("date", key(monthEnd)).list(InkNetOnly.self) {
@@ -248,10 +252,9 @@ final class AnalyticsModel {
         let ids = Set(periodShifts.map(\.id))
         var m: [String: Double] = [:]
         for e in expenses {
-            // только расходы смен выбранного периода (день/неделя/месяц).
-            // Экстры сотрудников (employee_id != nil) тоже учитываем — у них
-            // category_name = "Имя (экстра)", т.е. показываются именованной строкой.
             if let sid = e.shift_id, !ids.contains(sid) { continue }
+            // Авансы — расход инкассации, не кассы; не показываем в расходах периода.
+            if e.category_name?.hasPrefix("Аванс") == true { continue }
             m[e.category_name ?? "—", default: 0] += e.amount ?? 0
         }
         return m.sorted { $0.value > $1.value }
@@ -285,6 +288,21 @@ final class AnalyticsModel {
 
     // Период: срез смен по режиму относительно ВЫБРАННОЙ даты (currentDate).
     private var allLoaded: [Shift] { adj(shiftsRaw + prevShiftsRaw) }
+    private var periodRaw: [Shift] {
+        let all = shiftsRaw + prevShiftsRaw
+        switch periodMode {
+        case "day": return all.filter { $0.date == key(currentDate) }
+        case "week":
+            let (mon, sun) = weekRange
+            return all.filter { $0.date >= key(mon) && $0.date <= key(sun) }
+        default: return shiftsRaw
+        }
+    }
+    var pCash: Double { periodRaw.reduce(0) { $0 + ($1.income ?? 0) } }
+    var pCard: Double { periodRaw.reduce(0) { $0 + ($1.income_card ?? 0) } }
+    var pTotal: Double { pCash + pCard }
+    var prevTotal: Double { prevShiftsRaw.reduce(0) { $0 + ($1.income ?? 0) + ($1.income_card ?? 0) } }
+
     var weekRange: (Date, Date) {
         let cal = Calendar.current
         let wd = cal.component(.weekday, from: currentDate)
@@ -325,20 +343,28 @@ final class AnalyticsModel {
     func cardOf(_ e: Employee) -> Double {
         cardAmounts.first(where: { $0.employee_id == e.id })?.card_amount ?? 0
     }
-    struct SalaryRow: Identifiable { let id: String; let name: String; let salary: Double; let abs: Int; let deduct: Double; let card: Double; let cash: Double; let total: Double }
+    struct SalaryRow: Identifiable {
+        let id: String; let name: String; let salary: Double; let abs: Int
+        let deduct: Double; let card: Double; let cash: Double; let total: Double
+        let advance: Double; let advanceList: [SalaryAdvance]
+    }
     var salaryRows: [SalaryRow] {
         employees.map { e in
             let absN = absences.filter { $0.employee_id == e.id }.count
             let deduct = Double(absN) * (e.deduct_per_absence ?? 0)
             let card = cardOf(e)
-            let cash = (e.salary ?? 0) - deduct - card
-            return SalaryRow(id: e.id, name: e.name, salary: e.salary ?? 0, abs: absN, deduct: deduct, card: card, cash: cash, total: cash + card)
+            let advList = advances.filter { $0.employee_id == e.id }
+            let advance = advList.reduce(0) { $0 + ($1.amount ?? 0) }
+            let total = max(0, (e.salary ?? 0) - deduct)
+            let cash = max(0, total - advance - card)
+            return SalaryRow(id: e.id, name: e.name, salary: e.salary ?? 0, abs: absN, deduct: deduct, card: card, cash: cash, total: total, advance: advance, advanceList: advList)
         }
     }
     var payrollTotal: Double { employees.reduce(0) { $0 + ($1.salary ?? 0) } }
     var salTotal: Double { salaryRows.reduce(0) { $0 + $1.total } }
     var salCard: Double { salaryRows.reduce(0) { $0 + $1.card } }
     var salCash: Double { salaryRows.reduce(0) { $0 + $1.cash } }
+    var salAdvance: Double { salaryRows.reduce(0) { $0 + $1.advance } }
     /// Сохранить сумму «на карту» за выбранный месяц.
     func saveMonthlyCard(_ empId: String, _ amount: Double) async {
         if let ex = cardAmounts.first(where: { $0.employee_id == empId }), let cid = ex.id {
@@ -352,6 +378,62 @@ final class AnalyticsModel {
         var arr = cardAmounts.filter { $0.employee_id != empId }
         arr.append(CardAmount(id: cardAmounts.first { $0.employee_id == empId }?.id, employee_id: empId, card_amount: amount))
         cardAmounts = arr
+    }
+
+    func addAdvance(empId: String, amount: Double, date: String) async {
+        let empName = employees.first { $0.id == empId }?.name ?? ""
+
+        // 1. Write to salary_advances for per-employee salary tracking.
+        try? await DB.from("salary_advances").insert([
+            "restaurant_id": rid, "employee_id": empId,
+            "amount": amount, "date": date, "note": empName + " аванс",
+        ] as [String: Any]).run()
+
+        // 2. Update inkassation for the shift on that date — advance is paid from inkassated money.
+        let shift = shiftsRaw.first { $0.date == date }
+            ?? shiftsRaw.filter { $0.date <= date }.sorted { $0.date > $1.date }.first
+        if let shift = shift, let ink = inkDetails[shift.id] {
+            let newExpense = (ink.expense ?? 0) + amount
+            let reasonParts = [ink.reason?.isEmpty == false ? ink.reason : nil, empName + " аванс"]
+                .compactMap { $0 }
+            let newReason = reasonParts.joined(separator: ", ")
+            let newTotal = (ink.amount ?? (shift.inkassation ?? 0)) - newExpense - (ink.salary ?? 0)
+            try? await DB.from("inkassations").update([
+                "expense": newExpense, "reason": newReason, "total": newTotal,
+            ] as [String: Any]).eq("shift_id", shift.id).run()
+            inkDetails[shift.id] = Inkassation(shift_id: shift.id, amount: ink.amount,
+                expense: newExpense, reason: newReason, total: newTotal,
+                salary: ink.salary, salary_note: ink.salary_note)
+        }
+
+        // 3. Reload advances list.
+        let ym = ymKey
+        if let adv = try? await DB.from("salary_advances").select()
+            .gte("date", ym + "-01").lte("date", ym + "-31").list(SalaryAdvance.self) { advances = adv }
+    }
+
+    func deleteAdvance(_ a: SalaryAdvance) async {
+        try? await DB.from("salary_advances").delete().eq("id", a.id).run()
+        advances.removeAll { $0.id == a.id }
+
+        // Reverse the inkassation expense update.
+        let shift = shiftsRaw.first { $0.date == (a.date ?? "") }
+            ?? shiftsRaw.filter { ($0.date) <= (a.date ?? "") }.sorted { $0.date > $1.date }.first
+        if let shift = shift, let ink = inkDetails[shift.id] {
+            let newExpense = max(0, (ink.expense ?? 0) - (a.amount ?? 0))
+            let empName = employees.first { $0.id == a.employee_id }?.name ?? ""
+            let newReason = (ink.reason ?? "")
+                .components(separatedBy: ", ")
+                .filter { !$0.hasPrefix(empName + " аванс") || advances.contains { $0.employee_id == a.employee_id } }
+                .joined(separator: ", ")
+            let newTotal = (ink.amount ?? (shift.inkassation ?? 0)) - newExpense - (ink.salary ?? 0)
+            try? await DB.from("inkassations").update([
+                "expense": newExpense, "reason": newReason, "total": newTotal,
+            ] as [String: Any]).eq("shift_id", shift.id).run()
+            inkDetails[shift.id] = Inkassation(shift_id: shift.id, amount: ink.amount,
+                expense: newExpense, reason: newReason.isEmpty ? nil : newReason, total: newTotal,
+                salary: ink.salary, salary_note: ink.salary_note)
+        }
     }
 
     // кальян
@@ -418,16 +500,16 @@ final class AnalyticsModel {
                   income: 1400, income_card: 300, total_expense: 500, inkassation: 900, closing_balance: 200, opening_balance: 200)
         }
         expenses = [
-            .init(employee_id: nil, category_id: "c1", category_name: "Продукты", amount: 3200, note: nil, shift_id: "s1"),
-            .init(employee_id: nil, category_id: "c2", category_name: "Бар", amount: 1800, note: nil, shift_id: "s1"),
-            .init(employee_id: nil, category_id: "c3", category_name: "Хозтовары", amount: 600, note: nil, shift_id: "s2"),
+            ShiftExpense(id: "exp1", employee_id: nil, category_id: "c1", category_name: "Продукты", amount: 3200, note: nil, shift_id: "s1"),
+            ShiftExpense(id: "exp2", employee_id: nil, category_id: "c2", category_name: "Бар", amount: 1800, note: nil, shift_id: "s1"),
+            ShiftExpense(id: "exp3", employee_id: nil, category_id: "c3", category_name: "Хозтовары", amount: 600, note: nil, shift_id: "s2"),
         ]
         employees = [
             .init(id: "e1", name: "Анна Кузнецова", deduct_per_absence: 20, salary: 1200, card_amount: 400),
             .init(id: "e2", name: "Игорь Петров", deduct_per_absence: 20, salary: 1100, card_amount: 0),
             .init(id: "e3", name: "Мария Соколова", deduct_per_absence: 15, salary: 900, card_amount: 300),
         ]
-        absences = [.init(employee_id: "e3", source: "manager"), .init(employee_id: "e3", source: "manager")]
+        absences = [.init(employee_id: "e3", source: "manager", date: "2026-06-10"), .init(employee_id: "e3", source: "manager", date: "2026-06-14")]
         cardAmounts = [.init(id: "ca1", employee_id: "e1", card_amount: 450)]
         types = [.init(id: "h1", name: "Классический", price: 15, portion_g: 20), .init(id: "h2", name: "Премиум", price: 22, portion_g: 25)]
         hookahRows = [
@@ -549,24 +631,20 @@ private struct AnalyticsBody: View {
 private struct PeriodTab: View {
     @Bindable var m: AnalyticsModel
     private var isMonth: Bool { m.periodMode == "month" }
+
     var body: some View {
         Picker("", selection: $m.periodMode) {
             Text(t("an.day")).tag("day"); Text(t("an.week")).tag("week"); Text(t("an.month")).tag("month")
         }.pickerStyle(.segmented)
 
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-            stat(t("an.income"), cur(m.pIncome), BrandKit.analytics, isMonth ? m.pct(m.totalIncome, m.prevIncome) : nil)
-            stat(t("an.expense"), cur(m.pExpense), BrandKit.menu, isMonth ? m.pct(m.totalExpense, m.prevExpense) : nil)
-            stat(t("tab.kassa"), cur(m.pClosing), BrandKit.manager, nil)
-            stat(t("mg.inkass"), cur(m.cumulativeInkass), BrandKit.stash, nil)
-        }
+        incomeCard
+
         if m.periodMode != "day" && !m.dailyIncome.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Text(t("an.incomeByDay")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                 Chart(m.dailyIncome) { d in
                     BarMark(x: .value("День", d.day), y: .value("Доход", d.income))
-                        .foregroundStyle(BrandKit.analytics)
-                        .cornerRadius(3)
+                        .foregroundStyle(BrandKit.analytics).cornerRadius(3)
                 }
                 .chartXAxis { AxisMarks(values: .automatic(desiredCount: 6)) { v in AxisValueLabel().foregroundStyle(.primary.opacity(0.4)) } }
                 .chartYAxis { AxisMarks { _ in AxisValueLabel().foregroundStyle(.primary.opacity(0.4)) } }
@@ -575,10 +653,16 @@ private struct PeriodTab: View {
             .padding(14).frame(maxWidth: .infinity)
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
         }
+
         if !m.catMap.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                Text(m.periodMode == "day" ? t("an.expenses") : t("an.topExpenses")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
-                    .padding(.bottom, 8)
+                HStack {
+                    Text(m.periodMode == "day" ? t("an.expenses") : t("an.topExpenses"))
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
+                    Spacer()
+                    Text(cur(m.pExpense)).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.55))
+                }
+                .padding(.bottom, 8)
                 ForEach(Array(m.catMap.enumerated()), id: \.offset) { i, c in
                     HStack {
                         Text(c.0).font(.system(size: 15)).foregroundStyle(.primary)
@@ -594,18 +678,64 @@ private struct PeriodTab: View {
         }
     }
 
-    private func stat(_ label: String, _ value: String, _ color: Color, _ pct: Double?) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
-            Text(value).font(.system(size: 22, weight: .heavy)).foregroundStyle(color).minimumScaleFactor(0.6).lineLimit(1)
-            if let p = pct {
-                Text((p >= 0 ? "▲ " : "▼ ") + String(format: "%.0f%%", abs(p)))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(p >= 0 ? BrandKit.analytics : BrandKit.menu)
+    private var incomeCard: some View {
+        let total = m.pTotal
+        let cashPct = total > 0 ? m.pCash / total : 0
+        let cardPct = total > 0 ? m.pCard / total : 0
+        let cashInt = Int((cashPct * 100).rounded())
+        let cardInt = 100 - cashInt
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("an.income")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
+                    Text(cur(total)).font(.system(size: 30, weight: .heavy)).foregroundStyle(BrandKit.analytics)
+                        .minimumScaleFactor(0.7).lineLimit(1)
+                    if isMonth, let p = m.pct(m.pTotal, m.prevTotal) {
+                        Text((p >= 0 ? "▲ " : "▼ ") + String(format: "%.0f%%", abs(p)))
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(p >= 0 ? BrandKit.analytics : BrandKit.menu)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
+
+            if total > 0 {
+                GeometryReader { geo in
+                    HStack(spacing: 2) {
+                        if cashPct > 0 {
+                            RoundedRectangle(cornerRadius: 3).fill(BrandKit.analytics)
+                                .frame(width: max(6, (geo.size.width - (cardPct > 0 ? 2 : 0)) * CGFloat(cashPct)))
+                        }
+                        if cardPct > 0 {
+                            RoundedRectangle(cornerRadius: 3).fill(BrandKit.manager).frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+                .frame(height: 6).padding(.horizontal, 14)
+            }
+
+            HStack(spacing: 0) {
+                periodCol(t("an.cashShort"), cur(m.pCash), BrandKit.analytics, cashPct > 0 ? "\(cashInt)%" : nil)
+                Divider().frame(height: 28).overlay(Color.primary.opacity(0.12))
+                periodCol(t("an.cardShort"), cur(m.pCard), BrandKit.manager, cardPct > 0 ? "\(cardInt)%" : nil)
+                Divider().frame(height: 28).overlay(Color.primary.opacity(0.12))
+                periodCol(t("an.inkShort"), cur(m.pInkass), BrandKit.stash, nil)
+            }
+            .padding(.horizontal, 4).padding(.vertical, 10)
+        }
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func periodCol(_ label: String, _ value: String, _ color: Color, _ pct: String?) -> some View {
+        VStack(spacing: 2) {
+            Text(value).font(.system(size: 14, weight: .bold)).foregroundStyle(color).lineLimit(1).minimumScaleFactor(0.6)
+            HStack(spacing: 3) {
+                Text(label).font(.system(size: 10)).foregroundStyle(.primary.opacity(0.45)).lineLimit(1)
+                if let p = pct { Text(p).font(.system(size: 10, weight: .semibold)).foregroundStyle(.primary.opacity(0.3)) }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -614,11 +744,18 @@ private struct PeriodTab: View {
 private struct SalaryTab: View {
     @Bindable var m: AnalyticsModel
     @State private var expanded: String?
+    @State private var showAdvanceSheet = false
+    @State private var advEmpId = ""
+
     var body: some View {
         VStack(spacing: 10) {
             Text(t("an.payrollFund")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
             Text(cur(m.salTotal)).font(.system(size: 30, weight: .heavy)).foregroundStyle(BrandKit.analytics)
             HStack(spacing: 0) {
+                if m.salAdvance > 0 {
+                    miniTotal(t("an.advance"), cur(m.salAdvance), BrandKit.stash)
+                    Divider().frame(height: 30).overlay(Color.primary.opacity(0.12))
+                }
                 miniTotal(t("byCash"), cur(m.salCash), BrandKit.analytics)
                 Divider().frame(height: 30).overlay(Color.primary.opacity(0.12))
                 miniTotal(t("toCard"), cur(m.salCard), BrandKit.manager)
@@ -633,7 +770,12 @@ private struct SalaryTab: View {
                     HStack {
                         Text(r.name).font(.system(size: 15, weight: .medium)).foregroundStyle(.primary)
                         Spacer()
-                        Text(cur(r.total)).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(cur(r.cash)).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
+                            if r.advance > 0 || r.card > 0 {
+                                Text(t("byCash")).font(.system(size: 10)).foregroundStyle(.primary.opacity(0.35))
+                            }
+                        }
                         Image(systemName: expanded == r.id ? "chevron.up" : "chevron.down")
                             .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
                     }
@@ -644,16 +786,39 @@ private struct SalaryTab: View {
                     VStack(spacing: 8) {
                         detail(t("baseSalary"), cur(r.salary))
                         if r.abs > 0 { detail(t("absencesN", ["n": "\(r.abs)"]), "−" + cur(r.deduct)) }
+                        ForEach(r.advanceList.sorted { ($0.date ?? "") < ($1.date ?? "") }) { a in
+                            HStack {
+                                Text(a.date.map { dayLabelRu($0) + " · " + t("an.advance") } ?? t("an.advance"))
+                                    .font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5))
+                                Spacer()
+                                Text("−" + cur(a.amount ?? 0)).font(.system(size: 13, weight: .medium)).foregroundStyle(BrandKit.stash)
+                                Button { Task { await m.deleteAdvance(a) } } label: {
+                                    Image(systemName: "xmark.circle").font(.system(size: 14)).foregroundStyle(.primary.opacity(0.3))
+                                }
+                            }
+                        }
+                        Button {
+                            advEmpId = r.id
+                            showAdvanceSheet = true
+                        } label: {
+                            Label(t("an.addAdvance"), systemImage: "plus")
+                                .font(.system(size: 13, weight: .semibold)).foregroundStyle(BrandKit.analytics)
+                        }
                         detail(t("byCash"), cur(r.cash))
                         CardInputRow(empId: r.id, current: r.card) { amt in
                             Task { await m.saveMonthlyCard(r.id, amt) }
                         }
-                        .id(m.ymKey + r.id) // пересоздать поле при смене месяца → не тянуть сумму прошлого
+                        .id(m.ymKey + r.id)
                     }
                     .padding(.horizontal, 14).padding(.bottom, 14)
                 }
             }
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        }
+        .sheet(isPresented: $showAdvanceSheet) {
+            AdvanceAddSheet { amount, date in
+                Task { await m.addAdvance(empId: advEmpId, amount: amount, date: date) }
+            }
         }
     }
     private func detail(_ l: String, _ v: String) -> some View {
@@ -704,6 +869,57 @@ private struct CardInputRow: View {
         .onChange(of: focused) { _, isFocused in
             if !isFocused { onSave(Double(text) ?? 0) }
         }
+    }
+}
+
+private struct AdvanceAddSheet: View {
+    let onSave: (Double, String) -> Void
+    @State private var amount = ""
+    @State private var date = Date()
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.miseBg.ignoresSafeArea()
+                VStack(spacing: 20) {
+                    HStack(spacing: 8) {
+                        Text(Money.symbol).font(.system(size: 22, weight: .bold)).foregroundStyle(.primary.opacity(0.4))
+                        TextField("0", text: $amount)
+                            .keyboardType(.decimalPad)
+                            .font(.system(size: 28, weight: .heavy)).foregroundStyle(BrandKit.analytics)
+                    }
+                    .padding(16)
+                    .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+
+                    DatePicker(t("an.date"), selection: $date, displayedComponents: .date)
+                        .datePickerStyle(.compact).tint(BrandKit.analytics)
+
+                    Spacer()
+                }
+                .padding(20)
+            }
+            .navigationTitle(t("an.addAdvance")).navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(t("cancel")) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(t("done")) {
+                        let df = DateFormatter()
+                        df.dateFormat = "yyyy-MM-dd"
+                        df.locale = Locale(identifier: "en_US_POSIX")
+                        onSave(Double(amount.replacingOccurrences(of: ",", with: ".")) ?? 0, df.string(from: date))
+                        dismiss()
+                    }
+                    .disabled((Double(amount.replacingOccurrences(of: ",", with: ".")) ?? 0) <= 0)
+                    .fontWeight(.bold)
+                }
+            }
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
+            .preferredColorScheme(.dark)
+        }
+        .presentationDetents([.medium])
     }
 }
 
@@ -808,7 +1024,7 @@ private struct KassaTab: View {
                 .padding(14).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
             }
         } else {
-            let salToday = (m.payrollTotal / Double(m.daysInMonth) * Double(m.daysPassed)).rounded()
+            let salToday = max(0, (m.payrollTotal / Double(m.daysInMonth) * Double(m.daysPassed) - m.salAdvance).rounded())
             let diff = m.totalInkassNet - salToday
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
                 stat(t("an.totalInkass"), cur(m.totalInkassNet), BrandKit.stash)
