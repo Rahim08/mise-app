@@ -176,7 +176,7 @@ let STRINGS: [String: [Lang: String]] = [
     "mg.inkass":         tr("Cash collection", "Инкассация", "Prelievo cassa", "Encaisse", "İnkassasiya", "Tahsilat", "Інкасація", "Инкассация"),
     "mg.inkSum":         tr("Collection amount", "Сумма инкассации", "Importo prelievo", "Montant encaissé", "İnkassasiya məbləği", "Tahsilat tutarı", "Сума інкасації", "Инкассация сомасы"),
     "mg.inkExpense":     tr("Expense from collection", "Расход из инкассации", "Spesa dal prelievo", "Dépense du prélèvement", "İnkassasiyadan xərc", "Tahsilattan gider", "Витрата з інкасації", "Инкассациядан шығыс"),
-    "mg.inkReason":      tr("Expense reason", "Причина расхода", "Motivo spesa", "Motif de la dépense", "Xərcin səbəbi", "Gider nedeni", "Причина витрати", "Шығыс себебі"),
+    "mg.inkReason":      tr("Reason", "Причина", "Motivo", "Motif", "Səbəb", "Neden", "Причина", "Себеп"),
     "mg.salary":         tr("Salary", "Зарплата", "Stipendio", "Salaire", "Maaş", "Maaş", "Зарплата", "Жалақы"),
     "mg.shiftClosed":    tr("Shift closed", "Смена закрыта", "Turno chiuso", "Service fermé", "Növbə bağlandı", "Vardiya kapandı", "Зміна закрита", "Ауысым жабылды"),
     "mg.shiftSavedSub":  tr("Day’s till saved", "Касса за день сохранена", "Cassa del giorno salvata", "Caisse du jour enregistrée", "Günün kassası saxlanıldı", "Günün kasası kaydedildi", "Касу за день збережено", "Күнгі касса сақталды"),
