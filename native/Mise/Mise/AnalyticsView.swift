@@ -384,10 +384,13 @@ final class AnalyticsModel {
         let empName = employees.first { $0.id == empId }?.name ?? ""
 
         // 1. Write to salary_advances for per-employee salary tracking.
-        try? await DB.from("salary_advances").insert([
-            "restaurant_id": rid, "employee_id": empId,
-            "amount": amount, "date": date, "note": empName + " аванс",
-        ] as [String: Any]).run()
+        // If insert fails (e.g. table missing) — bail out, don't touch inkassation.
+        do {
+            try await DB.from("salary_advances").insert([
+                "restaurant_id": rid, "employee_id": empId,
+                "amount": amount, "date": date, "note": empName + " аванс",
+            ] as [String: Any]).run()
+        } catch { return }
 
         // 2. Update inkassation for the shift on that date — advance is paid from inkassated money.
         let shift = shiftsRaw.first { $0.date == date }
