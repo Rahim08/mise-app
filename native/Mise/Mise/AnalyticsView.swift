@@ -673,7 +673,7 @@ private struct PeriodTab: View {
                     Text(m.periodMode == "day" ? t("an.expenses") : t("an.topExpenses"))
                         .font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                     Spacer()
-                    Text(cur(m.pExpense)).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.55))
+                    Text(cur(m.catMap.reduce(0) { $0 + $1.1 })).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.55))
                 }
                 .padding(.bottom, 8)
                 ForEach(Array(m.catMap.enumerated()), id: \.offset) { i, c in
