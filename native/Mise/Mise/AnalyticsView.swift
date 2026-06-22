@@ -171,7 +171,7 @@ final class AnalyticsModel {
         let ids = shiftsRaw.map(\.id)
         if !ids.isEmpty {
             if let e = try? await DB.from("shift_expenses").select().in("shift_id", ids).list(ShiftExpense.self) { expenses = e }
-            if let inks = try? await DB.from("inkassations").select("shift_id, amount, expense, reason, total").in("shift_id", ids).list(Inkassation.self) {
+            if let inks = try? await DB.from("inkassations").select("shift_id, amount, expense, reason, total, salary, salary_note").in("shift_id", ids).list(Inkassation.self) {
                 var d: [String: Inkassation] = [:]
                 for ink in inks { if let sid = ink.shift_id { d[sid] = ink } }
                 inkDetails = d
@@ -392,18 +392,28 @@ final class AnalyticsModel {
         // 2. Update inkassation for the shift on that date — advance is paid from inkassated money.
         let shift = shiftsRaw.first { $0.date == date }
             ?? shiftsRaw.filter { $0.date <= date }.sorted { $0.date > $1.date }.first
-        if let shift = shift, let ink = inkDetails[shift.id] {
-            let newExpense = (ink.expense ?? 0) + amount
-            let reasonParts = [ink.reason?.isEmpty == false ? ink.reason : nil, empName + " аванс"]
+        if let shift = shift {
+            let ink = inkDetails[shift.id]
+            let baseAmount = ink?.amount ?? (shift.inkassation ?? 0)
+            let newExpense = (ink?.expense ?? 0) + amount
+            let reasonParts = [ink?.reason?.isEmpty == false ? ink?.reason : nil, empName + " аванс"]
                 .compactMap { $0 }
             let newReason = reasonParts.joined(separator: ", ")
-            let newTotal = (ink.amount ?? (shift.inkassation ?? 0)) - newExpense - (ink.salary ?? 0)
-            try? await DB.from("inkassations").update([
-                "expense": newExpense, "reason": newReason, "total": newTotal,
-            ] as [String: Any]).eq("shift_id", shift.id).run()
-            inkDetails[shift.id] = Inkassation(shift_id: shift.id, amount: ink.amount,
+            let newTotal = baseAmount - newExpense - (ink?.salary ?? 0)
+            if ink != nil {
+                try? await DB.from("inkassations").update([
+                    "expense": newExpense, "reason": newReason, "total": newTotal,
+                ] as [String: Any]).eq("shift_id", shift.id).run()
+            } else {
+                try? await DB.from("inkassations").insert([
+                    "shift_id": shift.id, "restaurant_id": rid, "date": shift.date,
+                    "amount": baseAmount, "expense": newExpense, "reason": newReason,
+                    "salary": 0, "total": newTotal,
+                ] as [String: Any]).run()
+            }
+            inkDetails[shift.id] = Inkassation(shift_id: shift.id, amount: baseAmount > 0 ? baseAmount : nil,
                 expense: newExpense, reason: newReason, total: newTotal,
-                salary: ink.salary, salary_note: ink.salary_note)
+                salary: ink?.salary, salary_note: ink?.salary_note)
         }
 
         // 3. Reload advances list.
@@ -420,8 +430,8 @@ final class AnalyticsModel {
         let shift = shiftsRaw.first { $0.date == (a.date ?? "") }
             ?? shiftsRaw.filter { ($0.date) <= (a.date ?? "") }.sorted { $0.date > $1.date }.first
         if let shift = shift, let ink = inkDetails[shift.id] {
-            let newExpense = max(0, (ink.expense ?? 0) - (a.amount ?? 0))
             let empName = employees.first { $0.id == a.employee_id }?.name ?? ""
+            let newExpense = max(0, (ink.expense ?? 0) - (a.amount ?? 0))
             let newReason = (ink.reason ?? "")
                 .components(separatedBy: ", ")
                 .filter { !$0.hasPrefix(empName + " аванс") || advances.contains { $0.employee_id == a.employee_id } }
