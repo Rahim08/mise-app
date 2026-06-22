@@ -262,7 +262,7 @@ final class AnalyticsModel {
 
     // касса
     var filledShifts: [Shift] { shifts.filter { ($0.income ?? 0) > 0 || ($0.total_expense ?? 0) > 0 } }
-    var shiftsWithInk: [Shift] { shifts.filter { ($0.inkassation ?? 0) > 0 } }
+    var shiftsWithInk: [Shift] { shifts.filter { ($0.inkassation ?? 0) > 0 || (inkDetails[$0.id]?.expense ?? 0) > 0 } }
 
     // прогноз
     var daysInMonth: Int {
