@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
+import { notify as pushNotify } from '@/lib/notifyClient'
 import { Segmented } from '@/components/Segmented'
 import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
@@ -188,6 +189,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
         setShift({ ...sh, opening_balance: openingBalance })
         await loadAbsencesByDate(restaurantId, fmtDate(currentDate)) // подтянуть авто-прогулы дня
         showToast(tr('mg.shiftOpened'))
+        pushNotify({ type: 'cash_open', title: 'Касса открыта', body: 'Смена открыта', audience: { managers: true } })
       } else if (error?.code === '23505') {
         // Shift already exists — reload it
         await loadDay(restaurantId, currentDate, employees, categories)
@@ -276,6 +278,8 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     setShowSummary(false)
     setLocked(true)
     showToast(tr('mg.shiftSaved'))
+    const c = calc()
+    pushNotify({ type: 'cash_close', title: 'Касса закрыта', body: 'Смена закрыта', secureBody: `Выручка €${fv(c.inc)} · остаток €${fv(c.balance)}`, audience: { managers: true } })
     setSaving(false)
   }
 

@@ -55,6 +55,8 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   attendance_records:          { read: ['people'], write: ['people'] },
   push_subscriptions:          { read: ['people'], write: ['people'] },
   notifications:               { read: ['people'], write: ['people'] },
+  notification_prefs:          { read: ['manager', 'analytics', 'stash', 'people'], write: ['manager', 'analytics', 'stash', 'people'] },
+  purchase_items:              { read: ['people'], write: ['people'] },
   // safe read-only directory of teammates (no pin_hash)
   staff_directory:             { read: ['manager', 'analytics', 'stash', 'people'], write: [] },
 }

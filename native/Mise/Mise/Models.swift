@@ -220,6 +220,18 @@ nonisolated struct AttendanceRecord: Codable, Identifiable, Sendable {
     let late_minutes: Int?
 }
 
+nonisolated struct PurchaseItem: Codable, Identifiable, Sendable {
+    let id: String
+    let category: String
+    let name: String
+    let qty: Double?
+    let unit: String?
+    var status: String          // todo | bought | unavailable
+    let created_by: String?
+    let created_by_name: String?
+    let created_at: String?
+}
+
 nonisolated struct SwapRequest: Codable, Identifiable, Sendable {
     let id: String
     let schedule_id: String?
