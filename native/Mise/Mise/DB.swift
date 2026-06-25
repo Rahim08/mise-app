@@ -19,11 +19,13 @@ final class DBQuery {
     private var orderArr: [[String: Any]] = []
     private var limitN: Int?
     private var returning: String?
+    private var onConflict: String?
 
     init(_ table: String) { self.table = table }
 
     @discardableResult func select(_ cols: String = "*") -> DBQuery { columns = cols; return self }
     @discardableResult func insert(_ v: Any) -> DBQuery { op = "insert"; values = v; return self }
+    @discardableResult func upsert(_ v: Any, onConflict: String? = nil) -> DBQuery { op = "upsert"; values = v; self.onConflict = onConflict; return self }
     @discardableResult func update(_ v: Any) -> DBQuery { op = "update"; values = v; return self }
     @discardableResult func delete() -> DBQuery { op = "delete"; return self }
 
@@ -64,6 +66,7 @@ final class DBQuery {
         } else {
             if let v = values { p["values"] = v }
             if let r = returning { p["returning"] = r }
+            if let oc = onConflict { p["onConflict"] = oc }
         }
         if !filters.isEmpty { p["filters"] = filters }
         if !orderArr.isEmpty { p["order"] = orderArr }

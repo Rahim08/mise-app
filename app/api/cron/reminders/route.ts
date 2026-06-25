@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendTrialEndingEmail } from '@/lib/email'
+import { sendPush } from '@/lib/apns'
 
 export const dynamic = 'force-dynamic'
 
@@ -106,6 +107,68 @@ async function autoMarkNoShows(admin: any, now: Date): Promise<number> {
   }
 }
 
+// Push для только что созданных напоминаний о сменах (с учётом pref shift_reminder).
+async function pushShiftReminders(admin: any, inserts: any[]): Promise<number> {
+  try {
+    const staffIds = [...new Set(inserts.map(i => i.staff_id).filter(Boolean))]
+    if (!staffIds.length) return 0
+    const { data: prefs } = await admin.from('notification_prefs').select('staff_id, prefs').in('staff_id', staffIds)
+    const prefMap: Record<string, any> = {}; (prefs || []).forEach((p: any) => { prefMap[p.staff_id] = p.prefs || {} })
+    const { data: subs } = await admin.from('push_subscriptions').select('staff_id, device_token').in('staff_id', staffIds).not('device_token', 'is', null)
+    const subMap: Record<string, string[]> = {}; (subs || []).forEach((s: any) => { (subMap[s.staff_id] ||= []).push(s.device_token) })
+    let sent = 0
+    for (const i of inserts) {
+      if (!i.staff_id || prefMap[i.staff_id]?.shift_reminder === false) continue
+      const tokens = subMap[i.staff_id]; if (!tokens?.length) continue
+      const r = await sendPush(tokens, { title: i.title, body: i.body, data: i.data })
+      sent += r.sent
+    }
+    return sent
+  } catch { return 0 }
+}
+
+// Дневной дайджест закупа — только тем, у кого включён режим purchase_digest='daily'.
+async function sendPurchaseDigest(admin: any, now: Date): Promise<number> {
+  try {
+    const today = fmtDate(now)
+    const { data: items } = await admin.from('purchase_items')
+      .select('restaurant_id').eq('status', 'todo').gte('created_at', `${today}T00:00:00Z`)
+    if (!items?.length) return 0
+    const byRest: Record<string, number> = {}
+    items.forEach((it: any) => { byRest[it.restaurant_id] = (byRest[it.restaurant_id] || 0) + 1 })
+
+    let sent = 0
+    for (const rid of Object.keys(byRest)) {
+      const count = byRest[rid]
+      const { data: prefs } = await admin.from('notification_prefs').select('staff_id, to_owner, prefs').eq('restaurant_id', rid)
+      const { data: mgrs } = await admin.from('staff').select('id').eq('restaurant_id', rid).eq('is_active', true).eq('role', 'manager')
+
+      const recipients: { staff_id: string | null; to_owner: boolean }[] = []
+      const ownerPref = (prefs || []).find((p: any) => p.to_owner)?.prefs || {}
+      if (ownerPref.purchase_digest === 'daily' && ownerPref.purchase !== false) recipients.push({ staff_id: null, to_owner: true })
+      ;(mgrs || []).forEach((m: any) => {
+        const p = (prefs || []).find((x: any) => x.staff_id === m.id)?.prefs || {}
+        if (p.purchase_digest === 'daily' && p.purchase !== false) recipients.push({ staff_id: m.id, to_owner: false })
+      })
+      if (!recipients.length) continue
+
+      const title = 'Закуп за день'
+      const body = `${count} позиц. к закупке`
+      const nowIso = now.toISOString()
+      await admin.from('notifications').insert(recipients.map(r => ({ restaurant_id: rid, staff_id: r.staff_id, to_owner: r.to_owner, type: 'purchase', title, body, sent_at: nowIso })))
+
+      const { data: subs } = await admin.from('push_subscriptions').select('staff_id, to_owner, device_token').eq('restaurant_id', rid).not('device_token', 'is', null)
+      for (const r of recipients) {
+        const tokens = (subs || []).filter((s: any) => r.to_owner ? s.to_owner : s.staff_id === r.staff_id).map((s: any) => s.device_token)
+        if (!tokens.length) continue
+        const res = await sendPush(tokens, { title, body })
+        sent += res.sent
+      }
+    }
+    return sent
+  } catch { return 0 }
+}
+
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET
   if (!secret || req.headers.get('authorization') !== `Bearer ${secret}`) {
@@ -123,7 +186,8 @@ export async function GET(req: NextRequest) {
   if (!schedules?.length) {
     const trialEmails = await sendTrialReminders(admin, now)
     const noShows = await autoMarkNoShows(admin, now)
-    return NextResponse.json({ ok: true, sent: 0, trialEmails, noShows })
+    const purchaseDigest = await sendPurchaseDigest(admin, now)
+    return NextResponse.json({ ok: true, sent: 0, trialEmails, noShows, purchaseDigest })
   }
 
   // Уже отправленные напоминания за последние 2 дня → set(schedule_id)
@@ -152,12 +216,15 @@ export async function GET(req: NextRequest) {
     })
   }
 
+  let pushed = 0
   if (inserts.length) {
     const { error } = await admin.from('notifications').insert(inserts)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    pushed = await pushShiftReminders(admin, inserts)
   }
 
   const trialEmails = await sendTrialReminders(admin, now)
   const noShows = await autoMarkNoShows(admin, now)
-  return NextResponse.json({ ok: true, sent: inserts.length, trialEmails, noShows })
+  const purchaseDigest = await sendPurchaseDigest(admin, now)
+  return NextResponse.json({ ok: true, sent: inserts.length, pushed, trialEmails, noShows, purchaseDigest })
 }

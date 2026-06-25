@@ -174,6 +174,7 @@ final class ManagerModel {
             shift = sh
             await loadAbsences(key(currentDate))
             flash(t("mg.shiftOpened"))
+            await Notify.send(type: "cash_open", title: "Касса открыта", body: "Смена открыта", audience: ["managers": true])
         } else {
             await loadDay(currentDate)
         }
@@ -248,6 +249,10 @@ final class ManagerModel {
             try await persist()
             locked = true
             flash(t("mg.shiftSaved"))
+            let c = calc
+            await Notify.send(type: "cash_close", title: "Касса закрыта", body: "Смена закрыта",
+                              audience: ["managers": true],
+                              secureBody: "Выручка \(Money.s(c.inc)) · остаток \(Money.s(c.balance))")
         } catch {
             flash(t("saveFailed", ["err": error.localizedDescription]))
         }

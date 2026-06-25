@@ -5,7 +5,12 @@ import SwiftUI
 final class AppModel {
     enum Phase { case loading, welcome, connect, pin, permissions, authed }
 
-    var phase: Phase = .loading
+    var phase: Phase = .loading {
+        didSet {
+            // Войдя, регистрируем APNs-токен и привязываем его к ресторану/пользователю.
+            if phase == .authed { PushManager.shared.registerForPush() }
+        }
+    }
     var restaurant: Restaurant? {
         didSet { Money.symbol = (restaurant?.currency).flatMap { $0.isEmpty ? nil : $0 } ?? "€" }
     }

@@ -5,6 +5,13 @@ private let PEOPLE_ACCENT = BrandKit.people
 
 private func eur(_ v: Double) -> String { Money.s(v) }
 
+// Число без хвостовых нулей: 5.0 → "5", 1.5 → "1.5".
+extension Double {
+    var clean: String {
+        truncatingRemainder(dividingBy: 1) == 0 ? String(Int(self)) : String(self)
+    }
+}
+
 private let STATUS_ORDER = ["todo", "in_progress", "done"]
 @MainActor private func statusLabel(_ s: String) -> String { t("pe.st." + (s == "in_progress" ? "inprogress" : s)) }
 @MainActor private func prioLabel(_ p: String?) -> String { t("pe.prio." + (p ?? "medium")) }
@@ -80,6 +87,11 @@ final class PeopleModel {
     var orders: [MenuOrder] = []
     var ordersLoaded = false
     var ordersSeg = "active"
+
+    // закуп
+    var purchase: [PurchaseItem] = []
+    var purchaseLoaded = false
+    var purchaseSeg = "todo" // todo | done
 
     init(rid: String, myId: String, myName: String, isManager: Bool, myRole: String?) {
         self.rid = rid; self.myId = myId; self.myName = myName; self.isManager = isManager; self.myRole = myRole
@@ -352,6 +364,7 @@ final class PeopleModel {
             "restaurant_id": rid, "staff_id": myId, "date": todayKey,
             "check_in_at": ISO8601DateFormatter().string(from: Date()), "status": "present", "source": "manual",
         ]).run()
+        await Notify.send(type: "attendance", title: "Сотрудник на смене", body: "\(myName.isEmpty ? "Сотрудник" : myName) пришёл(а)", audience: ["managers": true])
         flash(t("pe.checkedIn"))
         await loadAttendance()
     }
@@ -556,6 +569,70 @@ final class PeopleModel {
         try? await DB.from("menu_orders").update(["status": status]).eq("id", o.id).run()
     }
 
+    // закуп
+    func loadPurchase() async {
+        purchase = (try? await DB.from("purchase_items").select().order("created_at", ascending: false).limit(300).list(PurchaseItem.self)) ?? []
+        purchaseLoaded = true
+    }
+    var purchaseTodo: [PurchaseItem] { purchase.filter { $0.status == "todo" } }
+    var purchaseDone: [PurchaseItem] { purchase.filter { $0.status != "todo" } }
+
+    func addPurchase(category: String, rows: [(name: String, qty: String, unit: String)], catLabel: String) async {
+        let valid = rows.map { ($0.name.trimmingCharacters(in: .whitespaces), $0.qty, $0.unit) }.filter { !$0.0.isEmpty }
+        if valid.isEmpty { return }
+        let creator: Any = myId == "owner" ? NSNull() : myId
+        let payload: [[String: Any]] = valid.map { r in
+            var v: [String: Any] = [
+                "category": category, "name": r.0, "status": "todo",
+                "created_by": creator,
+                "created_by_name": myName,
+            ]
+            let q = r.1.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
+            v["qty"] = Double(q) ?? NSNull()
+            let unitTrim = r.2.trimmingCharacters(in: .whitespaces)
+            v["unit"] = unitTrim.isEmpty ? NSNull() : unitTrim
+            return v
+        }
+        try? await DB.from("purchase_items").insert(payload).run()
+        let who = myName.isEmpty ? "" : "\(myName): "
+        let body = valid.count == 1 ? "\(who)\(valid[0].0)" : "\(who)\(valid.count)"
+        await Notify.send(type: "purchase", title: "\(catLabel) · \(t("pe.pTab"))", body: body, audience: ["managers": true], data: ["category": category])
+        await loadPurchase()
+    }
+
+    func setPurchaseStatus(_ it: PurchaseItem, _ status: String) async {
+        if let i = purchase.firstIndex(where: { $0.id == it.id }) { purchase[i].status = status }
+        var v: [String: Any] = ["status": status]
+        let boughtBy: Any = (status == "bought" && myId != "owner") ? myId : NSNull()
+        v["bought_by"] = boughtBy
+        v["bought_at"] = status == "bought" ? ISO8601DateFormatter().string(from: Date()) : NSNull()
+        try? await DB.from("purchase_items").update(v).eq("id", it.id).run()
+    }
+
+    func removePurchase(_ it: PurchaseItem) async {
+        purchase.removeAll { $0.id == it.id }
+        try? await DB.from("purchase_items").delete().eq("id", it.id).run()
+    }
+
+    /// Текст списка к закупке (по цехам) — для копирования/отправки поставщику.
+    func purchaseText(catLabel: (String) -> String) -> String {
+        let cats = Array(Set(purchaseTodo.map { $0.category }))
+        var lines: [String] = []
+        for c in cats {
+            let arr = purchaseTodo.filter { $0.category == c }
+            if arr.isEmpty { continue }
+            lines.append("\(catLabel(c)):")
+            for x in arr {
+                var amt = ""
+                if let q = x.qty { amt = " — \(q.clean)\(x.unit.map { " \($0)" } ?? "")" }
+                else if let u = x.unit { amt = " — \(u)" }
+                lines.append("• \(x.name)\(amt)")
+            }
+            lines.append("")
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     func flash(_ m: String) {
         toast = m
         Task { try? await Task.sleep(nanoseconds: 2_400_000_000); if toast == m { toast = nil } }
@@ -722,6 +799,8 @@ private struct PeopleBody: View {
                 AppTabPage(refresh: { await refreshOps() }) { ZalTab(m: m) }
                     .tabItem { Label(t("tab.hall"), systemImage: "storefront") }.tag("ops")
                     .badge(m.activeOrders.isEmpty ? 0 : m.activeOrders.count)
+                AppTabPage(refresh: { await m.loadPurchase() }) { PurchaseTab(m: m) }
+                    .tabItem { Label(t("tab.purchase"), systemImage: "cart") }.tag("purchase")
                 AppTabPage(refresh: { await m.loadSalary() }) { PeopleSalaryTab(m: m) }
                     .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
             }
@@ -746,6 +825,7 @@ private struct PeopleBody: View {
             case "ops":
                 if !m.menuLoaded { await m.loadMenu() }
                 if !m.ordersLoaded { await m.loadOrders() }
+            case "purchase": if !m.purchaseLoaded { await m.loadPurchase() }
             case "salary": if !m.salaryLoaded { await m.loadSalary() }
             default:       if !m.schedLoaded { await m.loadSchedule() }
             }
@@ -1823,6 +1903,187 @@ private struct ZalTab: View {
         case "check":  ChecklistsTab(m: m)
         case "tech":   TechCardsTab(m: m)
         default:       StopTab(m: m)
+        }
+    }
+}
+
+// MARK: Закуп
+
+let PURCHASE_CATS_IOS: [(id: String, label: String)] = [
+    ("kitchen", "pe.catKitchen"), ("bar", "pe.catBar"), ("hookah", "pe.catHookah"),
+    ("household", "pe.catHousehold"), ("general", "pe.catGeneral"),
+]
+
+@MainActor func purchaseCatLabel(_ id: String) -> String {
+    PURCHASE_CATS_IOS.first { $0.id == id }.map { t($0.label) } ?? id
+}
+
+private struct PurchaseTab: View {
+    @Bindable var m: PeopleModel
+    @State private var showForm = false
+
+    var body: some View {
+        Group {
+            Button { showForm = true } label: {
+                Label(t("pe.pAddItems"), systemImage: "plus")
+                    .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).padding(.vertical, 13)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(PEOPLE_ACCENT))
+            }
+
+            Picker("", selection: $m.purchaseSeg) {
+                Text(m.purchaseTodo.isEmpty ? t("pe.pToBuy") : "\(t("pe.pToBuy")) · \(m.purchaseTodo.count)").tag("todo")
+                Text(t("pe.pDone")).tag("done")
+            }.pickerStyle(.segmented)
+
+            if m.purchaseSeg == "todo" && m.isManager && !m.purchaseTodo.isEmpty {
+                HStack(spacing: 8) {
+                    Button { copyList() } label: {
+                        Label(t("pe.pCopy"), systemImage: "doc.on.doc")
+                            .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).padding(.vertical, 10)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(.primary.opacity(0.06)))
+                    }.tint(.primary)
+                    Button { waList() } label: {
+                        Label("WhatsApp", systemImage: "paperplane.fill")
+                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(red: 0.12, green: 0.67, blue: 0.32))
+                            .frame(maxWidth: .infinity).padding(.vertical, 10)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Color(red: 0.12, green: 0.67, blue: 0.32).opacity(0.12)))
+                    }
+                }
+            }
+
+            let list = m.purchaseSeg == "todo" ? m.purchaseTodo : m.purchaseDone
+            if !m.purchaseLoaded {
+                ProgressView().tint(.primary).padding(.top, 40)
+            } else if list.isEmpty {
+                VStack(spacing: 4) {
+                    Text(m.purchaseSeg == "todo" ? t("pe.pEmpty") : t("pe.pDone")).font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary.opacity(0.7))
+                    if m.purchaseSeg == "todo" { Text(t("pe.pEmptyHint")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.4)) }
+                }.frame(maxWidth: .infinity).padding(.top, 50)
+            } else {
+                let cats = list.map { $0.category }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+                ForEach(cats, id: \.self) { cid in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(purchaseCatLabel(cid).uppercased()).font(.system(size: 12, weight: .bold)).foregroundStyle(.primary.opacity(0.45))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ForEach(list.filter { $0.category == cid }) { it in row(it) }
+                    }
+                }
+            }
+        }
+        .task { if !m.purchaseLoaded { await m.loadPurchase() } }
+        .sheet(isPresented: $showForm) { PurchaseFormSheet(m: m) }
+    }
+
+    private func row(_ it: PurchaseItem) -> some View {
+        HStack(spacing: 12) {
+            if m.purchaseSeg == "todo" && m.isManager {
+                Button { Task { await m.setPurchaseStatus(it, "bought") } } label: {
+                    Image(systemName: "circle").font(.system(size: 22)).foregroundStyle(.primary.opacity(0.3))
+                }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(it.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+                        .strikethrough(it.status == "bought")
+                    if let q = it.qty { Text("· \(q.clean)\(it.unit.map { " \($0)" } ?? "")").font(.system(size: 14)).foregroundStyle(.primary.opacity(0.45)) }
+                    else if let u = it.unit { Text("· \(u)").font(.system(size: 14)).foregroundStyle(.primary.opacity(0.45)) }
+                }
+                if let by = it.created_by_name, !by.isEmpty {
+                    Text(by + (it.status == "unavailable" ? " · \(t("pe.pUnavail"))" : "")).font(.system(size: 11.5)).foregroundStyle(.primary.opacity(0.4))
+                }
+            }
+            Spacer()
+            if m.purchaseSeg == "todo" && m.isManager {
+                Button { Task { await m.setPurchaseStatus(it, "unavailable") } } label: {
+                    Text(t("pe.pUnavail")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
+                }
+            }
+            if m.isManager || it.created_by == m.myId {
+                Button { Task { await m.removePurchase(it) } } label: {
+                    Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.4))
+                }
+            }
+        }
+        .padding(.vertical, 12).padding(.horizontal, 14)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .opacity(it.status == "todo" ? 1 : 0.6)
+    }
+
+    private func copyList() {
+        UIPasteboard.general.string = m.purchaseText(catLabel: purchaseCatLabel)
+        m.flash(t("pe.pCopied"))
+    }
+    private func waList() {
+        let text = m.purchaseText(catLabel: purchaseCatLabel)
+        if let url = URL(string: "https://wa.me/?text=\(text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") {
+            UIApplication.shared.open(url)
+        }
+    }
+}
+
+private struct PurchaseFormSheet: View {
+    @Bindable var m: PeopleModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var cat = "kitchen"
+    @State private var rows: [Row] = [Row()]
+    @State private var saving = false
+
+    struct Row: Identifiable { let id = UUID(); var name = ""; var qty = ""; var unit = "" }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.miseBg.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 14) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(PURCHASE_CATS_IOS, id: \.id) { c in
+                                    Button { cat = c.id } label: {
+                                        Text(t(c.label)).font(.system(size: 13, weight: cat == c.id ? .bold : .medium))
+                                            .foregroundStyle(cat == c.id ? .white : .primary)
+                                            .padding(.horizontal, 14).padding(.vertical, 8)
+                                            .background(Capsule().fill(cat == c.id ? PEOPLE_ACCENT : Color.primary.opacity(0.08)))
+                                    }
+                                }
+                            }
+                        }
+                        ForEach($rows) { $r in
+                            HStack(spacing: 8) {
+                                TextField(t("pe.pNamePh"), text: $r.name).textFieldStyle(.roundedBorder)
+                                TextField(t("pe.pQty"), text: $r.qty).textFieldStyle(.roundedBorder).frame(width: 64).keyboardType(.decimalPad)
+                                TextField(t("pe.pUnit"), text: $r.unit).textFieldStyle(.roundedBorder).frame(width: 64)
+                                if rows.count > 1 {
+                                    Button { rows.removeAll { $0.id == r.id } } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.primary.opacity(0.3)) }
+                                }
+                            }
+                        }
+                        Button { rows.append(Row()) } label: {
+                            Label(t("pe.pAddRow"), systemImage: "plus").font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
+                                .frame(maxWidth: .infinity).padding(.vertical, 11)
+                                .background(RoundedRectangle(cornerRadius: 12).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5])).foregroundStyle(.primary.opacity(0.2)))
+                        }
+                    }.padding(16)
+                }
+            }
+            .navigationTitle(t("pe.pNew")).navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(t("pe.pSubmit")) { submit() }.disabled(saving || !rows.contains { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty })
+                }
+            }
+        }
+    }
+
+    private func submit() {
+        saving = true
+        let payload = rows.map { (name: $0.name, qty: $0.qty, unit: $0.unit) }
+        Task {
+            await m.addPurchase(category: cat, rows: payload, catLabel: purchaseCatLabel(cat))
+            dismiss()
         }
     }
 }

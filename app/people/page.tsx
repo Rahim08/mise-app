@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
+import { notify as pushNotify } from '@/lib/notifyClient'
 import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
@@ -349,10 +350,9 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
       created_by: myId === 'owner' ? null : myId,
       priority: form.priority, due_date: form.due_date || null, status: 'todo',
     }
-    await Promise.all(targets.map(async tid => {
-      await db.from('staff_tasks').insert({ ...base, assigned_to: tid })
-      if (tid !== myId) await db.from('notifications').insert({ staff_id: tid, type: 'task', title: 'Новая задача', body: form.title.trim() })
-    }))
+    await Promise.all(targets.map(tid => db.from('staff_tasks').insert({ ...base, assigned_to: tid })))
+    const notifyIds = targets.filter(tid => tid !== myId)
+    if (notifyIds.length) pushNotify({ type: 'task', title: 'Новая задача', body: form.title.trim(), audience: { staff_ids: notifyIds } })
     setSaving(false); setShowForm(false); setForm({ title: '', description: '', assigned_to: '', priority: 'medium', due_date: '' })
     toast(targets.length > 1 ? tr('pe.taskCreatedFor', { n: targets.length }) : tr('pe.taskCreated')); await load()
   }
@@ -572,7 +572,7 @@ function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boo
   const myUpcoming = schedules.filter(s => s.staff_id === myId && s.published && s.date >= fmtDate(new Date())).sort((a, b) => a.date.localeCompare(b.date))
 
   const notify = (staffId: string, type: string, title: string, body: string) =>
-    db.from('notifications').insert({ staff_id: staffId, type, title, body })
+    pushNotify({ type, title, body, audience: { staff_ids: [staffId] } })
   const now = () => new Date().toISOString()
 
   const create = async () => {
@@ -590,6 +590,11 @@ function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boo
 
   const setStatus = async (r: any, patch: any) => {
     await db.from('shift_swap_requests').update(patch).eq('id', r.id)
+    await load()
+  }
+  const peerAccept = async (r: any) => {
+    await db.from('shift_swap_requests').update({ status: 'peer_accepted', peer_responded_at: now() }).eq('id', r.id)
+    pushNotify({ type: 'swap_request', title: 'Обмен на согласование', body: 'Коллега принял обмен — нужно одобрение менеджера', audience: { managers: true } })
     await load()
   }
   const peerDecline = async (r: any) => {
@@ -636,7 +641,7 @@ function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boo
         {/* Actions */}
         {r.status === 'pending_peer' && iAmTarget && (
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <button onClick={() => setStatus(r, { status: 'peer_accepted', peer_responded_at: now() })} style={btnA(accent)}>{tr('pe.accept')}</button>
+            <button onClick={() => peerAccept(r)} style={btnA(accent)}>{tr('pe.accept')}</button>
             <button onClick={() => peerDecline(r)} style={btnB(t)}>{tr('pe.decline')}</button>
           </div>
         )}
@@ -789,6 +794,9 @@ function AttendanceTab({ me, isManager, accent, t, toast }: { me: any; isManager
       { staff_id: myId, date: today, check_in_at: new Date().toISOString(), check_in_lat: pos.lat, check_in_lng: pos.lng, check_in_distance_m: Math.round(dist), late_minutes: late, status, source: 'geo' },
       { onConflict: 'restaurant_id,staff_id,date' }
     )
+    // Уведомляем владельца/менеджеров о приходе сотрудника на смену.
+    const lateTxt = status === 'late' ? ` (+${late} мин)` : ''
+    pushNotify({ type: 'attendance', title: 'Сотрудник на смене', body: `${me.name || 'Сотрудник'} пришёл(а)${lateTxt}`, audience: { managers: true } })
     toast(status === 'late' ? tr('pe.checkedLate', { n: late! }) : tr('pe.checkedIn')); await load()
   }
 
@@ -1566,6 +1574,298 @@ function TechCardsView({ isManager, accent, t, toast }: { isManager: boolean; ac
 
 // ── OPS TAB («Зал»: стоп-лист / заказы / чек-листы / техкарты) ──────────────────
 
+// ── NOTIFICATION SETTINGS (персональные тумблеры) ──────────────────────────────
+
+function Toggle({ on, onToggle, accent, t }: { on: boolean; onToggle: () => void; accent: string; t: any }) {
+  return (
+    <button onClick={onToggle} style={{ width: 50, height: 30, borderRadius: 15, border: 'none', cursor: 'pointer', background: on ? accent : t.fill, position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
+      <span style={{ position: 'absolute', top: 3, left: on ? 23 : 3, width: 24, height: 24, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.3)', transition: 'left .2s' }} />
+    </button>
+  )
+}
+
+function NotificationSettings({ me, isManager, accent, t }: { me: any; isManager: boolean; accent: string; t: any }) {
+  const { t: tr } = useI18n()
+  const isOwner = !!me.is_owner
+  const [prefs, setPrefs] = useState<Record<string, any> | null>(null)
+  const [rowId, setRowId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const q = isOwner
+      ? db.from('notification_prefs').select('*').eq('to_owner', true)
+      : db.from('notification_prefs').select('*').eq('staff_id', me.id)
+    q.then(({ data }: any) => { const row = (data || [])[0]; setRowId(row?.id || null); setPrefs(row?.prefs || {}) })
+  }, [])
+
+  const persist = async (next: Record<string, any>) => {
+    setPrefs(next)
+    if (rowId) {
+      await db.from('notification_prefs').update({ prefs: next, updated_at: new Date().toISOString() }).eq('id', rowId)
+    } else {
+      const { data } = await db.from('notification_prefs').insert(isOwner ? { to_owner: true, prefs: next } : { staff_id: me.id, prefs: next }).select().single()
+      if (data?.id) setRowId(data.id)
+    }
+  }
+  const toggle = (k: string) => persist({ ...(prefs || {}), [k]: !(prefs?.[k] !== false) })
+  const setVal = (k: string, v: any) => persist({ ...(prefs || {}), [k]: v })
+  const isOn = (k: string) => prefs?.[k] !== false   // нет ключа = включено
+
+  if (!prefs) return <div style={{ textAlign: 'center', padding: 30, color: t.text3 }}>{tr('pe.loading')}</div>
+
+  const Row = ({ k, label }: { k: string; label: string }) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 0', borderBottom: `0.5px solid ${t.sep2}` }}>
+      <span style={{ fontSize: 15, color: t.text }}>{label}</span>
+      <Toggle on={isOn(k)} onToggle={() => toggle(k)} accent={accent} t={t} />
+    </div>
+  )
+
+  return (
+    <div>
+      <Row k="shift_reminder" label={tr('pe.nsShiftReminder')} />
+      <Row k="task" label={tr('pe.nsTask')} />
+      <Row k="swap" label={tr('pe.nsSwap')} />
+
+      {isManager && (
+        <>
+          <div style={{ fontSize: 11, fontWeight: 700, color: t.text3, textTransform: 'uppercase', letterSpacing: .4, margin: '20px 0 4px' }}>{tr('pe.nsForManagers')}</div>
+          <Row k="attendance" label={tr('pe.nsAttendance')} />
+          <Row k="cash_open" label={tr('pe.nsCashOpen')} />
+          <Row k="cash_close" label={tr('pe.nsCashClose')} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 0', borderBottom: `0.5px solid ${t.sep2}` }}>
+            <span style={{ fontSize: 15, color: t.text }}>{tr('pe.nsShowAmount')}</span>
+            <Toggle on={prefs.show_cash_amount === true} onToggle={() => setVal('show_cash_amount', !(prefs.show_cash_amount === true))} accent={accent} t={t} />
+          </div>
+          <Row k="purchase" label={tr('pe.nsPurchase')} />
+          <div style={{ padding: '13px 0' }}>
+            <div style={{ fontSize: 15, color: t.text, marginBottom: 10 }}>{tr('pe.nsPurchaseMode')}</div>
+            <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, gap: 2 }}>
+              {([['each', tr('pe.nsEach')], ['daily', tr('pe.nsDaily')]] as const).map(([id, label]) => {
+                const cur = prefs.purchase_digest === 'daily' ? 'daily' : 'each'
+                return <button key={id} onClick={() => setVal('purchase_digest', id)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: cur === id ? 700 : 500, cursor: 'pointer', background: cur === id ? t.surface : 'transparent', color: cur === id ? accent : t.text3, boxShadow: cur === id ? t.sh2 : 'none' }}>{label}</button>
+              })}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── PURCHASE TAB (закуп) ─────────────────────────────────────────────────────────
+
+const PURCHASE_CATS = [
+  { id: 'kitchen', label: 'pe.catKitchen' },
+  { id: 'bar', label: 'pe.catBar' },
+  { id: 'hookah', label: 'pe.catHookah' },
+  { id: 'household', label: 'pe.catHousehold' },
+  { id: 'general', label: 'pe.catGeneral' },
+] as const
+
+function PurchaseTab({ me, isManager, accent, t, toast }: { me: any; isManager: boolean; accent: string; t: any; toast: (m: string) => void }) {
+  const { t: tr } = useI18n()
+  const [items, setItems] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [seg, setSeg] = useState<'todo' | 'done'>('todo')
+  const [showForm, setShowForm] = useState(false)
+  const [cat, setCat] = useState<string>('kitchen')
+  const [rows, setRows] = useState<{ name: string; qty: string; unit: string }[]>([{ name: '', qty: '', unit: '' }])
+  const [saving, setSaving] = useState(false)
+
+  const load = async () => {
+    const { data } = await db.from('purchase_items').select('*').order('created_at', { ascending: false }).limit(300)
+    setItems(data || []); setLoading(false)
+  }
+  useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv) }, [])
+
+  const catLabel = (id: string) => { const c = PURCHASE_CATS.find(x => x.id === id); return c ? tr(c.label) : id }
+
+  const setRow = (i: number, patch: Partial<{ name: string; qty: string; unit: string }>) =>
+    setRows(rs => rs.map((r, j) => j === i ? { ...r, ...patch } : r))
+
+  const submit = async () => {
+    const valid = rows.map(r => ({ ...r, name: r.name.trim() })).filter(r => r.name)
+    if (!valid.length) return
+    setSaving(true)
+    const payload = valid.map(r => ({
+      category: cat,
+      name: r.name,
+      qty: r.qty.trim() ? (Number(r.qty.replace(',', '.')) || null) : null,
+      unit: r.unit.trim() || null,
+      status: 'todo',
+      created_by: (me.id && me.id !== 'owner') ? me.id : null,
+      created_by_name: me.name || (me.is_owner ? tr('role.owner') : ''),
+    }))
+    const { error } = await db.from('purchase_items').insert(payload)
+    setSaving(false)
+    if (error) { toast(error.message); return }
+    // Push владельцу/менеджерам (с учётом их персональных настроек и режима дайджеста).
+    const who = me.name || (me.is_owner ? tr('role.owner') : '')
+    const summary = valid.length === 1
+      ? `${who ? who + ': ' : ''}${valid[0].name}`
+      : `${who ? who + ' — ' : ''}${valid.length} ${tr('pe.pTab').toLowerCase()}`
+    pushNotify({ type: 'purchase', title: `${catLabel(cat)} · ${tr('pe.pTab')}`, body: summary, audience: { managers: true }, data: { category: cat } })
+    setShowForm(false); setRows([{ name: '', qty: '', unit: '' }]); setCat('kitchen')
+    load()
+  }
+
+  const setStatus = async (it: any, status: string) => {
+    const now = new Date().toISOString()
+    const bought = status === 'bought'
+    setItems(xs => xs.map(x => x.id === it.id ? { ...x, status, bought_at: bought ? now : null } : x))
+    await db.from('purchase_items').update({
+      status,
+      bought_by: bought ? ((me.id && me.id !== 'owner') ? me.id : null) : null,
+      bought_at: bought ? now : null,
+    }).eq('id', it.id)
+  }
+
+  const remove = async (it: any) => {
+    setItems(xs => xs.filter(x => x.id !== it.id))
+    await db.from('purchase_items').delete().eq('id', it.id)
+  }
+
+  const clearDone = async () => {
+    const ids = items.filter(x => x.status !== 'todo').map(x => x.id)
+    if (!ids.length) return
+    setItems(xs => xs.filter(x => x.status === 'todo'))
+    await db.from('purchase_items').delete().in('id', ids)
+    toast(tr('pe.pClearDone'))
+  }
+
+  const buildText = () => {
+    const todo = items.filter(x => x.status === 'todo')
+    const cats = [...new Set(todo.map(x => x.category))]
+    const lines: string[] = []
+    cats.forEach(cid => {
+      const arr = todo.filter(x => x.category === cid)
+      if (!arr.length) return
+      lines.push(`${catLabel(cid)}:`)
+      arr.forEach(x => {
+        const amt = x.qty != null ? ` — ${x.qty}${x.unit ? ' ' + x.unit : ''}` : (x.unit ? ` — ${x.unit}` : '')
+        lines.push(`• ${x.name}${amt}`)
+      })
+      lines.push('')
+    })
+    return lines.join('\n').trim()
+  }
+  const copyList = async () => { try { await navigator.clipboard.writeText(buildText()); toast(tr('pe.pCopied')) } catch { toast(buildText()) } }
+  const waList = () => { window.open(`https://wa.me/?text=${encodeURIComponent(buildText())}`, '_blank') }
+
+  if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
+
+  const todo = items.filter(x => x.status === 'todo')
+  const done = items.filter(x => x.status !== 'todo')
+  const list = seg === 'todo' ? todo : done
+  const catsInList = [...new Set(list.map(x => x.category))]
+
+  return (
+    <div>
+      {/* add button */}
+      <button onClick={() => setShowForm(true)} style={{ width: '100%', padding: '13px 0', borderRadius: 14, border: 'none', background: accent, color: '#fff', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', marginBottom: 14 }}>{tr('pe.pAddItems')}</button>
+
+      {/* segments */}
+      <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
+        {([['todo', `${tr('pe.pToBuy')}${todo.length ? ` · ${todo.length}` : ''}`], ['done', tr('pe.pDone')]] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setSeg(id)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: seg === id ? 700 : 500, cursor: 'pointer', background: seg === id ? t.surface : 'transparent', color: seg === id ? accent : t.text3, boxShadow: seg === id ? t.sh2 : 'none' }}>{label}</button>
+        ))}
+      </div>
+
+      {/* copy / whatsapp (manager, todo view) */}
+      {seg === 'todo' && isManager && todo.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          <button onClick={copyList} style={{ ...btnB2(t), flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg>
+            {tr('pe.pCopy')}
+          </button>
+          <button onClick={waList} style={{ ...btnB2(t), flex: 1, background: '#25D36618', color: '#1faa52', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163a11.867 11.867 0 01-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 018.413 3.488 11.824 11.824 0 013.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 01-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884a9.86 9.86 0 001.59 5.318l-.999 3.648 3.908-1.235zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z" /></svg>
+            WhatsApp
+          </button>
+        </div>
+      )}
+
+      {list.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
+          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{seg === 'todo' ? tr('pe.pEmpty') : tr('pe.emptyYet')}</div>
+          {seg === 'todo' && <div style={{ fontSize: 13, marginTop: 4 }}>{tr('pe.pEmptyHint')}</div>}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {catsInList.map(cid => (
+            <div key={cid}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: t.text3, textTransform: 'uppercase', letterSpacing: .4, marginBottom: 8 }}>{catLabel(cid)}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {list.filter(x => x.category === cid).map(it => (
+                  <div key={it.id} style={{ background: t.surface, borderRadius: 14, padding: '12px 14px', boxShadow: t.sh, display: 'flex', alignItems: 'center', gap: 12, opacity: it.status === 'todo' ? 1 : 0.6 }}>
+                    {seg === 'todo' && isManager && (
+                      <button onClick={() => setStatus(it, 'bought')} style={{ width: 26, height: 26, borderRadius: '50%', border: `2px solid ${t.sep}`, background: 'transparent', cursor: 'pointer', flexShrink: 0 }} aria-label={tr('pe.pBought')} />
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: t.text, textDecoration: it.status === 'bought' ? 'line-through' : 'none' }}>
+                        {it.name}{it.qty != null && <span style={{ color: t.text3, fontWeight: 500 }}> · {it.qty}{it.unit ? ` ${it.unit}` : ''}</span>}{it.qty == null && it.unit && <span style={{ color: t.text3, fontWeight: 500 }}> · {it.unit}</span>}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: t.text3, marginTop: 2 }}>
+                        {it.created_by_name ? `${tr('pe.pBy')} ${it.created_by_name}` : ''}{it.status === 'unavailable' ? ` · ${tr('pe.pUnavail')}` : ''}
+                      </div>
+                    </div>
+                    {seg === 'todo' && isManager && (
+                      <button onClick={() => setStatus(it, 'unavailable')} style={{ ...btnB2(t), padding: '6px 10px', fontSize: 12 }}>{tr('pe.pUnavail')}</button>
+                    )}
+                    {(isManager || it.created_by === me.id) && (
+                      <button onClick={() => remove(it)} style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'transparent', color: t.text3, cursor: 'pointer', flexShrink: 0 }} aria-label="×">
+                        <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {seg === 'done' && isManager && done.length > 0 && (
+            <button onClick={clearDone} style={{ ...btnB2(t), color: t.red, alignSelf: 'center' }}>{tr('pe.pClearDone')}</button>
+          )}
+        </div>
+      )}
+
+      {/* ADD FORM */}
+      {showForm && (
+        <Sheet onClose={() => setShowForm(false)} t={t}>
+          <div style={{ padding: '14px 16px 32px' }}>
+            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 16 }}>{tr('pe.pNew')}</div>
+
+            {/* category chips */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+              {PURCHASE_CATS.map(c => (
+                <button key={c.id} onClick={() => setCat(c.id)} style={{ padding: '8px 14px', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: cat === c.id ? 700 : 500, cursor: 'pointer', background: cat === c.id ? accent : t.fill, color: cat === c.id ? '#fff' : t.text }}>{tr(c.label)}</button>
+              ))}
+            </div>
+
+            {/* rows */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
+              {rows.map((r, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input value={r.name} onChange={e => setRow(i, { name: e.target.value })} placeholder={tr('pe.pNamePh')} style={{ ...inp(t), marginBottom: 0, flex: 1 }} />
+                  <input value={r.qty} onChange={e => setRow(i, { qty: e.target.value })} placeholder={tr('pe.pQty')} inputMode="decimal" style={{ ...inp(t), marginBottom: 0, width: 64, padding: '12px 8px', textAlign: 'center' }} />
+                  <input value={r.unit} onChange={e => setRow(i, { unit: e.target.value })} placeholder={tr('pe.pUnit')} style={{ ...inp(t), marginBottom: 0, width: 64, padding: '12px 8px', textAlign: 'center' }} />
+                  {rows.length > 1 && (
+                    <button onClick={() => setRows(rs => rs.filter((_, j) => j !== i))} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', background: 'transparent', color: t.text3, cursor: 'pointer', flexShrink: 0 }}>
+                      <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <button onClick={() => setRows(rs => [...rs, { name: '', qty: '', unit: '' }])} style={{ ...btnB2(t), width: '100%', marginBottom: 16 }}>{tr('pe.pAddRow')}</button>
+
+            <button onClick={submit} disabled={saving || !rows.some(r => r.name.trim())} style={{ width: '100%', padding: '14px 0', borderRadius: 14, border: 'none', background: accent, color: '#fff', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', opacity: (saving || !rows.some(r => r.name.trim())) ? 0.5 : 1 }}>{tr('pe.pSubmit')}</button>
+          </div>
+        </Sheet>
+      )}
+    </div>
+  )
+}
+
 function OpsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boolean; accent: string; t: any; toast: (m: string) => void }) {
   const { t: tr } = useI18n()
   const [view, setView] = useState<'stop' | 'orders' | 'check' | 'tech'>('stop')
@@ -1668,6 +1968,7 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
   const [tab, setTab] = useState<string>('shifts')
   const [toast, setToast] = useState('')
   const [showNotif, setShowNotif] = useState(false)
+  const [showNotifSettings, setShowNotifSettings] = useState(false)
   const [unread, setUnread] = useState(0)
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2500) }
 
@@ -1700,6 +2001,7 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
     { id: 'shifts', label: isManager ? tr('pe.schedule') : tr('pe.shiftsTab'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },
     { id: 'tasks', label: tr('pe.tasks'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /><path d="M9 13l2 2 4-4" /></svg> },
     { id: 'ops', label: tr('pe.hall'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M3 9l1.2-5h15.6L21 9" /><path d="M4 9v11a1 1 0 001 1h14a1 1 0 001-1V9" /><path d="M3 9h18" /><path d="M9 21v-6h6v6" /></svg> },
+    { id: 'purchase', label: tr('pe.pTab'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><circle cx="9" cy="21" r="1.5" /><circle cx="18" cy="21" r="1.5" /><path d="M2 3h2.2l2.2 12.4a1.5 1.5 0 001.5 1.2h9.1a1.5 1.5 0 001.5-1.2L21 7H5.3" /></svg> },
     { id: 'salary', label: tr('pe.salaryTab'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="2" y="6" width="20" height="13" rx="2.5" /><path d="M2 10h20" /><circle cx="17.5" cy="14.5" r="1.4" fill="currentColor" stroke="none" /></svg> },
   ]
 
@@ -1720,6 +2022,9 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
               {unread > 0 && <span style={{ position: 'absolute', top: 2, right: 2, minWidth: 16, height: 16, borderRadius: 8, background: t.red, color: '#fff', fontSize: 10, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{unread > 9 ? '9+' : unread}</span>}
             </button>
           )}
+          <button onClick={() => setShowNotifSettings(true)} style={{ width: 36, height: 36, borderRadius: '50%', background: t.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text }} aria-label={tr('pe.nsTitle')}>
+            <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" /></svg>
+          </button>
           <button onClick={t.toggle} style={{ width: 36, height: 36, borderRadius: '50%', background: t.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text }}>
             {t.dark
               ? <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" /></svg>
@@ -1737,6 +2042,7 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
           {tab === 'shifts' && <ShiftsHub me={me} isManager={isManager} restaurantId={restaurantId} accent={accent} t={t} toast={showToast} />}
           {tab === 'tasks' && <TasksTab isManager={isManager} myId={me.id || ''} accent={accent} t={t} toast={showToast} />}
           {tab === 'ops' && <OpsTab me={me} isManager={isManager} accent={accent} t={t} toast={showToast} />}
+          {tab === 'purchase' && <PurchaseTab me={me} isManager={isManager} accent={accent} t={t} toast={showToast} />}
           {tab === 'salary' && <SalaryTab me={me} isManager={isManager} accent={accent} t={t} />}
         </div>
       </div>
@@ -1747,6 +2053,16 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
           <div style={{ padding: '14px 16px 32px' }}>
             <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 16 }}>{tr('pe.notifications')}</div>
             <NotificationsTab myId={me.id} accent={accent} t={t} />
+          </div>
+        </Sheet>
+      )}
+
+      {/* NOTIFICATION SETTINGS SHEET */}
+      {showNotifSettings && (
+        <Sheet onClose={() => setShowNotifSettings(false)} t={t}>
+          <div style={{ padding: '14px 16px 32px' }}>
+            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 16 }}>{tr('pe.nsTitle')}</div>
+            <NotificationSettings me={me} isManager={isManager} accent={accent} t={t} />
           </div>
         </Sheet>
       )}

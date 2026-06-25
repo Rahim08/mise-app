@@ -228,6 +228,13 @@ struct SettingsView: View {
                         }
                     }
                     Section {
+                        NavigationLink {
+                            NotificationSettingsView()
+                        } label: {
+                            Label(t("pe.nsTitle"), systemImage: "bell.badge")
+                        }
+                    }
+                    Section {
                         Button(role: .destructive) { confirmLogout = true } label: {
                             Label(t("logout"), systemImage: "rectangle.portrait.and.arrow.right")
                         }
@@ -245,6 +252,106 @@ struct SettingsView: View {
         }
     }
 }
+
+// MARK: - Настройки уведомлений (персональные тумблеры)
+
+private nonisolated struct PrefsBlob: Codable, Sendable {
+    var shift_reminder: Bool?; var task: Bool?; var swap: Bool?; var attendance: Bool?
+    var cash_open: Bool?; var cash_close: Bool?; var purchase: Bool?
+    var show_cash_amount: Bool?; var purchase_digest: String?
+}
+private nonisolated struct NotifPrefRow: Codable, Identifiable, Sendable { let id: String; let prefs: PrefsBlob? }
+
+struct NotificationSettingsView: View {
+    @Environment(AppModel.self) private var app
+
+    @State private var loaded = false
+    @State private var rowId: String?
+    @State private var shiftReminder = true
+    @State private var task = true
+    @State private var swap = true
+    @State private var attendance = true
+    @State private var cashOpen = true
+    @State private var cashClose = true
+    @State private var purchase = true
+    @State private var showCashAmount = false
+    @State private var purchaseDigest = "each"
+
+    private var isManager: Bool { (app.staff?.isOwner ?? false) || app.staff?.role == "manager" }
+    private var isOwner: Bool { app.staff?.isOwner ?? false }
+
+    var body: some View {
+        ZStack {
+            Color.miseBg.ignoresSafeArea()
+            Form {
+                Section {
+                    Toggle(t("pe.nsShiftReminder"), isOn: $shiftReminder).onChange(of: shiftReminder) { _, _ in save() }
+                    Toggle(t("pe.nsTask"), isOn: $task).onChange(of: task) { _, _ in save() }
+                    Toggle(t("pe.nsSwap"), isOn: $swap).onChange(of: swap) { _, _ in save() }
+                }
+                if isManager {
+                    Section(t("pe.nsForManagers")) {
+                        Toggle(t("pe.nsAttendance"), isOn: $attendance).onChange(of: attendance) { _, _ in save() }
+                        Toggle(t("pe.nsCashOpen"), isOn: $cashOpen).onChange(of: cashOpen) { _, _ in save() }
+                        Toggle(t("pe.nsCashClose"), isOn: $cashClose).onChange(of: cashClose) { _, _ in save() }
+                        Toggle(t("pe.nsShowAmount"), isOn: $showCashAmount).onChange(of: showCashAmount) { _, _ in save() }
+                        Toggle(t("pe.nsPurchase"), isOn: $purchase).onChange(of: purchase) { _, _ in save() }
+                        Picker(t("pe.nsPurchaseMode"), selection: $purchaseDigest) {
+                            Text(t("pe.nsEach")).tag("each")
+                            Text(t("pe.nsDaily")).tag("daily")
+                        }.onChange(of: purchaseDigest) { _, _ in save() }
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .tint(PEOPLE_ACCENT_M)
+            .disabled(!loaded)
+        }
+        .navigationTitle(t("pe.nsTitle")).navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Color.miseBg, for: .navigationBar)
+        .task { await load() }
+    }
+
+    private func load() async {
+        let q = isOwner
+            ? DB.from("notification_prefs").select().eq("to_owner", true)
+            : DB.from("notification_prefs").select().eq("staff_id", app.staff?.id ?? "")
+        let row = (try? await q.limit(1).list(NotifPrefRow.self))?.first
+        if let row {
+            rowId = row.id
+            let p = row.prefs
+            shiftReminder = p?.shift_reminder ?? true
+            task = p?.task ?? true
+            swap = p?.swap ?? true
+            attendance = p?.attendance ?? true
+            cashOpen = p?.cash_open ?? true
+            cashClose = p?.cash_close ?? true
+            purchase = p?.purchase ?? true
+            showCashAmount = p?.show_cash_amount ?? false
+            purchaseDigest = p?.purchase_digest ?? "each"
+        }
+        loaded = true
+    }
+
+    private func save() {
+        guard loaded else { return }
+        let prefs: [String: Any] = [
+            "shift_reminder": shiftReminder, "task": task, "swap": swap, "attendance": attendance,
+            "cash_open": cashOpen, "cash_close": cashClose, "purchase": purchase,
+            "show_cash_amount": showCashAmount, "purchase_digest": purchaseDigest,
+        ]
+        Task {
+            if let id = rowId {
+                try? await DB.from("notification_prefs").update(["prefs": prefs, "updated_at": ISO8601DateFormatter().string(from: Date())]).eq("id", id).run()
+            } else {
+                let values: [String: Any] = isOwner ? ["to_owner": true, "prefs": prefs] : ["staff_id": app.staff?.id ?? "", "prefs": prefs]
+                if let row = try? await DB.from("notification_prefs").insert(values).single(NotifPrefRow.self) { rowId = row.id }
+            }
+        }
+    }
+}
+
+private let PEOPLE_ACCENT_M = BrandKit.people
 
 private func themeLabel(_ th: AppTheme) -> String {
     switch th {
