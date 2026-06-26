@@ -1845,8 +1845,8 @@ function PurchaseTab({ me, isManager, accent, t, toast }: { me: any; isManager: 
               {rows.map((r, i) => (
                 <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input value={r.name} onChange={e => setRow(i, { name: e.target.value })} placeholder={tr('pe.pNamePh')} style={{ ...inp(t), marginBottom: 0, flex: 1 }} />
-                  <input value={r.qty} onChange={e => setRow(i, { qty: e.target.value })} placeholder={tr('pe.pQty')} inputMode="decimal" style={{ ...inp(t), marginBottom: 0, width: 64, padding: '12px 8px', textAlign: 'center' }} />
-                  <input value={r.unit} onChange={e => setRow(i, { unit: e.target.value })} placeholder={tr('pe.pUnit')} style={{ ...inp(t), marginBottom: 0, width: 64, padding: '12px 8px', textAlign: 'center' }} />
+                  <input value={r.qty} onChange={e => setRow(i, { qty: e.target.value })} placeholder={tr('pe.pQtyEx')} inputMode="decimal" style={{ ...inp(t), marginBottom: 0, width: 64, padding: '12px 8px', textAlign: 'center' }} />
+                  <input value={r.unit} onChange={e => setRow(i, { unit: e.target.value })} placeholder={tr('pe.pUnitEx')} style={{ ...inp(t), marginBottom: 0, width: 64, padding: '12px 8px', textAlign: 'center' }} />
                   {rows.length > 1 && (
                     <button onClick={() => setRows(rs => rs.filter((_, j) => j !== i))} style={{ width: 30, height: 30, borderRadius: 8, border: 'none', background: 'transparent', color: t.text3, cursor: 'pointer', flexShrink: 0 }}>
                       <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" /></svg>

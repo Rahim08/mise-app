@@ -146,14 +146,16 @@ let STRINGS: [String: [Lang: String]] = [
 
     // Закуп (pe.p*) + настройки уведомлений (pe.ns*)
     "pe.pTab":         tr("Purchase", "Закуп", "Acquisti", "Achats", "Satınalma", "Satın alma", "Закупівля", "Сатып алу"),
-    "pe.pAddItems":    tr("+ Add items", "+ Добавить", "+ Aggiungi", "+ Ajouter", "+ Əlavə et", "+ Ekle", "+ Додати", "+ Қосу"),
+    "pe.pAddItems":    tr("Add items", "Добавить", "Aggiungi", "Ajouter", "Əlavə et", "Ekle", "Додати", "Қосу"),
     "pe.pNew":         tr("What to buy", "Что купить", "Cosa comprare", "Quoi acheter", "Nə almalı", "Ne alınmalı", "Що купити", "Не сатып алу"),
     "pe.pEmpty":       tr("List is empty", "Список пуст", "Lista vuota", "Liste vide", "Siyahı boşdur", "Liste boş", "Список порожній", "Тізім бос"),
     "pe.pEmptyHint":   tr("Add what needs to be bought", "Добавьте, что нужно купить", "Aggiungi cosa comprare", "Ajoutez quoi acheter", "Nə alınacağını əlavə edin", "Ne alınacağını ekleyin", "Додайте, що купити", "Не сатып алу керегін қосыңыз"),
     "pe.pNamePh":      tr("Item, e.g. Milk", "Позиция, напр. Молоко", "Articolo, es. Latte", "Article, ex. Lait", "Məhsul, məs. Süd", "Ürün, örn. Süt", "Позиція, напр. Молоко", "Тауар, мыс. Сүт"),
     "pe.pQty":         tr("Qty", "Кол-во", "Qtà", "Qté", "Say", "Adet", "К-сть", "Саны"),
+    "pe.pQtyEx":       tr("5", "5", "5", "5", "5", "5", "5", "5"),
     "pe.pUnit":        tr("Unit", "Ед.", "Unità", "Unité", "Vahid", "Birim", "Од.", "Бірлік"),
-    "pe.pAddRow":      tr("+ one more", "+ ещё позиция", "+ un altro", "+ un autre", "+ daha biri", "+ bir daha", "+ ще одна", "+ тағы бір"),
+    "pe.pUnitEx":      tr("kg", "кг", "kg", "kg", "kq", "kg", "кг", "кг"),
+    "pe.pAddRow":      tr("one more", "ещё позиция", "un altro", "un autre", "daha biri", "bir daha", "ще одна", "тағы бір"),
     "pe.pSubmit":      tr("Add to list", "Добавить в список", "Aggiungi alla lista", "Ajouter à la liste", "Siyahıya əlavə et", "Listeye ekle", "Додати до списку", "Тізімге қосу"),
     "pe.pToBuy":       tr("To buy", "Купить", "Da comprare", "À acheter", "Alınacaq", "Alınacak", "Купити", "Сатып алу"),
     "pe.pDone":        tr("Bought", "Куплено", "Comprati", "Achetés", "Alınanlar", "Alınanlar", "Куплено", "Сатып алынды"),

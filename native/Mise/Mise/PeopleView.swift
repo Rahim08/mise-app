@@ -2052,8 +2052,8 @@ private struct PurchaseFormSheet: View {
                         ForEach($rows) { $r in
                             HStack(spacing: 8) {
                                 TextField(t("pe.pNamePh"), text: $r.name).textFieldStyle(.roundedBorder)
-                                TextField(t("pe.pQty"), text: $r.qty).textFieldStyle(.roundedBorder).frame(width: 64).keyboardType(.decimalPad)
-                                TextField(t("pe.pUnit"), text: $r.unit).textFieldStyle(.roundedBorder).frame(width: 64)
+                                TextField(t("pe.pQtyEx"), text: $r.qty).textFieldStyle(.roundedBorder).frame(width: 56).keyboardType(.decimalPad)
+                                TextField(t("pe.pUnitEx"), text: $r.unit).textFieldStyle(.roundedBorder).frame(width: 56)
                                 if rows.count > 1 {
                                     Button { rows.removeAll { $0.id == r.id } } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.primary.opacity(0.3)) }
                                 }
