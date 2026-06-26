@@ -183,6 +183,27 @@ let STRINGS: [String: [Lang: String]] = [
     "pe.nsDaily":      tr("Once a day", "Раз в день", "Una volta al giorno", "Une fois par jour", "Gündə bir dəfə", "Günde bir kez", "Раз на день", "Күніне бір рет"),
     "pe.nsForManagers": tr("For managers and owner", "Для менеджеров и владельца", "Per manager e titolare", "Pour managers et propriétaire", "Menecerlər və sahib üçün", "Yöneticiler ve sahip için", "Для менеджерів і власника", "Менеджерлер мен иеге"),
 
+    // Дисциплина (pe.dis*)
+    "pe.discipline":   tr("Discipline", "Дисциплина", "Disciplina", "Discipline", "İntizam", "Disiplin", "Дисципліна", "Тәртіп"),
+    "pe.disMore":      tr("Details", "Подробнее", "Dettagli", "Détails", "Ətraflı", "Ayrıntılar", "Детальніше", "Толығырақ"),
+    "pe.perThisMonth": tr("This month", "Этот месяц", "Questo mese", "Ce mois", "Bu ay", "Bu ay", "Цей місяць", "Осы ай"),
+    "pe.perLastMonth": tr("Last month", "Прошлый", "Mese scorso", "Mois dernier", "Keçən ay", "Geçen ay", "Минулий", "Өткен ай"),
+    "pe.per30":        tr("30 days", "30 дней", "30 giorni", "30 jours", "30 gün", "30 gün", "30 днів", "30 күн"),
+    "pe.per90":        tr("90 days", "90 дней", "90 giorni", "90 jours", "90 gün", "90 gün", "90 днів", "90 күн"),
+    "pe.punctuality":  tr("Punctuality", "Пунктуальность", "Puntualità", "Ponctualité", "Dəqiqlik", "Dakiklik", "Пунктуальність", "Дәлдік"),
+    "pe.disOnTime":    tr("On time", "Вовремя", "In orario", "À l’heure", "Vaxtında", "Zamanında", "Вчасно", "Уақытында"),
+    "pe.disTotal":     tr("Total", "Суммарно", "Totale", "Total", "Cəmi", "Toplam", "Сумарно", "Жалпы"),
+    "pe.disAvg":       tr("Average", "Среднее", "Media", "Moyenne", "Orta", "Ortalama", "Середнє", "Орташа"),
+    "pe.disMax":       tr("Max", "Макс.", "Max", "Max", "Maks.", "Maks.", "Макс.", "Макс."),
+    "pe.disLates":     tr("Late", "Опозданий", "Ritardi", "Retards", "Gecikmə", "Gecikme", "Запізнень", "Кешігу"),
+    "pe.disShifts":    tr("shifts", "смен", "turni", "services", "növbə", "vardiya", "змін", "ауысым"),
+    "pe.disMin":       tr("min", "мин", "min", "min", "dəq", "dk", "хв", "мин"),
+    "pe.disNoData":    tr("No data", "Нет данных", "Nessun dato", "Aucune donnée", "Məlumat yoxdur", "Veri yok", "Немає даних", "Дерек жоқ"),
+    "pe.disEmpty":     tr("No attendance in this period", "Нет явок за период", "Nessuna presenza nel periodo", "Aucune présence sur la période", "Bu dövrdə davamiyyət yoxdur", "Bu dönemde devam yok", "Немає явок за період", "Бұл кезеңде келу жоқ"),
+    "pe.disCopy":      tr("Copy summary", "Скопировать сводку", "Copia riepilogo", "Copier le résumé", "Xülasəni kopyala", "Özeti kopyala", "Скопіювати зведення", "Қорытындыны көшіру"),
+    "pe.disGrace":     tr("Late threshold, min", "Порог опоздания, мин", "Soglia ritardo, min", "Seuil de retard, min", "Gecikmə həddi, dəq", "Gecikme eşiği, dk", "Поріг запізнення, хв", "Кешігу шегі, мин"),
+    "pe.disExtra":     tr("Off-schedule", "Без графика", "Fuori turno", "Hors planning", "Cədvəlsiz", "Program dışı", "Поза графіком", "Кестесіз"),
+
     // Вкладки Stash
     "tab.stashShift": tr("Shift", "Смена", "Turno", "Service", "Növbə", "Vardiya", "Зміна", "Ауысым"),
     "tab.stock":      tr("Stock", "Склад", "Magazzino", "Stock", "Anbar", "Stok", "Склад", "Қойма"),

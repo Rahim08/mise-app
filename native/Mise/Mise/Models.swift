@@ -220,6 +220,8 @@ nonisolated struct AttendanceRecord: Codable, Identifiable, Sendable {
     let late_minutes: Int?
 }
 
+nonisolated struct GraceRow: Codable, Sendable { let late_grace_min: Int? }
+
 nonisolated struct PurchaseItem: Codable, Identifiable, Sendable {
     let id: String
     let category: String

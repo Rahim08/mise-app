@@ -705,6 +705,28 @@ const STRINGS: Record<string, Row> = {
   'pe.catHousehold': { en: 'Household', ru: 'Хозтовары', it: 'Casalinghi', fr: 'Ménage', az: 'Təsərrüfat', tr: 'Ev', uk: 'Господарські', kk: 'Шаруашылық' },
   'pe.catGeneral':   { en: 'General', ru: 'Общее', it: 'Generale', fr: 'Général', az: 'Ümumi', tr: 'Genel', uk: 'Загальне', kk: 'Жалпы' },
 
+  // ── Discipline / опоздания (pe.dis*) ──
+  'pe.discipline':   { en: 'Discipline', ru: 'Дисциплина', it: 'Disciplina', fr: 'Discipline', az: 'İntizam', tr: 'Disiplin', uk: 'Дисципліна', kk: 'Тәртіп' },
+  'pe.disMore':      { en: 'Details', ru: 'Подробнее', it: 'Dettagli', fr: 'Détails', az: 'Ətraflı', tr: 'Ayrıntılar', uk: 'Детальніше', kk: 'Толығырақ' },
+  'pe.perThisMonth': { en: 'This month', ru: 'Этот месяц', it: 'Questo mese', fr: 'Ce mois', az: 'Bu ay', tr: 'Bu ay', uk: 'Цей місяць', kk: 'Осы ай' },
+  'pe.perLastMonth': { en: 'Last month', ru: 'Прошлый', it: 'Mese scorso', fr: 'Mois dernier', az: 'Keçən ay', tr: 'Geçen ay', uk: 'Минулий', kk: 'Өткен ай' },
+  'pe.per30':        { en: '30 days', ru: '30 дней', it: '30 giorni', fr: '30 jours', az: '30 gün', tr: '30 gün', uk: '30 днів', kk: '30 күн' },
+  'pe.per90':        { en: '90 days', ru: '90 дней', it: '90 giorni', fr: '90 jours', az: '90 gün', tr: '90 gün', uk: '90 днів', kk: '90 күн' },
+  'pe.perCustom':    { en: 'Custom', ru: 'Период', it: 'Periodo', fr: 'Période', az: 'Dövr', tr: 'Dönem', uk: 'Період', kk: 'Кезең' },
+  'pe.punctuality':  { en: 'Punctuality', ru: 'Пунктуальность', it: 'Puntualità', fr: 'Ponctualité', az: 'Dəqiqlik', tr: 'Dakiklik', uk: 'Пунктуальність', kk: 'Дәлдік' },
+  'pe.disOnTime':    { en: 'On time', ru: 'Вовремя', it: 'In orario', fr: 'À l’heure', az: 'Vaxtında', tr: 'Zamanında', uk: 'Вчасно', kk: 'Уақытында' },
+  'pe.disTotal':     { en: 'Total', ru: 'Суммарно', it: 'Totale', fr: 'Total', az: 'Cəmi', tr: 'Toplam', uk: 'Сумарно', kk: 'Жалпы' },
+  'pe.disAvg':       { en: 'Average', ru: 'Среднее', it: 'Media', fr: 'Moyenne', az: 'Orta', tr: 'Ortalama', uk: 'Середнє', kk: 'Орташа' },
+  'pe.disMax':       { en: 'Max', ru: 'Макс.', it: 'Max', fr: 'Max', az: 'Maks.', tr: 'Maks.', uk: 'Макс.', kk: 'Макс.' },
+  'pe.disLates':     { en: 'Late', ru: 'Опозданий', it: 'Ritardi', fr: 'Retards', az: 'Gecikmə', tr: 'Gecikme', uk: 'Запізнень', kk: 'Кешігу' },
+  'pe.disNoData':    { en: 'No data', ru: 'Нет данных', it: 'Nessun dato', fr: 'Aucune donnée', az: 'Məlumat yoxdur', tr: 'Veri yok', uk: 'Немає даних', kk: 'Дерек жоқ' },
+  'pe.disEmpty':     { en: 'No attendance in this period', ru: 'Нет явок за период', it: 'Nessuna presenza nel periodo', fr: 'Aucune présence sur la période', az: 'Bu dövrdə davamiyyət yoxdur', tr: 'Bu dönemde devam yok', uk: 'Немає явок за період', kk: 'Бұл кезеңде келу жоқ' },
+  'pe.disCopy':      { en: 'Copy summary', ru: 'Скопировать сводку', it: 'Copia riepilogo', fr: 'Copier le résumé', az: 'Xülasəni kopyala', tr: 'Özeti kopyala', uk: 'Скопіювати зведення', kk: 'Қорытындыны көшіру' },
+  'pe.disGrace':     { en: 'Late threshold, min', ru: 'Порог опоздания, мин', it: 'Soglia ritardo, min', fr: 'Seuil de retard, min', az: 'Gecikmə həddi, dəq', tr: 'Gecikme eşiği, dk', uk: 'Поріг запізнення, хв', kk: 'Кешігу шегі, мин' },
+  'pe.disExtra':     { en: 'Off-schedule', ru: 'Без графика', it: 'Fuori turno', fr: 'Hors planning', az: 'Cədvəlsiz', tr: 'Program dışı', uk: 'Поза графіком', kk: 'Кестесіз' },
+  'pe.from':         { en: 'From', ru: 'С', it: 'Da', fr: 'Du', az: 'Başlanğıc', tr: 'Başlangıç', uk: 'З', kk: 'Бастап' },
+  'pe.to':           { en: 'To', ru: 'По', it: 'A', fr: 'Au', az: 'Son', tr: 'Bitiş', uk: 'По', kk: 'Дейін' },
+
   // ── Notification settings (pe.ns*) ──
   'pe.nsTitle':      { en: 'Notification settings', ru: 'Настройки уведомлений', it: 'Impostazioni notifiche', fr: 'Réglages des notifications', az: 'Bildiriş tənzimləmələri', tr: 'Bildirim ayarları', uk: 'Налаштування сповіщень', kk: 'Хабарландыру баптаулары' },
   'pe.nsShiftReminder':{ en: 'Shift reminders', ru: 'Напоминания о смене', it: 'Promemoria turni', fr: 'Rappels de service', az: 'Növbə xatırlatmaları', tr: 'Vardiya hatırlatıcıları', uk: 'Нагадування про зміну', kk: 'Ауысым еске салулары' },
