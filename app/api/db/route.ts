@@ -40,10 +40,12 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   hookah_goals:         { read: ['stash', 'analytics'], write: ['analytics'] }, // KPI-цели по кальянам; постановку гейтит UI на должностных лиц
   tobacco_flavors:      { read: ['stash'], write: ['stash'] },
   tobacco_inventories:  { read: ['stash'], write: ['stash'] },
+  menus:                { read: ['people'], write: [] }, // multi-menu; owner always, people reads menu
   menu_settings:        { read: ['people'], write: [] },
   menu_categories:      { read: ['people'], write: [] },
   menu_items:           { read: ['people'], write: ['people'] }, // People stop-list toggles is_available
   menu_orders:          { read: ['manager', 'people'], write: ['people'] }, // orders inbox updates status
+  menu_events:          { read: [], write: [] }, // owner-only analytics read; writes via anon /api/menu/event
   // mise People (operational layer)
   staff_tasks:                 { read: ['people'], write: ['people'] },
   staff_reports:               { read: ['people'], write: ['people'] },

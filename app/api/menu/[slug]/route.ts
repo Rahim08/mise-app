@@ -1,5 +1,8 @@
 // Public guest menu — assembled server-side so the browser never touches the DB with the
 // anon key. Returns only published data and safe restaurant fields (no owner_pin / stripe).
+//
+// Resolves the menu from the `menus` table (multi-menu). Falls back to the legacy
+// single `menu_settings` row when no `menus` row exists yet (pre-migration / old data).
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
@@ -7,14 +10,29 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ slu
   const { slug } = await params
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-  const { data: settings } = await admin
-    .from('menu_settings').select('*').eq('slug', slug).eq('is_published', true).single()
-  if (!settings) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  // 1. Prefer the multi-menu model.
+  let menuId: string | null = null
+  let settings: any = null
+  const { data: menu } = await admin
+    .from('menus').select('*').eq('slug', slug).eq('is_published', true).maybeSingle()
+  if (menu) {
+    settings = menu
+    menuId = menu.id
+  } else {
+    // 2. Legacy fallback — single menu_settings row keyed by slug.
+    const { data: legacy } = await admin
+      .from('menu_settings').select('*').eq('slug', slug).eq('is_published', true).maybeSingle()
+    if (!legacy) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    settings = legacy
+  }
 
+  const restaurantId = settings.restaurant_id
+  const catQ = admin.from('menu_categories').select('*').eq('is_visible', true).order('position')
+  const itemQ = admin.from('menu_items').select('*').eq('is_visible', true).order('position')
   const [rest, cats, items] = await Promise.all([
-    admin.from('restaurants').select('id, name, logo_url, currency, subscription_plan, subscription_status, comp_apps').eq('id', settings.restaurant_id).single(),
-    admin.from('menu_categories').select('*').eq('restaurant_id', settings.restaurant_id).eq('is_visible', true).order('position'),
-    admin.from('menu_items').select('*').eq('restaurant_id', settings.restaurant_id).eq('is_visible', true).order('position'),
+    admin.from('restaurants').select('id, name, logo_url, currency, subscription_plan, subscription_status, comp_apps').eq('id', restaurantId).single(),
+    menuId ? catQ.eq('menu_id', menuId) : catQ.eq('restaurant_id', restaurantId),
+    menuId ? itemQ.eq('menu_id', menuId) : itemQ.eq('restaurant_id', restaurantId),
   ])
 
   // QR-меню — с тарифа Business (или выдано супер-админом через comp_apps) + активная подписка
@@ -26,6 +44,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ slu
   const { subscription_plan, subscription_status, comp_apps, ...safeRest } = r || {}
   return NextResponse.json({
     settings,
+    menu_id: menuId,
     restaurant: safeRest,
     categories: cats.data || [],
     items: items.data || [],
