@@ -199,6 +199,7 @@ final class AppModel {
         restaurant = nil
         staff = nil
         currentApp = nil
+        isReauth = false   // сбрасываем, иначе следующий вход пропустит экран Permissions
         phase = .welcome
     }
 }

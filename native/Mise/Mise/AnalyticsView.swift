@@ -139,10 +139,10 @@ final class AnalyticsModel {
         #endif
         loading = true; defer { loading = false }
         let cal = Calendar.current
-        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: currentDate))!
-        let monthEnd = cal.date(byAdding: DateComponents(month: 1, day: -1), to: monthStart)!
-        let prevStart = cal.date(byAdding: .month, value: -1, to: monthStart)!
-        let prevEnd = cal.date(byAdding: .day, value: -1, to: monthStart)!
+        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: currentDate)) ?? currentDate
+        let monthEnd = cal.date(byAdding: DateComponents(month: 1, day: -1), to: monthStart) ?? monthStart
+        let prevStart = cal.date(byAdding: .month, value: -1, to: monthStart) ?? monthStart
+        let prevEnd = cal.date(byAdding: .day, value: -1, to: monthStart) ?? monthStart
         let ym = String(key(currentDate).prefix(7))
 
         if let s = try? await DB.from("restaurant_settings").select().limit(1).list(AnalyticsSettings.self).first {
@@ -205,7 +205,7 @@ final class AnalyticsModel {
     }
 
     func changeMonth(_ d: Int) async {
-        currentDate = Calendar.current.date(byAdding: .month, value: d, to: currentDate)!
+        currentDate = Calendar.current.date(byAdding: .month, value: d, to: currentDate) ?? currentDate
         await load()
     }
 
@@ -214,9 +214,9 @@ final class AnalyticsModel {
     private var navUnitIsWeek: Bool { tab == "period" && periodMode == "week" }
     func navigate(_ dir: Int) async {
         let cal = Calendar.current
-        if navUnitIsDay { currentDate = cal.date(byAdding: .day, value: dir, to: currentDate)! }
-        else if navUnitIsWeek { currentDate = cal.date(byAdding: .day, value: dir * 7, to: currentDate)! }
-        else { currentDate = cal.date(byAdding: .month, value: dir, to: currentDate)! }
+        if navUnitIsDay { currentDate = cal.date(byAdding: .day, value: dir, to: currentDate) ?? currentDate }
+        else if navUnitIsWeek { currentDate = cal.date(byAdding: .day, value: dir * 7, to: currentDate) ?? currentDate }
+        else { currentDate = cal.date(byAdding: .month, value: dir, to: currentDate) ?? currentDate }
         await load()
     }
     func setDate(_ d: Date) async { currentDate = d; await load() }
@@ -306,8 +306,8 @@ final class AnalyticsModel {
     var weekRange: (Date, Date) {
         let cal = Calendar.current
         let wd = cal.component(.weekday, from: currentDate)
-        let monday = cal.date(byAdding: .day, value: -((wd + 5) % 7), to: currentDate)!
-        return (monday, cal.date(byAdding: .day, value: 6, to: monday)!)
+        let monday = cal.date(byAdding: .day, value: -((wd + 5) % 7), to: currentDate) ?? currentDate
+        return (monday, cal.date(byAdding: .day, value: 6, to: monday) ?? monday)
     }
     var periodShifts: [Shift] {
         switch periodMode {

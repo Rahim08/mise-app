@@ -256,9 +256,9 @@ final class PeopleModel {
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedSchedule(); return }
         #endif
         let cal = Calendar.current
-        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: calendarMonth))!
+        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: calendarMonth)) ?? calendarMonth
         let lastDay = cal.date(byAdding: .day, value: -1,
-                               to: cal.date(byAdding: .month, value: 1, to: monthStart)!)!
+                               to: cal.date(byAdding: .month, value: 1, to: monthStart) ?? monthStart) ?? monthStart
         async let dirL = (try? DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)) ?? []
         async let sch = (try? DB.from("staff_schedules").select().gte("date", key(monthStart)).lte("date", key(lastDay)).list(Schedule.self)) ?? []
         if dir.isEmpty { dir = await dirL } else { _ = await dirL }
@@ -269,12 +269,12 @@ final class PeopleModel {
     }
 
     func prevMonth() async {
-        calendarMonth = Calendar.current.date(byAdding: .month, value: -1, to: calendarMonth)!
+        calendarMonth = Calendar.current.date(byAdding: .month, value: -1, to: calendarMonth) ?? calendarMonth
         selectedCalDate = nil; schedLoaded = false
         await loadSchedule()
     }
     func nextMonth() async {
-        calendarMonth = Calendar.current.date(byAdding: .month, value: 1, to: calendarMonth)!
+        calendarMonth = Calendar.current.date(byAdding: .month, value: 1, to: calendarMonth) ?? calendarMonth
         selectedCalDate = nil; schedLoaded = false
         await loadSchedule()
     }
@@ -317,9 +317,9 @@ final class PeopleModel {
     func copyLastWeek() async {
         let cal = Calendar.current
         let weekday = cal.component(.weekday, from: Date())
-        let monday = cal.date(byAdding: .day, value: -((weekday + 5) % 7), to: Date())!
-        let lastMon = cal.date(byAdding: .day, value: -7, to: monday)!
-        let lastSun = cal.date(byAdding: .day, value: -1, to: monday)!
+        let monday = cal.date(byAdding: .day, value: -((weekday + 5) % 7), to: Date()) ?? Date()
+        let lastMon = cal.date(byAdding: .day, value: -7, to: monday) ?? monday
+        let lastSun = cal.date(byAdding: .day, value: -1, to: monday) ?? monday
         let prev = (try? await DB.from("staff_schedules").select()
             .gte("date", key(lastMon)).lte("date", key(lastSun)).list(Schedule.self)) ?? []
         guard !prev.isEmpty else { flash(t("pe.noPrevWeek")); return }
@@ -383,8 +383,8 @@ final class PeopleModel {
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedSwaps(); return }
         #endif
         let cal = Calendar.current
-        let from = key(cal.date(byAdding: .day, value: -14, to: Date())!)
-        let to = key(cal.date(byAdding: .day, value: 60, to: Date())!)
+        let from = key(cal.date(byAdding: .day, value: -14, to: Date()) ?? Date())
+        let to = key(cal.date(byAdding: .day, value: 60, to: Date()) ?? Date())
         swaps = (try? await DB.from("shift_swap_requests").select().order("created_at", ascending: false).list(SwapRequest.self)) ?? []
         if dir.isEmpty { dir = (try? await DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)) ?? [] }
         swapScheds = (try? await DB.from("staff_schedules").select().gte("date", from).lte("date", to).list(Schedule.self)) ?? []
@@ -436,7 +436,7 @@ final class PeopleModel {
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { clHistoryLoaded = true; return }
         #endif
-        let from = key(Calendar.current.date(byAdding: .day, value: -30, to: Date())!)
+        let from = key(Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date())
         clHistory = (try? await DB.from("shift_checklist_completions").select()
             .gte("date", from).order("date", ascending: false).list(ChecklistCompletion.self)) ?? []
         if checklists.isEmpty {
@@ -564,7 +564,7 @@ final class PeopleModel {
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedOrders(); return }
         #endif
-        let from = key(Calendar.current.date(byAdding: .day, value: -2, to: Date())!)
+        let from = key(Calendar.current.date(byAdding: .day, value: -2, to: Date()) ?? Date())
         orders = (try? await DB.from("menu_orders").select().gte("created_at", from)
             .order("created_at", ascending: false).limit(100).list(MenuOrder.self)) ?? []
         ordersLoaded = true
@@ -647,14 +647,14 @@ final class PeopleModel {
         let cal = Calendar.current; let now = Date()
         switch discPeriod {
         case "lastMonth":
-            let startThis = cal.date(from: cal.dateComponents([.year, .month], from: now))!
-            let startLast = cal.date(byAdding: .month, value: -1, to: startThis)!
-            let endLast = cal.date(byAdding: .day, value: -1, to: startThis)!
+            let startThis = cal.date(from: cal.dateComponents([.year, .month], from: now)) ?? now
+            let startLast = cal.date(byAdding: .month, value: -1, to: startThis) ?? startThis
+            let endLast = cal.date(byAdding: .day, value: -1, to: startThis) ?? startThis
             return (key(startLast), key(endLast))
-        case "30d": return (key(cal.date(byAdding: .day, value: -29, to: now)!), key(now))
-        case "90d": return (key(cal.date(byAdding: .day, value: -89, to: now)!), key(now))
+        case "30d": return (key(cal.date(byAdding: .day, value: -29, to: now) ?? now), key(now))
+        case "90d": return (key(cal.date(byAdding: .day, value: -89, to: now) ?? now), key(now))
         default:
-            let start = cal.date(from: cal.dateComponents([.year, .month], from: now))!
+            let start = cal.date(from: cal.dateComponents([.year, .month], from: now)) ?? now
             return (key(start), key(now))
         }
     }
@@ -1691,8 +1691,8 @@ private struct DisciplineTab: View {
     private func heatmap(year: Int, month: Int, byDate: [String: AttendanceRecord]) -> some View {
         let cal = Calendar.current
         let comps = DateComponents(year: year, month: month, day: 1)
-        let first = cal.date(from: comps)!
-        let days = cal.range(of: .day, in: .month, for: first)!.count
+        let first = cal.date(from: comps) ?? Date()
+        let days = cal.range(of: .day, in: .month, for: first)?.count ?? 30
         let lead = (cal.component(.weekday, from: first) + 5) % 7 // Пн=0
         let mf = DateFormatter(); mf.locale = appLocale(); mf.dateFormat = "LLLL yyyy"
         let cols = Array(repeating: GridItem(.flexible(), spacing: 5), count: 7)
@@ -1732,12 +1732,14 @@ private struct DisciplineTab: View {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX")
         guard let start = f.date(from: from), let end = f.date(from: to) else { return [] }
         let cal = Calendar.current
-        var cur = cal.date(from: cal.dateComponents([.year, .month], from: start))!
+        var cur = cal.date(from: cal.dateComponents([.year, .month], from: start)) ?? start
         var arr: [(key: String, y: Int, m: Int)] = []
         while cur <= end {
             let c = cal.dateComponents([.year, .month], from: cur)
-            arr.append((key: "\(c.year!)-\(c.month!)", y: c.year!, m: c.month!))
-            cur = cal.date(byAdding: .month, value: 1, to: cur)!
+            let y = c.year ?? 0, mo = c.month ?? 0
+            arr.append((key: "\(y)-\(mo)", y: y, m: mo))
+            guard let next = cal.date(byAdding: .month, value: 1, to: cur) else { break }
+            cur = next
         }
         return arr
     }
@@ -1901,9 +1903,9 @@ private struct ShiftsCalendar: View {
     private let cal = Calendar.current
 
     private var monthStart: Date {
-        cal.date(from: cal.dateComponents([.year, .month], from: m.calendarMonth))!
+        cal.date(from: cal.dateComponents([.year, .month], from: m.calendarMonth)) ?? m.calendarMonth
     }
-    private var daysInMonth: Int { cal.range(of: .day, in: .month, for: monthStart)!.count }
+    private var daysInMonth: Int { cal.range(of: .day, in: .month, for: monthStart)?.count ?? 30 }
     private var firstOffset: Int {
         let wd = cal.component(.weekday, from: monthStart) // 1=Sun…7=Sat
         return (wd + 5) % 7 // Mon→0 … Sun→6

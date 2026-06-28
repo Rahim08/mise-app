@@ -82,7 +82,7 @@ final class ManagerModel {
     }
 
     private func prevClosing(before date: Date) async -> Double {
-        let y = Calendar.current.date(byAdding: .day, value: -1, to: date)!
+        let y = Calendar.current.date(byAdding: .day, value: -1, to: date) ?? date
         let rows = (try? await DB.from("shifts").select("closing_balance")
             .eq("date", key(y)).order("opened_at", ascending: false).limit(1).list(ClosingOnly.self)) ?? []
         return rows.first?.closing_balance ?? 0
@@ -150,7 +150,7 @@ final class ManagerModel {
 
     func changeDate(_ dir: Int) async {
         if shift != nil && !locked { _ = try? await persist() }
-        currentDate = Calendar.current.date(byAdding: .day, value: dir, to: currentDate)!
+        currentDate = Calendar.current.date(byAdding: .day, value: dir, to: currentDate) ?? currentDate
         await loadDay(currentDate)
     }
 

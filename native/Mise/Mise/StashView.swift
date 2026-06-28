@@ -101,9 +101,9 @@ final class StashModel {
     }
     private func monthBounds() -> (String, String) {
         let cal = Calendar.current
-        let first = cal.date(from: cal.dateComponents([.year, .month], from: Date()))!
-        let next = cal.date(byAdding: .month, value: 1, to: first)!
-        let last = cal.date(byAdding: .day, value: -1, to: next)!
+        let first = cal.date(from: cal.dateComponents([.year, .month], from: Date())) ?? Date()
+        let next = cal.date(byAdding: .month, value: 1, to: first) ?? first
+        let last = cal.date(byAdding: .day, value: -1, to: next) ?? next
         return (key(first), key(last))
     }
 
@@ -186,7 +186,7 @@ final class StashModel {
     }
 
     func shiftDay(_ d: Int) async {
-        currentDate = Calendar.current.date(byAdding: .day, value: d, to: currentDate)!
+        currentDate = Calendar.current.date(byAdding: .day, value: d, to: currentDate) ?? currentDate
         await loadShift()
     }
 

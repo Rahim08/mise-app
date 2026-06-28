@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { useTheme } from '@/hooks/useTheme'
+import { useI18n } from '@/lib/i18n'
 import { AppIcon, Wordmark, type BrandApp } from '@/components/brand'
 import { AppLoading } from '@/components/AppLoading'
 
@@ -13,6 +14,7 @@ function QRScanner({ onResult, onClose, t }: { onResult: (data: string) => void;
   const streamRef = useRef<MediaStream | null>(null)
   const rafRef = useRef<number>(0)
   const [error, setError] = useState('')
+  const { t: tr } = useI18n()
 
   useEffect(() => {
     startCamera()
@@ -31,7 +33,7 @@ function QRScanner({ onResult, onClose, t }: { onResult: (data: string) => void;
         scan()
       }
     } catch {
-      setError('Нет доступа к камере. Разрешите доступ в настройках браузера.')
+      setError(tr('auth.gate.cameraDenied'))
     }
   }
 
@@ -68,7 +70,7 @@ function QRScanner({ onResult, onClose, t }: { onResult: (data: string) => void;
       {error ? (
         <div style={{ textAlign: 'center', padding: '0 32px' }}>
           <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 20, lineHeight: 1.5 }}>{error}</div>
-          <button onClick={() => { stopCamera(); onClose() }} style={{ padding: '12px 28px', borderRadius: 14, background: '#fff', color: '#000', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>Закрыть</button>
+          <button onClick={() => { stopCamera(); onClose() }} style={{ padding: '12px 28px', borderRadius: 14, background: '#fff', color: '#000', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>{tr('auth.gate.close')}</button>
         </div>
       ) : (
         <>
@@ -89,7 +91,7 @@ function QRScanner({ onResult, onClose, t }: { onResult: (data: string) => void;
             </div>
           </div>
           <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, marginTop: 24, textAlign: 'center', padding: '0 32px' }}>
-            Наведите камеру на QR-код заведения
+            {tr('auth.gate.pointCamera')}
           </div>
         </>
       )}
@@ -112,6 +114,7 @@ export function AuthGate({ appId, appName, onAuth }: {
   onAuth: (restaurantId: string) => void
 }) {
   const t = useTheme()
+  const { t: tr } = useI18n()
   const router = useRouter()
   const [phase, setPhase] = useState<AuthPhase>('loading')
   const [showQRScanner, setShowQRScanner] = useState(false)
@@ -177,7 +180,7 @@ export function AuthGate({ appId, appName, onAuth }: {
 
   const loadRestaurant = async (rid: string) => {
     const info = await getRestaurantInfo(rid)
-    if (!info) { setErrorMsg('Заведение не найдено'); setPhase('error'); return }
+    if (!info) { setErrorMsg(tr('auth.gate.venueNotFound')); setPhase('error'); return }
     setRestaurant(info)
     setPhase('pin')
   }
@@ -223,11 +226,11 @@ export function AuthGate({ appId, appName, onAuth }: {
 
     if (result.match) {
       const staffData = result.is_owner
-        ? { id: 'owner', name: 'Владелец', apps: ['manager', 'analytics', 'stash', 'people'], is_owner: true }
+        ? { id: 'owner', name: tr('dash.owner'), apps: ['manager', 'analytics', 'stash', 'people'], is_owner: true }
         : result.staff
       if (!result.is_owner && !staffData?.apps?.includes(appId)) {
         setChecking(false)
-        setErrorMsg('У вас нет доступа к этому приложению')
+        setErrorMsg(tr('auth.gate.noAppAccess'))
         setPhase('error')
         return
       }
@@ -261,7 +264,7 @@ export function AuthGate({ appId, appName, onAuth }: {
       <div style={{ width: 64, height: 64, borderRadius: 16, background: `${t.red}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
         <svg width="32" height="32" fill="none" stroke={t.red} strokeWidth="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" /></svg>
       </div>
-      <div style={{ fontWeight: 700, fontSize: 18, color: t.text, marginBottom: 8 }}>Ошибка</div>
+      <div style={{ fontWeight: 700, fontSize: 18, color: t.text, marginBottom: 8 }}>{tr('auth.gate.error')}</div>
       <div style={{ color: t.text3, fontSize: 14, textAlign: 'center', maxWidth: 260 }}>{errorMsg}</div>
     </div>
   )
@@ -273,7 +276,7 @@ export function AuthGate({ appId, appName, onAuth }: {
         <div style={{ marginBottom: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
           <AppIcon app={appId as BrandApp} size={72} />
           <div style={{ fontWeight: 700, fontSize: 22, color: t.text, letterSpacing: -0.5 }}>{appName}</div>
-          <div style={{ fontSize: 14, color: t.text3, textAlign: 'center', maxWidth: 260 }}>Для начала работы отсканируйте QR-код в разделе Доступ на дашборде заведения</div>
+          <div style={{ fontSize: 14, color: t.text3, textAlign: 'center', maxWidth: 260 }}>{tr('auth.gate.qrHint')}</div>
         </div>
         <div style={{ width: 220, height: 220, borderRadius: 24, background: t.surface, boxShadow: t.sh, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 40, position: 'relative' }}>
           <svg width="80" height="80" viewBox="0 0 80 80" fill="none" opacity={0.2}>
@@ -298,7 +301,7 @@ export function AuthGate({ appId, appName, onAuth }: {
           ))}
         </div>
         <button onClick={() => setShowQRScanner(true)} style={{ padding: '16px 40px', borderRadius: 16, background: t.blue, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${t.blue}44` }}>
-          Сканировать QR
+          {tr('auth.gate.scanQr')}
         </button>
         <div style={{ position: 'absolute', bottom: 32, display: 'flex', alignItems: 'center', gap: 8, opacity: 0.35 }}>
           <Wordmark size={16} color={t.text} />
@@ -324,7 +327,7 @@ export function AuthGate({ appId, appName, onAuth }: {
           <AppIcon app={appId as BrandApp} size={72} />
         )}
         <div style={{ fontWeight: 700, fontSize: 20, color: t.text }}>{restaurant?.name}</div>
-        <div style={{ fontSize: 13, color: t.text3 }}>Введите PIN для входа</div>
+        <div style={{ fontSize: 13, color: t.text3 }}>{tr('auth.gate.enterPin')}</div>
       </div>
       <div style={{ display: 'flex', gap: 18, marginBottom: 44, animation: shaking ? 'shake .5s ease' : 'none' }}>
         {[0, 1, 2, 3].map(i => (
@@ -332,7 +335,7 @@ export function AuthGate({ appId, appName, onAuth }: {
         ))}
       </div>
       {pinError && (
-        <div style={{ color: t.red, fontSize: 13, fontWeight: 500, marginBottom: -28, marginTop: -36 }}>Неверный PIN</div>
+        <div style={{ color: t.red, fontSize: 13, fontWeight: 500, marginBottom: -28, marginTop: -36 }}>{tr('auth.gate.wrongPin')}</div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 76px)', gap: 14 }}>
         {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'].map((k, i) => (
@@ -347,7 +350,7 @@ export function AuthGate({ appId, appName, onAuth }: {
         ))}
       </div>
       <button onClick={() => { localStorage.removeItem('mise_restaurant_id'); setPhase('qr') }} style={{ marginTop: 36, background: 'none', border: 'none', color: t.text3, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', padding: '8px 20px' }}>
-        Сменить заведение
+        {tr('auth.gate.changeVenue')}
       </button>
       <div style={{ position: 'absolute', bottom: 32, display: 'flex', alignItems: 'center', gap: 8, opacity: 0.35 }}>
         <Wordmark size={16} color={t.text} />
@@ -361,12 +364,12 @@ export function AuthGate({ appId, appName, onAuth }: {
         <div style={{ width: 88, height: 88, borderRadius: 24, background: `${t.blue}18`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="44" height="44" fill="none" stroke={t.blue} strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path d="M19 10v2a7 7 0 01-14 0v-2" /><path d="M12 19v4M8 23h8" /></svg>
         </div>
-        <div style={{ fontWeight: 700, fontSize: 22, color: t.text, letterSpacing: -0.5 }}>Включить Face ID?</div>
-        <div style={{ fontSize: 14, color: t.text3, textAlign: 'center', maxWidth: 260 }}>Следующий вход будет быстрее — без ввода PIN</div>
+        <div style={{ fontWeight: 700, fontSize: 22, color: t.text, letterSpacing: -0.5 }}>{tr('auth.gate.faceIdTitle')}</div>
+        <div style={{ fontSize: 14, color: t.text3, textAlign: 'center', maxWidth: 260 }}>{tr('auth.gate.faceIdSub')}</div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%', maxWidth: 320, padding: '0 24px' }}>
-        <button onClick={() => { if (restaurant) { localStorage.setItem(`mise_bio_${restaurant.id}`, '1'); onAuth(restaurant.id) } }} style={{ padding: '16px', borderRadius: 16, background: t.blue, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${t.blue}44` }}>Включить Face ID</button>
-        <button onClick={() => { if (restaurant) { localStorage.setItem(`mise_bio_${restaurant.id}`, '0'); onAuth(restaurant.id) } }} style={{ padding: '16px', borderRadius: 16, background: t.fill, color: t.text, border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>Не сейчас</button>
+        <button onClick={() => { if (restaurant) { localStorage.setItem(`mise_bio_${restaurant.id}`, '1'); onAuth(restaurant.id) } }} style={{ padding: '16px', borderRadius: 16, background: t.blue, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${t.blue}44` }}>{tr('auth.gate.faceIdEnable')}</button>
+        <button onClick={() => { if (restaurant) { localStorage.setItem(`mise_bio_${restaurant.id}`, '0'); onAuth(restaurant.id) } }} style={{ padding: '16px', borderRadius: 16, background: t.fill, color: t.text, border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>{tr('auth.gate.notNow')}</button>
       </div>
     </div>
   )

@@ -65,9 +65,9 @@ final class BookingsModel {
     /// Дни текущего месяца календаря, где есть брони — для точек-пометок.
     func loadMonth() async {
         let cal = Calendar.current
-        let first = cal.date(from: cal.dateComponents([.year, .month], from: visibleMonth))!
-        let next = cal.date(byAdding: .month, value: 1, to: first)!
-        let last = cal.date(byAdding: .day, value: -1, to: next)!
+        let first = cal.date(from: cal.dateComponents([.year, .month], from: visibleMonth)) ?? visibleMonth
+        let next = cal.date(byAdding: .month, value: 1, to: first) ?? first
+        let last = cal.date(byAdding: .day, value: -1, to: next) ?? next
         let rows = (try? await DB.from("bookings").select("booking_date")
             .gte("booking_date", key(first)).lte("booking_date", key(last)).list(BookingDay.self)) ?? []
         monthDays = Set(rows.compactMap { $0.booking_date })
@@ -79,7 +79,7 @@ final class BookingsModel {
     }
 
     func changeMonth(_ dir: Int) async {
-        visibleMonth = Calendar.current.date(byAdding: .month, value: dir, to: visibleMonth)!
+        visibleMonth = Calendar.current.date(byAdding: .month, value: dir, to: visibleMonth) ?? visibleMonth
         await loadMonth()
     }
 

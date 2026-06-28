@@ -38,6 +38,11 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# secrets / private keys (APNs .p8, etc.) — НИКОГДА не коммитить
+*.p8
+*.pem
+*.key
+
 # vercel
 .vercel
 
