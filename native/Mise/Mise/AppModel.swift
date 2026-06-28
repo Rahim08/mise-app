@@ -41,6 +41,12 @@ final class AppModel {
         return s.isOwner || s.role == "manager"
     }
 
+    /// Должностное лицо (владелец/управляющий): может редактировать любые брони, ставить цели KPI.
+    var isOfficial: Bool {
+        guard let s = staff else { return false }
+        return s.isOwner || s.role == "manager"
+    }
+
     private let d = UserDefaults.standard
 
     private var deviceId: String {
@@ -171,10 +177,11 @@ final class AppModel {
     // MARK: хаб приложений
 
     /// Приложения, доступные вошедшему (только те, на которые есть доступ).
+    /// Bookings и News доступны всем сотрудникам (брони/лента — общие для команды).
     var availableApps: [String] {
         let order = ["manager", "analytics", "stash", "people"]
         let apps = staff?.apps ?? []
-        return order.filter { apps.contains($0) }
+        return order.filter { apps.contains($0) } + ["bookings", "news"]
     }
 
     func openApp(_ id: String) { currentApp = id }

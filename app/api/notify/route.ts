@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   if (!type || !title) return NextResponse.json({ error: 'type and title required' }, { status: 400 })
 
   const aud: Audience = audience || {}
-  if (!aud.staff_ids?.length && !aud.owner && !aud.managers) {
+  if (!aud.staff_ids?.length && !aud.owner && !aud.managers && !aud.all) {
     return NextResponse.json({ error: 'audience required' }, { status: 400 })
   }
 

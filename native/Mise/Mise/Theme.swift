@@ -26,7 +26,15 @@ enum Money {
     nonisolated(unsafe) static var symbol = "€"
     /// «<symbol>1 500»; отрицательные — «−<symbol>1 500».
     static func s(_ v: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.groupingSeparator = " "; f.maximumFractionDigits = 0
+        // Всегда 2 знака после запятой — как на вебе (app/manager/page.tsx fv).
+        // «95,60», «1 500,00». Копейки не теряются и формат единый во всех приложениях.
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        // Неразрывный пробел: «1 234,00» не переносится по разделителю тысяч на 2 строки.
+        f.groupingSeparator = "\u{00A0}"
+        f.decimalSeparator = ","
+        f.minimumFractionDigits = 2
+        f.maximumFractionDigits = 2
         let body = f.string(from: NSNumber(value: abs(v))) ?? "0"
         return (v < 0 ? "−" + symbol : symbol) + body
     }
@@ -55,6 +63,8 @@ enum BrandKit {
     static let stash     = Color(hex: 0xff9500)
     static let people    = Color(hex: 0x5856d6)
     static let menu      = Color(hex: 0xff2d55)
+    static let bookings  = Color(hex: 0x00c7be)
+    static let news      = Color(hex: 0xff375f)
     static let accent    = Color(hex: 0x8e8e93)
 
     /// Порядок как в иконке/лендинге.

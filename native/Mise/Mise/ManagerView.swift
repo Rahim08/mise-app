@@ -540,6 +540,7 @@ private struct ManagerBody: View {
                 Spacer()
                 Text(money(c.balance)).font(.system(size: 20, weight: .heavy))
                     .foregroundStyle(c.balance < 0 ? .red : .green)
+                    .lineLimit(1).minimumScaleFactor(0.7)
             }
             .padding(.top, 2)
             if c.inkNet != 0 {

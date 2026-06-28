@@ -32,6 +32,11 @@ final class StashModel {
     var shiftLoading = true
     var saving = false
 
+    // KPI-цели по кальянам (текущий календарный месяц)
+    var goals: [HookahGoal] = []
+    var monthQty: [String: Int] = [:]   // type_id → платных кальянов за месяц
+    var goalsLoading = true
+
     // Склад
     var stock: [StockItem] = []
     var movements: [Movement] = []
@@ -85,6 +90,55 @@ final class StashModel {
         }
         paid = p; free = fr
         venueBase = (await outs).reduce(0) { $0 + $1.quantity_g } - pastGrams
+    }
+
+    // MARK: KPI-цели
+
+    /// Ключ текущего календарного месяца «YYYY-MM» (по реальной дате, не по навигации смены).
+    var monthKey: String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM"; f.locale = Locale(identifier: "en_US_POSIX")
+        return f.string(from: Date())
+    }
+    private func monthBounds() -> (String, String) {
+        let cal = Calendar.current
+        let first = cal.date(from: cal.dateComponents([.year, .month], from: Date()))!
+        let next = cal.date(byAdding: .month, value: 1, to: first)!
+        let last = cal.date(byAdding: .day, value: -1, to: next)!
+        return (key(first), key(last))
+    }
+
+    func loadGoals() async {
+        goalsLoading = true; defer { goalsLoading = false }
+        let (from, to) = monthBounds()
+        async let gs = (try? DB.from("hookah_goals").select().eq("month", monthKey)
+            .order("created_at").list(HookahGoal.self)) ?? []
+        async let sales = (try? DB.from("hookah_sales").select("hookah_type_id, quantity, is_free, date")
+            .gte("date", from).lte("date", to).eq("is_free", false).list(HookahSale.self)) ?? []
+        goals = await gs
+        var q: [String: Int] = [:]
+        for r in await sales {
+            guard let id = r.hookah_type_id else { continue }
+            q[id, default: 0] += Int(r.quantity ?? 0)
+        }
+        monthQty = q
+    }
+
+    func goalProgress(_ g: HookahGoal) -> Int {
+        (g.type_ids ?? []).reduce(0) { $0 + (monthQty[$1] ?? 0) }
+    }
+
+    func saveGoal(title: String?, typeIds: [String], target: Int) async {
+        let values: [String: Any] = [
+            "title": title ?? NSNull(), "type_ids": typeIds,
+            "target_qty": target, "month": monthKey,
+        ]
+        try? await DB.from("hookah_goals").insert(values).run()
+        await loadGoals()
+    }
+
+    func deleteGoal(_ g: HookahGoal) async {
+        try? await DB.from("hookah_goals").delete().eq("id", g.id).run()
+        await loadGoals()
     }
 
     func paidOf(_ id: String) -> Int { Int(paid[id] ?? "") ?? 0 }
@@ -369,6 +423,7 @@ struct StashView: View {
                 #endif
                 await model.loadShift()
                 await model.loadWarehouse()
+                await model.loadGoals()
             }
         }
     }
@@ -383,7 +438,7 @@ private struct StashBody: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             TabView(selection: $m.tab) {
-                AppTabPage(refresh: { await m.loadShift() }) { ShiftTab(m: m) }
+                AppTabPage(refresh: { await m.loadShift(); await m.loadGoals() }) { ShiftTab(m: m) }
                     .tabItem { Label(t("tab.stashShift"), systemImage: "flame.fill") }.tag("shift")
                 AppTabPage(refresh: { await m.loadWarehouse() }) { StockTab(m: m) }
                     .tabItem { Label(t("tab.stock"), systemImage: "tray.full.fill") }.tag("stock")
@@ -420,6 +475,9 @@ private struct StashBody: View {
 
 private struct ShiftTab: View {
     @Bindable var m: StashModel
+    @Environment(AppModel.self) private var app
+    @State private var editingGoal: HookahGoal?
+    @State private var showGoalEditor = false
 
     var body: some View {
         Group {
@@ -436,6 +494,7 @@ private struct ShiftTab: View {
                 .transition(.opacity)
             } else {
                 VStack(spacing: 12) {
+                    goalSection
                     dayNav
                     stats
                     modeSeg
@@ -446,6 +505,39 @@ private struct ShiftTab: View {
             }
         }
         .animation(.spring(duration: 0.45, bounce: 0.08), value: m.shiftLoading)
+        .sheet(isPresented: $showGoalEditor) {
+            GoalEditor(goal: editingGoal, types: m.types,
+                       onSave: { title, ids, target in Task { await m.saveGoal(title: title, typeIds: ids, target: target) } },
+                       onDelete: { g in Task { await m.deleteGoal(g) } })
+        }
+    }
+
+    // KPI-цель месяца — сверху смены: кальянщик видит прогресс там, где вбивает кальяны.
+    @ViewBuilder private var goalSection: some View {
+        if !m.goals.isEmpty {
+            ForEach(m.goals) { g in
+                GoalCard(g: g, current: m.goalProgress(g), typeNames: goalNames(g), editable: app.isOfficial)
+                    .onTapGesture { if app.isOfficial { editingGoal = g; showGoalEditor = true } }
+            }
+        } else if app.isOfficial {
+            Button { editingGoal = nil; showGoalEditor = true } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "target").font(.system(size: 15, weight: .bold))
+                    Text(t("kpi.setGoal")).font(.system(size: 14, weight: .semibold))
+                    Spacer()
+                    Image(systemName: "plus").font(.system(size: 14, weight: .bold))
+                }
+                .foregroundStyle(BrandKit.stash)
+                .padding(14)
+                .background(BrandKit.stash.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+    }
+
+    private func goalNames(_ g: HookahGoal) -> String {
+        let ids = Set(g.type_ids ?? [])
+        let ns = m.types.filter { ids.contains($0.id) }.compactMap { $0.name }
+        return ns.isEmpty ? t("kpi.allTypes") : ns.joined(separator: ", ")
     }
 
     private var dayNav: some View {
@@ -955,4 +1047,139 @@ private func shortDateTime(_ iso: String?) -> String {
     guard let date = parseISO(iso) else { return "—" }
     let f = DateFormatter(); f.locale = appLocale(); f.dateFormat = "d MMM, HH:mm"
     return f.string(from: date)
+}
+
+// MARK: - KPI: цели по кальянам (геймификация). Показывается сверху вкладки «Смена».
+
+private struct GoalCard: View {
+    let g: HookahGoal
+    let current: Int
+    let typeNames: String
+    let editable: Bool
+
+    private var target: Int { max(g.target_qty ?? 0, 0) }
+    private var ratio: Double { target == 0 ? 0 : min(Double(current) / Double(target), 1) }
+    private var reached: Bool { target > 0 && current >= target }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    if let tt = g.title, !tt.isEmpty {
+                        Text(tt).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
+                    }
+                    Text(typeNames).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.55)).lineLimit(2)
+                }
+                Spacer()
+                if editable {
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(.primary.opacity(0.25))
+                }
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("\(current)").font(.system(size: 28, weight: .heavy)).foregroundStyle(reached ? BrandKit.analytics : .primary)
+                Text("/ \(target)").font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary.opacity(0.4))
+                Spacer()
+                Text("\(Int(ratio * 100))%").font(.system(size: 15, weight: .bold)).foregroundStyle(reached ? BrandKit.analytics : BrandKit.stash)
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.1))
+                    Capsule().fill(reached ? BrandKit.analytics : BrandKit.stash)
+                        .frame(width: max(geo.size.width * ratio, ratio > 0 ? 8 : 0))
+                }
+            }
+            .frame(height: 10)
+
+            Text(reached ? t("kpi.reached") : t("kpi.left", ["n": String(max(target - current, 0))]))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(reached ? BrandKit.analytics : .primary.opacity(0.6))
+        }
+        .padding(16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct GoalEditor: View {
+    let goal: HookahGoal?
+    let types: [HookahType]
+    let onSave: (String?, [String], Int) -> Void
+    let onDelete: (HookahGoal) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var target = ""
+    @State private var selected: Set<String> = []
+    @State private var confirmDelete = false
+
+    private var isNew: Bool { goal == nil }
+    private var valid: Bool { !selected.isEmpty && (Int(target) ?? 0) > 0 }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.miseBg.ignoresSafeArea()
+                Form {
+                    Section(t("kpi.fTitle")) {
+                        TextField(t("kpi.titlePh"), text: $title)
+                    }
+                    Section(t("kpi.types")) {
+                        if types.isEmpty {
+                            Text(t("kpi.noTypes")).foregroundStyle(.primary.opacity(0.5))
+                        }
+                        ForEach(types) { tp in
+                            Button {
+                                if selected.contains(tp.id) { selected.remove(tp.id) } else { selected.insert(tp.id) }
+                            } label: {
+                                HStack {
+                                    Text(tp.name ?? "—").foregroundStyle(.primary)
+                                    Spacer()
+                                    if selected.contains(tp.id) {
+                                        Image(systemName: "checkmark").foregroundStyle(BrandKit.stash)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Section(t("kpi.target")) {
+                        TextField("0", text: $target).keyboardType(.numberPad)
+                    }
+                    if !isNew, let g = goal {
+                        Section {
+                            Button(role: .destructive) { confirmDelete = true } label: {
+                                Label(t("kpi.delete"), systemImage: "trash")
+                            }
+                            .confirmationDialog(t("kpi.delete"), isPresented: $confirmDelete, titleVisibility: .visible) {
+                                Button(t("kpi.delete"), role: .destructive) { onDelete(g); dismiss() }
+                                Button(t("cancel"), role: .cancel) {}
+                            }
+                        }
+                    }
+                }
+                .scrollContentBackground(.hidden)
+                .tint(BrandKit.stash)
+            }
+            .navigationTitle(isNew ? t("kpi.new") : t("kpi.edit")).navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(t("kpi.save")) {
+                        let tt = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        onSave(tt.isEmpty ? nil : tt, Array(selected), Int(target) ?? 0)
+                        dismiss()
+                    }.bold().disabled(!valid)
+                }
+            }
+            .onAppear(perform: prime)
+        }
+    }
+
+    private func prime() {
+        guard let g = goal else { return }
+        title = g.title ?? ""
+        target = g.target_qty.map(String.init) ?? ""
+        selected = Set(g.type_ids ?? [])
+    }
 }

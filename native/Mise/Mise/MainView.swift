@@ -14,6 +14,8 @@ let miseModules: [String: MiseModule] = [
     "analytics": .init(id: "analytics", title: "Analytics", subtitle: "Выручка и аналитика",  symbol: "chart.bar.fill",  color: BrandKit.analytics),
     "stash":     .init(id: "stash",     title: "Stash",     subtitle: "Склад и кальян",       symbol: "shippingbox.fill", color: BrandKit.stash),
     "people":    .init(id: "people",    title: "People",    subtitle: "Команда и расписание", symbol: "person.2.fill",    color: BrandKit.people),
+    "bookings":  .init(id: "bookings",  title: "Bookings",  subtitle: "Брони столов",         symbol: "calendar.badge.clock", color: BrandKit.bookings),
+    "news":      .init(id: "news",      title: "News",      subtitle: "Лента и объявления",   symbol: "megaphone.fill",  color: BrandKit.news),
 ]
 
 /// После входа: хаб со списком доступных приложений. Если приложение одно — сразу в него.
@@ -156,6 +158,8 @@ private struct AppContainer: View {
         case "stash":     StashView()
         case "analytics": AnalyticsView()
         case "people":    PeopleView()
+        case "bookings":  BookingsView()
+        case "news":      NewsView()
         default:          ComingSoon(module: module)
         }
     }
@@ -259,6 +263,7 @@ private nonisolated struct PrefsBlob: Codable, Sendable {
     var shift_reminder: Bool?; var task: Bool?; var swap: Bool?; var attendance: Bool?
     var cash_open: Bool?; var cash_close: Bool?; var purchase: Bool?
     var show_cash_amount: Bool?; var purchase_digest: String?
+    var booking: Bool?; var news: Bool?
 }
 private nonisolated struct NotifPrefRow: Codable, Identifiable, Sendable { let id: String; let prefs: PrefsBlob? }
 
@@ -276,6 +281,8 @@ struct NotificationSettingsView: View {
     @State private var purchase = true
     @State private var showCashAmount = false
     @State private var purchaseDigest = "each"
+    @State private var booking = true
+    @State private var news = true
 
     private var isManager: Bool { (app.staff?.isOwner ?? false) || app.staff?.role == "manager" }
     private var isOwner: Bool { app.staff?.isOwner ?? false }
@@ -288,9 +295,11 @@ struct NotificationSettingsView: View {
                     Toggle(t("pe.nsShiftReminder"), isOn: $shiftReminder).onChange(of: shiftReminder) { _, _ in save() }
                     Toggle(t("pe.nsTask"), isOn: $task).onChange(of: task) { _, _ in save() }
                     Toggle(t("pe.nsSwap"), isOn: $swap).onChange(of: swap) { _, _ in save() }
+                    Toggle(t("pe.nsNews"), isOn: $news).onChange(of: news) { _, _ in save() }
                 }
                 if isManager {
                     Section(t("pe.nsForManagers")) {
+                        Toggle(t("pe.nsBooking"), isOn: $booking).onChange(of: booking) { _, _ in save() }
                         Toggle(t("pe.nsAttendance"), isOn: $attendance).onChange(of: attendance) { _, _ in save() }
                         Toggle(t("pe.nsCashOpen"), isOn: $cashOpen).onChange(of: cashOpen) { _, _ in save() }
                         Toggle(t("pe.nsCashClose"), isOn: $cashClose).onChange(of: cashClose) { _, _ in save() }
@@ -329,6 +338,8 @@ struct NotificationSettingsView: View {
             purchase = p?.purchase ?? true
             showCashAmount = p?.show_cash_amount ?? false
             purchaseDigest = p?.purchase_digest ?? "each"
+            booking = p?.booking ?? true
+            news = p?.news ?? true
         }
         loaded = true
     }
@@ -339,6 +350,7 @@ struct NotificationSettingsView: View {
             "shift_reminder": shiftReminder, "task": task, "swap": swap, "attendance": attendance,
             "cash_open": cashOpen, "cash_close": cashClose, "purchase": purchase,
             "show_cash_amount": showCashAmount, "purchase_digest": purchaseDigest,
+            "booking": booking, "news": news,
         ]
         Task {
             if let id = rowId {

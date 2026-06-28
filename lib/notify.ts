@@ -15,9 +15,11 @@ const TYPE_PREF: Record<string, string> = {
   cash_open: 'cash_open',
   cash_close: 'cash_close',
   purchase: 'purchase',
+  booking: 'booking',
+  news: 'news',
 }
 
-export interface Audience { staff_ids?: string[]; owner?: boolean; managers?: boolean }
+export interface Audience { staff_ids?: string[]; owner?: boolean; managers?: boolean; all?: boolean }
 
 export interface NotifyInput {
   type: string
@@ -37,10 +39,14 @@ export async function dispatchNotification(admin: any, rid: string, input: Notif
 
   // 1. Получатели
   const recipients: Recipient[] = []
-  if (audience.owner || audience.managers) recipients.push({ staff_id: null, to_owner: true })
+  if (audience.owner || audience.managers || audience.all) recipients.push({ staff_id: null, to_owner: true })
 
   const staffSet = new Set<string>(audience.staff_ids || [])
-  if (audience.managers) {
+  if (audience.all) {
+    const { data: all } = await admin.from('staff')
+      .select('id').eq('restaurant_id', rid).eq('is_active', true)
+    ;(all || []).forEach((s: any) => staffSet.add(s.id))
+  } else if (audience.managers) {
     const { data: mgrs } = await admin.from('staff')
       .select('id').eq('restaurant_id', rid).eq('is_active', true).eq('role', 'manager')
     ;(mgrs || []).forEach((m: any) => staffSet.add(m.id))

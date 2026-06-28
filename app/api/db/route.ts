@@ -37,6 +37,7 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   tobacco_movements:    { read: ['stash', 'analytics'], write: ['stash'] },
   hookah_sales:         { read: ['stash', 'analytics'], write: ['stash'] }, // смена кальянщика
   hookah_types:         { read: ['stash', 'analytics'], write: [] },        // виды кальянов — правит владелец
+  hookah_goals:         { read: ['stash', 'analytics'], write: ['analytics'] }, // KPI-цели по кальянам; постановку гейтит UI на должностных лиц
   tobacco_flavors:      { read: ['stash'], write: ['stash'] },
   tobacco_inventories:  { read: ['stash'], write: ['stash'] },
   menu_settings:        { read: ['people'], write: [] },
@@ -59,6 +60,11 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   purchase_items:              { read: ['people'], write: ['people'] },
   // safe read-only directory of teammates (no pin_hash)
   staff_directory:             { read: ['manager', 'analytics', 'stash', 'people'], write: [] },
+  // CRM-бронирование: любой сотрудник видит/создаёт; «только автор/должностные лица
+  // редактируют» форсится в UI (строковая логика). Доступ — любой модуль.
+  bookings:                    { read: ['manager', 'analytics', 'stash', 'people'], write: ['manager', 'analytics', 'stash', 'people'] },
+  // Лента новостей: читают все; публикацию гейтит UI на должностных лиц (owner/manager).
+  news_posts:                  { read: ['manager', 'analytics', 'stash', 'people'], write: ['manager', 'analytics', 'stash', 'people'] },
 }
 
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'like', 'ilike'])

@@ -265,3 +265,36 @@ nonisolated struct TechCard: Codable, Identifiable, Sendable {
     let category: String?
     let items: [String]?
 }
+
+nonisolated struct Booking: Codable, Identifiable, Sendable {
+    let id: String
+    var booking_date: String?
+    var booking_time: String?
+    var guest_name: String?
+    var guests_count: Int?
+    var phone: String?
+    var table_label: String?
+    var note: String?
+    var status: String?
+    let created_by: String?
+    let created_by_name: String?
+}
+
+nonisolated struct HookahGoal: Codable, Identifiable, Sendable {
+    let id: String
+    var title: String?
+    var type_ids: [String]?
+    var target_qty: Int?
+    var month: String?
+}
+
+nonisolated struct NewsPost: Codable, Identifiable, Sendable {
+    let id: String
+    var kind: String?
+    var priority: String?
+    var title: String?
+    var body: String?
+    let created_by: String?
+    let created_by_name: String?
+    let created_at: String?
+}
