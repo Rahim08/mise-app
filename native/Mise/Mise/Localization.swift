@@ -616,6 +616,12 @@ let STRINGS: [String: [Lang: String]] = [
     "nw.new":             tr("New post", "Новый пост", "Nuovo post", "Nouveau post", "Yeni paylaşım", "Yeni gönderi", "Новий допис", "Жаңа жазба"),
     "nw.publish":         tr("Publish", "Опубликовать", "Pubblica", "Publier", "Yerləşdir", "Yayınla", "Опублікувати", "Жариялау"),
 
+    // People — дополнительные (свайп-действия, офлайн-явка)
+    "pe.cancelOrder":       tr("Cancel order?", "Отменить заказ?", "Annullare l'ordine?", "Annuler la commande ?", "Sifarişi ləğv et?", "Siparişi iptal et?", "Скасувати замовлення?", "Тапсырысты болдырмау?"),
+    "pe.keep":              tr("Keep", "Оставить", "Mantieni", "Garder", "Saxla", "Tut", "Залишити", "Сақтау"),
+    "pe.checkInPending":    tr("Pending sync", "Ожидает отправки", "In attesa di sync", "En attente de sync", "Göndərilmə gözləyir", "Bekliyor", "Очікує надсилання", "Жіберілуін күтуде"),
+    "pe.checkInPendingHint": tr("Check-in saved offline. Will be sent when network is available.", "Явка записана локально. Отправится при наличии сети.", "Ingresso salvato offline. Verrà inviato alla connessione.", "Arrivée enregistrée hors ligne. Sera envoyée à la connexion.", "Gəliş oflayn saxlanıldı. Şəbəkə olduqda göndəriləcək.", "Giriş çevrimdışı kaydedildi. Ağ bağlantısında gönderilecek.", "Явку збережено офлайн. Надішлеться при підключенні.", "Келу офлайн сақталды. Желі болғанда жіберіледі."),
+
     // KPI — цели по кальянам
     "tab.goal":           tr("Goal", "Цель", "Obiettivo", "Objectif", "Hədəf", "Hedef", "Ціль", "Мақсат"),
     "kpi.title":          tr("Hookah goal", "Цель по кальянам", "Obiettivo narghilè", "Objectif chicha", "Kalyan hədəfi", "Nargile hedefi", "Ціль по кальянах", "Кальян мақсаты"),
