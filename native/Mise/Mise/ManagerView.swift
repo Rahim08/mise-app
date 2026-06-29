@@ -254,9 +254,23 @@ final class ManagerModel {
             locked = true
             flash(t("mg.shiftSaved"))
             let c = calc
-            await Notify.send(type: "cash_close", title: "Касса закрыта", body: "Смена закрыта",
+            // Дайджест дня: сводка в защищённом теле (показывается, если включён show_cash_amount).
+            nonisolated struct HkSale: Codable, Sendable { let quantity: Double?; let price: Double?; let is_free: Bool? }
+            var hk = ""
+            if let sales = try? await DB.from("hookah_sales").select("quantity, price, is_free, date")
+                .eq("date", key(currentDate)).list(HkSale.self) {
+                let paid = sales.filter { $0.is_free != true }.reduce(0) { $0 + Int($1.quantity ?? 0) }
+                let rev = sales.filter { $0.is_free != true }.reduce(0.0) { $0 + ($1.quantity ?? 0) * ($1.price ?? 0) }
+                if paid > 0 { hk = " · Кальяны \(paid) (\(Money.s(rev)))" }
+            }
+            var digest = "Выручка \(Money.s(c.inc))"
+            if c.card > 0 { digest += " + карта \(Money.s(c.card))" }
+            digest += " · Расход \(Money.s(c.totalExp))"
+            if c.ink > 0 { digest += " · Инкасс \(Money.s(c.ink))" }
+            digest += " · Касса \(Money.s(c.balance))" + hk
+            await Notify.send(type: "cash_close", title: "Касса закрыта — итоги дня", body: "Смена закрыта",
                               audience: ["managers": true],
-                              secureBody: "Выручка \(Money.s(c.inc)) · остаток \(Money.s(c.balance))")
+                              secureBody: digest)
         } catch {
             flash(t("saveFailed", ["err": error.localizedDescription]))
         }
