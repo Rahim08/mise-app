@@ -635,4 +635,26 @@ let STRINGS: [String: [Lang: String]] = [
     "kpi.types":          tr("Hookah types", "Виды кальянов", "Tipi di narghilè", "Types de chicha", "Kalyan növləri", "Nargile türleri", "Види кальянів", "Кальян түрлері"),
     "kpi.noTypes":        tr("No hookah types — add them in settings", "Нет видов кальянов — добавьте в настройках", "Nessun tipo — aggiungi nelle impostazioni", "Aucun type — ajoutez dans les réglages", "Növ yoxdur — ayarlarda əlavə edin", "Tür yok — ayarlardan ekleyin", "Немає видів — додайте в налаштуваннях", "Түрлер жоқ — баптаулардан қосыңыз"),
     "kpi.target":         tr("Target (qty)", "Цель (кол-во)", "Obiettivo (q.tà)", "Objectif (qté)", "Hədəf (say)", "Hedef (adet)", "Ціль (к-сть)", "Мақсат (саны)"),
+
+    // Analytics — Export
+    "an.export":          tr("Export", "Экспорт", "Esporta", "Exporter", "İxrac", "Dışa aktar", "Експорт", "Экспорт"),
+    "an.exportCSV":       tr("Export CSV", "Скачать CSV", "Esporta CSV", "Exporter CSV", "CSV ixrac", "CSV dışa aktar", "Експорт CSV", "CSV экспорты"),
+    "an.exportPDF":       tr("Export PDF", "Скачать PDF", "Esporta PDF", "Exporter PDF", "PDF ixrac", "PDF dışa aktar", "Експорт PDF", "PDF экспорты"),
+    "an.csvDate":         tr("Date", "Дата", "Data", "Date", "Tarix", "Tarih", "Дата", "Күні"),
+    "an.csvOpening":      tr("Opening", "Открытие", "Apertura", "Ouverture", "Açılış", "Açılış", "Відкриття", "Ашылу"),
+    "an.csvIncome":       tr("Income", "Доход", "Entrate", "Revenu", "Gəlir", "Gelir", "Дохід", "Кіріс"),
+    "an.csvExpense":      tr("Expense", "Расход", "Spese", "Dépense", "Xərc", "Gider", "Витрата", "Шығыс"),
+    "an.csvInkass":       tr("Inkass.", "Инкасс.", "Prelievo", "Encaisse", "İnkass.", "Tahsilat", "Інкас.", "Инкасс."),
+    "an.csvClosing":      tr("Closing", "Закрытие", "Chiusura", "Clôture", "Bağlanış", "Kapanış", "Закриття", "Жабылу"),
+    "an.csvTotal":        tr("Total", "Итого", "Totale", "Total", "Cəmi", "Toplam", "Разом", "Барлығы"),
+    "an.pdfTitle":        tr("Analytics Report", "Отчёт по аналитике", "Report analitico", "Rapport analytique", "Analitika hesabatı", "Analiz raporu", "Звіт по аналітиці", "Аналитика есебі"),
+    "an.pdfShiftsTable":  tr("Shifts", "Смены", "Turni", "Services", "Növbələr", "Vardiyalar", "Зміни", "Ауысымдар"),
+    "an.exportFailed":    tr("Export failed", "Ошибка экспорта", "Esportazione fallita", "Échec de l'export", "İxrac xətası", "Dışa aktarma hatası", "Помилка експорту", "Экспорт қатесі"),
+
+    // Analytics — AI Advisor
+    "an.advisor":         tr("Advisor", "Советник", "Consulente", "Conseiller", "Məsləhətçi", "Danışman", "Радник", "Кеңесші"),
+    "an.advisorRefresh":  tr("Refresh", "Обновить", "Aggiorna", "Actualiser", "Yenilə", "Yenile", "Оновити", "Жаңарту"),
+    "an.advisorLoading":  tr("Analysing data...", "Анализирую данные...", "Analizzando...", "Analyse en cours...", "Məlumatlar analiz edilir...", "Veriler analiz ediliyor...", "Аналізую дані...", "Деректер талданып жатыр..."),
+    "an.advisorEmpty":    tr("No insights yet — tap Refresh", "Нет наблюдений — нажмите «Обновить»", "Nessuna analisi — premi Aggiorna", "Pas d'analyse — appuyez sur Actualiser", "Hələ məlumat yoxdur — Yenilə düyməsinə basın", "Henüz analiz yok — Yenile'ye dokunun", "Немає спостережень — натисніть «Оновити»", "Ақпарат жоқ — Жаңарту басыңыз"),
+    "an.advisorPrompt":   tr("Give 2-3 short practical observations and tips based on this data: compare with last month, note anomalies, what to improve.", "Дай 2-3 кратких практичных наблюдения и совета по этим данным: сравни с прошлым месяцем, отметь аномалии, что улучшить.", "Dai 2-3 brevi osservazioni pratiche su questi dati: confronta con il mese scorso, segnala anomalie, cosa migliorare.", "Donne 2-3 courtes observations pratiques sur ces données : compare avec le mois dernier, note les anomalies, quoi améliorer.", "Bu məlumatlar üzrə 2-3 qısa praktik müşahidə ver: keçən ay ilə müqayisə et, anormallıqları qeyd et, nəyi yaxşılaşdırmaq olar.", "Bu veriler hakkında 2-3 kısa pratik gözlem ver: geçen ayla karşılaştır, anormallikleri belirt, neyi iyileştirmeli.", "Дай 2-3 коротких практичних спостереження за цими даними: порівняй з минулим місяцем, відзнач аномалії, що покращити.", "Осы деректер бойынша 2-3 қысқа практикалық байқау бер: өткен айбен салыстыр, ауытқуларды атап өт, нені жақсарту керек."),
 ]

@@ -498,6 +498,162 @@ final class AnalyticsModel {
         .sorted { $0.date > $1.date }
     }
 
+    // MARK: - Export
+
+    /// Build a CSV string for the current month's shifts.
+    func buildCSV() -> String {
+        let cols = [t("an.csvDate"), t("an.csvOpening"), t("an.csvIncome"),
+                    t("an.csvExpense"), t("an.csvInkass"), t("an.csvClosing")]
+        var lines = [cols.joined(separator: ",")]
+        for s in filledShifts {
+            let row = [
+                s.date,
+                String(format: "%.2f", s.opening_balance ?? 0),
+                String(format: "%.2f", s.income ?? 0),
+                String(format: "%.2f", s.total_expense ?? 0),
+                String(format: "%.2f", s.inkassation ?? 0),
+                String(format: "%.2f", s.closing_balance ?? 0),
+            ]
+            lines.append(row.joined(separator: ","))
+        }
+        // totals row
+        let totals = [
+            t("an.csvTotal"),
+            "",
+            String(format: "%.2f", totalIncome),
+            String(format: "%.2f", totalExpense),
+            String(format: "%.2f", totalInkass),
+            "",
+        ]
+        lines.append(totals.joined(separator: ","))
+        return lines.joined(separator: "\n")
+    }
+
+    /// Write CSV to a temp file and return its URL.
+    func csvFileURL() -> URL? {
+        let csv = buildCSV()
+        guard let data = csv.data(using: .utf8) else { return nil }
+        let name = "analytics-\(navLabel.replacingOccurrences(of: " ", with: "-")).csv"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        try? data.write(to: url)
+        return url
+    }
+
+    /// Render a PDF (A4) of the shift table and return its Data.
+    func buildPDF() -> Data {
+        let pageWidth: CGFloat = 595
+        let pageHeight: CGFloat = 842
+        let margin: CGFloat = 40
+        let rowH: CGFloat = 22
+        let headerH: CGFloat = 32
+        let titleH: CGFloat = 44
+
+        let cols: [(String, CGFloat)] = [
+            (t("an.csvDate"),    90),
+            (t("an.csvOpening"), 80),
+            (t("an.csvIncome"),  80),
+            (t("an.csvExpense"), 80),
+            (t("an.csvInkass"),  80),
+            (t("an.csvClosing"), 80),
+        ]
+        let tableWidth = cols.reduce(0) { $0 + $1.1 }
+
+        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight))
+        return renderer.pdfData { ctx in
+            ctx.beginPage()
+            let para = NSMutableParagraphStyle()
+            para.alignment = .left
+            let titleAttr: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 17, weight: .bold),
+                .foregroundColor: UIColor.label,
+                .paragraphStyle: para,
+            ]
+            let subAttr: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 12),
+                .foregroundColor: UIColor.secondaryLabel,
+                .paragraphStyle: para,
+            ]
+            let headerAttr: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 10, weight: .semibold),
+                .foregroundColor: UIColor.secondaryLabel,
+            ]
+            let cellAttr: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 11),
+                .foregroundColor: UIColor.label,
+            ]
+            let totalAttr: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: UIColor.label,
+            ]
+
+            var y = margin
+
+            // Title
+            (t("an.pdfTitle") as NSString).draw(at: CGPoint(x: margin, y: y), withAttributes: titleAttr)
+            y += titleH - 10
+            (navLabel as NSString).draw(at: CGPoint(x: margin, y: y), withAttributes: subAttr)
+            y += titleH
+
+            // Header row background
+            UIColor.systemGray5.setFill()
+            UIRectFill(CGRect(x: margin, y: y, width: tableWidth, height: headerH))
+
+            var x = margin
+            for col in cols {
+                (col.0 as NSString).draw(
+                    in: CGRect(x: x + 4, y: y + (headerH - 14) / 2, width: col.1 - 8, height: 14),
+                    withAttributes: headerAttr)
+                x += col.1
+            }
+            y += headerH
+
+            // Data rows
+            for (i, s) in filledShifts.enumerated() {
+                if i % 2 == 1 {
+                    UIColor.systemGray6.setFill()
+                    UIRectFill(CGRect(x: margin, y: y, width: tableWidth, height: rowH))
+                }
+                let cells = [
+                    s.date,
+                    Money.s(s.opening_balance ?? 0),
+                    Money.s(s.income ?? 0),
+                    Money.s(s.total_expense ?? 0),
+                    Money.s(s.inkassation ?? 0),
+                    Money.s(s.closing_balance ?? 0),
+                ]
+                x = margin
+                for (ci, col) in cols.enumerated() {
+                    (cells[ci] as NSString).draw(
+                        in: CGRect(x: x + 4, y: y + (rowH - 13) / 2, width: col.1 - 8, height: 13),
+                        withAttributes: cellAttr)
+                    x += col.1
+                }
+                y += rowH
+
+                // start new page if needed
+                if y + rowH + 60 > pageHeight - margin {
+                    ctx.beginPage()
+                    y = margin
+                }
+            }
+
+            // Totals row
+            UIColor.systemGray4.setFill()
+            UIRectFill(CGRect(x: margin, y: y, width: tableWidth, height: rowH))
+            let totalCells = [
+                t("an.csvTotal"), "", Money.s(totalIncome),
+                Money.s(totalExpense), Money.s(totalInkass), "",
+            ]
+            x = margin
+            for (ci, col) in cols.enumerated() {
+                (totalCells[ci] as NSString).draw(
+                    in: CGRect(x: x + 4, y: y + (rowH - 13) / 2, width: col.1 - 8, height: 13),
+                    withAttributes: totalAttr)
+                x += col.1
+            }
+        }
+    }
+
     #if DEBUG
     private func seedDemo() {
         includeCard = true; hkPrice = 15; hkPortion = 20
@@ -580,7 +736,7 @@ private struct AnalyticsBody: View {
             VStack(spacing: 0) {
                 monthNav
                 TabView(selection: $m.tab) {
-                    AppTabPage(refresh: { await m.load() }) { PeriodTab(m: m) }
+                    AppTabPage(refresh: { await m.load() }) { PeriodTab(m: m, aiEnabled: aiEnabled) }
                         .tabItem { Label(t("tab.period"), systemImage: "calendar") }.tag("period")
                     AppTabPage(refresh: { await m.load() }) { KassaTab(m: m) }
                         .tabItem { Label(t("tab.kassa"), systemImage: "banknote.fill") }.tag("kassa")
@@ -643,6 +799,7 @@ private struct AnalyticsBody: View {
 
 private struct PeriodTab: View {
     @Bindable var m: AnalyticsModel
+    let aiEnabled: Bool
     private var isMonth: Bool { m.periodMode == "month" }
 
     var body: some View {
@@ -688,6 +845,10 @@ private struct PeriodTab: View {
             }
             .padding(14)
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        }
+
+        if aiEnabled {
+            AIAdvisorCard(m: m)
         }
     }
 
@@ -982,11 +1143,67 @@ private struct HookahTab: View {
     }
 }
 
+// MARK: Экспорт
+
+/// UIActivityViewController bridge for sharing files.
+private struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+
+/// A small export menu button (CSV + PDF) for analytics tabs.
+private struct ExportMenuButton: View {
+    let m: AnalyticsModel
+    @State private var shareItems: [Any] = []
+    @State private var showShare = false
+
+    var body: some View {
+        HStack {
+            Spacer()
+            Menu {
+                Button {
+                    if let url = m.csvFileURL() {
+                        shareItems = [url]
+                        showShare = true
+                    }
+                } label: {
+                    Label(t("an.exportCSV"), systemImage: "tablecells")
+                }
+                Button {
+                    let data = m.buildPDF()
+                    let url = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("analytics-\(m.navLabel.replacingOccurrences(of: " ", with: "-")).pdf")
+                    if (try? data.write(to: url)) != nil {
+                        shareItems = [url]
+                        showShare = true
+                    }
+                } label: {
+                    Label(t("an.exportPDF"), systemImage: "doc.richtext")
+                }
+            } label: {
+                Label(t("an.export"), systemImage: "square.and.arrow.up")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(BrandKit.analytics)
+                    .padding(.vertical, 6).padding(.horizontal, 12)
+                    .background(Color.primary.opacity(0.07), in: Capsule())
+            }
+            .sheet(isPresented: $showShare) {
+                ShareSheet(activityItems: shareItems)
+            }
+        }
+    }
+}
+
 // MARK: Касса
 
 private struct KassaTab: View {
     @Bindable var m: AnalyticsModel
     var body: some View {
+        ExportMenuButton(m: m)
+
         Picker("", selection: $m.kassaMode) {
             Text(t("tab.kassa")).tag("kassa"); Text(t("mg.inkass")).tag("inkass")
         }.pickerStyle(.segmented)
@@ -1223,6 +1440,106 @@ private struct ForecastTab: View {
         }
         .frame(maxWidth: .infinity).padding(.vertical, 12)
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+// MARK: AI Advisor Card
+
+/// Proactive AI insights card shown on the Period tab when AI is enabled.
+private struct AIAdvisorCard: View {
+    @Bindable var m: AnalyticsModel
+    @State private var insights: String = ""
+    @State private var loading = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(t("an.advisor"))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary.opacity(0.45))
+                    .kerning(0.5)
+                Spacer()
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    if loading {
+                        ProgressView().scaleEffect(0.7)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(BrandKit.analytics)
+                    }
+                }
+                .disabled(loading)
+            }
+
+            if loading {
+                Text(t("an.advisorLoading"))
+                    .font(.system(size: 13))
+                    .foregroundStyle(.primary.opacity(0.4))
+            } else if let err = error {
+                Text(err)
+                    .font(.system(size: 13))
+                    .foregroundStyle(BrandKit.menu)
+            } else if insights.isEmpty {
+                Text(t("an.advisorEmpty"))
+                    .font(.system(size: 13))
+                    .foregroundStyle(.primary.opacity(0.4))
+            } else {
+                // Render each line as a bullet point
+                let lines = insights
+                    .components(separatedBy: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(lines.indices, id: \.self) { i in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("–")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(BrandKit.analytics)
+                                .frame(width: 10, alignment: .leading)
+                            Text(cleanBullet(lines[i]))
+                                .font(.system(size: 13))
+                                .foregroundStyle(.primary.opacity(0.85))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .task { if insights.isEmpty && !loading { await refresh() } }
+    }
+
+    private func refresh() async {
+        loading = true; error = nil
+        let prompt = t("an.advisorPrompt")
+        if let reply = await m.handleAI(prompt) {
+            if reply.hasPrefix(t("ai.err")) || reply.hasPrefix(t("ai.errGeneric")) {
+                error = reply
+            } else {
+                insights = reply
+            }
+        } else {
+            error = t("ai.noReply")
+        }
+        loading = false
+    }
+
+    /// Strip markdown bullet prefixes (*, -, •, 1.) that the AI might return.
+    private func cleanBullet(_ s: String) -> String {
+        var r = s
+        for prefix in ["* ", "- ", "• ", "– ", "— "] {
+            if r.hasPrefix(prefix) { r = String(r.dropFirst(prefix.count)); break }
+        }
+        // strip leading "1. ", "2. " etc.
+        if let dot = r.firstIndex(of: "."), r.distance(from: r.startIndex, to: dot) <= 2,
+           r.index(after: dot) < r.endIndex, r[r.index(after: dot)] == " " {
+            r = String(r[r.index(dot, offsetBy: 2)...])
+        }
+        return r
     }
 }
 
