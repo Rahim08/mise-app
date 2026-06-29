@@ -22,6 +22,7 @@ let miseModules: [String: MiseModule] = [
 /// Тап по бренду в шапке приложения возвращает к выбору (если приложений несколько).
 struct MainView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -40,6 +41,13 @@ struct MainView: View {
             // Одно доступное приложение → открываем сразу, без промежуточного экрана.
             if app.currentApp == nil, app.availableApps.count == 1 {
                 app.currentApp = app.availableApps.first
+            }
+        }
+        // Снимок для виджета: считаем при входе и при возврате на передний план.
+        .task { await SnapshotWriter.refresh(canSeeMoney: app.canSeeMoney) }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await SnapshotWriter.refresh(canSeeMoney: app.canSeeMoney, force: true) }
             }
         }
     }

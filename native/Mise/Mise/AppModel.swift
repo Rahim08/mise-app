@@ -205,5 +205,6 @@ final class AppModel {
         currentApp = nil
         isReauth = false   // сбрасываем, иначе следующий вход пропустит экран Permissions
         phase = .welcome
+        SnapshotWriter.clear()   // чистим снимок виджета, чтобы не светились старые цифры
     }
 }

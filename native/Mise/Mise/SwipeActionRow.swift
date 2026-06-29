@@ -132,14 +132,14 @@ struct TabEdgeSwipe: ViewModifier {
                         let fromLeft = v.startLocation.x < 40
                         let fromRight = v.startLocation.x > width - 40
                         let idx = tabs.firstIndex(of: selection) ?? 0
+                        // Гаптику даёт .sensoryFeedback(.selection, trigger:) на самой вкладке —
+                        // здесь её НЕ дублируем (иначе двойной отклик при смене вкладки свайпом).
                         if dx > 0, fromLeft {            // вправо от левого края — назад
                             if idx > 0 {
-                                UISelectionFeedbackGenerator().selectionChanged()
                                 withAnimation(.easeInOut(duration: 0.2)) { selection = tabs[idx - 1] }
                             } else { onFirstBack?() }
                         } else if dx < 0, fromRight {    // влево от правого края — вперёд
                             if idx < tabs.count - 1 {
-                                UISelectionFeedbackGenerator().selectionChanged()
                                 withAnimation(.easeInOut(duration: 0.2)) { selection = tabs[idx + 1] }
                             }
                         }

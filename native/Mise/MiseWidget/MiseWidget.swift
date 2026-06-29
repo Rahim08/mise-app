@@ -40,11 +40,10 @@ struct MiseWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: kind, intent: MiseWidgetConfig.self, provider: MiseProvider()) { entry in
             MiseWidgetView(entry: entry)
-                .containerBackground(for: .widget) { Color.black }
         }
         .configurationDisplayName("Mise")
-        .description("Касса, кальяны или ближайшие брони. / Cash, hookahs or upcoming bookings.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .description("Касса или ближайшие брони. / Cash or upcoming bookings.")
+        .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline])
     }
 }
 
@@ -69,12 +68,111 @@ struct MiseWidgetView: View {
 
     private var accent: Color { entry.config.accent.color }
 
-    var body: some View {
+    // Deep-link: тап по виджету открывает приложение на нужном модуле.
+    private var deepLink: URL? {
         switch entry.config.metric {
-        case .cash:     CashWidget(snap: entry.snapshot, accent: accent, family: family)
-        case .hookahs:  HookahWidget(snap: entry.snapshot, accent: accent, family: family)
-        case .bookings: BookingWidget(snap: entry.snapshot, accent: accent, family: family)
+        case .cash:     return URL(string: "mise://analytics")
+        case .hookahs:  return URL(string: "mise://stash")
+        case .bookings: return URL(string: "mise://bookings")
         }
+    }
+
+    private var isAccessory: Bool {
+        switch family {
+        case .accessoryCircular, .accessoryRectangular, .accessoryInline: return true
+        default: return false
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        if isAccessory {
+            AccessoryWidgetView(snap: entry.snapshot, metric: entry.config.metric, family: family)
+        } else {
+            switch entry.config.metric {
+            case .cash:     CashWidget(snap: entry.snapshot, accent: accent, family: family)
+            case .hookahs:  HookahWidget(snap: entry.snapshot, accent: accent, family: family)
+            case .bookings: BookingWidget(snap: entry.snapshot, accent: accent, family: family)
+            }
+        }
+    }
+
+    var body: some View {
+        content
+            .widgetURL(deepLink)
+            .containerBackground(for: .widget) { isAccessory ? Color.clear : Color.black }
+    }
+}
+
+// MARK: - Accessory (lock screen) — компактные виджеты
+
+private struct AccessoryWidgetView: View {
+    let snap: MiseSnapshot
+    let metric: WidgetMetric
+    let family: WidgetFamily
+
+    private func money(_ v: Double) -> String { SnapMoney.s(v, symbol: snap.currencySymbol) }
+    private var nextBooking: SnapBooking? { snap.bookings.first }
+
+    var body: some View {
+        switch family {
+        case .accessoryInline:
+            switch metric {
+            case .cash:     Text("\(money(snap.cashClosing))")
+            case .hookahs:  Text("\(snap.hookahPaid) кальянов")
+            case .bookings: Text(nextBooking.map { "\($0.time) \($0.guest)" } ?? "Броней нет")
+            }
+
+        case .accessoryCircular:
+            ZStack {
+                AccessoryWidgetBackground()
+                switch metric {
+                case .cash:
+                    VStack(spacing: 0) {
+                        Image(systemName: "creditcard.fill").font(.system(size: 11, weight: .bold))
+                        Text(shortMoney(snap.cashClosing)).font(.system(size: 13, weight: .bold)).minimumScaleFactor(0.5).lineLimit(1)
+                    }
+                case .hookahs:
+                    VStack(spacing: 0) {
+                        Image(systemName: "smoke.fill").font(.system(size: 11, weight: .bold))
+                        Text("\(snap.hookahPaid)").font(.system(size: 16, weight: .bold))
+                    }
+                case .bookings:
+                    VStack(spacing: 0) {
+                        Image(systemName: "calendar").font(.system(size: 11, weight: .bold))
+                        Text("\(snap.bookings.count)").font(.system(size: 16, weight: .bold))
+                    }
+                }
+            }
+
+        default: // .accessoryRectangular
+            VStack(alignment: .leading, spacing: 2) {
+                switch metric {
+                case .cash:
+                    Label("Касса дня", systemImage: "creditcard.fill").font(.system(size: 12, weight: .semibold))
+                    Text(money(snap.cashClosing)).font(.system(size: 18, weight: .bold))
+                    Text("Приход \(money(snap.cashIncome))").font(.system(size: 11)).foregroundStyle(.secondary)
+                case .hookahs:
+                    Label("Кальяны", systemImage: "smoke.fill").font(.system(size: 12, weight: .semibold))
+                    Text("\(snap.hookahPaid) платных").font(.system(size: 16, weight: .bold))
+                    Text("+\(snap.hookahFree) бесплатных").font(.system(size: 11)).foregroundStyle(.secondary)
+                case .bookings:
+                    Label("Брони", systemImage: "calendar.badge.clock").font(.system(size: 12, weight: .semibold))
+                    if let b = nextBooking {
+                        Text("\(b.time) · \(b.guest)").font(.system(size: 15, weight: .bold)).lineLimit(1)
+                        Text(b.table.isEmpty ? "\(b.party) гост." : "\(b.table) · \(b.party) гост.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                    } else {
+                        Text("Броней нет").font(.system(size: 13)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func shortMoney(_ v: Double) -> String {
+        let n = NumberFormatter(); n.numberStyle = .decimal; n.maximumFractionDigits = 0; n.groupingSeparator = "\u{00A0}"
+        return (snap.currencySymbol) + (n.string(from: NSNumber(value: v)) ?? "0")
     }
 }
 
@@ -254,6 +352,5 @@ private struct BookingWidget: View {
     MiseWidget()
 } timeline: {
     MiseEntry(date: .now, snapshot: .placeholder, config: MiseWidgetConfig(metric: .cash))
-    MiseEntry(date: .now, snapshot: .placeholder, config: MiseWidgetConfig(metric: .hookahs, accent: .amber))
     MiseEntry(date: .now, snapshot: .placeholder, config: MiseWidgetConfig(metric: .bookings, accent: .violet))
 }

@@ -143,7 +143,8 @@ final class BookingsModel {
     func save(_ b: Booking, isNew: Bool) async {
         var values: [String: Any] = [
             "booking_date": b.booking_date ?? key(currentDate),
-            "status": b.status ?? "new",
+            // Новая бронь создаётся БЕЗ статуса — статус ставится свайпом (пришёл/опоздал).
+            "status": b.status ?? NSNull(),
         ]
         values["booking_time"] = b.booking_time ?? NSNull()
         values["guest_name"] = b.guest_name ?? NSNull()
@@ -165,13 +166,6 @@ final class BookingsModel {
         await load()
         await loadMonth()
         allBookingsLoaded = false // invalidate cache
-    }
-
-    func setStatus(_ b: Booking, status: String) async {
-        try? await DB.from("bookings").update(["status": status]).eq("id", b.id).run()
-        await load()
-        await loadMonth()
-        allBookingsLoaded = false
     }
 
     /// Краткий текст пуша по брони: «Анна · 4 гостя · 19:30 · стол 5».
@@ -228,6 +222,8 @@ struct BookingsView: View {
     @State private var duplicating: Booking?
     @State private var duplicateDate = Date()
     @State private var showDuplicateDialog = false
+    @State private var prefillName: String?     // префилл для «Новая бронь» из карточки гостя
+    @State private var prefillPhone: String?
 
     private func canEdit(_ b: Booking) -> Bool {
         app.isOfficial || (b.created_by != nil && b.created_by == app.staff?.id)
@@ -373,11 +369,18 @@ struct BookingsView: View {
                         canDelete: editing != nil && (editing.map(canEdit) ?? false),
                         onSave: { b, isNew in Task { await m.save(b, isNew: isNew) } },
                         onDelete: { b in Task { await m.delete(b) } },
-                        author: (app.staff?.id ?? "owner", app.staff?.name ?? t("role.owner"))
+                        author: (app.staff?.id ?? "owner", app.staff?.name ?? t("role.owner")),
+                        prefillName: prefillName,
+                        prefillPhone: prefillPhone
                     )
                 }
                 .sheet(isPresented: $showGuests) {
-                    GuestsView(m: m)
+                    GuestsView(m: m, onNewBooking: { name, phone in
+                        // Закрываем шит гостей и открываем редактор с префиллом.
+                        showGuests = false
+                        prefillName = name; prefillPhone = phone; editing = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showEditor = true }
+                    })
                 }
                 .confirmationDialog(t("bk.duplicateTitle"), isPresented: $showDuplicateDialog, titleVisibility: .visible) {
                     Button(t("bk.duplicate")) {
@@ -392,7 +395,7 @@ struct BookingsView: View {
                                 phone: b.phone,
                                 table_label: b.table_label,
                                 note: b.note,
-                                status: "new",
+                                status: nil,
                                 created_by: app.staff?.id ?? b.created_by,
                                 created_by_name: app.staff?.name ?? b.created_by_name
                             )
@@ -601,7 +604,7 @@ struct BookingsView: View {
 
     private var addButton: some View {
         Button {
-            editing = nil; showEditor = true
+            editing = nil; prefillName = nil; prefillPhone = nil; showEditor = true
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         } label: {
             Image(systemName: "plus").font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
@@ -731,7 +734,8 @@ private struct BookingCard: View {
 
     @State private var showPhoneMenu = false
 
-    private var st: BkStatus { BkStatus(rawValue: b.status ?? "new") ?? .new }
+    // nil/пустой статус = бронь «без статуса» (бейдж не показываем).
+    private var st: BkStatus? { (b.status?.isEmpty == false) ? BkStatus(rawValue: b.status!) : nil }
 
     var body: some View {
         Button(action: onTap) {
@@ -805,9 +809,11 @@ private struct BookingCard: View {
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 6) {
-                    Text(st.label).font(.system(size: 11, weight: .bold)).foregroundStyle(st.color)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(st.color.opacity(0.16), in: Capsule())
+                    if let st {
+                        Text(st.label).font(.system(size: 11, weight: .bold)).foregroundStyle(st.color)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(st.color.opacity(0.16), in: Capsule())
+                    }
                     if !editable {
                         Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(.primary.opacity(0.25))
                     }
@@ -838,6 +844,8 @@ private struct BookingEditor: View {
     let onSave: (Booking, Bool) -> Void
     let onDelete: (Booking) -> Void
     let author: (String, String)
+    var prefillName: String? = nil     // префилл для «Новая бронь» из карточки гостя
+    var prefillPhone: String? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -846,7 +854,7 @@ private struct BookingEditor: View {
     @State private var guests = ""
     @State private var table = ""
     @State private var note = ""
-    @State private var status = "new"
+    @State private var status: String? = nil    // nil = без статуса (новая бронь)
     @State private var hasTime = false
     @State private var time = Date()
     @State private var confirmDelete = false
@@ -870,12 +878,17 @@ private struct BookingEditor: View {
                         }
                         field(t("bk.table"), text: $table)
                     }
-                    Section(t("bk.status")) {
-                        Picker(t("bk.status"), selection: $status) {
-                            ForEach(BkStatus.allCases, id: \.rawValue) { s in
-                                Text(s.label).tag(s.rawValue)
-                            }
-                        }.pickerStyle(.segmented)
+                    // Статус задаётся только при редактировании существующей брони
+                    // (новая создаётся без статуса; пришёл/опоздал ставятся свайпом).
+                    if !isNew {
+                        Section(t("bk.status")) {
+                            Picker(t("bk.status"), selection: $status) {
+                                Text(t("bk.stNone")).tag(String?.none)
+                                ForEach([BkStatus.arrived, .late, .cancelled], id: \.rawValue) { s in
+                                    Text(s.label).tag(Optional(s.rawValue))
+                                }
+                            }.pickerStyle(.segmented)
+                        }
                     }
                     Section(t("bk.note")) {
                         TextField(t("bk.notePh"), text: $note, axis: .vertical).lineLimit(2...5)
@@ -910,13 +923,18 @@ private struct BookingEditor: View {
     }
 
     private func prime() {
-        guard let b = booking else { return }
+        guard let b = booking else {
+            // Новая бронь: префилл из карточки гостя (имя/телефон), статуса нет.
+            name = prefillName ?? ""
+            phone = prefillPhone ?? ""
+            return
+        }
         name = b.guest_name ?? ""
         phone = b.phone ?? ""
         guests = b.guests_count.map(String.init) ?? ""
         table = b.table_label ?? ""
         note = b.note ?? ""
-        status = b.status ?? "new"
+        status = (b.status?.isEmpty == false) ? b.status : nil
         if let ts = b.booking_time, let parsed = Self.timeFmt.date(from: ts) {
             hasTime = true; time = parsed
         }
@@ -935,7 +953,7 @@ private struct BookingEditor: View {
             phone: trimmed(phone),
             table_label: trimmed(table),
             note: trimmed(note),
-            status: status,
+            status: isNew ? nil : status,
             created_by: booking?.created_by ?? author.0,
             created_by_name: booking?.created_by_name ?? author.1
         )

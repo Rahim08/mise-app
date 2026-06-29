@@ -55,10 +55,10 @@ private func buildProfiles(from bookings: [Booking]) -> [GuestProfile] {
 
 struct GuestsView: View {
     let m: BookingsModel
+    var onNewBooking: (String?, String?) -> Void = { _, _ in }
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
     @State private var selectedGuest: GuestProfile?
-    @State private var showDetail = false
 
     private var profiles: [GuestProfile] {
         buildProfiles(from: m.allBookings)
@@ -100,7 +100,6 @@ struct GuestsView: View {
                                 ForEach(filtered) { guest in
                                     GuestRow(guest: guest) {
                                         selectedGuest = guest
-                                        showDetail = true
                                     }
                                 }
                             }
@@ -118,10 +117,14 @@ struct GuestsView: View {
                     Button(t("done")) { dismiss() }
                 }
             }
-            .sheet(isPresented: $showDetail) {
-                if let g = selectedGuest {
-                    GuestDetailView(guest: g)
-                }
+            .sheet(item: $selectedGuest) { g in
+                GuestDetailView(guest: g, rid: m.rid, onNewBooking: { name, phone in
+                    // Закрываем карточку гостя, затем родитель закрывает список и открывает редактор.
+                    selectedGuest = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        onNewBooking(name, phone)
+                    }
+                })
             }
         }
     }
@@ -211,12 +214,25 @@ private struct GuestRow: View {
 
 // MARK: - GuestDetailView
 
+private nonisolated struct GuestNote: Codable, Sendable { let note: String? }
+
 struct GuestDetailView: View {
     let guest: GuestProfile
+    let rid: String
+    var onNewBooking: (String?, String?) -> Void = { _, _ in }
     @Environment(\.dismiss) private var dismiss
+
+    @State private var note = ""
+    @State private var noteLoaded = false
+    @State private var showPhoneMenu = false
 
     private var sortedBookings: [Booking] {
         guest.bookings.sorted { ($0.booking_date ?? "") > ($1.booking_date ?? "") }
+    }
+
+    // Имя гостя для префилла новой брони (не телефон).
+    private var guestName: String? {
+        guest.bookings.compactMap { $0.guest_name }.first { !$0.isEmpty }
     }
 
     var body: some View {
@@ -225,8 +241,10 @@ struct GuestDetailView: View {
                 Color.miseBg.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 16) {
-                        // Шапка гостя
                         guestHeader
+                        newBookingButton
+                        statsCard
+                        noteSection
 
                         // История броней
                         VStack(alignment: .leading, spacing: 10) {
@@ -252,6 +270,17 @@ struct GuestDetailView: View {
                 }
             }
         }
+        .task { if !noteLoaded { await loadNote() } }
+    }
+
+    private var newBookingButton: some View {
+        Button { onNewBooking(guestName, guest.phone) } label: {
+            Label(t("gs.newBooking"), systemImage: "calendar.badge.plus")
+                .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                .frame(maxWidth: .infinity).padding(.vertical, 13)
+                .background(GS_ACCENT, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private var guestHeader: some View {
@@ -263,8 +292,26 @@ struct GuestDetailView: View {
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(guest.displayName).font(.system(size: 18, weight: .bold)).foregroundStyle(.primary)
-                if let ph = guest.phone {
-                    Text(ph).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5))
+                if let ph = guest.phone, !ph.isEmpty {
+                    Button { showPhoneMenu = true } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "phone.fill").font(.system(size: 11))
+                            Text(ph).font(.system(size: 13, weight: .medium))
+                        }.foregroundStyle(GS_ACCENT)
+                    }
+                    .buttonStyle(.plain)
+                    .confirmationDialog(t("bk.contactGuest"), isPresented: $showPhoneMenu, titleVisibility: .visible) {
+                        let digits = ph.filter { $0.isNumber }
+                        if !digits.isEmpty {
+                            Button(t("bk.callAction")) {
+                                if let url = URL(string: "tel:\(digits)") { UIApplication.shared.open(url) }
+                            }
+                            Button("WhatsApp") {
+                                if let url = URL(string: "https://wa.me/\(digits)") { UIApplication.shared.open(url) }
+                            }
+                        }
+                        Button(t("cancel"), role: .cancel) {}
+                    }
                 }
             }
             Spacer()
@@ -281,8 +328,90 @@ struct GuestDetailView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
+    // MARK: статистика гостя
+
+    private var avgParty: Int? {
+        guest.visitCount > 0 && guest.totalGuests > 0 ? Int((Double(guest.totalGuests) / Double(guest.visitCount)).rounded()) : nil
+    }
+
+    private var favTable: String? {
+        let tables = guest.bookings.compactMap { $0.table_label }.filter { !$0.isEmpty }
+        guard !tables.isEmpty else { return nil }
+        let counts = Dictionary(grouping: tables, by: { $0 }).mapValues(\.count)
+        return counts.max { $0.value < $1.value }?.key
+    }
+
+    private var sinceLastVisit: String? {
+        guard let last = guest.lastVisitDate else { return nil }
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"; df.locale = Locale(identifier: "en_US_POSIX")
+        guard let d = df.date(from: last) else { return nil }
+        let days = Calendar.current.dateComponents([.day], from: d, to: Date()).day ?? 0
+        if days <= 0 { return t("gs.today") }
+        if days < 30 { return t("gs.daysAgo", ["n": "\(days)"]) }
+        return t("gs.monthsAgo", ["n": "\(days / 30)"])
+    }
+
+    @ViewBuilder private var statsCard: some View {
+        let items: [(String, String)] = {
+            var a: [(String, String)] = []
+            if let p = avgParty { a.append((t("gs.avgParty"), "\(p)")) }
+            if let tbl = favTable { a.append((t("gs.favTable"), tbl)) }
+            if let s = sinceLastVisit { a.append((t("gs.lastVisit"), s)) }
+            return a
+        }()
+        if !items.isEmpty {
+            HStack(spacing: 10) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, it in
+                    VStack(spacing: 3) {
+                        Text(it.1).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
+                        Text(it.0).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.45))
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(14)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
+    // MARK: заметка о госте
+
+    private var noteSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(t("gs.note"))
+                .font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.5))
+                .padding(.horizontal, 4)
+            TextField(t("gs.notePh"), text: $note, axis: .vertical)
+                .lineLimit(1...4).font(.system(size: 14))
+                .padding(12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .onSubmit { saveNote() }
+            HStack {
+                Spacer()
+                Button(t("bk.save")) { saveNote() }
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(GS_ACCENT)
+            }
+        }
+    }
+
+    private func loadNote() async {
+        if let row = try? await DB.from("guest_notes").select().eq("guest_key", guest.id).single(GuestNote.self) {
+            note = row.note ?? ""
+        }
+        noteLoaded = true
+    }
+
+    private func saveNote() {
+        let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            try? await DB.from("guest_notes")
+                .upsert(["guest_key": guest.id, "note": text], onConflict: "restaurant_id,guest_key").run()
+        }
+    }
+
     private func historyRow(_ b: Booking) -> some View {
-        let st = BkStatusPublic(rawValue: b.status ?? "new") ?? .new
+        let st: BkStatusPublic? = (b.status?.isEmpty == false) ? BkStatusPublic(rawValue: b.status!) : nil
         return HStack(spacing: 12) {
             VStack(spacing: 2) {
                 Text(b.booking_time ?? "—").font(.system(size: 14, weight: .bold)).foregroundStyle(.primary)
@@ -310,9 +439,11 @@ struct GuestDetailView: View {
 
             Spacer()
 
-            Text(st.label).font(.system(size: 10, weight: .bold)).foregroundStyle(st.color)
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(st.color.opacity(0.16), in: Capsule())
+            if let st {
+                Text(st.label).font(.system(size: 10, weight: .bold)).foregroundStyle(st.color)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(st.color.opacity(0.16), in: Capsule())
+            }
         }
         .padding(12)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

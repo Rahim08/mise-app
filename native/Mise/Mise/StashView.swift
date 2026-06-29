@@ -65,7 +65,9 @@ final class StashModel {
         async let tpsR = try? DB.from("hookah_types").select().eq("is_active", true).order("created_at").list(HookahType.self)
         async let salesR = try? DB.from("hookah_sales")
             .select("hookah_type_id, quantity, portion_g, is_free, date, flavor").list(HookahSale.self)
-        async let outsR = try? DB.from("tobacco_movements").select("quantity_g").eq("type", "out").list(Movement.self)
+        // Полный select — Movement требует brand/flavor (иначе строки отбрасываются Lossy-декодом).
+        async let outsR = try? DB.from("tobacco_movements").select().eq("type", "out").list(Movement.self)
+        async let venueWoR = try? DB.from("tobacco_movements").select().eq("type", "writeoff").list(Movement.self)
         // Категории бесплатных кальянов из настроек заведения (дашборд → Настройки → Кальян).
         nonisolated struct FreeCatsSettings: Codable { let free_hookah_categories: [String]? }
         if let cats = try? await DB.from("restaurant_settings").select("free_hookah_categories").limit(1).list(FreeCatsSettings.self).first?.free_hookah_categories, !cats.isEmpty {
@@ -73,7 +75,7 @@ final class StashModel {
             if !freeCats.contains(freeCat) { freeCat = freeCats.first ?? freeCat }
         }
         // Только при успехе перезаписываем — сбой на refresh не должен стирать смену.
-        guard let tps = await tpsR, let sales = await salesR, let outs = await outsR else {
+        guard let tps = await tpsR, let sales = await salesR, let outs = await outsR, let venueWo = await venueWoR else {
             if !types.isEmpty { flash(t("refreshFailed")) }
             return
         }
@@ -94,7 +96,9 @@ final class StashModel {
             }
         }
         paid = p; free = fr
-        venueBase = outs.reduce(0) { $0 + $1.quantity_g } - pastGrams
+        // Списание «с заведения» = движение writeoff без бренда/вкуса (общий вес зала).
+        let venueWriteoff = venueWo.filter { $0.brand.isEmpty && $0.flavor.isEmpty }.reduce(0) { $0 + $1.quantity_g }
+        venueBase = outs.reduce(0) { $0 + $1.quantity_g } - pastGrams - venueWriteoff
     }
 
     // MARK: KPI-цели
@@ -357,6 +361,68 @@ final class StashModel {
         return true
     }
 
+    /// Списание «с заведения»: только вес, без бренда/вкуса. Уменьшает общий объём зала (venueBase),
+    /// склад не трогает. Маркер — пустые brand/flavor у движения writeoff.
+    func saveVenueWriteoff(grams gramsStr: String, reason: String) async -> Bool {
+        let qty = Double(gramsStr.filter { $0.isNumber || $0 == "." }) ?? 0
+        if qty <= 0 { flash(t("st.fillRow")); return false }
+        if reason.trimmingCharacters(in: .whitespaces).isEmpty { flash(t("st.writeoffReason")); return false }
+        if qty > venueBase { flash(t("st.onlyLeftVenue", ["g": grams(max(0, venueBase))])); return false }
+        saving = true; defer { saving = false }
+        let batchId = UUID().uuidString
+        try? await DB.from("tobacco_movements").insert([
+            "restaurant_id": rid, "brand": "", "flavor": "", "quantity_g": qty,
+            "type": "writeoff", "batch_id": batchId, "reason": reason,
+        ]).run()
+        await loadWarehouse()
+        await loadShift()
+        flash(t("st.saved", ["n": "1"]))
+        return true
+    }
+
+    /// Откатывает дельты остатка и удаляет все строки батча. Без тоста (для reuse в edit).
+    private func revertAndDelete(_ items: [Movement]) async {
+        let fresh = (try? await DB.from("tobacco_stock").select().list(StockItem.self)) ?? stock
+        // Складские движения (с брендом/вкусом) откатываем; «с заведения» (пустые) — только удаляем,
+        // venueBase пересчитается из оставшихся движений в loadShift().
+        var adjust: [String: Double] = [:]
+        var exById: [String: StockItem] = [:]
+        for mv in items where !mv.brand.isEmpty && !mv.flavor.isEmpty {
+            guard let ex = fresh.first(where: { norm($0.brand) == norm(mv.brand) && norm($0.flavor) == norm(mv.flavor) }) else { continue }
+            adjust[ex.id, default: 0] += (mv.type == "in" ? -mv.quantity_g : mv.quantity_g)
+            exById[ex.id] = ex
+        }
+        for (id, delta) in adjust {
+            if let ex = exById[id] {
+                try? await DB.from("tobacco_stock").update(["quantity_g": max(0, ex.quantity_g + delta)]).eq("id", id).run()
+            }
+        }
+        for mv in items { try? await DB.from("tobacco_movements").delete().eq("id", mv.id).run() }
+    }
+
+    /// Удаление перемещения (батча) с откатом остатка.
+    func deleteMovementBatch(_ items: [Movement]) async {
+        guard !items.isEmpty else { return }
+        saving = true; defer { saving = false }
+        await revertAndDelete(items)
+        await loadWarehouse()
+        await loadShift()
+        flash(t("st.movDeleted"))
+    }
+
+    /// Редактирование: откатываем старый батч и пишем новый (для складских позиций).
+    func replaceMovementBatch(_ old: [Movement], rows: [MovRow], reason: String) async -> Bool {
+        await revertAndDelete(old)
+        return await saveMovement(rows, reason: reason)
+    }
+
+    /// Редактирование списания «с заведения»: откат старого + новый вес.
+    func replaceVenueWriteoff(_ old: [Movement], grams gramsStr: String, reason: String) async -> Bool {
+        await revertAndDelete(old)
+        await loadShift()   // venueBase должен учесть удаление старого списания до проверки лимита
+        return await saveVenueWriteoff(grams: gramsStr, reason: reason)
+    }
+
     struct InvRow { let id: String; let brand: String; let flavor: String; let expected: Double; let actual: Double }
 
     func saveInventory(_ rows: [InvRow]) async -> Bool {
@@ -449,6 +515,8 @@ private struct StashBody: View {
     let aiEnabled: Bool
     @State private var showAddMov = false
     @State private var showAddInv = false
+    @State private var editBatch: MovBatchRef?
+    @State private var pendingDeleteBatch: MovBatchRef?
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -457,7 +525,11 @@ private struct StashBody: View {
                     .tabItem { Label(t("tab.stashShift"), systemImage: "flame.fill") }.tag("shift")
                 AppTabPage(refresh: { await m.loadWarehouse() }) { StockTab(m: m) }
                     .tabItem { Label(t("tab.stock"), systemImage: "tray.full.fill") }.tag("stock")
-                AppTabPage(refresh: { await m.loadWarehouse() }) { MovementsTab(m: m, showAdd: $showAddMov) }
+                AppTabPage(refresh: { await m.loadWarehouse() }) {
+                    MovementsTab(m: m, showAdd: $showAddMov,
+                                 onEdit: { items in editBatch = MovBatchRef(items: items) },
+                                 onDelete: { items in pendingDeleteBatch = MovBatchRef(items: items) })
+                }
                     .tabItem { Label(t("tab.movements"), systemImage: "arrow.left.arrow.right") }.tag("movements")
                 AppTabPage(refresh: { await m.loadWarehouse() }) { InventoryTab(m: m, showAdd: $showAddInv) }
                     .tabItem { Label(t("tab.inventory"), systemImage: "checklist") }.tag("inventory")
@@ -485,8 +557,24 @@ private struct StashBody: View {
             if open { showAddMov = true; m.shouldOpenMovSheet = false }
         }
         .sheet(isPresented: $showAddMov) { AddMovementSheet(m: m) }
+        .sheet(item: $editBatch) { ref in AddMovementSheet(m: m, editBatch: ref.items) }
         .sheet(isPresented: $showAddInv) { AddInventorySheet(m: m) }
+        .confirmationDialog(t("st.movDeleteConfirm"),
+                            isPresented: Binding(get: { pendingDeleteBatch != nil }, set: { if !$0 { pendingDeleteBatch = nil } }),
+                            titleVisibility: .visible) {
+            Button(t("delete"), role: .destructive) {
+                if let r = pendingDeleteBatch { Task { await m.deleteMovementBatch(r.items) } }
+                pendingDeleteBatch = nil
+            }
+            Button(t("cancel"), role: .cancel) { pendingDeleteBatch = nil }
+        }
     }
+}
+
+/// Обёртка батча движений для presentation через .sheet(item:)/confirmationDialog.
+struct MovBatchRef: Identifiable {
+    let items: [Movement]
+    var id: String { items.first?.batch_id ?? items.first?.id ?? UUID().uuidString }
 }
 
 // MARK: Смена
@@ -734,6 +822,8 @@ private struct StockTab: View {
 private struct MovementsTab: View {
     @Bindable var m: StashModel
     @Binding var showAdd: Bool
+    var onEdit: ([Movement]) -> Void = { _ in }
+    var onDelete: ([Movement]) -> Void = { _ in }
 
     var body: some View {
         Picker("", selection: $m.movMode) {
@@ -750,8 +840,13 @@ private struct MovementsTab: View {
         if m.movementBatches.isEmpty {
             Text(t("st.noMovements")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 30)
         } else {
+            // Подсказка: правки доступны по долгому тапу.
+            Text(t("st.movEditHint")).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.35))
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 4)
             ForEach(m.movementBatches, id: \.0) { batchId, items in
-                MovementBatchRow(items: items)
+                MovementBatchRow(items: items,
+                                 onEdit: { onEdit(items) },
+                                 onDelete: { onDelete(items) })
             }
         }
     }
@@ -759,9 +854,16 @@ private struct MovementsTab: View {
 
 private struct MovementBatchRow: View {
     let items: [Movement]
+    var onEdit: () -> Void = {}
+    var onDelete: () -> Void = {}
     @State private var open = false
     private var total: Double { items.reduce(0) { $0 + $1.quantity_g } }
     private var isIn: Bool { items.first?.type == "in" }
+
+    private func posLabel(_ mv: Movement) -> String {
+        // Списание «с заведения» — без бренда/вкуса.
+        (mv.brand.isEmpty && mv.flavor.isEmpty) ? t("st.venueWriteoffLabel") : "\(mv.brand) · \(mv.flavor)"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -784,7 +886,7 @@ private struct MovementBatchRow: View {
                 VStack(spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { idx, mv in
                         HStack {
-                            Text("\(mv.brand) · \(mv.flavor)").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.85))
+                            Text(posLabel(mv)).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.85))
                             Spacer()
                             Text((isIn ? "+" : "−") + grams(mv.quantity_g)).font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(isIn ? BrandKit.analytics : BrandKit.stash)
@@ -797,6 +899,10 @@ private struct MovementBatchRow: View {
             }
         }
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .contextMenu {
+            Button { onEdit() } label: { Label(t("edit"), systemImage: "pencil") }
+            Button(role: .destructive) { onDelete() } label: { Label(t("delete"), systemImage: "trash") }
+        }
     }
 }
 
@@ -855,12 +961,24 @@ private struct AutoField: View {
 
 private struct AddMovementSheet: View {
     @Bindable var m: StashModel
+    var editBatch: [Movement]? = nil               // непусто → режим редактирования батча
     @Environment(\.dismiss) private var dismiss
     @State private var rows = [StashModel.MovRow()]
     @State private var reason = ""
     @State private var fromStock = false
     @State private var picks: [String: String] = [:]   // stock.id → граммы для выбора со склада
+    @State private var writeoffVenue = false           // списание: false=со склада, true=с заведения
+    @State private var venueGrams = ""                 // вес списания с заведения
     @State private var primed = false
+
+    private var isEditing: Bool { editBatch != nil }
+    private var totalLabel: String {
+        switch m.movMode {
+        case "in":  return t("st.totalIn")
+        case "out": return t("st.totalOut")
+        default:    return t("st.totalWriteoff")
+        }
+    }
 
     // Источник для «Из склада», сгруппирован по брендам: для прихода — все известные,
     // для выдачи/списания — только то, что есть в наличии (брать можно лишь имеющееся).
@@ -885,6 +1003,48 @@ private struct AddMovementSheet: View {
         Binding(get: { picks[id] ?? "" }, set: { picks[id] = $0.filter(\.isNumber) })
     }
 
+    // Списание с заведения: только вес (общий объём зала), без бренда/вкуса.
+    @ViewBuilder private var venueWriteoffField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(t("st.venueWriteoffHint")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
+            TextField(t("st.grams"), text: $venueGrams).keyboardType(.numberPad)
+                .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.primary)
+            HStack {
+                Text(t("st.venueAvailable")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
+                Spacer()
+                Text(grams(max(0, m.venueBase))).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.7))
+            }
+        }
+        .padding(12).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func commit() async {
+        if m.movMode == "writeoff" && writeoffVenue {
+            let ok = isEditing
+                ? await m.replaceVenueWriteoff(editBatch!, grams: venueGrams, reason: reason)
+                : await m.saveVenueWriteoff(grams: venueGrams, reason: reason)
+            if ok { dismiss() }
+        } else {
+            let toSave = fromStock ? pickedRows() : rows
+            let ok = isEditing
+                ? await m.replaceMovementBatch(editBatch!, rows: toSave, reason: reason)
+                : await m.saveMovement(toSave, reason: reason)
+            if ok { dismiss() }
+        }
+    }
+
+    private func primeForEdit(_ batch: [Movement]) {
+        m.movMode = batch.first?.type ?? "in"
+        reason = batch.first?.reason ?? ""
+        if batch.allSatisfy({ $0.brand.isEmpty && $0.flavor.isEmpty }) {
+            writeoffVenue = true
+            venueGrams = String(Int(batch.reduce(0) { $0 + $1.quantity_g }))
+        } else {
+            fromStock = false
+            rows = batch.map { StashModel.MovRow(brand: $0.brand, flavor: $0.flavor, grams: String(Int($0.quantity_g))) }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -895,11 +1055,22 @@ private struct AddMovementSheet: View {
                             Text(t("st.in")).tag("in"); Text(t("st.out")).tag("out"); Text(t("st.writeoff")).tag("writeoff")
                         }.pickerStyle(.segmented)
 
-                        Picker("", selection: $fromStock) {
-                            Text(t("st.manual")).tag(false); Text(t("st.fromStock")).tag(true)
-                        }.pickerStyle(.segmented)
+                        // Списание: со склада (бренд/вкус) или с заведения (только вес общего объёма зала).
+                        if m.movMode == "writeoff" {
+                            Picker("", selection: $writeoffVenue) {
+                                Text(t("st.fromWarehouse")).tag(false); Text(t("st.fromVenue")).tag(true)
+                            }.pickerStyle(.segmented)
+                        }
 
-                        if fromStock { stockPicker } else { manualRows }
+                        if writeoffVenue && m.movMode == "writeoff" {
+                            venueWriteoffField
+                        } else {
+                            Picker("", selection: $fromStock) {
+                                Text(t("st.manual")).tag(false); Text(t("st.fromStock")).tag(true)
+                            }.pickerStyle(.segmented)
+
+                            if fromStock { stockPicker } else { manualRows }
+                        }
 
                         if m.movMode == "writeoff" {
                             TextField(t("st.writeoffReasonField"), text: $reason).textFieldStyle(.plain)
@@ -909,22 +1080,22 @@ private struct AddMovementSheet: View {
                     .padding(16)
                 }
             }
-            .navigationTitle(t("st.movement")).navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(isEditing ? t("st.editMovement") : t("st.movement")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(t("save")) {
-                        let toSave = fromStock ? pickedRows() : rows
-                        Task { if await m.saveMovement(toSave, reason: reason) { dismiss() } }
-                    }.disabled(m.saving)
+                    Button(t("save")) { Task { await commit() } }.disabled(m.saving)
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
             .preferredColorScheme(.dark)
+            .onChange(of: m.movMode) { _, mode in if mode != "writeoff" { writeoffVenue = false } }
             .onAppear {
                 guard !primed else { return }
                 primed = true
-                if let pre = m.aiMovRows, !pre.isEmpty {
+                if let batch = editBatch {
+                    primeForEdit(batch)
+                } else if let pre = m.aiMovRows, !pre.isEmpty {
                     rows = pre; fromStock = false; m.aiMovRows = nil
                 } else {
                     fromStock = m.movMode != "in"   // выдача/списание — со склада по умолчанию
@@ -939,6 +1110,14 @@ private struct AddMovementSheet: View {
             let outOnly = m.movMode != "in"
             let avail = m.stockOf(row.brand, row.flavor)
             VStack(spacing: 8) {
+                if rows.count > 1 {
+                    HStack {
+                        Spacer()
+                        Button { rows.removeAll { $0.id == row.id } } label: {
+                            Image(systemName: "xmark.circle.fill").font(.system(size: 16)).foregroundStyle(.primary.opacity(0.3))
+                        }.buttonStyle(.plain)
+                    }
+                }
                 AutoField(placeholder: t("st.brand"), text: $row.brand,
                           suggestions: m.brandSuggestions(outOnly),
                           onPick: { row.flavor = "" })
@@ -991,7 +1170,7 @@ private struct AddMovementSheet: View {
                 .padding(12).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
             }
             HStack {
-                Text(t("st.takeTotal")).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
+                Text(totalLabel).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
                 Spacer()
                 Text(grams(takeTotal)).font(.system(size: 15, weight: .bold)).foregroundStyle(BrandKit.stash)
             }

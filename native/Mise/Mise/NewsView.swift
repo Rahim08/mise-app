@@ -62,6 +62,7 @@ final class NewsModel {
     var posts: [NewsPost] = []
     var loading = true
     var toast: String?
+    private var lastOK: Date?            // время последнего успешного load — гасим ложный тост
 
     init(rid: String) { self.rid = rid }
 
@@ -73,18 +74,26 @@ final class NewsModel {
     func load() async {
         loading = true
         defer { loading = false }
-        // Только при успехе перезаписываем — сбой/пустой ответ на refresh не должен стирать данные.
-        guard let rows = try? await DB.from("news_posts").select()
-            .order("created_at", ascending: false).limit(100).list(NewsPost.self) else {
-            if !posts.isEmpty { flash(t("refreshFailed")) }
-            return
-        }
-        // Важные/срочные закрепляем сверху, внутри уровня — новее выше.
-        posts = rows.sorted { a, b in
-            let ra = NewsPriority(rawValue: a.priority ?? "normal")?.rank ?? 0
-            let rb = NewsPriority(rawValue: b.priority ?? "normal")?.rank ?? 0
-            if ra != rb { return ra > rb }
-            return (a.created_at ?? "") > (b.created_at ?? "")
+        do {
+            // Только при успехе перезаписываем — сбой/пустой ответ на refresh не должен стирать данные.
+            let rows = try await DB.from("news_posts").select()
+                .order("created_at", ascending: false).limit(100).list(NewsPost.self)
+            // Важные/срочные закрепляем сверху, внутри уровня — новее выше.
+            posts = rows.sorted { a, b in
+                let ra = NewsPriority(rawValue: a.priority ?? "normal")?.rank ?? 0
+                let rb = NewsPriority(rawValue: b.priority ?? "normal")?.rank ?? 0
+                if ra != rb { return ra > rb }
+                return (a.created_at ?? "") > (b.created_at ?? "")
+            }
+            lastOK = Date()
+        } catch {
+            #if DEBUG
+            print("[News] load failed: \(error)")
+            #endif
+            // Не пугаем тостом, если данные уже есть и только что был успешный показ
+            // (гонка publish→pull даёт два load подряд — второй не должен ругаться).
+            let recentOK = lastOK.map { Date().timeIntervalSince($0) < 4 } ?? false
+            if !posts.isEmpty && !recentOK { flash(t("refreshFailed")) }
         }
     }
 
