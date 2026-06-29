@@ -637,7 +637,7 @@ private struct ManagerBody: View {
     }
 
     private func amountField(_ text: Binding<String>) -> some View {
-        TextField("€ 0", text: text)
+        TextField(Money.symbol + " 0", text: text)
             .keyboardType(.decimalPad)
             .multilineTextAlignment(.trailing)
             .font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)

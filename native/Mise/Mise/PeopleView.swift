@@ -59,6 +59,8 @@ final class PeopleModel {
     var attLoaded = false
     var checking = false
     var todayScheduledIds: Set<String> = []
+    /// true — есть отложенная явка (сеть не работала при отметке)
+    var pendingCheckIn = false
 
     // обмены
     var swaps: [SwapRequest] = []
@@ -355,6 +357,9 @@ final class PeopleModel {
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedAttendance(); return }
         #endif
+        // Показать отложенную явку из очереди до запроса сети
+        pendingCheckIn = UserDefaults.standard.data(forKey: pendingCheckInKey) != nil
+
         let cal = Calendar.current
         let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: Date()))!
         if let g = try? await DB.from("restaurant_settings").select().limit(1).list(GeoSettings.self).first { geo = g }
@@ -373,24 +378,78 @@ final class PeopleModel {
             } else if !attendance.isEmpty { flash(t("refreshFailed")) }
         }
         attLoaded = true
+
+        // Попытка сбросить очередь офлайн-явки
+        if !isManager && pendingCheckIn { await flushPendingCheckIn() }
     }
     var todayKey: String { key(Date()) }
     var todayRec: AttendanceRecord? { attendance.first { $0.staff_id == myId && $0.date == todayKey } }
 
+    // MARK: ключ очереди офлайн-явки
+    private var pendingCheckInKey: String { "mise_pending_checkin_\(rid)_\(myId)" }
+
     func checkIn() async {
         guard todayRec == nil else { return }
         checking = true; defer { checking = false }
+
         if let g = geo, g.attendance_enabled == true, let lat = g.latitude, let lng = g.longitude {
             guard let coord = await LocationOneShot().current() else { flash(t("pe.noGeo")); return }
             if distanceMeters(coord, lat, lng) > (g.geo_radius_m ?? 150) { flash(t("pe.outOfZone")); return }
         }
-        try? await DB.from("attendance_records").insert([
+
+        // Идемпотентность: убедиться, что записи за сегодня нет (двойная проверка)
+        let existing = (try? await DB.from("attendance_records").select()
+            .eq("staff_id", myId).eq("date", todayKey).limit(1).list(AttendanceRecord.self)) ?? []
+        guard existing.isEmpty else { await loadAttendance(); return }
+
+        let payload: [String: Any] = [
             "restaurant_id": rid, "staff_id": myId, "date": todayKey,
             "check_in_at": ISO8601DateFormatter().string(from: Date()), "status": "present", "source": "manual",
-        ]).run()
-        await Notify.send(type: "attendance", title: "Сотрудник на смене", body: "\(myName.isEmpty ? "Сотрудник" : myName) пришёл(а)", audience: ["managers": true])
-        flash(t("pe.checkedIn"))
-        await loadAttendance()
+        ]
+        do {
+            try await DB.from("attendance_records").insert(payload).run()
+            UserDefaults.standard.removeObject(forKey: pendingCheckInKey)
+            pendingCheckIn = false
+            await Notify.send(type: "attendance", title: "Сотрудник на смене", body: "\(myName.isEmpty ? "Сотрудник" : myName) пришёл(а)", audience: ["managers": true])
+            flash(t("pe.checkedIn"))
+            await loadAttendance()
+        } catch {
+            // Сеть недоступна — сохранить в очередь
+            let pending: [String: String] = ["date": todayKey, "ts": ISO8601DateFormatter().string(from: Date())]
+            if let data = try? JSONEncoder().encode(pending) {
+                UserDefaults.standard.set(data, forKey: pendingCheckInKey)
+            }
+            pendingCheckIn = true
+            flash(t("pe.checkInPending"))
+        }
+    }
+
+    /// Сбросить отложенную явку (при загрузке и возврате в foreground).
+    func flushPendingCheckIn() async {
+        guard let data = UserDefaults.standard.data(forKey: pendingCheckInKey),
+              let pending = try? JSONDecoder().decode([String: String].self, from: data),
+              let date = pending["date"], let ts = pending["ts"] else {
+            pendingCheckIn = false; return
+        }
+        // Не создавать дубликат
+        let existing = (try? await DB.from("attendance_records").select()
+            .eq("staff_id", myId).eq("date", date).limit(1).list(AttendanceRecord.self)) ?? []
+        if !existing.isEmpty {
+            UserDefaults.standard.removeObject(forKey: pendingCheckInKey)
+            pendingCheckIn = false; return
+        }
+        do {
+            try await DB.from("attendance_records").insert([
+                "restaurant_id": rid, "staff_id": myId, "date": date,
+                "check_in_at": ts, "status": "present", "source": "manual",
+            ] as [String: Any]).run()
+            UserDefaults.standard.removeObject(forKey: pendingCheckInKey)
+            pendingCheckIn = false
+            flash(t("pe.checkedIn"))
+            await loadAttendance()
+        } catch {
+            pendingCheckIn = true
+        }
     }
 
     // MARK: обмены
@@ -1506,6 +1565,15 @@ private struct AttendanceTab: View {
                 }
                 .frame(maxWidth: .infinity).padding(20)
                 .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
+            } else if m.pendingCheckIn {
+                // Явка записана локально, ожидает отправки на сервер
+                VStack(spacing: 6) {
+                    Image(systemName: "clock.badge.exclamationmark").font(.system(size: 36)).foregroundStyle(BrandKit.stash)
+                    Text(t("pe.checkInPending")).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+                    Text(t("pe.checkInPendingHint")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5)).multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity).padding(20)
+                .background(BrandKit.stash.opacity(0.12), in: RoundedRectangle(cornerRadius: 18))
             } else {
                 Button {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -1522,6 +1590,9 @@ private struct AttendanceTab: View {
                 .disabled(m.checking)
             }
             historyList
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            if m.pendingCheckIn { Task { await m.flushPendingCheckIn() } }
         }
     }
 
@@ -2810,26 +2881,40 @@ private struct OrderCard: View {
     let o: MenuOrder
     private var isCall: Bool { o.items?.first?.call == "waiter" }
     private var active: Bool { o.status == "new" || o.status == "in_progress" }
+    @State private var showCancelConfirm = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            header
-            if !isCall {
-                itemsSection
-                Divider().overlay(Color.primary.opacity(0.08))
-                HStack {
-                    Text(eur(o.total ?? 0)).font(.system(size: 15, weight: .heavy)).foregroundStyle(.primary)
-                    Spacer()
-                    buttons
+        SwipeActionRow(
+            leading: active ? SwipeAction(label: t("pe.order.done"), systemImage: "checkmark", tint: BrandKit.analytics, handler: {
+                Task { await m.setOrderStatus(o, "done") }
+            }) : nil,
+            trailing: active ? [SwipeAction(label: t("cancel"), systemImage: "xmark", tint: BrandKit.menu, handler: {
+                showCancelConfirm = true
+            })] : []
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                header
+                if !isCall {
+                    itemsSection
+                    Divider().overlay(Color.primary.opacity(0.08))
+                    HStack {
+                        Text(eur(o.total ?? 0)).font(.system(size: 15, weight: .heavy)).foregroundStyle(.primary)
+                        Spacer()
+                        buttons
+                    }
+                } else if active {
+                    HStack { Spacer(); Button(t("pe.coming")) { Task { await m.setOrderStatus(o, "done") } }
+                        .buttonStyle(.borderedProminent).tint(PEOPLE_ACCENT) }
                 }
-            } else if active {
-                HStack { Spacer(); Button(t("pe.coming")) { Task { await m.setOrderStatus(o, "done") } }
-                    .buttonStyle(.borderedProminent).tint(PEOPLE_ACCENT) }
             }
+            .padding(14)
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            .overlay(alignment: .leading) { if isCall { Rectangle().fill(BrandKit.stash).frame(width: 3) } }
         }
-        .padding(14)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(alignment: .leading) { if isCall { Rectangle().fill(BrandKit.stash).frame(width: 3) } }
+        .confirmationDialog(t("pe.cancelOrder"), isPresented: $showCancelConfirm, titleVisibility: .visible) {
+            Button(t("cancel"), role: .destructive) { Task { await m.setOrderStatus(o, "cancelled") } }
+            Button(t("pe.keep"), role: .cancel) {}
+        }
     }
 
     private var header: some View {
@@ -2915,21 +3000,27 @@ private struct StopTab: View {
             VStack(spacing: 0) {
                 ForEach(Array(m.menu.enumerated()), id: \.element.id) { idx, item in
                     let avail = item.is_available ?? true
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.name).font(.system(size: 15)).foregroundStyle(.primary.opacity(avail ? 1 : 0.4)).strikethrough(!avail)
-                            if let p = item.price { Text(eur(p)).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4)) }
+                    SwipeActionRow(
+                        leading: (m.canStop && !avail) ? SwipeAction(label: t("pe.inMenu"), systemImage: "checkmark.circle", tint: BrandKit.analytics, handler: { Task { await m.toggleItem(item) } }) : nil,
+                        trailing: (m.canStop && avail) ? [SwipeAction(label: t("pe.inStop"), systemImage: "minus.circle", tint: BrandKit.menu, handler: { Task { await m.toggleItem(item) } })] : []
+                    ) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.name).font(.system(size: 15)).foregroundStyle(.primary.opacity(avail ? 1 : 0.4)).strikethrough(!avail)
+                                if let p = item.price { Text(eur(p)).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4)) }
+                            }
+                            Spacer()
+                            if m.canStop {
+                                Toggle("", isOn: Binding(get: { avail }, set: { _ in Task { await m.toggleItem(item) } }))
+                                    .labelsHidden().tint(BrandKit.analytics)
+                            } else {
+                                Text(avail ? t("pe.inMenu") : t("pe.inStop")).font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(avail ? BrandKit.analytics : BrandKit.menu)
+                            }
                         }
-                        Spacer()
-                        if m.canStop {
-                            Toggle("", isOn: Binding(get: { avail }, set: { _ in Task { await m.toggleItem(item) } }))
-                                .labelsHidden().tint(BrandKit.analytics)
-                        } else {
-                            Text(avail ? t("pe.inMenu") : t("pe.inStop")).font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(avail ? BrandKit.analytics : BrandKit.menu)
-                        }
+                        .padding(.vertical, 10).padding(.horizontal, 14)
+                        .background(Color.primary.opacity(0.06))
                     }
-                    .padding(.vertical, 10).padding(.horizontal, 14)
                     if idx < m.menu.count - 1 { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 14) }
                 }
             }
