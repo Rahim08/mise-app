@@ -62,20 +62,25 @@ final class StashModel {
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedDemo(); return }
         #endif
         shiftLoading = true; defer { shiftLoading = false }
-        async let tps = (try? DB.from("hookah_types").select().eq("is_active", true).order("created_at").list(HookahType.self)) ?? []
-        async let sales = (try? DB.from("hookah_sales")
-            .select("hookah_type_id, quantity, portion_g, is_free, date, flavor").list(HookahSale.self)) ?? []
-        async let outs = (try? DB.from("tobacco_movements").select("quantity_g").eq("type", "out").list(Movement.self)) ?? []
+        async let tpsR = try? DB.from("hookah_types").select().eq("is_active", true).order("created_at").list(HookahType.self)
+        async let salesR = try? DB.from("hookah_sales")
+            .select("hookah_type_id, quantity, portion_g, is_free, date, flavor").list(HookahSale.self)
+        async let outsR = try? DB.from("tobacco_movements").select("quantity_g").eq("type", "out").list(Movement.self)
         // Категории бесплатных кальянов из настроек заведения (дашборд → Настройки → Кальян).
         nonisolated struct FreeCatsSettings: Codable { let free_hookah_categories: [String]? }
         if let cats = try? await DB.from("restaurant_settings").select("free_hookah_categories").limit(1).list(FreeCatsSettings.self).first?.free_hookah_categories, !cats.isEmpty {
             freeCats = cats
             if !freeCats.contains(freeCat) { freeCat = freeCats.first ?? freeCat }
         }
-        types = await tps
+        // Только при успехе перезаписываем — сбой на refresh не должен стирать смену.
+        guard let tps = await tpsR, let sales = await salesR, let outs = await outsR else {
+            if !types.isEmpty { flash(t("refreshFailed")) }
+            return
+        }
+        types = tps
         var p: [String: String] = [:], fr: [String: [String: String]] = [:]
         var pastGrams = 0.0
-        for r in await sales {
+        for r in sales {
             if r.date == dateStr, let id = r.hookah_type_id {
                 let q = Int(r.quantity ?? 0)
                 if r.is_free == true {
@@ -89,7 +94,7 @@ final class StashModel {
             }
         }
         paid = p; free = fr
-        venueBase = (await outs).reduce(0) { $0 + $1.quantity_g } - pastGrams
+        venueBase = outs.reduce(0) { $0 + $1.quantity_g } - pastGrams
     }
 
     // MARK: KPI-цели
@@ -110,13 +115,17 @@ final class StashModel {
     func loadGoals() async {
         goalsLoading = true; defer { goalsLoading = false }
         let (from, to) = monthBounds()
-        async let gs = (try? DB.from("hookah_goals").select().eq("month", monthKey)
-            .order("created_at").list(HookahGoal.self)) ?? []
-        async let sales = (try? DB.from("hookah_sales").select("hookah_type_id, quantity, is_free, date")
-            .gte("date", from).lte("date", to).eq("is_free", false).list(HookahSale.self)) ?? []
-        goals = await gs
+        async let gsR = try? DB.from("hookah_goals").select().eq("month", monthKey)
+            .order("created_at").list(HookahGoal.self)
+        async let salesR = try? DB.from("hookah_sales").select("hookah_type_id, quantity, is_free, date")
+            .gte("date", from).lte("date", to).eq("is_free", false).list(HookahSale.self)
+        guard let gs = await gsR, let sales = await salesR else {
+            if !goals.isEmpty { flash(t("refreshFailed")) }
+            return
+        }
+        goals = gs
         var q: [String: Int] = [:]
-        for r in await sales {
+        for r in sales {
             guard let id = r.hookah_type_id else { continue }
             q[id, default: 0] += Int(r.quantity ?? 0)
         }
@@ -196,10 +205,15 @@ final class StashModel {
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { return }
         #endif
-        async let s = (try? DB.from("tobacco_stock").select().order("brand").order("flavor").list(StockItem.self)) ?? []
-        async let mv = (try? DB.from("tobacco_movements").select().order("created_at", ascending: false).limit(200).list(Movement.self)) ?? []
-        async let iv = (try? DB.from("tobacco_inventories").select().order("created_at", ascending: false).limit(50).list(Inventory.self)) ?? []
-        stock = await s; movements = await mv; inventories = await iv
+        async let sR = try? DB.from("tobacco_stock").select().order("brand").order("flavor").list(StockItem.self)
+        async let mvR = try? DB.from("tobacco_movements").select().order("created_at", ascending: false).limit(200).list(Movement.self)
+        async let ivR = try? DB.from("tobacco_inventories").select().order("created_at", ascending: false).limit(50).list(Inventory.self)
+        // Только при успехе перезаписываем — сбой на refresh не должен стирать склад.
+        guard let s = await sR, let mv = await mvR, let iv = await ivR else {
+            if !stock.isEmpty { flash(t("refreshFailed")) }
+            return
+        }
+        stock = s; movements = mv; inventories = iv
     }
 
     func isLow(_ s: StockItem) -> Bool { s.quantity_g > 0 && s.quantity_g <= (s.min_quantity_g ?? 200) }
@@ -430,6 +444,7 @@ struct StashView: View {
 }
 
 private struct StashBody: View {
+    @Environment(AppModel.self) private var app
     @Bindable var m: StashModel
     let aiEnabled: Bool
     @State private var showAddMov = false
@@ -449,6 +464,9 @@ private struct StashBody: View {
             }
             .tint(BrandKit.stash)
             .sensoryFeedback(.selection, trigger: m.tab)
+            .tabEdgeSwipe(tabs: ["shift", "stock", "movements", "inventory"],
+                          selection: $m.tab,
+                          onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
 
             if let toast = m.toast {
                 Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
@@ -840,6 +858,32 @@ private struct AddMovementSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var rows = [StashModel.MovRow()]
     @State private var reason = ""
+    @State private var fromStock = false
+    @State private var picks: [String: String] = [:]   // stock.id → граммы для выбора со склада
+    @State private var primed = false
+
+    // Источник для «Из склада», сгруппирован по брендам: для прихода — все известные,
+    // для выдачи/списания — только то, что есть в наличии (брать можно лишь имеющееся).
+    private var pickGroups: [(String, [StockItem])] {
+        let base = m.movMode == "in" ? m.stock : m.inStock
+        var g: [String: [StockItem]] = [:]
+        for s in base where !s.brand.isEmpty { g[s.brand, default: []].append(s) }
+        return g.map { ($0.key, $0.value.sorted { $0.flavor < $1.flavor }) }
+                .sorted { $0.0.lowercased() < $1.0.lowercased() }
+    }
+    private var takeTotal: Double {
+        picks.values.reduce(0) { $0 + (Double($1.filter(\.isNumber)) ?? 0) }
+    }
+    private func pickedRows() -> [StashModel.MovRow] {
+        m.stock.compactMap { s in
+            let v = (picks[s.id] ?? "").filter(\.isNumber)
+            guard (Double(v) ?? 0) > 0 else { return nil }
+            return StashModel.MovRow(brand: s.brand, flavor: s.flavor, grams: v)
+        }
+    }
+    private func pickBinding(_ id: String) -> Binding<String> {
+        Binding(get: { picks[id] ?? "" }, set: { picks[id] = $0.filter(\.isNumber) })
+    }
 
     var body: some View {
         NavigationStack {
@@ -851,33 +895,12 @@ private struct AddMovementSheet: View {
                             Text(t("st.in")).tag("in"); Text(t("st.out")).tag("out"); Text(t("st.writeoff")).tag("writeoff")
                         }.pickerStyle(.segmented)
 
-                        ForEach($rows) { $row in
-                            let outOnly = m.movMode != "in"
-                            let avail = m.stockOf(row.brand, row.flavor)
-                            VStack(spacing: 8) {
-                                // Бренд: подсказки из памяти склада (для выдачи/списания — только то, что в наличии).
-                                AutoField(placeholder: t("st.brand"), text: $row.brand,
-                                          suggestions: m.brandSuggestions(outOnly),
-                                          onPick: { row.flavor = "" })
-                                // Вкус: подсказки исходя из выбранного бренда.
-                                AutoField(placeholder: t("st.flavor"), text: $row.flavor,
-                                          suggestions: m.flavorsForBrand(row.brand, outOnly: outOnly),
-                                          disabled: outOnly && row.brand.trimmingCharacters(in: .whitespaces).isEmpty)
-                                TextField(t("st.grams"), text: $row.grams).keyboardType(.numberPad)
-                                    .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.primary)
-                                if let a = avail, !row.flavor.isEmpty {
-                                    HStack {
-                                        Text("\(t("st.available")): \(grams(a.quantity_g))")
-                                            .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
-                                        Spacer()
-                                    }
-                                }
-                            }
-                            .padding(12).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
-                        }
-                        Button { rows.append(.init()) } label: {
-                            Label(t("st.moreRow"), systemImage: "plus").font(.system(size: 14, weight: .medium)).foregroundStyle(BrandKit.stash)
-                        }
+                        Picker("", selection: $fromStock) {
+                            Text(t("st.manual")).tag(false); Text(t("st.fromStock")).tag(true)
+                        }.pickerStyle(.segmented)
+
+                        if fromStock { stockPicker } else { manualRows }
+
                         if m.movMode == "writeoff" {
                             TextField(t("st.writeoffReasonField"), text: $reason).textFieldStyle(.plain)
                                 .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.primary)
@@ -891,17 +914,90 @@ private struct AddMovementSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(t("save")) {
-                        Task { if await m.saveMovement(rows, reason: reason) { dismiss() } }
+                        let toSave = fromStock ? pickedRows() : rows
+                        Task { if await m.saveMovement(toSave, reason: reason) { dismiss() } }
                     }.disabled(m.saving)
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
             .preferredColorScheme(.dark)
             .onAppear {
+                guard !primed else { return }
+                primed = true
                 if let pre = m.aiMovRows, !pre.isEmpty {
-                    rows = pre
-                    m.aiMovRows = nil
+                    rows = pre; fromStock = false; m.aiMovRows = nil
+                } else {
+                    fromStock = m.movMode != "in"   // выдача/списание — со склада по умолчанию
                 }
+            }
+        }
+    }
+
+    // Ручной ввод бренд/вкус/граммы со подсказками (исходный режим).
+    @ViewBuilder private var manualRows: some View {
+        ForEach($rows) { $row in
+            let outOnly = m.movMode != "in"
+            let avail = m.stockOf(row.brand, row.flavor)
+            VStack(spacing: 8) {
+                AutoField(placeholder: t("st.brand"), text: $row.brand,
+                          suggestions: m.brandSuggestions(outOnly),
+                          onPick: { row.flavor = "" })
+                AutoField(placeholder: t("st.flavor"), text: $row.flavor,
+                          suggestions: m.flavorsForBrand(row.brand, outOnly: outOnly),
+                          disabled: outOnly && row.brand.trimmingCharacters(in: .whitespaces).isEmpty)
+                TextField(t("st.grams"), text: $row.grams).keyboardType(.numberPad)
+                    .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.primary)
+                if let a = avail, !row.flavor.isEmpty {
+                    HStack {
+                        Text("\(t("st.available")): \(grams(a.quantity_g))")
+                            .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
+                        Spacer()
+                    }
+                }
+            }
+            .padding(12).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+        }
+        Button { rows.append(.init()) } label: {
+            Label(t("st.moreRow"), systemImage: "plus").font(.system(size: 14, weight: .medium)).foregroundStyle(BrandKit.stash)
+        }
+    }
+
+    // Выбор со склада: список наличия по брендам + поле «сколько берёшь» + бегущий итог.
+    @ViewBuilder private var stockPicker: some View {
+        if pickGroups.isEmpty {
+            Text(t("st.noStockPick")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.45))
+                .frame(maxWidth: .infinity).padding(.vertical, 24)
+        } else {
+            ForEach(pickGroups, id: \.0) { brand, items in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(brand).font(.system(size: 13, weight: .bold)).foregroundStyle(.primary.opacity(0.6))
+                    ForEach(items) { s in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(s.flavor).font(.system(size: 14)).foregroundStyle(.primary)
+                                Text("\(t("st.available")): \(grams(s.quantity_g))")
+                                    .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
+                            }
+                            Spacer()
+                            TextField("0", text: pickBinding(s.id))
+                                .keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                                .font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+                                .frame(width: 72)
+                                .padding(.horizontal, 8).padding(.vertical, 6)
+                                .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                }
+                .padding(12).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+            }
+            HStack {
+                Text(t("st.takeTotal")).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
+                Spacer()
+                Text(grams(takeTotal)).font(.system(size: 15, weight: .bold)).foregroundStyle(BrandKit.stash)
+            }
+            .padding(.horizontal, 4).padding(.top, 2)
+            Button { fromStock = false } label: {
+                Label(t("st.addManual"), systemImage: "plus").font(.system(size: 14, weight: .medium)).foregroundStyle(BrandKit.stash)
             }
         }
     }

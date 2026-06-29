@@ -117,9 +117,12 @@ final class PeopleModel {
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedTasks(); return }
         #endif
-        async let tk = (try? DB.from("staff_tasks").select().order("created_at", ascending: false).list(StaffTask.self)) ?? []
-        async let d = (try? DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)) ?? []
-        tasks = await tk; dir = await d; tasksLoaded = true
+        async let tkR = try? DB.from("staff_tasks").select().order("created_at", ascending: false).list(StaffTask.self)
+        async let dR = try? DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)
+        let tkO = await tkR, dO = await dR
+        if let tk = tkO { tasks = tk } else if !tasks.isEmpty { flash(t("refreshFailed")) }
+        if let d = dO { dir = d }
+        tasksLoaded = true
     }
     func staffName(_ id: String?) -> String { dir.first { $0.id == id }?.name ?? "—" }
     var visibleTasks: [StaffTask] {
@@ -221,10 +224,14 @@ final class PeopleModel {
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedSalary(); return }
         #endif
         let ym = String(key(Date()).prefix(7))
-        async let emps = (try? DB.from("employees").select("id, name, salary, deduct_per_absence").eq("is_active", true).order("name").list(Employee.self)) ?? []
-        async let abs = (try? DB.from("shift_absences").select("employee_id, date, source").gte("date", ym + "-01").list(Absence.self)) ?? []
-        async let cards = (try? DB.from("monthly_card_amounts").select("employee_id, card_amount").eq("month", ym).list(CardAmount.self)) ?? []
-        let employees = await emps, absences = await abs, cardAmounts = await cards
+        async let empsR = try? DB.from("employees").select("id, name, salary, deduct_per_absence").eq("is_active", true).order("name").list(Employee.self)
+        async let absR = try? DB.from("shift_absences").select("employee_id, date, source").gte("date", ym + "-01").list(Absence.self)
+        async let cardsR = try? DB.from("monthly_card_amounts").select("employee_id, card_amount").eq("month", ym).list(CardAmount.self)
+        guard let employees = await empsR else {
+            if !salaryRows.isEmpty { flash(t("refreshFailed")) }
+            return
+        }
+        let absences = (await absR) ?? [], cardAmounts = (await cardsR) ?? []
 
         let advances = (try? await DB.from("salary_advances").select()
             .gte("date", ym + "-01").lte("date", ym + "-31").list(SalaryAdvance.self)) ?? []
@@ -259,10 +266,15 @@ final class PeopleModel {
         let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: calendarMonth)) ?? calendarMonth
         let lastDay = cal.date(byAdding: .day, value: -1,
                                to: cal.date(byAdding: .month, value: 1, to: monthStart) ?? monthStart) ?? monthStart
-        async let dirL = (try? DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)) ?? []
-        async let sch = (try? DB.from("staff_schedules").select().gte("date", key(monthStart)).lte("date", key(lastDay)).list(Schedule.self)) ?? []
-        if dir.isEmpty { dir = await dirL } else { _ = await dirL }
-        var rows = await sch
+        async let dirL = try? DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)
+        async let schR = try? DB.from("staff_schedules").select().gte("date", key(monthStart)).lte("date", key(lastDay)).list(Schedule.self)
+        let dO = await dirL
+        if dir.isEmpty, let d = dO { dir = d }
+        guard let schAll = await schR else {
+            if !schedules.isEmpty { flash(t("refreshFailed")) }
+            return
+        }
+        var rows = schAll
         if !isManager { rows = rows.filter { $0.staff_id == myId } }
         schedules = rows.sorted { $0.date < $1.date }
         schedLoaded = true
@@ -347,13 +359,18 @@ final class PeopleModel {
         let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: Date()))!
         if let g = try? await DB.from("restaurant_settings").select().limit(1).list(GeoSettings.self).first { geo = g }
         if isManager {
-            attendance = (try? await DB.from("attendance_records").select().gte("date", key(monthStart)).order("date", ascending: false).limit(500).list(AttendanceRecord.self)) ?? []
-            if dir.isEmpty { dir = (try? await DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)) ?? [] }
+            if let a = try? await DB.from("attendance_records").select().gte("date", key(monthStart)).order("date", ascending: false).limit(500).list(AttendanceRecord.self) {
+                attendance = a
+            } else if !attendance.isEmpty { flash(t("refreshFailed")) }
+            if dir.isEmpty, let d = try? await DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self) { dir = d }
             struct SchedStub: Codable { let staff_id: String }
-            let todayScheds = (try? await DB.from("staff_schedules").select("staff_id").eq("date", todayKey).list(SchedStub.self)) ?? []
-            todayScheduledIds = Set(todayScheds.map { $0.staff_id })
+            if let todayScheds = try? await DB.from("staff_schedules").select("staff_id").eq("date", todayKey).list(SchedStub.self) {
+                todayScheduledIds = Set(todayScheds.map { $0.staff_id })
+            }
         } else {
-            attendance = (try? await DB.from("attendance_records").select().eq("staff_id", myId).order("date", ascending: false).limit(62).list(AttendanceRecord.self)) ?? []
+            if let a = try? await DB.from("attendance_records").select().eq("staff_id", myId).order("date", ascending: false).limit(62).list(AttendanceRecord.self) {
+                attendance = a
+            } else if !attendance.isEmpty { flash(t("refreshFailed")) }
         }
         attLoaded = true
     }
@@ -385,9 +402,11 @@ final class PeopleModel {
         let cal = Calendar.current
         let from = key(cal.date(byAdding: .day, value: -14, to: Date()) ?? Date())
         let to = key(cal.date(byAdding: .day, value: 60, to: Date()) ?? Date())
-        swaps = (try? await DB.from("shift_swap_requests").select().order("created_at", ascending: false).list(SwapRequest.self)) ?? []
-        if dir.isEmpty { dir = (try? await DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)) ?? [] }
-        swapScheds = (try? await DB.from("staff_schedules").select().gte("date", from).lte("date", to).list(Schedule.self)) ?? []
+        if let s = try? await DB.from("shift_swap_requests").select().order("created_at", ascending: false).list(SwapRequest.self) {
+            swaps = s
+        } else if !swaps.isEmpty { flash(t("refreshFailed")) }
+        if dir.isEmpty, let d = try? await DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self) { dir = d }
+        if let ss = try? await DB.from("staff_schedules").select().gte("date", from).lte("date", to).list(Schedule.self) { swapScheds = ss }
         swapsLoaded = true
     }
     func swapSched(_ id: String?) -> Schedule? { swapScheds.first { $0.id == id } }
@@ -420,12 +439,15 @@ final class PeopleModel {
         // Чек-лист привязан к открытой смене модуля Manager: пока на сегодня есть смена,
         // чек-лист активен, а его прохождение пишется по shift_id этой смены. Новая смена
         // (новый день/новый shift_id) → чистые галочки.
-        let sh = (try? await DB.from("shifts").select("id, status, date")
-            .eq("date", key(Date())).order("opened_at", ascending: false).limit(1).list(ShiftRef.self)) ?? []
+        guard let sh = try? await DB.from("shifts").select("id, status, date")
+            .eq("date", key(Date())).order("opened_at", ascending: false).limit(1).list(ShiftRef.self) else {
+            if !checklists.isEmpty { flash(t("refreshFailed")) }
+            return
+        }
         openShiftId = sh.first?.id
         if let cls = try? await DB.from("shift_checklists").select().list(ShiftChecklist.self) { checklists = cls }
         if let sid = openShiftId {
-            completions = (try? await DB.from("shift_checklist_completions").select().eq("shift_id", sid).list(ChecklistCompletion.self)) ?? []
+            if let c = try? await DB.from("shift_checklist_completions").select().eq("shift_id", sid).list(ChecklistCompletion.self) { completions = c }
         } else {
             completions = []
         }
@@ -503,7 +525,9 @@ final class PeopleModel {
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedTech(); return }
         #endif
-        techCards = (try? await DB.from("tech_cards").select().eq("is_active", true).order("name").list(TechCard.self)) ?? []
+        if let tc = try? await DB.from("tech_cards").select().eq("is_active", true).order("name").list(TechCard.self) {
+            techCards = tc
+        } else if !techCards.isEmpty { flash(t("refreshFailed")) }
         techLoaded = true
     }
     func saveTechCard(id: String?, name: String, category: String, items: [String]) async {
@@ -548,7 +572,9 @@ final class PeopleModel {
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedMenu(); return }
         #endif
-        menu = (try? await DB.from("menu_items").select().eq("is_visible", true).order("position").list(MenuItem.self)) ?? []
+        if let mi = try? await DB.from("menu_items").select().eq("is_visible", true).order("position").list(MenuItem.self) {
+            menu = mi
+        } else if !menu.isEmpty { flash(t("refreshFailed")) }
         menuLoaded = true
     }
     func toggleItem(_ item: MenuItem) async {
@@ -565,8 +591,10 @@ final class PeopleModel {
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedOrders(); return }
         #endif
         let from = key(Calendar.current.date(byAdding: .day, value: -2, to: Date()) ?? Date())
-        orders = (try? await DB.from("menu_orders").select().gte("created_at", from)
-            .order("created_at", ascending: false).limit(100).list(MenuOrder.self)) ?? []
+        if let o = try? await DB.from("menu_orders").select().gte("created_at", from)
+            .order("created_at", ascending: false).limit(100).list(MenuOrder.self) {
+            orders = o
+        } else if !orders.isEmpty { flash(t("refreshFailed")) }
         ordersLoaded = true
     }
     var activeOrders: [MenuOrder] { orders.filter { $0.status == "new" || $0.status == "in_progress" } }
@@ -578,7 +606,9 @@ final class PeopleModel {
 
     // закуп
     func loadPurchase() async {
-        purchase = (try? await DB.from("purchase_items").select().order("created_at", ascending: false).limit(300).list(PurchaseItem.self)) ?? []
+        if let p = try? await DB.from("purchase_items").select().order("created_at", ascending: false).limit(300).list(PurchaseItem.self) {
+            purchase = p
+        } else if !purchase.isEmpty { flash(t("refreshFailed")) }
         purchaseLoaded = true
     }
     var purchaseTodo: [PurchaseItem] { purchase.filter { $0.status == "todo" } }
@@ -840,6 +870,7 @@ struct PeopleView: View {
 }
 
 private struct PeopleBody: View {
+    @Environment(AppModel.self) private var app
     @Bindable var m: PeopleModel
     @State private var showTaskForm = false
 
@@ -861,6 +892,9 @@ private struct PeopleBody: View {
             }
             .tint(PEOPLE_ACCENT)
             .sensoryFeedback(.selection, trigger: m.tab)
+            .tabEdgeSwipe(tabs: ["shifts", "tasks", "ops", "purchase", "salary"],
+                          selection: $m.tab,
+                          onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
 
             if let toast = m.toast {
                 Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
@@ -910,6 +944,7 @@ private struct TasksTab: View {
     @Bindable var m: PeopleModel
     @Binding var showForm: Bool
     @State private var showDone = false
+    @State private var pendingDelete: StaffTask?
 
     var body: some View {
         Picker("", selection: $m.tasksSeg) {
@@ -921,6 +956,14 @@ private struct TasksTab: View {
             ReportsTab(m: m)
         } else {
             tasksContent
+                .confirmationDialog(t("pe.deleteTask"),
+                                    isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                                    titleVisibility: .visible) {
+                    Button(t("delete"), role: .destructive) {
+                        if let task = pendingDelete { Task { await m.removeTask(task.id) } }; pendingDelete = nil
+                    }
+                    Button(t("cancel"), role: .cancel) { pendingDelete = nil }
+                }
         }
     }
 
@@ -982,7 +1025,17 @@ private struct TasksTab: View {
 
     private func row(_ task: StaffTask) -> some View {
         let done = task.status == "done"
-        return HStack(alignment: .top, spacing: 12) {
+        return SwipeActionRow(
+            leading: SwipeAction(label: done ? t("pe.reopen") : t("done"),
+                                 systemImage: done ? "arrow.uturn.left" : "checkmark.circle.fill",
+                                 tint: BrandKit.analytics) {
+                Task { await m.setStatus(task, done ? "todo" : "done") }
+            },
+            trailing: m.canDelete(task) ? [
+                SwipeAction(label: t("delete"), systemImage: "trash.fill", tint: BrandKit.menu) { pendingDelete = task }
+            ] : []
+        ) {
+        HStack(alignment: .top, spacing: 12) {
             Button { Task { await m.setStatus(task, done ? "todo" : "done") } } label: {
                 ZStack {
                     Circle().stroke(done ? PEOPLE_ACCENT : Color.primary.opacity(0.25), lineWidth: 2).frame(width: 22, height: 22)
@@ -1017,6 +1070,7 @@ private struct TasksTab: View {
             }
         }
         .padding(14)
+        }
     }
 }
 
@@ -2200,6 +2254,7 @@ let PURCHASE_CATS_IOS: [(id: String, label: String)] = [
 private struct PurchaseTab: View {
     @Bindable var m: PeopleModel
     @State private var showForm = false
+    @State private var pendingDelete: PurchaseItem?
 
     var body: some View {
         Group {
@@ -2252,9 +2307,25 @@ private struct PurchaseTab: View {
         }
         .task { if !m.purchaseLoaded { await m.loadPurchase() } }
         .sheet(isPresented: $showForm) { PurchaseFormSheet(m: m) }
+        .confirmationDialog(t("pe.deletePurchase"),
+                            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                            titleVisibility: .visible) {
+            Button(t("delete"), role: .destructive) {
+                if let it = pendingDelete { Task { await m.removePurchase(it) } }; pendingDelete = nil
+            }
+            Button(t("cancel"), role: .cancel) { pendingDelete = nil }
+        }
     }
 
     private func row(_ it: PurchaseItem) -> some View {
+        SwipeActionRow(
+            leading: (m.purchaseSeg == "todo" && m.isManager) ? SwipeAction(label: t("pe.pDone"), systemImage: "checkmark.circle.fill", tint: BrandKit.analytics) {
+                Task { await m.setPurchaseStatus(it, "bought") }
+            } : nil,
+            trailing: (m.isManager || it.created_by == m.myId) ? [
+                SwipeAction(label: t("delete"), systemImage: "trash.fill", tint: BrandKit.menu) { pendingDelete = it }
+            ] : []
+        ) {
         HStack(spacing: 12) {
             if m.purchaseSeg == "todo" && m.isManager {
                 Button { Task { await m.setPurchaseStatus(it, "bought") } } label: {
@@ -2287,6 +2358,7 @@ private struct PurchaseTab: View {
         .padding(.vertical, 12).padding(.horizontal, 14)
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
         .opacity(it.status == "todo" ? 1 : 0.6)
+        }
     }
 
     private func copyList() {

@@ -92,8 +92,12 @@ final class ManagerModel {
         loading = true
         defer { loading = false }
         let dateStr = key(date)
-        let shifts = (try? await DB.from("shifts").select()
-            .eq("date", dateStr).order("opened_at").list(Shift.self)) ?? []
+        // Только при успехе обрабатываем — сбой на refresh не должен сбрасывать открытую смену.
+        guard let shifts = try? await DB.from("shifts").select()
+            .eq("date", dateStr).order("opened_at").list(Shift.self) else {
+            if shift != nil { flash(t("refreshFailed")) }
+            return
+        }
         let opening = await prevClosing(before: date)
 
         // На случай дублей на одну дату (до миграции shifts-date-fix.sql) берём смену
@@ -336,6 +340,8 @@ struct ManagerView: View {
             }
         }
         .animation(.easeOut(duration: 0.3), value: m == nil)
+        .tabEdgeSwipe(tabs: ["only"], selection: .constant("only"),
+                      onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
         .task {
             if m == nil {
                 let model = ManagerModel(rid: app.restaurant?.id ?? "")

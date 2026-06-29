@@ -11,11 +11,13 @@ private let BK_ACCENT = BrandKit.bookings
 // MARK: Статусы
 
 private enum BkStatus: String, CaseIterable {
-    case new, confirmed, cancelled
+    case new, confirmed, arrived, late, cancelled
     var color: Color {
         switch self {
         case .new:       return BrandKit.manager
         case .confirmed: return BrandKit.analytics
+        case .arrived:   return BrandKit.analytics
+        case .late:      return BrandKit.stash
         case .cancelled: return BrandKit.accent
         }
     }
@@ -23,6 +25,8 @@ private enum BkStatus: String, CaseIterable {
         switch self {
         case .new:       return t("bk.stNew")
         case .confirmed: return t("bk.stConfirmed")
+        case .arrived:   return t("bk.stArrived")
+        case .late:      return t("bk.stLate")
         case .cancelled: return t("bk.stCancelled")
         }
     }
@@ -41,8 +45,14 @@ final class BookingsModel {
     var bookings: [Booking] = []
     var monthDays: Set<String> = []    // дни месяца, где есть брони (точки в календаре)
     var loading = true
+    var toast: String?
 
     init(rid: String) { self.rid = rid }
+
+    func flash(_ m: String) {
+        toast = m
+        Task { try? await Task.sleep(nanoseconds: 2_400_000_000); if toast == m { toast = nil } }
+    }
 
     private let dfKey: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX")
@@ -53,9 +63,13 @@ final class BookingsModel {
     func load() async {
         loading = true
         defer { loading = false }
-        let rows = (try? await DB.from("bookings").select()
+        // Только при успехе перезаписываем — сбой на refresh не должен стирать данные.
+        guard let rows = try? await DB.from("bookings").select()
             .eq("booking_date", key(currentDate))
-            .order("booking_time").list(Booking.self)) ?? []
+            .order("booking_time").list(Booking.self) else {
+            if !bookings.isEmpty { flash(t("refreshFailed")) }
+            return
+        }
         // Сортировка: брони без времени — в конец.
         bookings = rows.sorted {
             ($0.booking_time ?? "~", $0.created_by_name ?? "") < ($1.booking_time ?? "~", $1.created_by_name ?? "")
@@ -68,8 +82,8 @@ final class BookingsModel {
         let first = cal.date(from: cal.dateComponents([.year, .month], from: visibleMonth)) ?? visibleMonth
         let next = cal.date(byAdding: .month, value: 1, to: first) ?? first
         let last = cal.date(byAdding: .day, value: -1, to: next) ?? next
-        let rows = (try? await DB.from("bookings").select("booking_date")
-            .gte("booking_date", key(first)).lte("booking_date", key(last)).list(BookingDay.self)) ?? []
+        guard let rows = try? await DB.from("bookings").select("booking_date")
+            .gte("booking_date", key(first)).lte("booking_date", key(last)).list(BookingDay.self) else { return }
         monthDays = Set(rows.compactMap { $0.booking_date })
     }
 
@@ -126,6 +140,14 @@ final class BookingsModel {
         await load()
         await loadMonth()
     }
+
+    /// Свайп-отметка статуса (пришёл/опаздывает) — мгновенно локально, затем на сервер.
+    func setStatus(_ b: Booking, to status: String) async {
+        if let i = bookings.firstIndex(where: { $0.id == b.id }) { bookings[i].status = status }
+        try? await DB.from("bookings").update([
+            "status": status, "updated_at": ISO8601DateFormatter().string(from: Date()),
+        ]).eq("id", b.id).run()
+    }
 }
 
 // MARK: Экран
@@ -135,6 +157,7 @@ struct BookingsView: View {
     @State private var m: BookingsModel?
     @State private var editing: Booking?
     @State private var showEditor = false
+    @State private var pendingDelete: Booking?
 
     private func canEdit(_ b: Booking) -> Bool {
         app.isOfficial || (b.created_by != nil && b.created_by == app.staff?.id)
@@ -152,13 +175,45 @@ struct BookingsView: View {
                         emptyState
                     } else {
                         ForEach(m.bookings) { b in
-                            BookingCard(b: b, editable: canEdit(b)) {
-                                if canEdit(b) { editing = b; showEditor = true }
+                            SwipeActionRow(
+                                leading: canEdit(b) ? SwipeAction(label: t("bk.stArrived"), systemImage: "checkmark.circle.fill", tint: BrandKit.analytics) {
+                                    Task { await m.setStatus(b, to: "arrived") }
+                                } : nil,
+                                trailing: canEdit(b) ? [
+                                    SwipeAction(label: t("bk.stLate"), systemImage: "clock.fill", tint: BrandKit.stash) {
+                                        Task { await m.setStatus(b, to: "late") }
+                                    },
+                                    SwipeAction(label: t("bk.delete"), systemImage: "trash.fill", tint: BrandKit.menu) {
+                                        pendingDelete = b
+                                    },
+                                ] : []
+                            ) {
+                                BookingCard(b: b, editable: canEdit(b)) {
+                                    if canEdit(b) { editing = b; showEditor = true }
+                                }
                             }
                         }
                     }
                 }
                 .overlay(alignment: .bottomTrailing) { addButton }
+                .overlay(alignment: .bottom) {
+                    if let toast = m.toast {
+                        Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
+                            .padding(.horizontal, 18).padding(.vertical, 12)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .padding(.bottom, 60)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: m.toast)
+                .confirmationDialog(t("bk.delete"),
+                                    isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                                    titleVisibility: .visible) {
+                    Button(t("bk.delete"), role: .destructive) {
+                        if let b = pendingDelete { Task { await m.delete(b) } }; pendingDelete = nil
+                    }
+                    Button(t("cancel"), role: .cancel) { pendingDelete = nil }
+                }
                 .sheet(isPresented: $showEditor) {
                     BookingEditor(
                         booking: editing,
@@ -173,6 +228,8 @@ struct BookingsView: View {
                 Color.miseBg
             }
         }
+        .tabEdgeSwipe(tabs: ["only"], selection: .constant("only"),
+                      onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
         .task {
             if m == nil, let rid = app.restaurant?.id {
                 let model = BookingsModel(rid: rid); m = model

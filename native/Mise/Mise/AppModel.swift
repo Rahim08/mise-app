@@ -19,6 +19,7 @@ final class AppModel {
     var currentApp: String?
     var deviceMismatch = false
     var deviceLimitReached = false
+    var scanError: String?   // непустое = показать плашку «Неверный QR» и продолжить скан
 
     struct ResolvedStaff: Codable, Sendable {
         var id: String
@@ -114,20 +115,23 @@ final class AppModel {
     func goWelcome() { phase = .welcome }
 
     func handleScan(_ raw: String) async {
-        var rid = raw
-        if let comps = URLComponents(string: raw),
-           let q = comps.queryItems?.first(where: { $0.name == "restaurant" })?.value {
-            rid = q
+        scanError = nil
+        // Только QR Mise: ссылка вида …/join?restaurant=<id>. Иначе — невалидный код.
+        guard let comps = URLComponents(string: raw),
+              let rid = comps.queryItems?.first(where: { $0.name == "restaurant" })?.value,
+              !rid.isEmpty else {
+            scanError = t("ob.qrInvalid")
+            return
         }
         do {
             let resp = try await API.postJSON("/api/auth/restaurant-info",
                                               body: ["restaurantId": rid],
                                               as: RestaurantInfoResponse.self)
-            guard let r = resp.restaurant else { return }
+            guard let r = resp.restaurant else { scanError = t("ob.qrInvalid"); return }
             restaurant = r
             phase = .pin
         } catch {
-            // остаёмся на экране скана
+            scanError = t("ob.qrInvalid")
         }
     }
 

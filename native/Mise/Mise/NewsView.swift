@@ -61,14 +61,24 @@ final class NewsModel {
     let rid: String
     var posts: [NewsPost] = []
     var loading = true
+    var toast: String?
 
     init(rid: String) { self.rid = rid }
+
+    func flash(_ m: String) {
+        toast = m
+        Task { try? await Task.sleep(nanoseconds: 2_400_000_000); if toast == m { toast = nil } }
+    }
 
     func load() async {
         loading = true
         defer { loading = false }
-        let rows = (try? await DB.from("news_posts").select()
-            .order("created_at", ascending: false).limit(100).list(NewsPost.self)) ?? []
+        // Только при успехе перезаписываем — сбой/пустой ответ на refresh не должен стирать данные.
+        guard let rows = try? await DB.from("news_posts").select()
+            .order("created_at", ascending: false).limit(100).list(NewsPost.self) else {
+            if !posts.isEmpty { flash(t("refreshFailed")) }
+            return
+        }
         // Важные/срочные закрепляем сверху, внутри уровня — новее выше.
         posts = rows.sorted { a, b in
             let ra = NewsPriority(rawValue: a.priority ?? "normal")?.rank ?? 0
@@ -105,6 +115,7 @@ struct NewsView: View {
     @Environment(AppModel.self) private var app
     @State private var m: NewsModel?
     @State private var showCompose = false
+    @State private var pendingDelete: NewsPost?
 
     var body: some View {
         Group {
@@ -116,14 +127,36 @@ struct NewsView: View {
                         emptyState
                     } else {
                         ForEach(m.posts) { p in
-                            NewsCard(p: p, canDelete: app.isOfficial) {
-                                Task { await m.delete(p) }
+                            SwipeActionRow(trailing: app.isOfficial ? [
+                                SwipeAction(label: t("delete"), systemImage: "trash.fill", tint: BrandKit.menu) { pendingDelete = p }
+                            ] : []) {
+                                NewsCard(p: p, canDelete: app.isOfficial) {
+                                    Task { await m.delete(p) }
+                                }
                             }
                         }
                     }
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if app.isOfficial { addButton }
+                }
+                .overlay(alignment: .bottom) {
+                    if let toast = m.toast {
+                        Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
+                            .padding(.horizontal, 18).padding(.vertical, 12)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .padding(.bottom, 60)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: m.toast)
+                .confirmationDialog(t("nw.delete"),
+                                    isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                                    titleVisibility: .visible) {
+                    Button(t("delete"), role: .destructive) {
+                        if let p = pendingDelete { Task { await m.delete(p) } }; pendingDelete = nil
+                    }
+                    Button(t("cancel"), role: .cancel) { pendingDelete = nil }
                 }
                 .sheet(isPresented: $showCompose) {
                     NewsCompose(author: (app.staff?.id ?? "owner", app.staff?.name ?? t("role.owner"))) { kind, priority, title, body in
@@ -134,6 +167,8 @@ struct NewsView: View {
                 Color.miseBg
             }
         }
+        .tabEdgeSwipe(tabs: ["only"], selection: .constant("only"),
+                      onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
         .task {
             if m == nil, let rid = app.restaurant?.id {
                 let model = NewsModel(rid: rid); m = model; await model.load()

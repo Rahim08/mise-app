@@ -46,6 +46,7 @@ private struct WelcomeView: View {
 private struct ConnectView: View {
     @Environment(AppModel.self) private var model
     @State private var denied = false
+    @State private var scanAttempt = 0   // инкремент пересоздаёт сканер → продолжаем ловить QR
 
     var body: some View {
         VStack(spacing: 0) {
@@ -71,13 +72,34 @@ private struct ConnectView: View {
                         .padding(.horizontal, 28)
                 } else {
                     QRScannerView(onResult: { code in
-                        Task { await model.handleScan(code) }
+                        Task {
+                            await model.handleScan(code)
+                            // Невалидный код / не найден ресторан → пересоздаём сканер и ловим дальше.
+                            if model.scanError != nil { scanAttempt += 1 }
+                        }
                     }, onDenied: { denied = true })
+                    .id(scanAttempt)
                     .overlay { ScanFrame() }
+                    .overlay(alignment: .bottom) {
+                        if let err = model.scanError {
+                            Text(err)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14).padding(.vertical, 9)
+                                .background(BrandKit.menu.opacity(0.92), in: Capsule())
+                                .padding(.bottom, 14)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.2), value: model.scanError)
                 }
             }
             .frame(width: 300, height: 300)
             .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .onChange(of: model.scanError) { _, newVal in
+                guard newVal != nil else { return }
+                Task { try? await Task.sleep(for: .seconds(3)); if model.scanError == newVal { model.scanError = nil } }
+            }
 
             Spacer()
             Button { model.goWelcome() } label: {

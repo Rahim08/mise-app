@@ -32,6 +32,7 @@ final class AnalyticsModel {
     var prevShiftsRaw: [Shift] = []
     var expenses: [ShiftExpense] = []
     var prevExpenses: [ShiftExpense] = []
+    var pinnedCats: Set<String> = []   // закреплённые категории — первыми в разбивке
     var employees: [Employee] = []
     var cardAmounts: [CardAmount] = []
     var absences: [Absence] = []
@@ -186,10 +187,22 @@ final class AnalyticsModel {
         if let adv = try? await DB.from("salary_advances").select()
             .gte("date", key(monthStart)).lte("date", key(monthEnd)).list(SalaryAdvance.self) { advances = adv }
 
-        // Инкассация копится: сумма нетто (total) из inkassations до конца выбранного месяца.
-        nonisolated struct InkNetOnly: Codable, Sendable { let total: Double? }
-        if let inkRows = try? await DB.from("inkassations").select("total").lte("date", key(monthEnd)).list(InkNetOnly.self) {
-            cumulativeInkass = inkRows.reduce(0) { $0 + ($1.total ?? 0) }
+        // Инкассация копится ЧЕРЕЗ МЕСЯЦЫ (деньги заведения, не обнуляются на новый месяц):
+        // вся валовая инкассация по сменам до конца выбранного месяца минус все списания
+        // из инкассации (расход + выплаченная из неё ЗП). Берём gross из shifts (есть у каждой
+        // смены), вычеты — из inkassations (строка есть только когда были траты).
+        nonisolated struct ShiftInk: Codable, Sendable { let inkassation: Double? }
+        nonisolated struct InkDeduct: Codable, Sendable { let expense: Double?; let salary: Double? }
+        async let allShiftInk = try? DB.from("shifts").select("inkassation").lte("date", key(monthEnd)).list(ShiftInk.self)
+        async let allInkDed = try? DB.from("inkassations").select("expense, salary").lte("date", key(monthEnd)).list(InkDeduct.self)
+        let grossInk = (await allShiftInk)?.reduce(0) { $0 + ($1.inkassation ?? 0) } ?? 0
+        let dedInk = (await allInkDed)?.reduce(0) { $0 + (($1.expense ?? 0) + ($1.salary ?? 0)) } ?? 0
+        cumulativeInkass = grossInk - dedInk
+
+        // Закреплённые категории расходов — показываются первыми в разбивке.
+        nonisolated struct CatPin: Codable, Sendable { let name: String?; let is_pinned: Bool? }
+        if let cats = try? await DB.from("expense_categories").select("name, is_pinned").list(CatPin.self) {
+            pinnedCats = Set(cats.filter { $0.is_pinned == true }.compactMap { $0.name })
         }
 
         // кальян all-time + склад
@@ -257,7 +270,11 @@ final class AnalyticsModel {
             if e.category_name?.hasPrefix("Аванс") == true { continue }
             m[e.category_name ?? "—", default: 0] += e.amount ?? 0
         }
-        return m.sorted { $0.value > $1.value }
+        return m.sorted {
+            let pa = pinnedCats.contains($0.key), pb = pinnedCats.contains($1.key)
+            if pa != pb { return pa }   // закреплённые — первыми
+            return $0.value > $1.value
+        }
     }
 
     // касса
@@ -570,6 +587,7 @@ struct AnalyticsView: View {
 }
 
 private struct AnalyticsBody: View {
+    @Environment(AppModel.self) private var app
     @Bindable var m: AnalyticsModel
     let aiEnabled: Bool
     @State private var showDatePicker = false
@@ -593,6 +611,9 @@ private struct AnalyticsBody: View {
                 }
                 .tint(BrandKit.analytics)
                 .sensoryFeedback(.selection, trigger: m.tab)
+                .tabEdgeSwipe(tabs: ["period", "kassa", "forecast", "salary", "hookah"],
+                              selection: $m.tab,
+                              onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
             }
             if aiEnabled {
                 AIButton(module: "analytics") { msg in await m.handleAI(msg) }
@@ -1038,9 +1059,10 @@ private struct KassaTab: View {
             }
         } else {
             let salToday = max(0, (m.payrollTotal / Double(m.daysInMonth) * Double(m.daysPassed) - m.salAdvance).rounded())
-            let diff = m.totalInkassNet - salToday
+            // Инкассация — накопительная (деньги заведения, перетекают из месяца в месяц).
+            let diff = m.cumulativeInkass - salToday
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-                stat(t("an.totalInkass"), cur(m.totalInkassNet), BrandKit.stash)
+                stat(t("an.totalInkass"), cur(m.cumulativeInkass), BrandKit.stash)
                 stat(t("an.salaryToday"), cur(salToday), diff >= 0 ? BrandKit.analytics : BrandKit.menu)
             }
             if m.shiftsWithInk.isEmpty {
