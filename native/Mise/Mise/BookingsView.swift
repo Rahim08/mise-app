@@ -11,11 +11,13 @@ private let BK_ACCENT = BrandKit.bookings
 // MARK: Статусы
 
 private enum BkStatus: String, CaseIterable {
-    case new, confirmed, cancelled
+    case new, confirmed, arrived, late, cancelled
     var color: Color {
         switch self {
         case .new:       return BrandKit.manager
         case .confirmed: return BrandKit.analytics
+        case .arrived:   return BrandKit.analytics
+        case .late:      return BrandKit.stash
         case .cancelled: return BrandKit.accent
         }
     }
@@ -23,12 +25,27 @@ private enum BkStatus: String, CaseIterable {
         switch self {
         case .new:       return t("bk.stNew")
         case .confirmed: return t("bk.stConfirmed")
+        case .arrived:   return t("bk.stArrived")
+        case .late:      return t("bk.stLate")
         case .cancelled: return t("bk.stCancelled")
         }
     }
 }
 
-// MARK: Модель
+// MARK: - Диапазон
+
+enum BookingRange: Int, CaseIterable {
+    case today, tomorrow, week
+    var label: String {
+        switch self {
+        case .today:    return t("bk.today")
+        case .tomorrow: return t("bk.tomorrow")
+        case .week:     return t("bk.week")
+        }
+    }
+}
+
+// MARK: - Модель
 
 private nonisolated struct BookingDay: Codable, Sendable { let booking_date: String? }
 
@@ -39,8 +56,12 @@ final class BookingsModel {
     var currentDate = Date()           // выбранный день (показываем его брони)
     var visibleMonth = Date()          // месяц, открытый в календаре
     var bookings: [Booking] = []
+    var rangeBookings: [Booking] = []  // для режима Today/Tomorrow/Week
     var monthDays: Set<String> = []    // дни месяца, где есть брони (точки в календаре)
     var loading = true
+    var rangeLoading = false
+    var allBookings: [Booking] = []    // все брони для гостей-лояльности
+    var allBookingsLoaded = false
 
     init(rid: String) { self.rid = rid }
 
@@ -53,12 +74,38 @@ final class BookingsModel {
     func load() async {
         loading = true
         defer { loading = false }
-        let rows = (try? await DB.from("bookings").select()
+        if let rows = try? await DB.from("bookings").select()
             .eq("booking_date", key(currentDate))
-            .order("booking_time").list(Booking.self)) ?? []
-        // Сортировка: брони без времени — в конец.
-        bookings = rows.sorted {
-            ($0.booking_time ?? "~", $0.created_by_name ?? "") < ($1.booking_time ?? "~", $1.created_by_name ?? "")
+            .order("booking_time").list(Booking.self) {
+            bookings = rows.sorted {
+                ($0.booking_time ?? "~", $0.created_by_name ?? "") < ($1.booking_time ?? "~", $1.created_by_name ?? "")
+            }
+        }
+    }
+
+    /// Загрузить брони за диапазон (today/tomorrow/week).
+    func loadRange(from: Date, to: Date) async {
+        rangeLoading = true
+        defer { rangeLoading = false }
+        if let rows = try? await DB.from("bookings").select()
+            .gte("booking_date", key(from))
+            .lte("booking_date", key(to))
+            .order("booking_date")
+            .order("booking_time").list(Booking.self) {
+            rangeBookings = rows
+        }
+    }
+
+    /// Загрузить все брони для CRM гостей (~12 месяцев назад).
+    func loadAllBookings() async {
+        guard !allBookingsLoaded else { return }
+        let cal = Calendar.current
+        let from = cal.date(byAdding: .month, value: -12, to: Date()) ?? Date()
+        if let rows = try? await DB.from("bookings").select()
+            .gte("booking_date", key(from))
+            .order("booking_date").list(Booking.self) {
+            allBookings = rows
+            allBookingsLoaded = true
         }
     }
 
@@ -68,9 +115,10 @@ final class BookingsModel {
         let first = cal.date(from: cal.dateComponents([.year, .month], from: visibleMonth)) ?? visibleMonth
         let next = cal.date(byAdding: .month, value: 1, to: first) ?? first
         let last = cal.date(byAdding: .day, value: -1, to: next) ?? next
-        let rows = (try? await DB.from("bookings").select("booking_date")
-            .gte("booking_date", key(first)).lte("booking_date", key(last)).list(BookingDay.self)) ?? []
-        monthDays = Set(rows.compactMap { $0.booking_date })
+        if let rows = try? await DB.from("bookings").select("booking_date")
+            .gte("booking_date", key(first)).lte("booking_date", key(last)).list(BookingDay.self) {
+            monthDays = Set(rows.compactMap { $0.booking_date })
+        }
     }
 
     func selectDay(_ d: Date) async {
@@ -107,6 +155,14 @@ final class BookingsModel {
         }
         await load()
         await loadMonth()
+        allBookingsLoaded = false // invalidate cache
+    }
+
+    func setStatus(_ b: Booking, status: String) async {
+        try? await DB.from("bookings").update(["status": status]).eq("id", b.id).run()
+        await load()
+        await loadMonth()
+        allBookingsLoaded = false
     }
 
     /// Краткий текст пуша по брони: «Анна · 4 гостя · 19:30 · стол 5».
@@ -116,7 +172,7 @@ final class BookingsModel {
         if let g = b.guests_count { parts.append("\(g)") }
         if let tm = b.booking_time, !tm.isEmpty { parts.append(tm) }
         if let tbl = b.table_label, !tbl.isEmpty { parts.append("стол \(tbl)") }
-        let day = b.booking_date ?? key(currentDate)
+        let day = b.booking_date ?? key(Date())
         if day != key(Date()) { parts.append(day) }
         return parts.isEmpty ? "Добавлена бронь" : parts.joined(separator: " · ")
     }
@@ -125,7 +181,20 @@ final class BookingsModel {
         try? await DB.from("bookings").delete().eq("id", b.id).run()
         await load()
         await loadMonth()
+        allBookingsLoaded = false
     }
+}
+
+// MARK: - Гостевой профиль (агрегат)
+
+struct GuestProfile: Identifiable {
+    let id: String       // нормализованный ключ: телефон-цифры или lowercase-имя
+    let displayName: String
+    let phone: String?
+    var visitCount: Int
+    var lastVisitDate: String?   // "yyyy-MM-dd"
+    var totalGuests: Int
+    var bookings: [Booking]
 }
 
 // MARK: Экран
@@ -135,30 +204,132 @@ struct BookingsView: View {
     @State private var m: BookingsModel?
     @State private var editing: Booking?
     @State private var showEditor = false
+    @State private var showGuests = false
+    @State private var selectedRange: BookingRange = .today
+    @State private var searchText = ""
+    @State private var duplicating: Booking?
+    @State private var duplicateDate = Date()
+    @State private var showDuplicateDialog = false
 
     private func canEdit(_ b: Booking) -> Bool {
         app.isOfficial || (b.created_by != nil && b.created_by == app.staff?.id)
     }
 
+    // Брони текущего дня, отфильтрованные по поиску
+    private func filteredBookings(_ m: BookingsModel) -> [Booking] {
+        guard !searchText.isEmpty else { return m.bookings }
+        let q = searchText.lowercased()
+        return m.bookings.filter {
+            ($0.guest_name ?? "").lowercased().contains(q) ||
+            ($0.phone ?? "").lowercased().contains(q)
+        }
+    }
+
+    // Брони диапазона, отфильтрованные по поиску
+    private func filteredRange(_ m: BookingsModel) -> [Booking] {
+        guard !searchText.isEmpty else { return m.rangeBookings }
+        let q = searchText.lowercased()
+        return m.rangeBookings.filter {
+            ($0.guest_name ?? "").lowercased().contains(q) ||
+            ($0.phone ?? "").lowercased().contains(q)
+        }
+    }
+
+    // Сгруппированные по дням брони для режима Week
+    private func groupedByDay(_ bookings: [Booking]) -> [(String, [Booking])] {
+        var dict: [(String, [Booking])] = []
+        var seen: [String: Int] = [:]
+        for b in bookings {
+            let day = b.booking_date ?? ""
+            if let idx = seen[day] {
+                dict[idx].1.append(b)
+            } else {
+                seen[day] = dict.count
+                dict.append((day, [b]))
+            }
+        }
+        return dict
+    }
+
+    // Кол-во предыдущих визитов гостя по текущей брони
+    private func pastVisitCount(for b: Booking, in allBookings: [Booking]) -> Int {
+        guard let bDate = b.booking_date else { return 0 }
+        let key = guestKey(b)
+        return allBookings.filter { other in
+            guestKey(other) == key &&
+            (other.booking_date ?? "") < bDate &&
+            other.status != "cancelled"
+        }.count
+    }
+
+    private func guestKey(_ b: Booking) -> String {
+        let phone = (b.phone ?? "").filter { $0.isNumber }
+        if !phone.isEmpty { return phone }
+        return (b.guest_name ?? "").lowercased().trimmingCharacters(in: .whitespaces)
+    }
+
     var body: some View {
         Group {
             if let m {
-                AppTabPage(refresh: { await m.load(); await m.loadMonth() }) {
-                    BookingCalendar(m: m)
-                    dayHeader(m)
-                    if m.loading && m.bookings.isEmpty {
-                        ProgressView().tint(BK_ACCENT).frame(maxWidth: .infinity).padding(.top, 40)
-                    } else if m.bookings.isEmpty {
-                        emptyState
-                    } else {
-                        ForEach(m.bookings) { b in
-                            BookingCard(b: b, editable: canEdit(b)) {
-                                if canEdit(b) { editing = b; showEditor = true }
+                VStack(spacing: 0) {
+                    // Поисковая строка
+                    searchBar
+
+                    // Сегментированный контроль
+                    rangePicker(m)
+
+                    AppTabPage(refresh: {
+                        await m.load()
+                        await m.loadMonth()
+                        await refreshRange(m)
+                    }) {
+                        if selectedRange == .today || selectedRange == .tomorrow {
+                            // Calendar mode only for "today" to keep calendar navigation working
+                            if selectedRange == .today {
+                                BookingCalendar(m: m)
+                                dayHeader(m, bookings: filteredBookings(m))
+                            } else {
+                                tomorrowHeader(m)
+                            }
+                            if (selectedRange == .today ? m.loading : m.rangeLoading) &&
+                               (selectedRange == .today ? m.bookings : m.rangeBookings).isEmpty {
+                                ProgressView().tint(BK_ACCENT).frame(maxWidth: .infinity).padding(.top, 40)
+                            } else {
+                                let list = selectedRange == .today ? filteredBookings(m) : filteredRange(m)
+                                if list.isEmpty {
+                                    emptyState
+                                } else {
+                                    ForEach(list) { b in
+                                        bookingRow(b, m: m)
+                                    }
+                                }
+                            }
+                        } else {
+                            // Week view — grouped by day
+                            if m.rangeLoading && m.rangeBookings.isEmpty {
+                                ProgressView().tint(BK_ACCENT).frame(maxWidth: .infinity).padding(.top, 40)
+                            } else {
+                                let groups = groupedByDay(filteredRange(m))
+                                if groups.isEmpty {
+                                    emptyState
+                                } else {
+                                    ForEach(groups, id: \.0) { day, bks in
+                                        weekDayHeader(day: day, bookings: bks)
+                                        ForEach(bks) { b in
+                                            bookingRow(b, m: m)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
-                .overlay(alignment: .bottomTrailing) { addButton }
+                .overlay(alignment: .bottomTrailing) {
+                    VStack(spacing: 12) {
+                        guestsButton(m)
+                        addButton
+                    }
+                }
                 .sheet(isPresented: $showEditor) {
                     BookingEditor(
                         booking: editing,
@@ -169,6 +340,34 @@ struct BookingsView: View {
                         author: (app.staff?.id ?? "owner", app.staff?.name ?? t("role.owner"))
                     )
                 }
+                .sheet(isPresented: $showGuests) {
+                    GuestsView(m: m)
+                }
+                .confirmationDialog(t("bk.duplicateTitle"), isPresented: $showDuplicateDialog, titleVisibility: .visible) {
+                    Button(t("bk.duplicate")) {
+                        if let b = duplicating {
+                            let newId = UUID().uuidString
+                            let copy = Booking(
+                                id: newId,
+                                booking_date: m.key(duplicateDate),
+                                booking_time: b.booking_time,
+                                guest_name: b.guest_name,
+                                guests_count: b.guests_count,
+                                phone: b.phone,
+                                table_label: b.table_label,
+                                note: b.note,
+                                status: "new",
+                                created_by: app.staff?.id ?? b.created_by,
+                                created_by_name: app.staff?.name ?? b.created_by_name
+                            )
+                            Task { await m.save(copy, isNew: true) }
+                        }
+                    }
+                    Button(t("cancel"), role: .cancel) {}
+                } message: {
+                    Text(t("bk.duplicateFor") + ": " + (duplicating.map { _ in m.key(duplicateDate) } ?? ""))
+                }
+
             } else {
                 Color.miseBg
             }
@@ -176,21 +375,179 @@ struct BookingsView: View {
         .task {
             if m == nil, let rid = app.restaurant?.id {
                 let model = BookingsModel(rid: rid); m = model
-                await model.load(); await model.loadMonth()
+                async let l: () = model.load()
+                async let lm: () = model.loadMonth()
+                async let lr: () = loadInitialRange(model)
+                _ = await (l, lm, lr)
+            }
+        }
+        .onChange(of: selectedRange) { _, _ in
+            if let m { Task { await refreshRange(m) } }
+        }
+    }
+
+    private func loadInitialRange(_ m: BookingsModel) async {
+        let cal = Calendar.current
+        let today = Date()
+        let in7 = cal.date(byAdding: .day, value: 6, to: today) ?? today
+        await m.loadRange(from: today, to: in7)
+    }
+
+    private func refreshRange(_ m: BookingsModel) async {
+        let cal = Calendar.current
+        let today = Date()
+        switch selectedRange {
+        case .today:
+            await m.load()
+        case .tomorrow:
+            let tomorrow = cal.date(byAdding: .day, value: 1, to: today) ?? today
+            await m.loadRange(from: tomorrow, to: tomorrow)
+        case .week:
+            let in7 = cal.date(byAdding: .day, value: 6, to: today) ?? today
+            await m.loadRange(from: today, to: in7)
+        }
+    }
+
+    // MARK: - Строка брони со свайпами
+
+    @ViewBuilder
+    private func bookingRow(_ b: Booking, m: BookingsModel) -> some View {
+        let visits = pastVisitCount(for: b, in: m.allBookings)
+        BookingCard(b: b, editable: canEdit(b), pastVisits: visits) {
+            if canEdit(b) { editing = b; showEditor = true }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            // Свайп вправо — «Arrived»
+            if canEdit(b) {
+                Button {
+                    Task { await m.setStatus(b, status: "arrived") }
+                } label: {
+                    Label(t("bk.markArrived"), systemImage: "checkmark.circle.fill")
+                }
+                .tint(BrandKit.analytics)
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            // Полный свайп влево — удалить
+            if canEdit(b) {
+                Button(role: .destructive) {
+                    Task { await m.delete(b) }
+                } label: {
+                    Label(t("bk.delete"), systemImage: "trash")
+                }
+                // Частичный свайп влево — опоздал
+                Button {
+                    Task { await m.setStatus(b, status: "late") }
+                } label: {
+                    Label(t("bk.markLate"), systemImage: "clock.badge.exclamationmark")
+                }
+                .tint(BrandKit.stash)
+            }
+        }
+        .contextMenu {
+            if canEdit(b) {
+                Button {
+                    duplicating = b
+                    duplicateDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+                    showDuplicateDialog = true
+                } label: {
+                    Label(t("bk.duplicate"), systemImage: "doc.on.doc")
+                }
+                Button {
+                    editing = b; showEditor = true
+                } label: {
+                    Label(t("edit"), systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    Task { await m.delete(b) }
+                } label: {
+                    Label(t("bk.delete"), systemImage: "trash")
+                }
             }
         }
     }
 
-    private func dayHeader(_ m: BookingsModel) -> some View {
+    // MARK: - Вспомогательные View
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4))
+            TextField(t("bk.searchPh"), text: $searchText)
+                .font(.system(size: 15))
+            if !searchText.isEmpty {
+                Button { searchText = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.primary.opacity(0.4))
+                }
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 4)
+    }
+
+    private func rangePicker(_ m: BookingsModel) -> some View {
+        Picker("", selection: $selectedRange) {
+            ForEach(BookingRange.allCases, id: \.self) { r in
+                Text(r.label).tag(r)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 16).padding(.vertical, 6)
+    }
+
+    private func dayHeader(_ m: BookingsModel, bookings: [Booking]) -> some View {
         HStack(spacing: 6) {
             Text(dateTitle(m.currentDate)).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
             Text(dow(m.currentDate)).font(.system(size: 13, weight: .medium)).foregroundStyle(BK_ACCENT)
             Spacer()
-            if !m.bookings.isEmpty {
-                Text("\(m.bookings.count)").font(.system(size: 13, weight: .bold)).foregroundStyle(.primary.opacity(0.4))
+            if !bookings.isEmpty {
+                let total = bookings.compactMap { $0.guests_count }.reduce(0, +)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("\(bookings.count)").font(.system(size: 13, weight: .bold)).foregroundStyle(.primary.opacity(0.4))
+                    if total > 0 {
+                        Text(t("bk.totalGuests", ["n": "\(total)"]))
+                            .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.3))
+                    }
+                }
             }
         }
         .padding(.horizontal, 4).padding(.top, 4)
+    }
+
+    private func tomorrowHeader(_ m: BookingsModel) -> some View {
+        let cal = Calendar.current
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+        let bks = filteredRange(m)
+        return HStack(spacing: 6) {
+            Text(dateTitle(tomorrow)).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
+            Text(dow(tomorrow)).font(.system(size: 13, weight: .medium)).foregroundStyle(BK_ACCENT)
+            Spacer()
+            if !bks.isEmpty {
+                let total = bks.compactMap { $0.guests_count }.reduce(0, +)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("\(bks.count)").font(.system(size: 13, weight: .bold)).foregroundStyle(.primary.opacity(0.4))
+                    if total > 0 {
+                        Text(t("bk.totalGuests", ["n": "\(total)"]))
+                            .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.3))
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 4).padding(.top, 4)
+    }
+
+    private func weekDayHeader(day: String, bookings: [Booking]) -> some View {
+        let total = bookings.compactMap { $0.guests_count }.reduce(0, +)
+        return HStack(spacing: 6) {
+            Text(formatWeekDay(day)).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
+            Spacer()
+            Text("\(bookings.count)").font(.system(size: 13, weight: .bold)).foregroundStyle(.primary.opacity(0.4))
+            if total > 0 {
+                Text(t("bk.totalGuests", ["n": "\(total)"]))
+                    .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.3))
+            }
+        }
+        .padding(.horizontal, 4).padding(.top, 8).padding(.bottom, 2)
     }
 
     private var emptyState: some View {
@@ -203,6 +560,20 @@ struct BookingsView: View {
         .frame(maxWidth: .infinity).padding(.vertical, 40)
     }
 
+    private func guestsButton(_ m: BookingsModel) -> some View {
+        Button {
+            Task { await m.loadAllBookings() }
+            showGuests = true
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+            Image(systemName: "person.2").font(.system(size: 19, weight: .semibold)).foregroundStyle(BK_ACCENT)
+                .frame(width: 46, height: 46)
+                .background(.ultraThinMaterial, in: Circle())
+                .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+        }
+        .padding(.trailing, 20)
+    }
+
     private var addButton: some View {
         Button {
             editing = nil; showEditor = true
@@ -212,7 +583,7 @@ struct BookingsView: View {
                 .frame(width: 58, height: 58).background(BK_ACCENT, in: Circle())
                 .shadow(color: BK_ACCENT.opacity(0.4), radius: 12, y: 4)
         }
-        .padding(20)
+        .padding(.horizontal, 20).padding(.bottom, 4)
     }
 
     private func dateTitle(_ d: Date) -> String {
@@ -222,6 +593,12 @@ struct BookingsView: View {
     private func dow(_ d: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "EEEE"; f.locale = Locale(identifier: I18n.code)
         return f.string(from: d).capitalized
+    }
+    private func formatWeekDay(_ dayStr: String) -> String {
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"; df.locale = Locale(identifier: "en_US_POSIX")
+        guard let d = df.date(from: dayStr) else { return dayStr }
+        let out = DateFormatter(); out.dateFormat = "EEEE, d MMM"; out.locale = Locale(identifier: I18n.code)
+        return out.string(from: d).capitalized
     }
 }
 
@@ -324,7 +701,10 @@ private struct BookingCalendar: View {
 private struct BookingCard: View {
     let b: Booking
     let editable: Bool
+    let pastVisits: Int
     let onTap: () -> Void
+
+    @State private var showPhoneMenu = false
 
     private var st: BkStatus { BkStatus(rawValue: b.status ?? "new") ?? .new }
 
@@ -343,14 +723,55 @@ private struct BookingCard: View {
                 .frame(width: 56)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(b.guest_name?.isEmpty == false ? b.guest_name! : t("bk.noName"))
-                        .font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary)
+                    HStack(spacing: 6) {
+                        Text(b.guest_name?.isEmpty == false ? b.guest_name! : t("bk.noName"))
+                            .font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary)
+                        // Badge гостевой лояльности
+                        if pastVisits >= 5 {
+                            Text(t("gs.regularBadge"))
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(BK_ACCENT, in: Capsule())
+                        } else if pastVisits >= 3 {
+                            Text(t("gs.visitBadge", ["n": "\(pastVisits + 1)"]))
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(BK_ACCENT)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(BK_ACCENT.opacity(0.15), in: Capsule())
+                        }
+                    }
                     HStack(spacing: 10) {
                         if let tbl = b.table_label, !tbl.isEmpty {
                             label("tablecells", tbl)
                         }
                         if let ph = b.phone, !ph.isEmpty {
-                            label("phone.fill", ph)
+                            // Телефон — нажимаемый
+                            Button {
+                                showPhoneMenu = true
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "phone.fill").font(.system(size: 10))
+                                    Text(ph).font(.system(size: 12))
+                                }.foregroundStyle(BK_ACCENT)
+                            }
+                            .buttonStyle(.plain)
+                            .confirmationDialog(t("bk.contactGuest"), isPresented: $showPhoneMenu, titleVisibility: .visible) {
+                                let digits = ph.filter { $0.isNumber }
+                                if !digits.isEmpty {
+                                    Button(t("bk.callAction")) {
+                                        if let url = URL(string: "tel:\(digits)") {
+                                            UIApplication.shared.open(url)
+                                        }
+                                    }
+                                    Button("WhatsApp") {
+                                        if let url = URL(string: "https://wa.me/\(digits)") {
+                                            UIApplication.shared.open(url)
+                                        }
+                                    }
+                                }
+                                Button(t("cancel"), role: .cancel) {}
+                            }
                         }
                     }
                     if let note = b.note, !note.isEmpty {
