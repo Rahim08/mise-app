@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { MISE_KNOWLEDGE } from '@/lib/miseKnowledge'
 
-// Telegram-бот поддержки Mise. Webhook принимает апдейты, отвечает через Gemini
+// Telegram-бот поддержки Mise. Webhook принимает апдейты, отвечает через GROQ
 // строго по базе знаний (lib/miseKnowledge.ts). Публичный (для гостей/сотрудников),
-// без Pro-гейта. Env: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, GEMINI_API_KEY.
+// без Pro-гейта. Env: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, GROQ_API_KEY.
 
 const TG = (token: string, method: string, body: any) =>
   fetch(`https://api.telegram.org/bot${token}/${method}`, {
@@ -11,22 +11,25 @@ const TG = (token: string, method: string, body: any) =>
   })
 
 async function ask(question: string): Promise<string> {
-  const key = process.env.GEMINI_API_KEY
+  const key = process.env.GROQ_API_KEY
   if (!key) return 'Бот временно недоступен. Напишите на hello@misesuite.com.'
   try {
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
-      {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: `${MISE_KNOWLEDGE}\n\nВопрос пользователя: ${question}` }] }],
-          generationConfig: { temperature: 0.4, maxOutputTokens: 600 },
-        }),
-      }
-    )
+    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: MISE_KNOWLEDGE },
+          { role: 'user', content: question },
+        ],
+        temperature: 0.4,
+        max_tokens: 600,
+      }),
+    })
     const d = await r.json()
     if (!r.ok) return 'Не получилось ответить. Попробуйте позже или напишите на hello@misesuite.com.'
-    return d.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'Не понял вопрос — переформулируйте, пожалуйста.'
+    return d.choices?.[0]?.message?.content?.trim() || 'Не понял вопрос — переформулируйте, пожалуйста.'
   } catch {
     return 'Сервис временно недоступен. Напишите на hello@misesuite.com.'
   }

@@ -67,6 +67,8 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   bookings:                    { read: ['manager', 'analytics', 'stash', 'people'], write: ['manager', 'analytics', 'stash', 'people'] },
   // Лента новостей: читают все; публикацию гейтит UI на должностных лиц (owner/manager).
   news_posts:                  { read: ['manager', 'analytics', 'stash', 'people'], write: ['manager', 'analytics', 'stash', 'people'] },
+  // Заметки о гостях (CRM-бронирование): доступ — любой модуль.
+  guest_notes:                 { read: ['manager', 'analytics', 'stash', 'people'], write: ['manager', 'analytics', 'stash', 'people'] },
 }
 
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'like', 'ilike'])
