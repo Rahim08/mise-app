@@ -298,7 +298,9 @@ function CategoriesCard({ restaurantId }: { restaurantId: string }) {
   const load = async () => {
     setLoading(true)
     const { data } = await db.from('expense_categories').select('*').eq('restaurant_id', restaurantId).order('name')
-    setCats(data || []); setLoading(false)
+    // Закреплённые — первыми (как в Аналитике), внутри групп по алфавиту.
+    const rows = (data || []).sort((a: any, b: any) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) || String(a.name).localeCompare(String(b.name)))
+    setCats(rows); setLoading(false)
   }
 
   useEffect(() => { if (restaurantId) load() }, [restaurantId])
@@ -307,6 +309,12 @@ function CategoriesCard({ restaurantId }: { restaurantId: string }) {
     if (!newName.trim()) return
     await db.from('expense_categories').insert({ restaurant_id: restaurantId, name: newName.trim() })
     setNewName(''); load()
+  }
+
+  const togglePin = async (cat: any) => {
+    const { error } = await db.from('expense_categories').update({ is_pinned: !cat.is_pinned }).eq('id', cat.id)
+    if (error) { alert(tr('dash.notSaved') + error.message); return }
+    load()
   }
 
   const remove = async (id: string) => {
@@ -332,7 +340,13 @@ function CategoriesCard({ restaurantId }: { restaurantId: string }) {
           ? <div style={{ color: 'var(--tx2)', fontSize: '.85rem' }}>{tr('dash.noCats')}</div>
           : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {cats.map(cat => (
-                <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--fill)', borderRadius: 980, padding: '6px 12px' }}>
+                <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: cat.is_pinned ? 'var(--accent-soft, rgba(10,132,255,.14))' : 'var(--fill)', border: cat.is_pinned ? '1px solid var(--accent, #0a84ff)' : '1px solid transparent', borderRadius: 980, padding: '6px 12px' }}>
+                  <button onClick={() => togglePin(cat)} title={cat.is_pinned ? tr('dash.unpinCat') : tr('dash.pinCat')}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, lineHeight: 0, display: 'flex', color: cat.is_pinned ? 'var(--accent, #0a84ff)' : 'var(--tx3)' }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill={cat.is_pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 4h6l-1 7 3 3v2H7v-2l3-3-1-7z" /><line x1="12" y1="16" x2="12" y2="21" />
+                    </svg>
+                  </button>
                   <span style={{ fontSize: '.85rem', fontWeight: 500, color: 'var(--tx)' }}>{cat.name}</span>
                   <button onClick={() => remove(cat.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tx3)', fontSize: '.85rem', padding: 0, lineHeight: 1 }}>✕</button>
                 </div>

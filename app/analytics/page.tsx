@@ -431,6 +431,7 @@ export default function AnalyticsApp() {
   const [allShiftsRaw, setAllShifts] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
   const [allExpenses, setAllExpenses] = useState<any[]>([])
+  const [pinnedCats, setPinnedCats] = useState<Set<string>>(new Set())
   const [employees, setEmployees] = useState<any[]>([])
   const [cardAmounts, setCardAmounts] = useState<any[]>([])
   const [absences, setAbsences] = useState<any[]>([])
@@ -473,6 +474,9 @@ export default function AnalyticsApp() {
       setHk(h => ({ ...h, allRows: data || [] })))
     db.from('hookah_types').select('id, name').then(({ data }: any) =>
       setHk(h => ({ ...h, types: data || [] })))
+    // Закреплённые категории расходов — показываются первыми в разбивке.
+    db.from('expense_categories').select('name, is_pinned').then(({ data }: any) =>
+      setPinnedCats(new Set((data || []).filter((c: any) => c.is_pinned).map((c: any) => c.name))))
     loadAll(restaurantId, new Date())
     loadAllHistory(restaurantId)
   }, [restaurantId])
@@ -540,7 +544,10 @@ export default function AnalyticsApp() {
   const getCatMap = (exps: any[]) => {
     const m: Record<string, number> = {}
     exps.filter((e: any) => !e.employee_id).forEach((e: any) => { m[e.category_name] = (m[e.category_name] || 0) + e.amount })
-    return Object.entries(m).sort((a, b) => b[1] - a[1])
+    return Object.entries(m).sort((a, b) => {
+      const pa = pinnedCats.has(a[0]) ? 1 : 0, pb = pinnedCats.has(b[0]) ? 1 : 0
+      return pb - pa || b[1] - a[1]
+    })
   }
 
   const buildContext = () => {
@@ -638,7 +645,8 @@ export default function AnalyticsApp() {
   const renderPeriod = () => {
     const dayStr = fmtDate(currentDate)
     const dayShift = shifts.find((s: any) => s.date === dayStr)
-    const dayExps = dayShift ? expenses.filter((e: any) => e.shift_id === dayShift.id && !e.employee_id) : []
+    const dayExps = (dayShift ? expenses.filter((e: any) => e.shift_id === dayShift.id && !e.employee_id) : [])
+      .sort((a: any, b: any) => ((pinnedCats.has(b.category_name) ? 1 : 0) - (pinnedCats.has(a.category_name) ? 1 : 0)) || b.amount - a.amount)
     const inkAmt = dayShift?.inkassation || 0
     const dayInk = inkAmt > 0 ? { amount: inkAmt, expense: 0, reason: null, balance: inkAmt } : null
 
@@ -703,7 +711,7 @@ export default function AnalyticsApp() {
       const wi = ws.reduce((s: number, sh: any) => s + sh.income, 0)
       const we = ws.reduce((s: number, sh: any) => s + sh.total_expense, 0)
       const wExps = expenses.filter((e: any) => ws.map((s: any) => s.id).includes(e.shift_id))
-      const cats = getCatMap(wExps); const maxV = cats[0]?.[1] || 1
+      const cats = getCatMap(wExps); const maxV = Math.max(...cats.map((c: any) => c[1]), 1)
       const ip = pct(wi, prevIncome / 4); const ep = pct(we, prevExpense / 4)
 
       return (
@@ -743,7 +751,7 @@ export default function AnalyticsApp() {
     }
 
     // Month
-    const cats = getCatMap(expenses); const top5 = cats.slice(0, 5); const maxV = cats[0]?.[1] || 1
+    const cats = getCatMap(expenses); const top5 = cats.slice(0, 5); const maxV = Math.max(...cats.map((c: any) => c[1]), 1)
     const ip = pct(totalIncome, prevIncome); const ep = pct(totalExpense, prevExpense)
     const incomeArr = shifts.map((s: any) => s.income || 0)
     const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
