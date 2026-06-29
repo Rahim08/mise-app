@@ -1200,7 +1200,6 @@ private struct TaskFormSheet: View {
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
-            .preferredColorScheme(.dark)
         }
     }
 }
@@ -1330,7 +1329,6 @@ private struct ReportFormSheet: View {
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
-            .preferredColorScheme(.dark)
         }
     }
 }
@@ -2015,7 +2013,6 @@ private struct SwapCreateSheet: View {
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
-            .preferredColorScheme(.dark)
         }
     }
 }
@@ -2286,7 +2283,6 @@ private struct ScheduleEditSheet: View {
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
-            .preferredColorScheme(.dark)
         }
     }
 }
@@ -2663,7 +2659,6 @@ private struct ChecklistEditSheet: View {
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
-            .preferredColorScheme(.dark)
         }
     }
 }
@@ -2691,7 +2686,6 @@ private struct ChecklistHistorySheet: View {
             .navigationTitle(t("pe.checklistHistory")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(t("done")) { dismiss() } } }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
-            .preferredColorScheme(.dark)
         }
         .task { if !m.clHistoryLoaded { await m.loadChecklistHistory() } }
     }
@@ -2851,7 +2845,6 @@ private struct TechCardSheet: View {
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
-            .preferredColorScheme(.dark)
         }
     }
 }

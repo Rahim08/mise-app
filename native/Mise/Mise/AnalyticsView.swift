@@ -809,7 +809,6 @@ private struct AnalyticsBody: View {
                 .navigationTitle(t("an.pickDay")).navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button(t("done")) { showDatePicker = false } } }
                 .toolbarBackground(Color.miseBg, for: .navigationBar)
-                .preferredColorScheme(.dark)
             }
             .presentationDetents([.medium])
         }
@@ -1112,7 +1111,6 @@ private struct AdvanceAddSheet: View {
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
-            .preferredColorScheme(.dark)
         }
         .presentationDetents([.medium])
     }

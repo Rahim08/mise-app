@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // Локализация нативного приложения. Подход — как в вебе (lib/i18n.tsx): один словарь
 // STRINGS (ключ → переводы по локалям), фолбэк на английский. Язык по умолчанию берётся
@@ -39,7 +40,10 @@ final class L10n {
     }
 
     var theme: AppTheme {
-        didSet { UserDefaults.standard.set(theme.rawValue, forKey: themeKey) }
+        didSet {
+            UserDefaults.standard.set(theme.rawValue, forKey: themeKey)
+            applyThemeToWindows()
+        }
     }
 
     /// SwiftUI colorScheme override (nil = system).
@@ -48,6 +52,23 @@ final class L10n {
         case .dark:   return .dark
         case .light:  return .light
         case .system: return nil
+        }
+    }
+
+    /// Применяет тему на уровне UIWindow. `preferredColorScheme` не догоняет уже
+    /// открытый sheet (Настройки) и нативный таб-бар — они меняются лишь при
+    /// пересоздании иерархии. Override стиля окна шлёт trait-изменение всем
+    /// потомкам сразу, поэтому переключение видно вживую везде.
+    func applyThemeToWindows() {
+        let style: UIUserInterfaceStyle
+        switch theme {
+        case .dark:   style = .dark
+        case .light:  style = .light
+        case .system: style = .unspecified
+        }
+        for scene in UIApplication.shared.connectedScenes {
+            guard let ws = scene as? UIWindowScene else { continue }
+            for w in ws.windows { w.overrideUserInterfaceStyle = style }
         }
     }
 

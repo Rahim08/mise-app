@@ -20,6 +20,7 @@ struct RootView: View {
         .preferredColorScheme(l10n.colorScheme)
         .environment(model)
         .task { await model.start() }
+        .onAppear { l10n.applyThemeToWindows() }
         // Deep-link из виджета: mise://analytics | mise://stash | mise://bookings.
         .onOpenURL { url in route(url) }
         .onChange(of: model.phase) { _, phase in

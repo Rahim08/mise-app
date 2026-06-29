@@ -1088,7 +1088,6 @@ private struct AddMovementSheet: View {
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
-            .preferredColorScheme(.dark)
             .onChange(of: m.movMode) { _, mode in if mode != "writeoff" { writeoffVenue = false } }
             .onAppear {
                 guard !primed else { return }
@@ -1244,7 +1243,6 @@ private struct AddInventorySheet: View {
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
-            .preferredColorScheme(.dark)
         }
     }
 }

@@ -35,7 +35,6 @@ struct MainView: View {
                     .transition(.opacity)
             }
         }
-        .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.22), value: app.currentApp)
         .onAppear {
             // Одно доступное приложение → открываем сразу, без промежуточного экрана.
@@ -262,6 +261,9 @@ struct SettingsView: View {
                 Button(t("cancel"), role: .cancel) {}
             } message: { Text(t("logout.msg")) }
         }
+        // Sheet — отдельный контекст презентации: применяем тему явно, чтобы
+        // переключатель темы менял и сам экран настроек вживую.
+        .preferredColorScheme(L10n.shared.colorScheme)
     }
 }
 
