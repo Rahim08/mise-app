@@ -23,6 +23,16 @@ struct RootView: View {
         .onAppear { l10n.applyThemeToWindows() }
         // Deep-link из виджета: mise://analytics | mise://stash | mise://bookings.
         .onOpenURL { url in route(url) }
+        // Quick Actions с иконки (3D Touch / Haptic Touch)
+        .onReceive(NotificationCenter.default.publisher(for: .quickAction)) { note in
+            guard model.phase == .authed, let type = note.object as? String else { return }
+            switch type {
+            case "com.rahim.mise.openBookings": model.openApp("bookings")
+            case "com.rahim.mise.openManager":  model.openApp("manager")
+            case "com.rahim.mise.addExpense":   model.openApp("manager") // откроет менеджер, расход — через UI
+            default: break
+            }
+        }
         .onChange(of: model.phase) { _, phase in
             if phase == .authed, let id = pendingLink {
                 pendingLink = nil

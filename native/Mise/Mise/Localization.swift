@@ -310,6 +310,7 @@ let STRINGS: [String: [Lang: String]] = [
     "st.onlyLeft":      tr("{b} · {fl}: only {g}", "{b} · {fl}: только {g}", "{b} · {fl}: solo {g}", "{b} · {fl} : seulement {g}", "{b} · {fl}: yalnız {g}", "{b} · {fl}: sadece {g}", "{b} · {fl}: лише {g}", "{b} · {fl}: тек {g}"),
     "st.writeoffReason": tr("Specify the write-off reason", "Укажите причину списания", "Indica il motivo dello scarico", "Indiquez le motif de la radiation", "Silinmə səbəbini göstərin", "Düşüm nedenini belirtin", "Вкажіть причину списання", "Есептен шығару себебін көрсетіңіз"),
     "st.saved":         tr("Saved: {n}", "Сохранено: {n}", "Salvato: {n}", "Enregistré : {n}", "Saxlanıldı: {n}", "Kaydedildi: {n}", "Збережено: {n}", "Сақталды: {n}"),
+    "st.lowStock":      tr("Low stock alert", "Товар заканчивается", "Scorte in esaurimento", "Stock bas", "Stok azalması", "Stok uyarısı", "Сповіщення про запаси", "Қор азайғаны туралы"),
     "st.noTypes":       tr("No session types set", "Виды сессий не заданы", "Nessun tipo di sessione impostato", "Aucun type de session défini", "Seans növləri təyin edilməyib", "Seans türü tanımlı değil", "Типи сесій не задані", "Сеанс түрлері белгіленбеген"),
     "st.noTypesHint":   tr("Add them in the dashboard: Settings → Sessions", "Добавьте их в дашборде: Настройки → Сессии", "Aggiungili nella dashboard: Impostazioni → Sessioni", "Ajoutez-les dans le tableau de bord : Réglages → Sessions", "Onları idarə panelində əlavə edin: Tənzimləmələr → Seanslar", "Bunları panoda ekleyin: Ayarlar → Seanslar", "Додайте їх у дашборді: Налаштування → Сесії", "Оларды дашбордта қосыңыз: Параметрлер → Сеанстар"),
     "st.toToday":       tr("To today", "К сегодня", "A oggi", "À aujourd’hui", "Bu günə", "Bugüne", "До сьогодні", "Бүгінге"),
@@ -380,6 +381,7 @@ let STRINGS: [String: [Lang: String]] = [
     "an.inStock":        tr("In stock", "На складе", "In magazzino", "En stock", "Anbarda", "Stokta", "На складі", "Қоймада"),
     "an.atVenue":        tr("At venue", "В заведении", "Nel locale", "Sur place", "Məkanda", "Mekanda", "У закладі", "Орында"),
     "an.noHookahShifts": tr("No lounge sessions this month", "Сессий лаунжа в этом месяце нет", "Nessuna sessione lounge questo mese", "Aucune session lounge ce mois", "Bu ay launc sessiyası yoxdur", "Bu ay lounge seansı yok", "Цього місяця сесій лаунжу немає", "Бұл айда лаунж сеанстары жоқ"),
+    "an.comparing":      tr("Comparing with previous month", "Сравнение с прошлым месяцем", "Confronto con il mese scorso", "Comparaison avec le mois dernier", "Keçən ayla müqayisə", "Geçen ay ile karşılaştırma", "Порівняння з минулим місяцем", "Өткен аймен салыстыру"),
     "an.shiftsByDay":    tr("SHIFTS BY DAY", "СМЕНЫ ПО ДНЯМ", "TURNI PER GIORNO", "SERVICES PAR JOUR", "GÜNLƏR ÜZRƏ NÖVBƏLƏR", "GÜNE GÖRE VARDİYALAR", "ЗМІНИ ПО ДНЯХ", "КҮНДЕР БОЙЫНША АУЫСЫМДАР"),
     "an.balance":        tr("Balance", "Остаток", "Saldo", "Solde", "Qalıq", "Bakiye", "Залишок", "Қалдық"),
     "an.lastIncome":     tr("Last income", "Последний доход", "Ultimo incasso", "Dernier revenu", "Son gəlir", "Son gelir", "Останній дохід", "Соңғы кіріс"),
@@ -465,6 +467,8 @@ let STRINGS: [String: [Lang: String]] = [
     "pe.requestSent":    tr("Request sent", "Запрос отправлен", "Richiesta inviata", "Demande envoyée", "Sorğu göndərildi", "Talep gönderildi", "Запит надіслано", "Сұраныс жіберілді"),
     "pe.taskCreated":    tr("Task created", "Задача создана", "Compito creato", "Tâche créée", "Tapşırıq yaradıldı", "Görev oluşturuldu", "Завдання створено", "Тапсырма құрылды"),
     "pe.taskCreatedN":   tr("Task created for {n}", "Задача создана для {n}", "Compito creato per {n}", "Tâche créée pour {n}", "{n} üçün tapşırıq yaradıldı", "{n} için görev oluşturuldu", "Завдання створено для {n}", "{n} үшін тапсырма құрылды"),
+    "pe.voiceUnavailable": tr("Voice recognition unavailable", "Распознавание речи недоступно", "Riconoscimento vocale non disponibile", "Reconnaissance vocale indisponible", "Səs tanıma əlçatan deyil", "Ses tanıma kullanılamıyor", "Розпізнавання мови недоступне", "Дауысты тану қолжетімсіз"),
+    "pe.voiceEmpty":     tr("No speech detected", "Речь не распознана", "Nessun rilevamento vocale", "Aucune parole détectée", "Səs aşkar edilmədi", "Ses algılanamadı", "Мова не розпізнана", "Сөз анықталмады"),
 
     // People — задачи
     "pe.reports":        tr("Requests", "Заявки", "Richieste", "Demandes", "Sorğular", "Talepler", "Заявки", "Өтініштер"),
@@ -783,4 +787,15 @@ let STRINGS: [String: [Lang: String]] = [
     "gs.guestInfo":       tr("Guest info", "Информация о госте", "Info ospite", "Info invité", "Qonaq məlumatı", "Misafir bilgisi", "Інфо про гостя", "Қонақ ақпараты"),
     "gs.namePh":          tr("Name", "Имя", "Nome", "Nom", "Ad", "Ad", "Ім'я", "Аты"),
     "gs.phonePh":         tr("Phone", "Телефон", "Telefono", "Téléphone", "Telefon", "Telefon", "Телефон", "Телефон"),
+    // Quick Actions
+    "qa.todayBookings":   tr("Today's bookings", "Брони на сегодня", "Prenotazioni oggi", "Réservations du jour", "Bu günün rezervləri", "Bugünün rezervasyonları", "Броні на сьогодні", "Бүгінгі брондар"),
+    "qa.openShift":       tr("Open shift", "Открыть смену", "Apri turno", "Ouvrir le service", "Növbəni aç", "Vardiyayı aç", "Відкрити зміну", "Ауысымды ашу"),
+    "qa.addExpense":      tr("Add expense", "Добавить расход", "Aggiungi spesa", "Ajouter une dépense", "Xərc əlavə et", "Gider ekle", "Додати витрату", "Шығыс қосу"),
+    // Notification settings
+    "ns.lowStock":        tr("Low stock alerts", "Остатки заканчиваются", "Scorte in esaurimento", "Stock bas", "Stok azalması", "Stok uyarısı", "Сповіщення про запаси", "Қор азайғаны туралы"),
+    "ns.shiftReminder":   tr("Shift end reminder", "Напоминание о конце смены", "Promemoria fine turno", "Rappel fin de service", "Növbə sonu xatırlatması", "Vardiya sonu hatırlatması", "Нагадування про кінець зміни", "Ауысым соңы еске салу"),
+    "ns.voiceTasks":      tr("Voice task confirmation", "Подтверждение голосовой задачи", "Conferma compito vocale", "Confirmation tâche vocale", "Səsli tapşırıq təsdiqi", "Sesli görev onayı", "Підтвердження голосового завдання", "Дауыс тапсырмасын растау"),
+    // Shift reminder
+    "shift.reminderTitle": tr("Shift ending soon", "Смена скоро заканчивается", "Turno in chiusura", "Fin de service", "Növbə tezliklə bitir", "Vardiya yakında bitiyor", "Зміна незабаром закінчується", "Ауысым таяқша аяқталады"),
+    "shift.reminderBody":  tr("30 minutes until shift end. Don't forget to save data!", "30 минут до конца смены. Не забудьте сохранить данные!", "30 minuti alla fine del turno. Non dimenticare di salvare!", "30 minutes avant la fin du service. N'oubliez pas de sauvegarder!", "Növbə bitməsinə 30 dəqiqə. Məlumatları saxlamağı unutmayın!", "Vardiya bitimine 30 dakika. Verileri kaydetmeyi unutmayın!", "30 хвилин до кінця зміни. Не забудьте зберегти дані!", "Ауысым аяқталуына 30 минут. Деректерді сақтауды ұмытпаңыз!"),
 ]

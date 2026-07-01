@@ -4,7 +4,8 @@ import Charts
 private func cur(_ v: Double) -> String { Money.s(v) }
 private func kg(_ g: Double) -> String {
     if g >= 1000 {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 1
+        let f = NumberFormatter(); f.numberStyle = .decimal
+        f.minimumFractionDigits = 0; f.maximumFractionDigits = 2   // точно, без округления до целых
         return (f.string(from: NSNumber(value: g / 1000)) ?? "0") + " кг"
     }
     return "\(Int(g.rounded())) г"
@@ -19,6 +20,7 @@ final class AnalyticsModel {
     var tab = "period"
     var loading = true
     var currentDate = Date()
+    var showPrevious = false // показать сравнение с прошлым месяцем
 
     var includeCard = false
     var hkPrice = 0.0
@@ -100,7 +102,7 @@ final class AnalyticsModel {
             Cash collections (\(shiftsWithInk.count)): \(inkLines.isEmpty ? "none" : inkLines).
             Total inkass: gross \(Money.s(totalInkass)), net \(Money.s(totalInkassNet)).
             Hookah this period: \(qtyMonth) paid + \(qtyFree) free, revenue \(Money.s(revMonth)). By type: \(typeLines.isEmpty ? "none" : typeLines).
-            Tobacco in venue: \(kg(venueAtPlaceG)). Warehouse stock: \(stockLines.isEmpty ? "none" : stockLines).
+            Tobacco in venue: \(kg(venueAtPlaceG)). Warehouse total: \(kg(stockG)) (\(String(format: "%.0f", stockG)) g). Per-flavor warehouse stock: \(stockLines.isEmpty ? "none" : stockLines).
             Payroll fund: \(Money.s(payrollTotal)). Per employee: \(salLines.isEmpty ? "none" : salLines).
             """
 
@@ -556,118 +558,113 @@ final class AnalyticsModel {
         return url
     }
 
-    /// Render a PDF (A4) of the shift table and return its Data.
+    /// Render a clean A4 analytics report (header + summary cards + daily table).
     func buildPDF() -> Data {
-        let pageWidth: CGFloat = 595
-        let pageHeight: CGFloat = 842
-        let margin: CGFloat = 40
-        let rowH: CGFloat = 22
-        let headerH: CGFloat = 32
-        let titleH: CGFloat = 44
+        let pageW: CGFloat = 595, pageH: CGFloat = 842, margin: CGFloat = 40
+        let accent = UIColor(red: 0.20, green: 0.78, blue: 0.35, alpha: 1)   // BrandKit.analytics
 
         let cols: [(String, CGFloat)] = [
-            (t("an.csvDate"),    90),
+            (t("an.csvDate"),    95),
             (t("an.csvOpening"), 80),
             (t("an.csvIncome"),  80),
             (t("an.csvExpense"), 80),
             (t("an.csvInkass"),  80),
-            (t("an.csvClosing"), 80),
+            (t("an.csvClosing"), 100),
         ]
-        let tableWidth = cols.reduce(0) { $0 + $1.1 }
+        let tableW = cols.reduce(0) { $0 + $1.1 }
 
-        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight))
+        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageW, height: pageH))
         return renderer.pdfData { ctx in
             ctx.beginPage()
-            let para = NSMutableParagraphStyle()
-            para.alignment = .left
-            let titleAttr: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 17, weight: .bold),
-                .foregroundColor: UIColor.label,
-                .paragraphStyle: para,
-            ]
-            let subAttr: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 12),
-                .foregroundColor: UIColor.secondaryLabel,
-                .paragraphStyle: para,
-            ]
-            let headerAttr: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 10, weight: .semibold),
-                .foregroundColor: UIColor.secondaryLabel,
-            ]
-            let cellAttr: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 11),
-                .foregroundColor: UIColor.label,
-            ]
-            let totalAttr: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 11, weight: .semibold),
-                .foregroundColor: UIColor.label,
-            ]
+            var y: CGFloat = 0
 
-            var y = margin
-
-            // Title
-            (t("an.pdfTitle") as NSString).draw(at: CGPoint(x: margin, y: y), withAttributes: titleAttr)
-            y += titleH - 10
-            (navLabel as NSString).draw(at: CGPoint(x: margin, y: y), withAttributes: subAttr)
-            y += titleH
-
-            // Header row background
-            UIColor.systemGray5.setFill()
-            UIRectFill(CGRect(x: margin, y: y, width: tableWidth, height: headerH))
-
-            var x = margin
-            for col in cols {
-                (col.0 as NSString).draw(
-                    in: CGRect(x: x + 4, y: y + (headerH - 14) / 2, width: col.1 - 8, height: 14),
-                    withAttributes: headerAttr)
-                x += col.1
+            // helper: draw text in a rect (clips/aligns).
+            func text(_ s: String, _ x: CGFloat, _ yy: CGFloat, size: CGFloat,
+                      weight: UIFont.Weight = .regular, color: UIColor = .label,
+                      width: CGFloat? = nil, align: NSTextAlignment = .left) {
+                let p = NSMutableParagraphStyle(); p.alignment = align; p.lineBreakMode = .byTruncatingTail
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: size, weight: weight),
+                    .foregroundColor: color, .paragraphStyle: p,
+                ]
+                (s as NSString).draw(in: CGRect(x: x, y: yy, width: width ?? (pageW - x - margin), height: size + 8),
+                                     withAttributes: attrs)
             }
+
+            // Accent bar + title
+            accent.setFill(); UIRectFill(CGRect(x: 0, y: 0, width: pageW, height: 6))
+            y = margin
+            text(t("an.pdfTitle"), margin, y, size: 22, weight: .bold)
+            let df = DateFormatter(); df.dateFormat = "dd.MM.yyyy"; df.locale = appLocale()
+            text(t("an.pdfGenerated") + " " + df.string(from: Date()), margin, y + 6,
+                 size: 11, color: .secondaryLabel, width: tableW, align: .right)
+            y += 32
+            text(navLabel, margin, y, size: 13, weight: .semibold, color: .secondaryLabel)
+            y += 34
+
+            // Summary cards
+            let gap: CGFloat = 10
+            let cardW = (tableW - gap * 3) / 4
+            let cardH: CGFloat = 58
+            let cards: [(String, String, UIColor)] = [
+                (t("an.income"),    Money.s(totalIncome),          accent),
+                (t("an.expense"),   Money.s(totalExpense),         .systemRed),
+                (t("mg.inkass"),    Money.s(totalInkass),          .systemOrange),
+                (t("an.avgPerDay"), Money.s(dailyAvg.rounded()),   .systemGray),
+            ]
+            for (i, c) in cards.enumerated() {
+                let cx = margin + CGFloat(i) * (cardW + gap)
+                let path = UIBezierPath(roundedRect: CGRect(x: cx, y: y, width: cardW, height: cardH), cornerRadius: 10)
+                UIColor.systemGray6.setFill(); path.fill()
+                text(c.0.uppercased(), cx + 10, y + 9, size: 8, weight: .semibold, color: .secondaryLabel, width: cardW - 20)
+                text(c.1, cx + 10, y + 26, size: 15, weight: .bold, color: c.2, width: cardW - 20)
+            }
+            y += cardH + 26
+
+            // Section title
+            text(t("an.byDay"), margin, y, size: 11, weight: .semibold, color: .secondaryLabel)
+            y += 22
+
+            guard !filledShifts.isEmpty else {
+                text(t("an.noShiftData"), margin, y + 8, size: 13, color: .secondaryLabel)
+                return
+            }
+
+            let headerH: CGFloat = 26, rowH: CGFloat = 22
+            func drawCells(_ cells: [String], yy: CGFloat, size: CGFloat, weight: UIFont.Weight, color: UIColor) {
+                var x = margin
+                for (ci, col) in cols.enumerated() {
+                    text(cells[ci], x + 6, yy, size: size, weight: weight, color: color,
+                         width: col.1 - 12, align: ci == 0 ? .left : .right)
+                    x += col.1
+                }
+            }
+
+            // Table header
+            accent.withAlphaComponent(0.12).setFill(); UIRectFill(CGRect(x: margin, y: y, width: tableW, height: headerH))
+            drawCells(cols.map { $0.0 }, yy: y + 7, size: 9, weight: .semibold, color: .secondaryLabel)
             y += headerH
 
-            // Data rows
+            // Rows (with pagination)
             for (i, s) in filledShifts.enumerated() {
-                if i % 2 == 1 {
-                    UIColor.systemGray6.setFill()
-                    UIRectFill(CGRect(x: margin, y: y, width: tableWidth, height: rowH))
-                }
-                let cells = [
+                if y + rowH > pageH - margin { ctx.beginPage(); y = margin }
+                if i % 2 == 1 { UIColor.systemGray6.setFill(); UIRectFill(CGRect(x: margin, y: y, width: tableW, height: rowH)) }
+                drawCells([
                     s.date,
                     Money.s(s.opening_balance ?? 0),
                     Money.s(s.income ?? 0),
                     Money.s(s.total_expense ?? 0),
                     Money.s(s.inkassation ?? 0),
                     Money.s(s.closing_balance ?? 0),
-                ]
-                x = margin
-                for (ci, col) in cols.enumerated() {
-                    (cells[ci] as NSString).draw(
-                        in: CGRect(x: x + 4, y: y + (rowH - 13) / 2, width: col.1 - 8, height: 13),
-                        withAttributes: cellAttr)
-                    x += col.1
-                }
+                ], yy: y + 5, size: 10, weight: .regular, color: .label)
                 y += rowH
-
-                // start new page if needed
-                if y + rowH + 60 > pageHeight - margin {
-                    ctx.beginPage()
-                    y = margin
-                }
             }
 
-            // Totals row
-            UIColor.systemGray4.setFill()
-            UIRectFill(CGRect(x: margin, y: y, width: tableWidth, height: rowH))
-            let totalCells = [
-                t("an.csvTotal"), "", Money.s(totalIncome),
-                Money.s(totalExpense), Money.s(totalInkass), "",
-            ]
-            x = margin
-            for (ci, col) in cols.enumerated() {
-                (totalCells[ci] as NSString).draw(
-                    in: CGRect(x: x + 4, y: y + (rowH - 13) / 2, width: col.1 - 8, height: 13),
-                    withAttributes: totalAttr)
-                x += col.1
-            }
+            // Totals
+            if y + rowH > pageH - margin { ctx.beginPage(); y = margin }
+            UIColor.systemGray5.setFill(); UIRectFill(CGRect(x: margin, y: y, width: tableW, height: rowH))
+            drawCells([t("an.csvTotal"), "", Money.s(totalIncome), Money.s(totalExpense), Money.s(totalInkass), ""],
+                      yy: y + 5, size: 10, weight: .semibold, color: .label)
         }
     }
 
@@ -771,6 +768,8 @@ private struct AnalyticsBody: View {
                               selection: $m.tab,
                               onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
             }
+            .blur(radius: AIChat.shared.open ? 2 : 0)
+            .animation(.easeOut(duration: 0.3), value: AIChat.shared.open)
             if aiEnabled {
                 AIButton(module: "analytics") { msg in await m.handleAI(msg) }
             }
@@ -797,7 +796,34 @@ private struct AnalyticsBody: View {
                 Image(systemName: "chevron.right").foregroundStyle(.primary).frame(width: 36, height: 36)
             }
         }
+        // Swipe для сравнения с прошлым месяцем
+        .gesture(
+            DragGesture(minimumDistance: 50)
+                .onEnded { value in
+                    if value.translation.width < -50 { // свайп влево → показать прошлый
+                        withAnimation { m.showPrevious = true }
+                    } else if value.translation.width > 50 { // свайп вправо → скрыть
+                        withAnimation { m.showPrevious = false }
+                    }
+                }
+        )
         .padding(.horizontal, 16).padding(.bottom, 6)
+        // Бейдж сравнения
+        .overlay(alignment: .bottom) {
+            if m.showPrevious {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.left.arrow.right").font(.system(size: 10))
+                    Text(t("an.comparing")).font(.system(size: 11, weight: .medium))
+                    Button { withAnimation { m.showPrevious = false } } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 12))
+                    }
+                }
+                .foregroundStyle(BrandKit.analytics)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(BrandKit.analytics.opacity(0.12), in: Capsule())
+                .padding(.bottom, -20)
+            }
+        }
         .sheet(isPresented: $showDatePicker) {
             NavigationStack {
                 ZStack {
@@ -1173,45 +1199,54 @@ private struct ShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
 
+private struct SharePayload: Identifiable { let id = UUID(); let url: URL }
+
 /// A small export menu button (CSV + PDF) for analytics tabs.
+/// `compact` — иконка без подписи, для встраивания в строку заголовка («ПО ДНЯМ»).
 private struct ExportMenuButton: View {
     let m: AnalyticsModel
-    @State private var shareItems: [Any] = []
-    @State private var showShare = false
+    var compact: Bool = false
+    @State private var payload: SharePayload?
+
+    private func writePDF() -> URL? {
+        let data = m.buildPDF()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("analytics-\(m.navLabel.replacingOccurrences(of: " ", with: "-")).pdf")
+        return (try? data.write(to: url)) != nil ? url : nil
+    }
+
+    // Презентация share-листа прямо из Menu-действия в SwiftUI ненадёжна (лист не
+    // открывается) — даём меню закрыться и только потом ставим item.
+    private func present(_ url: URL?) {
+        guard let url else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { payload = SharePayload(url: url) }
+    }
 
     var body: some View {
-        HStack {
-            Spacer()
-            Menu {
-                Button {
-                    if let url = m.csvFileURL() {
-                        shareItems = [url]
-                        showShare = true
-                    }
-                } label: {
-                    Label(t("an.exportCSV"), systemImage: "tablecells")
-                }
-                Button {
-                    let data = m.buildPDF()
-                    let url = FileManager.default.temporaryDirectory
-                        .appendingPathComponent("analytics-\(m.navLabel.replacingOccurrences(of: " ", with: "-")).pdf")
-                    if (try? data.write(to: url)) != nil {
-                        shareItems = [url]
-                        showShare = true
-                    }
-                } label: {
-                    Label(t("an.exportPDF"), systemImage: "doc.richtext")
-                }
-            } label: {
+        Menu {
+            Button { present(m.csvFileURL()) } label: {
+                Label(t("an.exportCSV"), systemImage: "tablecells")
+            }
+            Button { present(writePDF()) } label: {
+                Label(t("an.exportPDF"), systemImage: "doc.richtext")
+            }
+        } label: {
+            if compact {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(BrandKit.analytics)
+                    .padding(6)
+                    .background(Color.primary.opacity(0.07), in: Circle())
+            } else {
                 Label(t("an.export"), systemImage: "square.and.arrow.up")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(BrandKit.analytics)
                     .padding(.vertical, 6).padding(.horizontal, 12)
                     .background(Color.primary.opacity(0.07), in: Capsule())
             }
-            .sheet(isPresented: $showShare) {
-                ShareSheet(activityItems: shareItems)
-            }
+        }
+        .sheet(item: $payload) { p in
+            ShareSheet(activityItems: [p.url])
         }
     }
 }
@@ -1221,8 +1256,6 @@ private struct ExportMenuButton: View {
 private struct KassaTab: View {
     @Bindable var m: AnalyticsModel
     var body: some View {
-        ExportMenuButton(m: m)
-
         Picker("", selection: $m.kassaMode) {
             Text(t("tab.kassa")).tag("kassa"); Text(t("mg.inkass")).tag("inkass")
         }.pickerStyle(.segmented)
@@ -1249,7 +1282,12 @@ private struct KassaTab: View {
                 Text(t("an.noShiftData")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 30)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(t("an.byDay")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5).padding(.bottom, 8)
+                    HStack {
+                        Text(t("an.byDay")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
+                        Spacer()
+                        ExportMenuButton(m: m, compact: true)
+                    }
+                    .padding(.bottom, 8)
                     HStack {
                         Text(t("an.date")).frame(width: 44, alignment: .leading)
                         Text(t("an.inCol")).frame(maxWidth: .infinity, alignment: .trailing)

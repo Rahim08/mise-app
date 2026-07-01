@@ -40,6 +40,44 @@ struct NextBookingIntent: AppIntent {
     }
 }
 
+/// «Открой смену» — открывает приложение на вкладке Manager.
+struct OpenShiftIntent: AppIntent {
+    static var title: LocalizedStringResource = "Открыть смену / Open shift"
+    static var description = IntentDescription("Открывает Mise на экране смены.")
+
+    @MainActor
+    func perform() async throws -> some IntentResult & OpensIntent {
+        return .result(opensIntent: OpenManagerIntent())
+    }
+}
+
+/// Внутренний intent для навигации на Manager.
+struct OpenManagerIntent: AppIntent {
+    static var title: LocalizedStringResource = "Open Manager"
+    func perform() async throws -> some IntentResult {
+        NotificationCenter.default.post(name: .quickAction, object: "com.rahim.mise.openManager")
+        return .result()
+    }
+}
+
+/// «Сколько броней» — Siri зачитывает количество броней из снимка.
+struct BookingCountIntent: AppIntent {
+    static var title: LocalizedStringResource = "Сколько броней / Booking count"
+    static var description = IntentDescription("Количество броней на сегодня из виджета.")
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let snap = MiseSnapshotStore.read() ?? MiseSnapshot()
+        let count = snap.bookings.count
+        if count == 0 {
+            return .result(dialog: "Броней на сегодня нет.")
+        }
+        let next = snap.bookings.first!
+        let extra = next.table.isEmpty ? "" : ", стол \(next.table)"
+        return .result(dialog: "\(count) броней. Ближайшая: \(next.time), \(next.guest)\(extra).")
+    }
+}
+
 struct MiseShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
@@ -53,6 +91,18 @@ struct MiseShortcuts: AppShortcutsProvider {
             phrases: ["Брони в \(.applicationName)", "\(.applicationName) ближайшая бронь", "Next booking in \(.applicationName)"],
             shortTitle: "Брони сегодня",
             systemImageName: "calendar.badge.clock"
+        )
+        AppShortcut(
+            intent: OpenShiftIntent(),
+            phrases: ["Открой смену в \(.applicationName)", "Open shift in \(.applicationName)", "\(.applicationName) открой смену"],
+            shortTitle: "Открыть смену",
+            systemImageName: "lock.open.fill"
+        )
+        AppShortcut(
+            intent: BookingCountIntent(),
+            phrases: ["Сколько броней в \(.applicationName)", "How many bookings in \(.applicationName)", "\(.applicationName) брони на сегодня"],
+            shortTitle: "Количество броней",
+            systemImageName: "questionmark.circle"
         )
     }
 }

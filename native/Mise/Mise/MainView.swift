@@ -43,10 +43,17 @@ struct MainView: View {
             }
         }
         // Снимок для виджета: считаем при входе и при возврате на передний план.
-        .task { await SnapshotWriter.refresh(canSeeMoney: app.canSeeMoney) }
+        // Перед пересчётом разбираем очередь интерактивных действий из виджета.
+        .task {
+            await SnapshotWriter.drainWidgetActions()
+            await SnapshotWriter.refresh(canSeeMoney: app.canSeeMoney)
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                Task { await SnapshotWriter.refresh(canSeeMoney: app.canSeeMoney, force: true) }
+                Task {
+                    await SnapshotWriter.drainWidgetActions()
+                    await SnapshotWriter.refresh(canSeeMoney: app.canSeeMoney, force: true)
+                }
             }
         }
     }
@@ -274,6 +281,7 @@ private nonisolated struct PrefsBlob: Codable, Sendable {
     var cash_open: Bool?; var cash_close: Bool?; var purchase: Bool?
     var show_cash_amount: Bool?; var purchase_digest: String?
     var booking: Bool?; var news: Bool?
+    var low_stock: Bool?; var voice_tasks: Bool?
 }
 private nonisolated struct NotifPrefRow: Codable, Identifiable, Sendable { let id: String; let prefs: PrefsBlob? }
 
@@ -293,6 +301,8 @@ struct NotificationSettingsView: View {
     @State private var purchaseDigest = "each"
     @State private var booking = true
     @State private var news = true
+    @State private var lowStock = true
+    @State private var voiceTasks = true
 
     private var isManager: Bool { (app.staff?.isOwner ?? false) || app.staff?.role == "manager" }
     private var isOwner: Bool { app.staff?.isOwner ?? false }
@@ -306,6 +316,8 @@ struct NotificationSettingsView: View {
                     Toggle(t("pe.nsTask"), isOn: $task).onChange(of: task) { _, _ in save() }
                     Toggle(t("pe.nsSwap"), isOn: $swap).onChange(of: swap) { _, _ in save() }
                     Toggle(t("pe.nsNews"), isOn: $news).onChange(of: news) { _, _ in save() }
+                    Toggle(t("ns.lowStock"), isOn: $lowStock).onChange(of: lowStock) { _, _ in save() }
+                    Toggle(t("ns.voiceTasks"), isOn: $voiceTasks).onChange(of: voiceTasks) { _, _ in save() }
                 }
                 if isManager {
                     Section(t("pe.nsForManagers")) {
@@ -350,6 +362,8 @@ struct NotificationSettingsView: View {
             purchaseDigest = p?.purchase_digest ?? "each"
             booking = p?.booking ?? true
             news = p?.news ?? true
+            lowStock = p?.low_stock ?? true
+            voiceTasks = p?.voice_tasks ?? true
         }
         loaded = true
     }
@@ -361,6 +375,7 @@ struct NotificationSettingsView: View {
             "cash_open": cashOpen, "cash_close": cashClose, "purchase": purchase,
             "show_cash_amount": showCashAmount, "purchase_digest": purchaseDigest,
             "booking": booking, "news": news,
+            "low_stock": lowStock, "voice_tasks": voiceTasks,
         ]
         Task {
             if let id = rowId {

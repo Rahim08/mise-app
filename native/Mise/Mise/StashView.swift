@@ -357,8 +357,28 @@ final class StashModel {
         await loadWarehouse()
         // Выдача в зал (out) меняет venueBase — нужно сразу пересчитать смену.
         if movMode == "out" { await loadShift() }
+        // Проверка минимального остатка — push если включено
+        checkLowStock()
         flash(t("st.saved", ["n": "\(filled.count)"]))
         return true
+    }
+
+    /// Проверка минимального остатка — отправляет push если включено в настройках.
+    private func checkLowStock() {
+        let prefs = UserDefaults.standard.dictionary(forKey: "mise_notif_prefs") as? [String: Bool]
+        guard prefs?["low_stock"] ?? true else { return } // по умолчанию включено
+        let lowItems = stock.filter { isLow($0) }
+        guard !lowItems.isEmpty else { return }
+        let names = lowItems.prefix(3).map { "\($0.brand) \($0.flavor)" }.joined(separator: ", ")
+        let suffix = lowItems.count > 3 ? " и ещё \(lowItems.count - 3)" : ""
+        Task {
+            await Notify.send(
+                type: "low_stock",
+                title: t("st.lowStock"),
+                body: "\(names)\(suffix)",
+                audience: ["managers": true]
+            )
+        }
     }
 
     /// Списание «с заведения»: только вес, без бренда/вкуса. Уменьшает общий объём зала (venueBase),
@@ -539,6 +559,8 @@ private struct StashBody: View {
             .tabEdgeSwipe(tabs: ["shift", "stock", "movements", "inventory"],
                           selection: $m.tab,
                           onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
+            .blur(radius: AIChat.shared.open ? 2 : 0)
+            .animation(.easeOut(duration: 0.3), value: AIChat.shared.open)
 
             if let toast = m.toast {
                 Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
@@ -840,9 +862,6 @@ private struct MovementsTab: View {
         if m.movementBatches.isEmpty {
             Text(t("st.noMovements")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 30)
         } else {
-            // Подсказка: правки доступны по долгому тапу.
-            Text(t("st.movEditHint")).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.35))
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 4)
             ForEach(m.movementBatches, id: \.0) { batchId, items in
                 MovementBatchRow(items: items,
                                  onEdit: { onEdit(items) },

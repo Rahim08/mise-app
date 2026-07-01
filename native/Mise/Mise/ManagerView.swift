@@ -34,7 +34,9 @@ final class ManagerModel {
     var locked = false
     var saving = false
     var loading = true
+    var loadError = false        // реальная ошибка загрузки (не отмена) → показать «Повторить»
     var toast: String?
+    private var loadGen = 0       // поколение загрузки — защита от гонок при быстрой смене даты
 
     init(rid: String) { self.rid = rid }
 
@@ -44,6 +46,13 @@ final class ManagerModel {
     }()
     func key(_ d: Date) -> String { dfKey.string(from: d) }
     private func activity(_ s: Shift) -> Double { (s.income ?? 0) + (s.total_expense ?? 0) + (s.inkassation ?? 0) }
+
+    /// Отмена задачи в любом виде (CancellationError, URLError.cancelled, Task.isCancelled).
+    private func isCancellation(_ e: Error) -> Bool {
+        if e is CancellationError { return true }
+        if (e as? URLError)?.code == .cancelled { return true }
+        return Task.isCancelled
+    }
 
     struct Calc {
         var inc = 0.0, card = 0.0, ink = 0.0
@@ -89,15 +98,29 @@ final class ManagerModel {
     }
 
     func loadDay(_ date: Date) async {
+        loadGen += 1
+        let gen = loadGen
         loading = true
-        defer { loading = false }
+        loadError = false
+        defer { if gen == loadGen { loading = false } }
         let dateStr = key(date)
-        // Только при успехе обрабатываем — сбой на refresh не должен сбрасывать открытую смену.
-        guard let shifts = try? await DB.from("shifts").select()
-            .eq("date", dateStr).order("opened_at").list(Shift.self) else {
-            if shift != nil { flash(t("refreshFailed")) }
+        // do/catch вместо try?: отмену (быстрые тапы по датам) игнорируем без ошибки,
+        // реальный сбой → состояние ошибки с кнопкой «Повторить».
+        let shifts: [Shift]
+        do {
+            shifts = try await DB.from("shifts").select()
+                .eq("date", dateStr).order("opened_at").list(Shift.self)
+        } catch {
+            guard gen == loadGen else { return }
+            if isCancellation(error) { return }   // быстрые тапы / pull-to-refresh — не ошибка
+            #if DEBUG
+            print("[Manager] loadDay failed for \(dateStr): \(error)")
+            #endif
+            // Экран-ошибку показываем, только когда смена ещё не загружена; иначе тихий тост.
+            if shift == nil { loadError = true } else { flash(t("refreshFailed")) }
             return
         }
+        guard gen == loadGen else { return }   // пользователь уже сменил дату — игнор
         let opening = await prevClosing(before: date)
 
         // На случай дублей на одну дату (до миграции shifts-date-fix.sql) берём смену
@@ -179,6 +202,8 @@ final class ManagerModel {
             await loadAbsences(key(currentDate))
             flash(t("mg.shiftOpened"))
             await Notify.send(type: "cash_open", title: "Касса открыта", body: "Смена открыта", audience: ["managers": true])
+            // Запланировать напоминание о закрытии смены
+            if ShiftReminder.isEnabled() { ShiftReminder.schedule() }
         } else {
             await loadDay(currentDate)
         }
@@ -252,6 +277,7 @@ final class ManagerModel {
         do {
             try await persist()
             locked = true
+            ShiftReminder.cancel() // отменить напоминание — смена закрыта
             flash(t("mg.shiftSaved"))
             let c = calc
             // Дайджест дня: сводка в защищённом теле (показывается, если включён show_cash_amount).
@@ -378,7 +404,10 @@ private struct ManagerBody: View {
                 VStack(spacing: 14) {
                     dateRow
                     Group {
-                        if m.shift == nil {
+                        if m.loadError {
+                            loadErrorState
+                                .transition(.opacity)
+                        } else if m.shift == nil {
                             emptyState
                                 .transition(.opacity)
                         } else {
@@ -387,6 +416,7 @@ private struct ManagerBody: View {
                         }
                     }
                     .animation(.spring(duration: 0.4, bounce: 0.08), value: m.shift == nil)
+                    .animation(.easeInOut(duration: 0.25), value: m.loadError)
                 }
                 .padding(16)
                 .padding(.bottom, 40)
@@ -395,6 +425,8 @@ private struct ManagerBody: View {
                 .animation(.spring(duration: 0.45, bounce: 0.1), value: m.loading)
             }
             .refreshable { await m.loadDay(m.currentDate) }
+            .blur(radius: AIChat.shared.open ? 2 : 0)
+            .animation(.easeOut(duration: 0.3), value: AIChat.shared.open)
 
             if let toast = m.toast {
                 Text(toast)
@@ -444,6 +476,22 @@ private struct ManagerBody: View {
                     .background(accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .disabled(m.saving)
+        }
+        .padding(.top, 50)
+    }
+
+    private var loadErrorState: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.orange.opacity(0.14)).frame(width: 80, height: 80)
+                Image(systemName: "wifi.exclamationmark").font(.system(size: 32, weight: .light)).foregroundStyle(.orange)
+            }
+            Text(t("loadFailed")).font(.system(size: 20, weight: .bold)).foregroundStyle(.primary)
+            Button { Task { await m.loadDay(m.currentDate) } } label: {
+                Text(t("retry")).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                    .padding(.horizontal, 40).padding(.vertical, 16)
+                    .background(accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
         }
         .padding(.top, 50)
     }

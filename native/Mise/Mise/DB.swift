@@ -8,6 +8,44 @@ import Foundation
 ///   DB.from("shifts").insert(["status": "open"]).single(Shift.self)
 enum DB {
     static func from(_ table: String) -> DBQuery { DBQuery(table) }
+
+    /// Очистить кеш для конкретной таблицы (вызывать после мутаций).
+    static func invalidateCache(table: String) { CacheStore.shared.invalidate(table: table) }
+
+    /// Очистить весь кеш.
+    static func clearCache() { CacheStore.shared.clearAll() }
+}
+
+// MARK: - In-memory cache (оффлайн-поддержка)
+
+/// Потокобезопасный кеш для SELECT-запросов с TTL.
+/// При ошибке сети возвращает кешированные данные с флагом stale.
+actor CacheStore {
+    static let shared = CacheStore()
+
+    private struct Entry {
+        let data: Data
+        let timestamp: Date
+    }
+
+    private var store: [String: Entry] = [:]
+    private let ttl: TimeInterval = 300 // 5 минут
+
+    func get(_ key: String) -> (data: Data, stale: Bool)? {
+        guard let entry = store[key] else { return nil }
+        let age = Date().timeIntervalSince(entry.timestamp)
+        return (entry.data, age > ttl)
+    }
+
+    func set(_ key: String, data: Data) {
+        store[key] = Entry(data: data, timestamp: Date())
+    }
+
+    func invalidate(table: String) {
+        store = store.filter { !$0.key.hasPrefix(table + ":") }
+    }
+
+    func clearAll() { store.removeAll() }
 }
 
 final class DBQuery {
@@ -76,19 +114,52 @@ final class DBQuery {
 
     /// Сетевая устойчивость: SELECT повторяем при сбое (идемпотентно). Без этого
     /// просадка сети/таймаут показывали «нет данных», пока не перелистнёшь туда-сюда.
+    /// Для SELECT-запросов используется кеш: при ошибке сети возвращаем кешированные данные.
     private func dbRequestResilient() async throws -> Data {
-        let attempts = op == "select" ? 3 : 1
+        let p = payload()
+        let isRead = op == "select"
+        let cacheKey = isRead ? cacheKey(p) : nil
+
+        // Попытка получить из кеша до запроса (для оффлайна)
+        var cachedStale: Data?
+        if let key = cacheKey {
+            if let entry = await CacheStore.shared.get(key) {
+                if !entry.stale { return entry.data } // свежий кеш — возвращаем сразу
+                cachedStale = entry.data // запомнили на случай ошибки сети
+            }
+        }
+
+        let attempts = isRead ? 3 : 1
         var last: Error = APIError.http(-1, nil)
         for i in 1...attempts {
-            do { return try await API.dbRequest(payload()) }
-            catch {
+            do {
+                let data = try await API.dbRequest(p)
+                // Кешируем успешный SELECT
+                if let key = cacheKey {
+                    await CacheStore.shared.set(key, data: data)
+                }
+                return data
+            } catch {
                 last = error
                 // не ретраить осмысленные ответы сервера (4xx) — только сетевые/5xx
                 if case APIError.http(let code, _) = error, (400..<500).contains(code) { throw error }
                 if i < attempts { try? await Task.sleep(nanoseconds: UInt64(i) * 400_000_000) }
             }
         }
+
+        // Сеть недоступна — возвращаем кеш если есть
+        if let stale = cachedStale {
+            return stale // UI покажет "stale" индикатор
+        }
+
         throw last
+    }
+
+    /// Генерация ключа кеша на основе payload запроса.
+    private func cacheKey(_ p: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: p, options: .sortedKeys) else { return table }
+        let hash = data.map { String(format: "%02x", $0) }.joined().prefix(32)
+        return "\(table):\(hash)"
     }
 
     /// SELECT множества строк (битые строки пропускаются, не роняя весь список).
@@ -105,8 +176,9 @@ final class DBQuery {
         return try JSONDecoder().decode(Wrap<T>.self, from: data).data
     }
 
-    /// Запись без возврата (INSERT/UPDATE/DELETE).
+    /// Запись без возврата (INSERT/UPDATE/DELETE). Инвалидирует кеш таблицы.
     func run() async throws {
         _ = try await API.dbRequest(payload())
+        DB.invalidateCache(table: table)
     }
 }

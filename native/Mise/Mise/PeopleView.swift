@@ -35,6 +35,7 @@ final class PeopleModel {
     var dir: [StaffDir] = []
     var tasksLoaded = false
     var tasksSeg = "tasks" // tasks | reports
+    var speech = SpeechManager()
 
     // заявки менеджеру (предложение / заказать / поломка)
     var reports: [StaffReport] = []
@@ -169,6 +170,29 @@ final class PeopleModel {
         flash(targets.count > 1 ? t("pe.taskCreatedN", ["n": "\(targets.count)"]) : t("pe.taskCreated"))
         await loadTasks()
         return true
+    }
+
+    /// Голосовое создание задачи: распознаёт речь → создаёт задачу.
+    func voiceTask() async {
+        guard await speech.start() else {
+            flash(t("pe.voiceUnavailable")); return
+        }
+        // Ждём 4 секунды распознавания
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        let text = speech.stop()
+        guard !text.isEmpty else { flash(t("pe.voiceEmpty")); return }
+        // Парсим: "Задача: помыть кальянную" → title = "Помыть кальянную"
+        let title: String
+        if text.lowercased().hasPrefix("задача") || text.lowercased().hasPrefix("task") {
+            title = String(text.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            title = text
+        }
+        // Назначаем на первого сотрудника (или себя)
+        let assignee = dir.first?.id ?? myId
+        _ = await createTask(title: title, desc: "", assignee: assignee, priority: "normal", due: "")
     }
 
     // MARK: заявки менеджеру
@@ -1028,11 +1052,25 @@ private struct TasksTab: View {
 
     @ViewBuilder private var tasksContent: some View {
         // Любой сотрудник может поставить задачу коллеге/сменщику (раньше — только менеджер).
-        Button { showForm = true } label: {
-            Label(t("pe.newTask"), systemImage: "plus")
-                .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
-                .frame(maxWidth: .infinity).padding(.vertical, 14)
-                .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
+        HStack(spacing: 10) {
+            Button { showForm = true } label: {
+                Label(t("pe.newTask"), systemImage: "plus")
+                    .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).padding(.vertical, 14)
+                    .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
+            }
+            // Голосовой ввод задачи
+            if #available(iOS 17.0, *) {
+                Button { Task { await m.voiceTask() } } label: {
+                    Image(systemName: m.speech.isListening ? "mic.fill" : "mic")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(m.speech.isListening ? .white : PEOPLE_ACCENT)
+                        .frame(width: 50, height: 50)
+                        .background(m.speech.isListening ? PEOPLE_ACCENT : PEOPLE_ACCENT.opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 14))
+                }
+                .disabled(m.speech.isListening)
+            }
         }
         if m.visibleTasks.isEmpty {
             Text(t("pe.noTasks")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)

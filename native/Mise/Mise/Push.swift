@@ -56,13 +56,39 @@ final class PushManager: NSObject, UNUserNotificationCenterDelegate {
     }
 }
 
-/// AppDelegate только ради колбэков APNs — остальное приложение остаётся на SwiftUI App.
+/// AppDelegate только ради колбэков APNs + Quick Actions — остальное приложение остаётся на SwiftUI App.
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = PushManager.shared
+        // Quick Actions (3D Touch / Haptic Touch на иконке)
+        application.shortcutItems = [
+            UIApplicationShortcutItem(type: "com.rahim.mise.openBookings",
+                                      localizedTitle: NSLocalizedString("qa.todayBookings", comment: ""),
+                                      localizedSubtitle: nil,
+                                      icon: UIApplicationShortcutIcon(systemImageName: "calendar.badge.clock"),
+                                      userInfo: nil),
+            UIApplicationShortcutItem(type: "com.rahim.mise.openManager",
+                                      localizedTitle: NSLocalizedString("qa.openShift", comment: ""),
+                                      localizedSubtitle: nil,
+                                      icon: UIApplicationShortcutIcon(systemImageName: "creditcard.fill"),
+                                      userInfo: nil),
+            UIApplicationShortcutItem(type: "com.rahim.mise.addExpense",
+                                      localizedTitle: NSLocalizedString("qa.addExpense", comment: ""),
+                                      localizedSubtitle: nil,
+                                      icon: UIApplicationShortcutIcon(systemImageName: "plus.circle"),
+                                      userInfo: nil),
+        ]
         return true
     }
+
+    func application(_ application: UIApplication,
+                     performShortcutItem shortcutItem: UIApplicationShortcutItem,
+                     completionHandler: @escaping (Bool) -> Void) {
+        NotificationCenter.default.post(name: .quickAction, object: shortcutItem.type)
+        completionHandler(true)
+    }
+
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         PushManager.shared.didRegister(token: deviceToken)
@@ -70,6 +96,38 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
         // Без APNs-окружения (симулятор / нет capability) — просто молчим.
+    }
+}
+
+extension Notification.Name {
+    static let quickAction = Notification.Name("mise.quickAction")
+}
+
+/// Планировщик локальных уведомлений (напоминание о смене).
+enum ShiftReminder {
+    private static let identifier = "com.rahim.mise.shiftReminder"
+
+    /// Запланировать напоминание через hours часов.
+    static func schedule(hours: Int = 8) {
+        let content = UNMutableNotificationContent()
+        content.title = t("shift.reminderTitle")
+        content.body = t("shift.reminderBody")
+        content.sound = .default
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: TimeInterval(hours * 3600), repeats: false)
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    /// Отменить запланированное напоминание.
+    static func cancel() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
+    }
+
+    /// Проверить, включены ли напоминания в настройках.
+    static func isEnabled() -> Bool {
+        let prefs = UserDefaults.standard.dictionary(forKey: "mise_notif_prefs") as? [String: Bool]
+        return prefs?["shift_reminder"] ?? true // по умолчанию включено
     }
 }
 
