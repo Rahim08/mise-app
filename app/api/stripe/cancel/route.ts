@@ -30,6 +30,6 @@ export async function POST(req: NextRequest) {
     await supabase.from('restaurants').update({ subscription_status: 'canceling' }).eq('id', restaurantId)
     return NextResponse.json({ success: true })
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
 }

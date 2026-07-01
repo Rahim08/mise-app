@@ -55,7 +55,7 @@ async function clearAttempts(key: string) {
 
 export async function POST(req: NextRequest) {
   const { restaurantId, pin, deviceId } = await req.json()
-  if (!restaurantId || !pin) return NextResponse.json({ error: 'Missing params' }, { status: 400 })
+  if (!restaurantId || !pin || !deviceId) return NextResponse.json({ error: 'Missing params (restaurantId, pin, deviceId required)' }, { status: 400 })
 
   const key = rateLimitKey(req, restaurantId)
   const entry = await getAttempts(key)
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
   // Check staff PIN
   const { data: staffList } = await supabase
     .from('staff')
-    .select('*')
+    .select('id, restaurant_id, name, role, apps, device_id, employee_id, is_active, pin_hash')
     .eq('restaurant_id', restaurantId)
     .eq('is_active', true)
 
@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
       await clearAttempts(key)
       // Enforce device binding: if staff already has a device_id and this request
       // comes from a different device, block login.
-      if (staff.device_id && deviceId && deviceId !== staff.device_id) {
+      if (staff.device_id && deviceId !== staff.device_id) {
         return NextResponse.json({ error: 'pin_device_mismatch' }, { status: 403 })
       }
       // Bind device on first login — check plan device limit first.

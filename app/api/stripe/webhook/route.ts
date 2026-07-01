@@ -139,6 +139,6 @@ export async function POST(req: NextRequest) {
       const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
       await admin.from('app_errors').insert({ source: 'server', message: `stripe/webhook: ${err.message}`, stack: err.stack?.slice(0, 4000) })
     } catch {}
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
 }

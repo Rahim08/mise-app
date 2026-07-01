@@ -8,6 +8,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
 import { AppLoading } from '@/components/AppLoading'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
+import { fmtDate as fmtDay } from '@/lib/format'
 import { useI18n, tCurrent } from '@/lib/i18n'
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -129,10 +130,6 @@ function StatCard({ label, value, color, t }: { label: string; value: string; co
 // дашборд → Настройки → Виды кальянов). Табак списывается из массы «в заведении»
 // (выдано в зал − продано × порция), склад не трогается. Конкретный вкус не
 // указывается — отложено.
-
-function fmtDay(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 
 // Категории бесплатных кальянов (для кого/повод). Храним в hookah_sales.flavor — без миграции.
 const FREE_CATS = ['Сотрудники', 'Владелец', 'Менеджер', 'Гость', 'Дегустация'] as const

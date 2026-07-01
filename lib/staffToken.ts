@@ -8,7 +8,7 @@
 import crypto from 'crypto'
 
 const COOKIE_NAME = 'mise_staff_token'
-const TTL_SECONDS = 60 * 60 * 24 * 30 // 30 days
+const TTL_SECONDS = 60 * 60 * 24 * 7 // 7 days (reduced from 30 for security)
 
 export interface StaffTokenPayload {
   rid: string          // restaurant_id
@@ -20,8 +20,8 @@ export interface StaffTokenPayload {
 }
 
 function secret(): string {
-  const s = process.env.MISE_TOKEN_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!s) throw new Error('Missing MISE_TOKEN_SECRET / SUPABASE_SERVICE_ROLE_KEY')
+  const s = process.env.MISE_TOKEN_SECRET
+  if (!s) throw new Error('Missing MISE_TOKEN_SECRET — set it in Vercel env (do NOT use SUPABASE_SERVICE_ROLE_KEY)')
   return s
 }
 

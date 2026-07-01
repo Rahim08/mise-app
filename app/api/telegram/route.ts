@@ -38,8 +38,13 @@ async function ask(question: string): Promise<string> {
 export async function POST(req: NextRequest) {
   const token = process.env.TELEGRAM_BOT_TOKEN
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET
-  // Защита webhook: Telegram присылает заданный секрет в заголовке
-  if (secret && req.headers.get('x-telegram-bot-api-secret-token') !== secret) {
+  // Защита webhook: Telegram присылает заданный секрет в заголовке.
+  // Если секрет не задан — блокируем все запросы (fail-closed).
+  if (!secret) {
+    console.error('TELEGRAM_WEBHOOK_SECRET not set — rejecting all requests')
+    return NextResponse.json({ ok: false }, { status: 500 })
+  }
+  if (req.headers.get('x-telegram-bot-api-secret-token') !== secret) {
     return NextResponse.json({ ok: false }, { status: 401 })
   }
   if (!token) return NextResponse.json({ ok: true }) // не настроен — молча 200

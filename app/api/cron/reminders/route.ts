@@ -14,10 +14,7 @@ import { sendTrialEndingEmail } from '@/lib/email'
 import { sendPush } from '@/lib/apns'
 
 export const dynamic = 'force-dynamic'
-
-function fmtDate(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
+import { fmtDate } from '@/lib/format'
 
 // Email owners whose trial ends within 3 days, once per day per restaurant.
 // Fully guarded — any failure here must not affect shift reminders. No-op until

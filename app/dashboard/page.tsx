@@ -8,6 +8,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { AppIcon, Wordmark, WordmarkMark, ACCENT_GLOW, type BrandApp } from '@/components/brand'
 import { track } from '@/lib/analytics'
 import { openCookieSettings } from '@/components/CookieConsent'
+import { fmtDate as fmtDay } from '@/lib/format'
 import { useIsNative } from '@/lib/native'
 import { useI18n, tCurrent } from '@/lib/i18n'
 
@@ -74,9 +75,6 @@ function TabIcon({ id, size = 15 }: { id: string; size?: number }) {
 }
 
 // Локальная дата YYYY-MM-DD — toISOString() сдвигает «сегодня» в не-UTC зонах
-function fmtDay(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 function timeAgo(iso: string) {
   const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
   if (m < 1) return tCurrent('dash.justNow')

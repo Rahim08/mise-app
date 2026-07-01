@@ -8,15 +8,7 @@ import { AuthGate } from '@/components/AuthGate'
 import { AppLoading } from '@/components/AppLoading'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n, tCurrent } from '@/lib/i18n'
-
-// ── HELPERS ───────────────────────────────────────────────────────────────────
-
-function fv(v: number) { return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
-// Local calendar date (YYYY-MM-DD). Using toISOString() would shift the day in non-UTC timezones.
-function fmtDate(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-function dd(s: string) { return s.slice(8, 10) + '.' + s.slice(5, 7) }
+import { fmtDate, fv, dd } from '@/lib/format'
 const COLORS = ['#34c759', '#ff3b30', '#007aff', '#ff9500', '#af52de', '#00c7be', '#ff6b35', '#5856d6']
 
 // ── CSV EXPORT (Excel-compatible: ';' delimiter + UTF-8 BOM for Cyrillic) ──────
@@ -56,7 +48,7 @@ function pdfTable(doc: any, title: string, headers: string[], rows: string[][], 
   y += 5; doc.setDrawColor(210); doc.line(40, y, 555, y); y += 15
   rows.forEach((r, ri) => {
     if (y > 800) { doc.addPage(); y = 56 }
-    if (ri === rows.length - 1 && r[0] === 'Итого') { doc.setDrawColor(210); doc.line(40, y - 11, 555, y - 11) }
+    if (ri === rows.length - 1) { doc.setDrawColor(210); doc.line(40, y - 11, 555, y - 11) }
     r.forEach((c, i) => doc.text(String(c ?? ''), colX[i], y))
     y += 16
   })
@@ -578,7 +570,7 @@ export default function AnalyticsApp() {
   const monthTitle = `${mFull(currentDate)} ${currentDate.getFullYear()}`
 
   const exportShifts = () => {
-    const rows: (string | number)[][] = [['Дата', 'Вход', 'Доход', 'Расход', 'Инкассация', 'Касса']]
+    const rows: (string | number)[][] = [[tr('an.csvDate'), tr('an.csvEntry'), tr('an.csvIncome'), tr('an.csvExpense'), tr('an.csvDeposit'), tr('an.csvCash')]]
     shifts.forEach((s: any) => rows.push([
       s.date,
       (s.opening_balance || 0).toFixed(2),
@@ -587,13 +579,13 @@ export default function AnalyticsApp() {
       (s.inkassation || 0).toFixed(2),
       (s.closing_balance || 0).toFixed(2),
     ]))
-    rows.push(['Итого', '', totalIncome.toFixed(2), totalExpense.toFixed(2), totalInkass.toFixed(2), (lastShift?.closing_balance || 0).toFixed(2)])
+    rows.push([tr('an.csvTotal'), '', totalIncome.toFixed(2), totalExpense.toFixed(2), totalInkass.toFixed(2), (lastShift?.closing_balance || 0).toFixed(2)])
     downloadCSV(`smeny_${monthTag}.csv`, rows)
   }
 
   const exportShiftsPDF = async () => {
     const doc = await makePdfDoc()
-    const headers = ['Дата', 'Вход', 'Доход', 'Расход', 'Инкасс', 'Касса']
+    const headers = [tr('an.csvDate'), tr('an.csvEntry'), tr('an.csvIncome'), tr('an.csvExpense'), tr('an.csvDeposit'), tr('an.csvCash')]
     const colX = [40, 130, 220, 310, 400, 485]
     const rows: string[][] = shifts.map((s: any) => [
       s.date,
@@ -603,7 +595,7 @@ export default function AnalyticsApp() {
       pdfCur + fv(s.inkassation || 0),
       pdfCur + fv(s.closing_balance || 0),
     ])
-    rows.push(['Итого', '', pdfCur + fv(totalIncome), pdfCur + fv(totalExpense), pdfCur + fv(totalInkass), pdfCur + fv(lastShift?.closing_balance || 0)])
+    rows.push([tr('an.csvTotal'), '', pdfCur + fv(totalIncome), pdfCur + fv(totalExpense), pdfCur + fv(totalInkass), pdfCur + fv(lastShift?.closing_balance || 0)])
     pdfTable(doc, `Смены — ${monthTitle}`, headers, rows, colX)
     doc.save(`smeny_${monthTag}.pdf`)
   }
@@ -615,7 +607,7 @@ export default function AnalyticsApp() {
   }
 
   const exportSalary = () => {
-    const rows: (string | number)[][] = [['Сотрудник', 'Оклад', 'Пропуски', 'Вычет', 'Карта', 'Наличные', 'Итого']]
+    const rows: (string | number)[][] = [[tr('an.csvEmployee'), tr('an.csvSalary'), tr('an.csvAbsences'), tr('an.csvDeduct'), tr('an.csvCard'), tr('an.csvCashPay'), tr('an.csvTotal')]]
     employees.forEach((emp: any) => {
       const abs = absences.filter((a: any) => a.employee_id === emp.id).length
       const deduct = abs * emp.deduct_per_absence
@@ -628,7 +620,7 @@ export default function AnalyticsApp() {
 
   const exportSalaryPDF = async () => {
     const doc = await makePdfDoc()
-    const headers = ['Сотрудник', 'Оклад', 'Проп.', 'Вычет', 'Карта', 'Нал.', 'Итого']
+    const headers = [tr('an.csvEmployee'), tr('an.csvSalary'), tr('an.csvAbsences'), tr('an.csvDeduct'), tr('an.csvCard'), tr('an.csvCashPay'), tr('an.csvTotal')]
     const colX = [40, 200, 270, 330, 400, 465, 520]
     const rows: string[][] = employees.map((emp: any) => {
       const abs = absences.filter((a: any) => a.employee_id === emp.id).length

@@ -5,8 +5,11 @@
 // that a future Mise POS sync will consume (see docs/integrations/mise-pos.md).
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
 export async function POST(req: NextRequest) {
+  const rlKey = rateLimitKey(req, 'menu-order')
+  if (!checkRateLimit(rlKey, 30, 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
   const { slug, items, total, tip, order_type, table_number, type } = await req.json()
   const isCall = type === 'waiter_call' // вызов официанта — без позиций
   if (!slug || (!isCall && (!Array.isArray(items) || items.length === 0))) {

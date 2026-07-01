@@ -1,11 +1,16 @@
 // Lightweight health check for uptime monitors (UptimeRobot, BetterStack, Vercel checks).
 // Verifies the process is up and the database is reachable. No secrets in the response.
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // Require bearer token to prevent DDoS via service-role connections.
+  const auth = req.headers.get('authorization')
+  if (auth !== `Bearer ${process.env.HEALTH_CHECK_SECRET}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
   const started = Date.now()
   let db: 'ok' | 'down' = 'down'
   try {

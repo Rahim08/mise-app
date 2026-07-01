@@ -11,17 +11,7 @@ import { AuthGate } from '@/components/AuthGate'
 import { AppLoading } from '@/components/AppLoading'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n } from '@/lib/i18n'
-
-// ── HELPERS ───────────────────────────────────────────────────────────────────
-
-function fv(v: number) { return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
-// Local calendar date (YYYY-MM-DD). Using toISOString() would shift the day in non-UTC timezones.
-function fmtDate(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-function displayDate(d: Date) {
-  return String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear()
-}
+import { fmtDate, fv, displayDate } from '@/lib/format'
 
 // ── ICONS ─────────────────────────────────────────────────────────────────────
 
@@ -189,7 +179,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
         setShift({ ...sh, opening_balance: openingBalance })
         await loadAbsencesByDate(restaurantId, fmtDate(currentDate)) // подтянуть авто-прогулы дня
         showToast(tr('mg.shiftOpened'))
-        pushNotify({ type: 'cash_open', title: 'Касса открыта', body: 'Смена открыта', audience: { managers: true } })
+        pushNotify({ type: 'cash_open', title: tr('mg.pushCashOpen'), body: tr('mg.pushShiftOpened'), audience: { managers: true } })
       } else if (error?.code === '23505') {
         // Shift already exists — reload it
         await loadDay(restaurantId, currentDate, employees, categories)
@@ -279,7 +269,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     setLocked(true)
     showToast(tr('mg.shiftSaved'))
     const c = calc()
-    pushNotify({ type: 'cash_close', title: 'Касса закрыта', body: 'Смена закрыта', secureBody: `Выручка €${fv(c.inc)} · остаток €${fv(c.balance)}`, audience: { managers: true } })
+    pushNotify({ type: 'cash_close', title: tr('mg.pushCashClosed'), body: tr('mg.pushShiftClosed'), secureBody: `${tr('mg.sumRevenue')} €${fv(c.inc)} · ${tr('mg.cellBalance')} €${fv(c.balance)}`, audience: { managers: true } })
     setSaving(false)
   }
 

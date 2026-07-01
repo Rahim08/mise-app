@@ -167,8 +167,8 @@ final class AppModel {
     private func persist(_ r: Restaurant, _ s: ResolvedStaff) {
         if let rd = try? JSONEncoder().encode(r) { d.set(rd, forKey: "mise_restaurant") }
         if let sd = try? JSONEncoder().encode(s) { d.set(sd, forKey: "mise_staff") }
-        // pin/check выставил httpOnly cookie (URLSession хранит его). Дублируем срок ~30 дней.
-        d.set(Date().addingTimeInterval(30 * 24 * 3600).timeIntervalSince1970, forKey: "mise_token_until")
+        // pin/check выставил httpOnly cookie (URLSession хранит его). Дублируем срок ~7 дней.
+        d.set(Date().addingTimeInterval(7 * 24 * 3600).timeIntervalSince1970, forKey: "mise_token_until")
     }
 
     func goPermissions() { phase = .permissions }

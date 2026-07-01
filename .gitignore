@@ -50,3 +50,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 mise-app/
+
+# Xcode build artifacts
+native/Mise/build/

@@ -9,13 +9,10 @@
 // here — it stays anon and is guarded by narrow public RLS policies.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
-import { verifyStaffToken, STAFF_COOKIE } from '@/lib/staffToken'
+import { resolveCaller, type Caller } from '@/lib/apiAuth'
 
 type AppId = 'manager' | 'analytics' | 'stash' | 'people'
-
-interface Caller { rid: string; owner: boolean; apps: string[] }
 
 // Per-table policy. `read`/`write` list the apps allowed (owner is always allowed).
 // Empty array = owner only. `scope` is the column used to restrict rows to the restaurant.
@@ -106,30 +103,6 @@ async function checkStaffPlanLimit(admin: any, rid: string, values: any, filters
   const newGrants = rows.filter(v => Array.isArray(v?.apps) && v.apps.length > 0).length
   if (withAccess + newGrants > plan.maxStaff) return `Лимит тарифа: до ${plan.maxStaff} сотрудников с доступом`
   return null
-}
-
-async function resolveCaller(req: NextRequest): Promise<Caller | null> {
-  const staff = verifyStaffToken(req.cookies.get(STAFF_COOKIE)?.value)
-
-  // Владелец тестирует PIN-приложения в том же браузере → есть И staff-кука, И
-  // Supabase-сессия. Раньше staff-кука побеждала и записи владельца резались
-  // правами сотрудника (тихие 403 в настройках). Если есть Supabase-кука —
-  // сначала пробуем владельца; у сотрудников её нет, для них ничего не меняется.
-  const hasSbSession = req.cookies.getAll().some(c => c.name.startsWith('sb-') && c.name.includes('auth-token'))
-  if (staff && !hasSbSession) return { rid: staff.rid, owner: staff.owner, apps: staff.apps || [] }
-
-  // Owner via Supabase session
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => req.cookies.getAll(), setAll: () => {} } }
-  )
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return staff ? { rid: staff.rid, owner: staff.owner, apps: staff.apps || [] } : null
-  const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-  const { data } = await admin.from('restaurants').select('id').eq('owner_id', user.id).single()
-  if (!data?.id) return staff ? { rid: staff.rid, owner: staff.owner, apps: staff.apps || [] } : null
-  return { rid: data.id, owner: true, apps: ['manager', 'analytics', 'stash'] }
 }
 
 function authorized(caller: Caller, allowed: AppId[]): boolean {

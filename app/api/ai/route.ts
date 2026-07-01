@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { verifyStaffToken, STAFF_COOKIE } from '@/lib/staffToken'
+import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
 async function getRestaurantId(req: NextRequest): Promise<string | null> {
   const staff = verifyStaffToken(req.cookies.get(STAFF_COOKIE)?.value)
@@ -30,6 +31,9 @@ Return ONLY valid JSON with any subset of these fields (empty string if not ment
 Numbers as digit strings only (no currency symbols).`
 
 export async function POST(req: NextRequest) {
+  const rlKey = rateLimitKey(req, 'ai')
+  if (!checkRateLimit(rlKey, 20, 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
+
   const restaurantId = await getRestaurantId(req)
   if (!restaurantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 

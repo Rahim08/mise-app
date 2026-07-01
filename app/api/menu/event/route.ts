@@ -3,10 +3,13 @@
 // client can't forge another venue's stats. Writes via service role (like /api/menu/order).
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
 const ALLOWED = new Set(['view', 'item_view', 'add_to_cart', 'order'])
 
 export async function POST(req: NextRequest) {
+  const rlKey = rateLimitKey(req, 'menu-event')
+  if (!checkRateLimit(rlKey, 60, 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
   let body: any
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Bad request' }, { status: 400 }) }
   const { slug, type, item_id, session_id, table_number } = body || {}

@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
+import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
 const ADMIN_EMAIL = 'raxim98@gmail.com'
 
@@ -17,6 +18,8 @@ async function isAdmin(req: NextRequest): Promise<boolean> {
 }
 
 export async function POST(req: NextRequest) {
+  const rlKey = rateLimitKey(req, 'admin')
+  if (!checkRateLimit(rlKey, 30, 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
   if (!await isAdmin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { action, restaurantId, note, status, plan, ends_at, endsAt, compApps, discountPct, deviceLimit, aiEnabled } = await req.json()

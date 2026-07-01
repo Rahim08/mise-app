@@ -15,6 +15,7 @@ const securityHeaders = [
   // Block MIME-type sniffing.
   { key: "X-Content-Type-Options", value: "nosniff" },
   // Allow framing only from same origin (landing iframe), block external clickjacking.
+  // CSP frame-ancestors is the modern replacement; kept for older browsers.
   { key: "X-Frame-Options", value: "SAMEORIGIN" },
   // Don't leak full URLs to third parties.
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
@@ -22,6 +23,18 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "camera=(self), geolocation=(self), microphone=(), payment=(self)" },
   // Isolate the browsing context a bit (helps against cross-origin leaks).
   { key: "X-DNS-Prefetch-Control", value: "on" },
+  // Content Security Policy — restricts sources for scripts, styles, images, etc.
+  // Inline styles are needed because all page components use style={{}} objects.
+  { key: "Content-Security-Policy", value: [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.vercel-scripts.com https://js.stripe.com https://*.googletagmanager.com https://*.google-analytics.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "img-src 'self' data: blob: https://*.supabase.co https://*.googleusercontent.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "connect-src 'self' https://*.supabase.co https://api.resend.com https://api.stripe.com https://api.groq.com https://*.posthog.com",
+    "frame-src 'self' https://js.stripe.com https://*.supabase.co",
+    "frame-ancestors 'self'",
+  ].join('; ') },
 ];
 
 const nextConfig: NextConfig = {

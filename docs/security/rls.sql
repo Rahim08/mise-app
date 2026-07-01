@@ -53,6 +53,25 @@ alter table public.tech_card_sessions          enable row level security;
 alter table public.shift_checklists            enable row level security;
 alter table public.shift_checklist_completions enable row level security;
 
+-- Additional tables from POLICY map — enable RLS for defense-in-depth.
+-- These tables were previously accessible via anon key without RLS.
+alter table public.salary_advances       enable row level security;
+alter table public.hookah_sales          enable row level security;
+alter table public.bookings              enable row level security;
+alter table public.news_posts            enable row level security;
+alter table public.guest_notes           enable row level security;
+alter table public.notification_prefs    enable row level security;
+alter table public.purchase_items        enable row level security;
+alter table public.push_subscriptions    enable row level security;
+alter table public.notifications         enable row level security;
+alter table public.shift_swap_requests   enable row level security;
+alter table public.attendance_records    enable row level security;
+alter table public.menu_events           enable row level security;
+alter table public.menus                 enable row level security;
+alter table public.hookah_types          enable row level security;
+alter table public.hookah_goals          enable row level security;
+alter table public.staff_directory       enable row level security;
+
 -- ----------------------------------------------------------------------------
 -- Owner self-access (optional but recommended).
 -- Lets a logged-in owner read their own restaurant row directly if ever needed,
@@ -105,3 +124,19 @@ create policy "owner reads own profile"
 -- alter table public.restaurant_settings  disable row level security;
 -- alter table public.profiles             disable row level security;
 -- alter table public.admin_notes          disable row level security;
+-- alter table public.salary_advances       disable row level security;
+-- alter table public.hookah_sales          disable row level security;
+-- alter table public.bookings              disable row level security;
+-- alter table public.news_posts            disable row level security;
+-- alter table public.guest_notes           disable row level security;
+-- alter table public.notification_prefs    disable row level security;
+-- alter table public.purchase_items        disable row level security;
+-- alter table public.push_subscriptions    disable row level security;
+-- alter table public.notifications         disable row level security;
+-- alter table public.shift_swap_requests   disable row level security;
+-- alter table public.attendance_records    disable row level security;
+-- alter table public.menu_events           disable row level security;
+-- alter table public.menus                 disable row level security;
+-- alter table public.hookah_types          disable row level security;
+-- alter table public.hookah_goals          disable row level security;
+-- alter table public.staff_directory       disable row level security;
