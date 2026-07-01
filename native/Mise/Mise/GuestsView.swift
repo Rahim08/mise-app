@@ -16,7 +16,7 @@ private func guestKey(_ b: Booking) -> String {
     return (b.guest_name ?? "").lowercased().trimmingCharacters(in: .whitespaces)
 }
 
-private func buildProfiles(from bookings: [Booking]) -> [GuestProfile] {
+func buildGuestProfiles(from bookings: [Booking]) -> [GuestProfile] {
     var dict: [String: GuestProfile] = [:]
     let sorted = bookings.sorted { ($0.booking_date ?? "") < ($1.booking_date ?? "") }
 
@@ -31,6 +31,13 @@ private func buildProfiles(from bookings: [Booking]) -> [GuestProfile] {
             existing.totalGuests += b.guests_count ?? 0
             if let d = b.booking_date, d > (existing.lastVisitDate ?? "") {
                 existing.lastVisitDate = d
+            }
+            // Дополняем недостающие имя/телефон из любой брони гостя — иначе у тех,
+            // чья ПЕРВАЯ бронь была без имени/телефона, префилл открывался пустым.
+            if existing.phone == nil, let ph = b.phone, !ph.isEmpty { existing.phone = ph }
+            if let nm = b.guest_name, !nm.isEmpty,
+               (existing.displayName.isEmpty || existing.displayName == existing.id || existing.displayName == (existing.phone ?? "")) {
+                existing.displayName = nm
             }
             existing.bookings.append(b)
             dict[key] = existing
@@ -59,9 +66,11 @@ struct GuestsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
     @State private var selectedGuest: GuestProfile?
+    @State private var editingGuest: GuestProfile?
+    @State private var deleteTarget: GuestProfile?
 
     private var profiles: [GuestProfile] {
-        buildProfiles(from: m.allBookings)
+        buildGuestProfiles(from: m.allBookings)
     }
 
     private var filtered: [GuestProfile] {
@@ -101,6 +110,14 @@ struct GuestsView: View {
                                     GuestRow(guest: guest) {
                                         selectedGuest = guest
                                     }
+                                    .contextMenu {
+                                        Button { editingGuest = guest } label: {
+                                            Label(t("edit"), systemImage: "pencil")
+                                        }
+                                        Button(role: .destructive) { deleteTarget = guest } label: {
+                                            Label(t("delete"), systemImage: "trash")
+                                        }
+                                    }
                                 }
                             }
                             .padding(.horizontal, 16)
@@ -126,6 +143,31 @@ struct GuestsView: View {
                     }
                 })
             }
+            .sheet(item: $editingGuest) { g in
+                GuestEditSheet(guest: g, rid: m.rid) {
+                    editingGuest = nil
+                }
+            }
+            .alert(t("gs.deleteGuest"), isPresented: .init(
+                get: { deleteTarget != nil },
+                set: { if !$0 { deleteTarget = nil } }
+            )) {
+                Button(t("cancel"), role: .cancel) { deleteTarget = nil }
+                Button(t("delete"), role: .destructive) {
+                    if let g = deleteTarget { deleteGuest(g) }
+                }
+            } message: {
+                Text(t("gs.deleteGuestConfirm", ["name": deleteTarget?.displayName ?? ""]))
+            }
+        }
+    }
+
+    private func deleteGuest(_ guest: GuestProfile) {
+        Task {
+            for b in guest.bookings {
+                try? await DB.from("bookings").delete().eq("id", b.id).run()
+            }
+            try? await DB.from("guest_notes").delete().eq("guest_key", guest.id).run()
         }
     }
 
@@ -230,9 +272,16 @@ struct GuestDetailView: View {
         guest.bookings.sorted { ($0.booking_date ?? "") > ($1.booking_date ?? "") }
     }
 
-    // Имя гостя для префилла новой брони (не телефон).
+    // Имя гостя для префилла новой брони (не телефон). Берём из самой свежей брони с именем.
     private var guestName: String? {
-        guest.bookings.compactMap { $0.guest_name }.first { !$0.isEmpty }
+        sortedBookings.compactMap { $0.guest_name }.first { !$0.isEmpty }
+            ?? (guest.displayName == guest.id ? nil : guest.displayName)
+    }
+
+    // Телефон для префилла — из любой брони гостя, не только профильной (которая берётся
+    // из самой ранней брони и могла быть без телефона).
+    private var guestPhone: String? {
+        guest.phone ?? guest.bookings.compactMap { $0.phone }.first { !$0.isEmpty }
     }
 
     var body: some View {
@@ -274,7 +323,7 @@ struct GuestDetailView: View {
     }
 
     private var newBookingButton: some View {
-        Button { onNewBooking(guestName, guest.phone) } label: {
+        Button { onNewBooking(guestName, guestPhone) } label: {
             Label(t("gs.newBooking"), systemImage: "calendar.badge.plus")
                 .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                 .frame(maxWidth: .infinity).padding(.vertical, 13)
@@ -454,6 +503,66 @@ struct GuestDetailView: View {
         guard let d = df.date(from: s) else { return s }
         let out = DateFormatter(); out.dateFormat = "d MMM yyyy"; out.locale = Locale(identifier: I18n.code)
         return out.string(from: d)
+    }
+}
+
+// MARK: - GuestEditSheet
+
+private struct GuestEditSheet: View {
+    let guest: GuestProfile
+    let rid: String
+    var onDone: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var phone: String
+    @State private var saving = false
+
+    init(guest: GuestProfile, rid: String, onDone: @escaping () -> Void) {
+        self.guest = guest
+        self.rid = rid
+        self.onDone = onDone
+        _name = State(initialValue: guest.displayName == guest.id ? "" : guest.displayName)
+        _phone = State(initialValue: guest.phone ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack { Color.miseBg.ignoresSafeArea()
+                Form {
+                    Section(t("gs.guestInfo")) {
+                        TextField(t("gs.namePh"), text: $name)
+                        TextField(t("gs.phonePh"), text: $phone)
+                            .keyboardType(.phonePad)
+                    }
+                }
+            }
+            .navigationTitle(t("gs.editGuest"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(t("bk.save")) { save() }.disabled(saving)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        saving = true
+        let newName = name.trimmingCharacters(in: .whitespaces)
+        let newPhone = phone.trimmingCharacters(in: .whitespaces)
+        Task {
+            for b in guest.bookings {
+                var patch: [String: Any] = [:]
+                if !newName.isEmpty { patch["guest_name"] = newName }
+                if !newPhone.isEmpty { patch["phone"] = newPhone }
+                else { patch["phone"] = "" }
+                if !patch.isEmpty {
+                    try? await DB.from("bookings").update(patch).eq("id", b.id).run()
+                }
+            }
+            await MainActor.run { saving = false; onDone(); dismiss() }
+        }
     }
 }
 

@@ -68,8 +68,28 @@ final class L10n {
         }
         for scene in UIApplication.shared.connectedScenes {
             guard let ws = scene as? UIWindowScene else { continue }
-            for w in ws.windows { w.overrideUserInterfaceStyle = style }
+            for w in ws.windows {
+                w.overrideUserInterfaceStyle = style
+                // Нативный liquid-glass UITabBar не перекрашивается от смены стиля окна,
+                // пока не пройдёт layout-проход — форсируем его вручную.
+                if let root = w.rootViewController { Self.refreshTabBars(in: root) }
+            }
         }
+    }
+
+    /// Рекурсивно обходит иерархию контроллеров и форсирует перерисовку таб-баров.
+    private static func refreshTabBars(in vc: UIViewController) {
+        if let tbc = vc as? UITabBarController {
+            let bar = tbc.tabBar
+            // Переназначение appearance + layout заставляет бар перечитать trait-стиль.
+            let std = bar.standardAppearance
+            bar.standardAppearance = std
+            bar.scrollEdgeAppearance = bar.scrollEdgeAppearance
+            bar.setNeedsLayout()
+            bar.layoutIfNeeded()
+        }
+        for child in vc.children { refreshTabBars(in: child) }
+        if let presented = vc.presentedViewController { refreshTabBars(in: presented) }
     }
 
     private init() {
@@ -250,6 +270,8 @@ let STRINGS: [String: [Lang: String]] = [
     "saving":     tr("Saving…", "Сохранение…", "Salvataggio…", "Enregistrement…", "Saxlanılır…", "Kaydediliyor…", "Збереження…", "Сақталуда…"),
     "saveFailed": tr("Not saved: {err}", "Не сохранилось: {err}", "Non salvato: {err}", "Non enregistré : {err}", "Saxlanılmadı: {err}", "Kaydedilmedi: {err}", "Не збережено: {err}", "Сақталмады: {err}"),
     "refreshFailed": tr("Couldn’t refresh", "Не удалось обновить", "Aggiornamento non riuscito", "Échec de l’actualisation", "Yenilənmədi", "Yenilenemedi", "Не вдалося оновити", "Жаңарту сәтсіз"),
+    "loadFailed": tr("Couldn’t load", "Не удалось загрузить", "Caricamento non riuscito", "Échec du chargement", "Yüklənmədi", "Yüklenemedi", "Не вдалося завантажити", "Жүктелмеді"),
+    "retry":      tr("Retry", "Повторить", "Riprova", "Réessayer", "Təkrar", "Tekrar", "Повторити", "Қайталау"),
     "empty":      tr("Empty", "Пусто", "Vuoto", "Vide", "Boş", "Boş", "Порожньо", "Бос"),
     "noData":     tr("No data", "Нет данных", "Nessun dato", "Aucune donnée", "Məlumat yoxdur", "Veri yok", "Немає даних", "Дерек жоқ"),
 
@@ -389,6 +411,8 @@ let STRINGS: [String: [Lang: String]] = [
     "ai.typeMessage":   tr("Type a message...", "Напишите сообщение...", "Scrivi messaggio...", "Tapez un message...", "Mesaj yazın...", "Mesaj yazın...", "Напишіть повідомлення...", "Хабар жазыңыз..."),
     "ai.applied":       tr("Fields filled", "Поля заполнены", "Campi compilati", "Champs remplis", "Sahələr dolduruldu", "Alanlar dolduruldu", "Поля заповнені", "Өрістер толтырылды"),
     "ai.close":         tr("Close", "Закрыть", "Chiudi", "Fermer", "Bağla", "Kapat", "Закрити", "Жабу"),
+    "ai.ask":           tr("Ask mise…", "Спроси у mise…", "Chiedi a mise…", "Demandez à mise…", "mise-dən soruş…", "mise'ye sor…", "Запитай у mise…", "mise-ден сұра…"),
+    "ai.more":          tr("More", "Подробнее", "Dettagli", "Plus", "Ətraflı", "Daha fazla", "Детальніше", "Толығырақ"),
     "an.pcs":            tr("{n} pcs", "{n} шт", "{n} pz", "{n} pcs", "{n} əd", "{n} adet", "{n} шт", "{n} дана"),
     "an.forecastMonth":  tr("MONTH FORECAST", "ПРОГНОЗ НА МЕСЯЦ", "PREVISIONE MESE", "PRÉVISION DU MOIS", "AY PROQNOZU", "AY TAHMİNİ", "ПРОГНОЗ НА МІСЯЦЬ", "АЙЛЫҚ БОЛЖАМ"),
     "an.revenueMonth":   tr("MONTH REVENUE", "ВЫРУЧКА ЗА МЕСЯЦ", "RICAVO DEL MESE", "REVENU DU MOIS", "AYLIQ GƏLİR", "AYLIK GELİR", "ВИРУЧКА ЗА МІСЯЦЬ", "АЙЛЫҚ ТҮСІМ"),
@@ -630,10 +654,12 @@ let STRINGS: [String: [Lang: String]] = [
     "bk.edit":            tr("Edit booking", "Редактировать", "Modifica", "Modifier", "Düzəliş", "Düzenle", "Редагувати", "Өзгерту"),
     "bk.save":            tr("Save", "Сохранить", "Salva", "Enregistrer", "Yadda saxla", "Kaydet", "Зберегти", "Сақтау"),
     "bk.secGuest":        tr("Guest", "Гость", "Ospite", "Invité", "Qonaq", "Misafir", "Гість", "Қонақ"),
+    "bk.suggestions":     tr("Existing guests", "Существующие гости", "Ospiti esistenti", "Invités existants", "Mövcud qonaqlar", "Mevcut misafirler", "Існуючі гості", "Бар қонақтар"),
     "bk.name":            tr("Name", "Имя", "Nome", "Nom", "Ad", "Ad", "Ім'я", "Аты"),
     "bk.phone":           tr("Phone", "Телефон", "Telefono", "Téléphone", "Telefon", "Telefon", "Телефон", "Телефон"),
     "bk.guests":          tr("Guests", "Гостей", "Ospiti", "Personnes", "Qonaq sayı", "Kişi", "Гостей", "Қонақтар"),
     "bk.secBooking":      tr("Booking", "Бронь", "Prenotazione", "Réservation", "Rezerv", "Rezervasyon", "Бронь", "Брон"),
+    "bk.date":            tr("Date", "Дата", "Data", "Date", "Tarix", "Tarih", "Дата", "Күні"),
     "bk.setTime":         tr("Set time", "Указать время", "Imposta orario", "Définir l'heure", "Vaxtı təyin et", "Saat belirle", "Вказати час", "Уақытты көрсету"),
     "bk.time":            tr("Time", "Время", "Orario", "Heure", "Vaxt", "Saat", "Час", "Уақыт"),
     "bk.table":           tr("Table", "Стол", "Tavolo", "Table", "Masa", "Masa", "Стіл", "Үстел"),
@@ -641,6 +667,7 @@ let STRINGS: [String: [Lang: String]] = [
     "bk.note":            tr("Comment", "Комментарий", "Commento", "Commentaire", "Şərh", "Yorum", "Коментар", "Пікір"),
     "bk.notePh":          tr("Comment…", "Комментарий…", "Commento…", "Commentaire…", "Şərh…", "Yorum…", "Коментар…", "Пікір…"),
     "bk.delete":          tr("Delete booking", "Удалить бронь", "Elimina prenotazione", "Supprimer", "Rezervi sil", "Rezervasyonu sil", "Видалити бронь", "Бронды жою"),
+    "bk.saveFailed":      tr("Couldn't save", "Не удалось сохранить", "Salvataggio non riuscito", "Échec de l'enregistrement", "Saxlanmadı", "Kaydedilemedi", "Не вдалося зберегти", "Сақталмады"),
 
     // News
     "nw.kInfo":           tr("Info", "Информация", "Info", "Info", "Məlumat", "Bilgi", "Інформація", "Ақпарат"),
@@ -701,6 +728,7 @@ let STRINGS: [String: [Lang: String]] = [
     "an.csvClosing":      tr("Closing", "Закрытие", "Chiusura", "Clôture", "Bağlanış", "Kapanış", "Закриття", "Жабылу"),
     "an.csvTotal":        tr("Total", "Итого", "Totale", "Total", "Cəmi", "Toplam", "Разом", "Барлығы"),
     "an.pdfTitle":        tr("Analytics Report", "Отчёт по аналитике", "Report analitico", "Rapport analytique", "Analitika hesabatı", "Analiz raporu", "Звіт по аналітиці", "Аналитика есебі"),
+    "an.pdfGenerated":    tr("Generated", "Сформировано", "Generato", "Généré", "Yaradıldı", "Oluşturuldu", "Сформовано", "Жасалды"),
     "an.pdfShiftsTable":  tr("Shifts", "Смены", "Turni", "Services", "Növbələr", "Vardiyalar", "Зміни", "Ауысымдар"),
     "an.exportFailed":    tr("Export failed", "Ошибка экспорта", "Esportazione fallita", "Échec de l'export", "İxrac xətası", "Dışa aktarma hatası", "Помилка експорту", "Экспорт қатесі"),
 
@@ -749,4 +777,10 @@ let STRINGS: [String: [Lang: String]] = [
     "gs.today":           tr("Today", "Сегодня", "Oggi", "Aujourd’hui", "Bu gün", "Bugün", "Сьогодні", "Бүгін"),
     "gs.daysAgo":         tr("{n} d ago", "{n} дн. назад", "{n} g fa", "il y a {n} j", "{n} gün əvvəl", "{n} gün önce", "{n} дн. тому", "{n} күн бұрын"),
     "gs.monthsAgo":       tr("{n} mo ago", "{n} мес. назад", "{n} mesi fa", "il y a {n} mois", "{n} ay əvvəl", "{n} ay önce", "{n} міс. тому", "{n} ай бұрын"),
+    "gs.editGuest":       tr("Edit guest", "Редактировать гостя", "Modifica ospite", "Modifier l'invité", "Qonağı düzəlt", "Misafiri düzenle", "Редагувати гостя", "Қонақты өзгерту"),
+    "gs.deleteGuest":     tr("Delete guest", "Удалить гостя", "Elimina ospite", "Supprimer l'invité", "Qonağı sil", "Misafiri sil", "Видалити гостя", "Қонақты жою"),
+    "gs.deleteGuestConfirm": tr("Delete all bookings for {name}?", "Удалить все брони гостя {name}?", "Eliminare tutte le prenotazioni di {name}?", "Supprimer toutes les réservations de {name} ?", "{name} üçün bütün rezervləri sil?", "{name} için tüm rezervasyonları sil?", "Видалити всі броні гостя {name}?", "{name} үшін барлық бронды жою?"),
+    "gs.guestInfo":       tr("Guest info", "Информация о госте", "Info ospite", "Info invité", "Qonaq məlumatı", "Misafir bilgisi", "Інфо про гостя", "Қонақ ақпараты"),
+    "gs.namePh":          tr("Name", "Имя", "Nome", "Nom", "Ad", "Ad", "Ім'я", "Аты"),
+    "gs.phonePh":         tr("Phone", "Телефон", "Telefono", "Téléphone", "Telefon", "Telefon", "Телефон", "Телефон"),
 ]
