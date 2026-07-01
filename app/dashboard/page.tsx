@@ -81,7 +81,8 @@ function timeAgo(iso: string) {
   if (m < 60) return tCurrent('dash.minAgo', { m })
   const h = Math.floor(m / 60)
   if (h < 24) return tCurrent('dash.hAgo', { h })
-  return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+  const loc = tCurrent('dash.locale') || 'en'
+  return new Date(iso).toLocaleDateString(loc, { day: 'numeric', month: 'short' })
 }
 
 // ── SPLASH SCREEN ─────────────────────────────────────────────────────────────
@@ -461,7 +462,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 16 }}>
-        {[{ l: tr('dash.inTeam'), v: String(employees.length), c: 'var(--tx)' }, { l: tr('dash.withAccess'), v: `${withAccess}/${maxStaff}`, c: '#007aff' }, { l: tr('dash.payrollMo'), v: `€${totalSalary.toLocaleString()}`, c: '#af52de' }].map(it => (
+        {[{ l: tr('dash.inTeam'), v: String(employees.length), c: 'var(--tx)' }, { l: tr('dash.withAccess'), v: `${withAccess}/${maxStaff}`, c: '#007aff' }, { l: tr('dash.payrollMo'), v: `${restaurant?.currency || '€'}${totalSalary.toLocaleString()}`, c: '#af52de' }].map(it => (
           <Card key={it.l} style={{ padding: '14px 16px', textAlign: 'center' }}>
             <div style={{ fontSize: '.68rem', color: 'var(--tx2)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4, letterSpacing: '.04em' }}>{it.l}</div>
             <div style={{ fontSize: '1.3rem', fontWeight: 700, color: it.c }}>{it.v}</div>

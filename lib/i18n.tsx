@@ -965,6 +965,7 @@ const STRINGS: Record<string, Row> = {
   'dash.justNow':    { en: 'just now', ru: 'только что', it: 'proprio ora', fr: 'à l’instant', az: 'indicə', tr: 'az önce', uk: 'щойно', kk: 'жаңа ғана' },
   'dash.minAgo':     { en: '{m} min ago', ru: '{m} мин назад', it: '{m} min fa', fr: 'il y a {m} min', az: '{m} dəq əvvəl', tr: '{m} dk önce', uk: '{m} хв тому', kk: '{m} мин бұрын' },
   'dash.hAgo':       { en: '{h} h ago', ru: '{h} ч назад', it: '{h} h fa', fr: 'il y a {h} h', az: '{h} saat əvvəl', tr: '{h} sa önce', uk: '{h} год тому', kk: '{h} сағ бұрын' },
+  'dash.locale':     { en: 'en', ru: 'ru', it: 'it', fr: 'fr', az: 'az', tr: 'tr', uk: 'uk', kk: 'kk' },
 
   // ── common ──
   'common.or':      { en: 'or', ru: 'или', it: 'oppure', fr: 'ou', az: 'və ya', tr: 'veya', uk: 'або', kk: 'немесе' },
