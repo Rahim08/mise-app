@@ -129,9 +129,9 @@ final class L10n {
 @MainActor func t(_ k: String, _ vars: [String: String] = [:]) -> String { L10n.shared.t(k, vars) }
 
 /// Зеркало кода языка для nonisolated-доступа (форматтеры дат вне MainActor).
-enum I18n { nonisolated(unsafe) static var code = "en" }
+@MainActor enum I18n { nonisolated(unsafe) static var code = "en" }
 /// Локаль для форматтеров дат — следует выбранному языку.
-func appLocale() -> Locale { Locale(identifier: I18n.code) }
+@MainActor func appLocale() -> Locale { Locale(identifier: I18n.code) }
 
 // MARK: - Словарь
 

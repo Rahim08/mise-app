@@ -73,7 +73,8 @@ export async function POST(req: NextRequest) {
     return { ok: true, text: d.choices?.[0]?.message?.content ?? '' }
   }
 
-  const body = await req.json()
+  let body: any
+  try { body = await req.json() } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }) }
 
   // Native iOS request: { module, message, context, lang }
   if (body.module) {
@@ -121,6 +122,9 @@ export async function POST(req: NextRequest) {
 
   // Legacy web request: { messages, context }
   const { messages, context } = body
+  if (!Array.isArray(messages) || messages.length === 0 || !messages[messages.length - 1]?.text) {
+    return NextResponse.json({ error: 'Invalid messages format' }, { status: 400 })
+  }
   const system = context ?? 'You are a helpful restaurant analytics assistant.'
   const lastMsg = messages[messages.length - 1].text
   const { ok, text } = await groqChat(system, lastMsg)

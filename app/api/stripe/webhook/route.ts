@@ -55,13 +55,18 @@ export async function POST(req: NextRequest) {
 
       // Отправляем receipt email владельцу
       try {
-        const { data: owner } = await supabase.auth.admin.getUserById(restaurantId)
-        const ownerEmail = owner?.user?.email
-        if (ownerEmail) {
-          const price = obj.amount_total ? `${(obj.amount_total / 100).toFixed(0)} ${(obj.currency || 'usd').toUpperCase()}` : undefined
-          await sendPaymentReceiptEmail(ownerEmail, plan || 'Pro', price)
+        const { data: restaurant } = await supabase.from('restaurants').select('owner_id').eq('id', restaurantId).single()
+        if (restaurant?.owner_id) {
+          const { data: owner } = await supabase.auth.admin.getUserById(restaurant.owner_id)
+          const ownerEmail = owner?.user?.email
+          if (ownerEmail) {
+            const price = obj.amount_total ? `${(obj.amount_total / 100).toFixed(0)} ${(obj.currency || 'usd').toUpperCase()}` : undefined
+            await sendPaymentReceiptEmail(ownerEmail, plan || 'Pro', price)
+          }
         }
-      } catch {}
+      } catch (err) {
+        console.error('[stripe-webhook] Failed to send receipt email:', err)
+      }
 
       // Повторный чекаут (смена плана, дабл-клик, «не увидел подписку — оформил ещё раз»)
       // создаёт ВТОРУЮ подписку у того же customer → двойное списание.

@@ -1199,4 +1199,7 @@ const STRINGS: Record<string, Row> = {
   // ── manager cash summary ──
   'mg.sumRevenue':   { en: 'Revenue', ru: 'Выручка', it: 'Ricavi', fr: 'Recettes', az: 'Gəlir', tr: 'Ciro', uk: 'Виручка', kk: 'Түсім' },
   'mg.sumHookah':    { en: 'Hookah', ru: 'Кальяны', it: 'Narghilè', fr: 'Chicha', az: 'Qəlyan', tr: 'Nargile', uk: 'Кальяни', kk: 'Кальян' },
+  // ── common ──
+  'offline':          { en: 'No connection — changes won\'t save until the network returns', ru: 'Нет соединения — изменения не сохранятся, пока сеть не вернётся', it: 'Nessuna connessione — le modifiche non saranno salvate fino al ripristino della rete', fr: 'Aucune connexion — les modifications ne seront pas enregistrées jusqu\'au retour du réseau', az: 'Bağlantı yoxdur — şəbəkə qayıdənə qədər dəyişikliklər saxlanılmayacaq', tr: 'Bağlantı yok — ağ dönene kadar değişiklikler kaydedilmeyecek', uk: 'Немає з\'єднання — зміни не збережуться, поки мережа не повернеться', kk: 'Байланыс жоқ — желі қайтып келгенше өзгерістер сақталмайды' },
+  'bk.newBooking':     { en: 'New booking', ru: 'Новая бронь', it: 'Nuova prenotazione', fr: 'Nouvelle réservation', az: 'Yeni bron', tr: 'Yeni rezervasyon', uk: 'Нове бронювання', kk: 'Жаңа бронь' },
 }

@@ -50,7 +50,7 @@ final class PeopleModel {
     var schedLoaded = false
     var shiftsView = "shifts" // shifts | swaps
     var calendarMonth: Date = {
-        Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: Date()))!
+        Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: Date())) ?? Date()
     }()
     var selectedCalDate: String? = nil
 
@@ -385,7 +385,7 @@ final class PeopleModel {
         pendingCheckIn = UserDefaults.standard.data(forKey: pendingCheckInKey) != nil
 
         let cal = Calendar.current
-        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: Date()))!
+        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: Date())) ?? Date()
         if let g = try? await DB.from("restaurant_settings").select().limit(1).list(GeoSettings.self).first { geo = g }
         if isManager {
             if let a = try? await DB.from("attendance_records").select().gte("date", key(monthStart)).order("date", ascending: false).limit(500).list(AttendanceRecord.self) {

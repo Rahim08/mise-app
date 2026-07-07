@@ -118,6 +118,16 @@ function Scanner({ onResult }: { onResult: (data: string) => void }) {
   )
 }
 
+function getDeviceId(): string {
+  const key = 'mise_device_id'
+  let id = localStorage.getItem(key)
+  if (!id) {
+    id = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+    localStorage.setItem(key, id)
+  }
+  return id
+}
+
 export function NativeOnboarding() {
   const router = useRouter()
   const [phase, setPhase] = useState<Phase>('init')
@@ -201,7 +211,7 @@ export function NativeOnboarding() {
     try {
       const res = await fetch('/api/auth/pin/check', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ restaurantId: restaurant.id, pin: entered }),
+        body: JSON.stringify({ restaurantId: restaurant.id, pin: entered, deviceId: getDeviceId() }),
       })
       const result = await res.json()
       if (result.match) {

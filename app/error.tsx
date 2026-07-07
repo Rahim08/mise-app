@@ -1,6 +1,6 @@
 'use client'
 
-export default function ManagerError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+export default function RootError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: '2rem', fontFamily: 'system-ui, sans-serif' }}>
       <h2 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '1rem' }}>Something went wrong</h2>

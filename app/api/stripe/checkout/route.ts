@@ -3,9 +3,9 @@ import { createClient } from '@supabase/supabase-js'
 import { verifyOwner } from '@/lib/stripeAuth'
 
 const PLANS: Record<string, { priceId: string }> = {
-  starter:  { priceId: 'price_1TgTbgQ50dEzENhL18edUbx7' },
-  business: { priceId: 'price_1TgTbyQ50dEzENhLp5BWqzIr' },
-  pro:      { priceId: 'price_1TgTcJQ50dEzENhLsmEHWwvL' },
+  starter:  { priceId: process.env.STRIPE_PRICE_STARTER || 'price_1TgTbgQ50dEzENhL18edUbx7' },
+  business: { priceId: process.env.STRIPE_PRICE_BUSINESS || 'price_1TgTbyQ50dEzENhLp5BWqzIr' },
+  pro:      { priceId: process.env.STRIPE_PRICE_PRO || 'price_1TgTcJQ50dEzENhLsmEHWwvL' },
 }
 
 export async function POST(req: NextRequest) {

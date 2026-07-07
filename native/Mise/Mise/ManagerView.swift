@@ -201,7 +201,7 @@ final class ManagerModel {
             shift = sh
             await loadAbsences(key(currentDate))
             flash(t("mg.shiftOpened"))
-            await Notify.send(type: "cash_open", title: "Касса открыта", body: "Смена открыта", audience: ["managers": true])
+            await Notify.send(type: "cash_open", title: t("mg.pushCashOpen"), body: t("mg.pushShiftOpened"), audience: ["managers": true])
             // Запланировать напоминание о закрытии смены
             if ShiftReminder.isEnabled() { ShiftReminder.schedule() }
         } else {
@@ -294,7 +294,7 @@ final class ManagerModel {
             digest += " · Расход \(Money.s(c.totalExp))"
             if c.ink > 0 { digest += " · Инкасс \(Money.s(c.ink))" }
             digest += " · Касса \(Money.s(c.balance))" + hk
-            await Notify.send(type: "cash_close", title: "Касса закрыта — итоги дня", body: "Смена закрыта",
+            await Notify.send(type: "cash_close", title: t("mg.pushCashClosed"), body: t("mg.pushShiftClosed"),
                               audience: ["managers": true],
                               secureBody: digest)
         } catch {

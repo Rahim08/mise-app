@@ -341,15 +341,15 @@ final class StashModel {
             let existing = fresh.first { norm($0.brand) == norm(r.brand) && norm($0.flavor) == norm(r.flavor) }
             let brand = existing?.brand ?? r.brand
             let flavor = existing?.flavor ?? r.flavor
-            try? await DB.from("tobacco_movements").insert([
+            try await DB.from("tobacco_movements").insert([
                 "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty,
                 "type": movMode, "batch_id": batchId, "reason": defReason,
             ]).run()
             if let ex = existing {
                 let delta = movMode == "in" ? qty : -qty
-                try? await DB.from("tobacco_stock").update(["quantity_g": ex.quantity_g + delta]).eq("id", ex.id).run()
+                try await DB.from("tobacco_stock").update(["quantity_g": ex.quantity_g + delta]).eq("id", ex.id).run()
             } else if movMode == "in" {
-                try? await DB.from("tobacco_stock").insert([
+                try await DB.from("tobacco_stock").insert([
                     "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty, "flavor_name": flavor,
                 ]).run()
             }

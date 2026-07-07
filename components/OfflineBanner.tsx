@@ -3,8 +3,10 @@
 // чтобы не было сюрприза «всё пропало». Короткие просадки гасит ретрай в lib/db;
 // этот баннер — для реального продолжительного офлайна.
 import { useEffect, useState } from 'react'
+import { useI18n } from '@/lib/i18n'
 
 export function OfflineBanner() {
+  const { t: tr } = useI18n()
   const [offline, setOffline] = useState(false)
 
   useEffect(() => {
@@ -33,7 +35,7 @@ export function OfflineBanner() {
     >
       <style>{`@keyframes miseOfflineDown{from{transform:translateY(-100%)}to{transform:translateY(0)}}`}</style>
       <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 24 24"><path d="M1 1l22 22M16.7 16.7A11 11 0 0 0 12 16M5 12.5a11 11 0 0 1 4-2.3M2 8.8a16 16 0 0 1 4.5-2.6M9 5.2A16 16 0 0 1 22 8.8M12 20h.01" /></svg>
-      Нет соединения — изменения не сохранятся, пока сеть не вернётся
+      {tr('offline')}
     </div>
   )
 }

@@ -22,6 +22,7 @@ func parseISO(_ s: String?) -> Date? {
 /// нативное приложение только читает символ и подставляет во все суммы.
 /// Устанавливается один раз после входа (AppModel) и читается из View (главный поток),
 /// поэтому nonisolated(unsafe) безопасен.
+@MainActor
 enum Money {
     nonisolated(unsafe) static var symbol = "€"
     /// «<symbol>1 500»; отрицательные — «−<symbol>1 500».

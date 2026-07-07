@@ -59,6 +59,7 @@ final class BookingsModel {
     var rangeBookings: [Booking] = []  // для режима Today/Tomorrow/Week
     var monthDays: Set<String> = []    // дни месяца, где есть брони (точки в календаре)
     var loading = true
+    var saving = false
     var toast: String?
     var rangeLoading = false
     var allBookings: [Booking] = []    // все брони для гостей-лояльности
@@ -141,6 +142,8 @@ final class BookingsModel {
     }
 
     func save(_ b: Booking, isNew: Bool) async {
+        guard !saving else { return }
+        saving = true; defer { saving = false }
         var values: [String: Any] = [
             "booking_date": b.booking_date ?? key(currentDate),
             // Новая бронь создаётся БЕЗ статуса — статус ставится свайпом (пришёл/опоздал).
@@ -157,7 +160,7 @@ final class BookingsModel {
             values["created_by"] = b.created_by ?? NSNull()
             values["created_by_name"] = b.created_by_name ?? NSNull()
             try? await DB.from("bookings").insert(values).run()
-            await Notify.send(type: "booking", title: "Новая бронь", body: notifyBody(b),
+            await Notify.send(type: "booking", title: t("bk.new"), body: notifyBody(b),
                               audience: ["managers": true], data: ["module": "bookings"])
         } else {
             values["updated_at"] = ISO8601DateFormatter().string(from: Date())
@@ -174,10 +177,10 @@ final class BookingsModel {
         if let n = b.guest_name, !n.isEmpty { parts.append(n) }
         if let g = b.guests_count { parts.append("\(g)") }
         if let tm = b.booking_time, !tm.isEmpty { parts.append(tm) }
-        if let tbl = b.table_label, !tbl.isEmpty { parts.append("стол \(tbl)") }
+        if let tbl = b.table_label, !tbl.isEmpty { parts.append("\(t("bk.table")) \(tbl)") }
         let day = b.booking_date ?? key(Date())
         if day != key(Date()) { parts.append(day) }
-        return parts.isEmpty ? "Добавлена бронь" : parts.joined(separator: " · ")
+        return parts.isEmpty ? t("bk.new") : parts.joined(separator: " · ")
     }
 
     func delete(_ b: Booking) async {
@@ -702,7 +705,7 @@ private struct BookingCalendar: View {
 
     // Дни месяца с ведущими пустыми ячейками до первого дня недели.
     private var cells: [Date?] {
-        let first = cal.date(from: cal.dateComponents([.year, .month], from: m.visibleMonth))!
+        let first = cal.date(from: cal.dateComponents([.year, .month], from: m.visibleMonth)) ?? Date()
         let count = cal.range(of: .day, in: .month, for: first)?.count ?? 30
         let weekday = cal.component(.weekday, from: first)
         let leading = (weekday - cal.firstWeekday + 7) % 7

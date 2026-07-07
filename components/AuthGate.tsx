@@ -108,6 +108,16 @@ function staffTokenValid(): boolean {
   return m ? parseInt(m[1], 10) > Math.floor(Date.now() / 1000) : false
 }
 
+function getDeviceId(): string {
+  const key = 'mise_device_id'
+  let id = localStorage.getItem(key)
+  if (!id) {
+    id = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+    localStorage.setItem(key, id)
+  }
+  return id
+}
+
 export function AuthGate({ appId, appName, onAuth }: {
   appId: string
   appName: string
@@ -220,7 +230,7 @@ export function AuthGate({ appId, appName, onAuth }: {
     const res = await fetch('/api/auth/pin/check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ restaurantId: restaurant.id, pin: enteredPin }),
+      body: JSON.stringify({ restaurantId: restaurant.id, pin: enteredPin, deviceId: getDeviceId() }),
     })
     const result = await res.json()
 

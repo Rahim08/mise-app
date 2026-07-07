@@ -20,11 +20,8 @@ export interface StaffTokenPayload {
 }
 
 function secret(): string {
-  const s = process.env.MISE_TOKEN_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!s) throw new Error('Missing MISE_TOKEN_SECRET / SUPABASE_SERVICE_ROLE_KEY')
-  if (!process.env.MISE_TOKEN_SECRET) {
-    console.warn('[staffToken] MISE_TOKEN_SECRET not set — falling back to SUPABASE_SERVICE_ROLE_KEY. Set MISE_TOKEN_SECRET in Vercel env for production.')
-  }
+  const s = process.env.MISE_TOKEN_SECRET
+  if (!s) throw new Error('MISE_TOKEN_SECRET is required. Set it in Vercel environment variables.')
   return s
 }
 
