@@ -302,6 +302,14 @@ let STRINGS: [String: [Lang: String]] = [
     "mg.shiftOpened":    tr("Shift opened", "Смена открыта", "Turno aperto", "Service ouvert", "Növbə açıldı", "Vardiya açıldı", "Зміна відкрита", "Ауысым ашылды"),
     "mg.shiftSaved":     tr("Shift saved", "Смена сохранена", "Turno salvato", "Service enregistré", "Növbə saxlanıldı", "Vardiya kaydedildi", "Зміну збережено", "Ауысым сақталды"),
 
+    // Digest keys (cash close push)
+    "mg.dRevenue":      tr("Revenue", "Выручка", "Ricavi", "Recettes", "Gəlir", "Ciro", "Виручка", "Түсім"),
+    "mg.dCard":         tr("card", "карта", "carta", "carte", "kart", "kart", "карта", "карта"),
+    "mg.dExpense":      tr("Expense", "Расход", "Spesa", "Dépense", "Xərc", "Gider", "Витрата", "Шығыс"),
+    "mg.dCollection":   tr("Collection", "Инкасс", "Versamento", "Encaissement", "İnkassasiya", "Tahsilat", "Інкасація", "Инкассация"),
+    "mg.dCash":         tr("Cash", "Касса", "Cassa", "Caisse", "Kassa", "Kasa", "Каса", "Касса"),
+    "mg.dHookah":       tr("Hookah", "Кальяны", "Narghilè", "Chicha", "Qəlyan", "Nargile", "Кальяни", "Кальян"),
+
     // Stash
     "st.shiftSaved":    tr("Shift saved · {p} sold", "Смена сохранена · {p} продано", "Turno salvato · {p} venduti", "Service enregistré · {p} vendus", "Növbə saxlanıldı · {p} satıldı", "Vardiya kaydedildi · {p} satıldı", "Зміну збережено · {p} продано", "Ауысым сақталды · {p} сатылды"),
     "st.shiftSavedFree": tr(" · {f} free", " · {f} беспл.", " · {f} gratis", " · {f} gratuits", " · {f} pulsuz", " · {f} ücretsiz", " · {f} безкошт.", " · {f} тегін"),

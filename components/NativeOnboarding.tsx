@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
+import { useI18n } from '@/lib/i18n'
 
 // Нативный онбординг (только внутри Capacitor-оболочки): приветствие с анимированным
 // логотипом → скан QR заведения → PIN → разрешения (Face ID / гео / уведомления).
@@ -11,12 +12,6 @@ import { db } from '@/lib/db'
 const APP_PATHS: Record<string, string> = {
   manager: '/manager', analytics: '/analytics', stash: '/tobacco', people: '/people',
 }
-
-// Фразы-возможности, всплывающие фоном на экране приветствия.
-const FEATURES = [
-  'Смены и касса', 'Выручка в реальном времени', 'Склад табака', 'Расписание команды',
-  'Зарплаты без таблиц', 'QR-меню', 'Инвентаризация', 'Кальянная смена', 'Явка по геолокации',
-]
 
 // Разбросанные позиции (в % от экрана) для фоновых фраз — фиксированы, чтобы не «прыгали».
 const FEATURE_POS = [
@@ -55,7 +50,7 @@ function AnimatedWordmark({ size = 68 }: { size?: number }) {
 }
 
 // ── Камера-сканер QR (getUserMedia + jsQR) ──
-function Scanner({ onResult }: { onResult: (data: string) => void }) {
+function Scanner({ onResult, t }: { onResult: (data: string) => void; t: (k: string) => string }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -96,7 +91,7 @@ function Scanner({ onResult }: { onResult: (data: string) => void }) {
 
   if (denied) return (
     <div style={{ textAlign: 'center', color: C.sub, fontSize: 14, lineHeight: 1.5, padding: '0 24px' }}>
-      Нет доступа к камере. Разрешите его в Настройках → Mise → Камера и вернитесь.
+      {t('onb.cameraDenied')}
     </div>
   )
 
@@ -130,6 +125,7 @@ function getDeviceId(): string {
 
 export function NativeOnboarding() {
   const router = useRouter()
+  const { t: tr } = useI18n()
   const [phase, setPhase] = useState<Phase>('init')
   const [restaurant, setRestaurant] = useState<any>(null)
   const [pin, setPin] = useState('')
@@ -143,7 +139,7 @@ export function NativeOnboarding() {
   useEffect(() => { init() }, [])
 
   const goToApp = (apps: string[], rid: string) => {
-    if (!apps || apps.length === 0) { setErrorMsg('Нет доступных приложений'); setPhase('error'); return }
+    if (!apps || apps.length === 0) { setErrorMsg(tr('onb.noApps')); setPhase('error'); return }
     if (apps.length === 1 && APP_PATHS[apps[0]]) { router.replace(APP_PATHS[apps[0]]); return }
     router.replace('/join?restaurant=' + rid)
   }
@@ -154,7 +150,6 @@ export function NativeOnboarding() {
   }
 
   const init = async () => {
-    // Вернувшийся сотрудник с живым токеном → сразу в приложение (локальная проверка, мгновенно).
     try {
       const rid = localStorage.getItem('mise_restaurant_id')
       if (rid && tokenValid()) {
@@ -162,8 +157,6 @@ export function NativeOnboarding() {
         if (raw) { const s = JSON.parse(raw); goToApp(s.apps, rid); return }
       }
     } catch {}
-    // Владелец с активной Supabase-сессией → в дашборд. С таймаутом, чтобы не зависнуть
-    // на чёрном экране, если сеть недоступна — тогда просто показываем приветствие.
     try {
       const withTimeout = <T,>(p: Promise<T>, ms: number) =>
         Promise.race([p, new Promise<null>(r => setTimeout(() => r(null), ms))])
@@ -190,7 +183,7 @@ export function NativeOnboarding() {
     let rid = raw
     try { const u = new URL(raw); const p = u.searchParams.get('restaurant'); if (p) rid = p } catch {}
     const info = await getRestaurantInfo(rid)
-    if (!info) { setErrorMsg('Заведение не найдено. Проверьте, что отсканировали QR из дашборда Mise.'); setPhase('error'); return }
+    if (!info) { setErrorMsg(tr('onb.venueNotFound')); setPhase('error'); return }
     localStorage.setItem('mise_restaurant_id', rid)
     document.cookie = `mise_restaurant_id=${rid}; path=/; max-age=2592000; SameSite=Lax`
     setRestaurant(info)
@@ -216,7 +209,7 @@ export function NativeOnboarding() {
       const result = await res.json()
       if (result.match) {
         const data = result.is_owner
-          ? { id: 'owner', name: 'Владелец', apps: ['manager', 'analytics', 'stash', 'people'], is_owner: true }
+          ? { id: 'owner', name: tr('onb.owner'), apps: ['manager', 'analytics', 'stash', 'people'], is_owner: true }
           : result.staff
         localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify(data))
         setStaff(data)
@@ -249,8 +242,6 @@ export function NativeOnboarding() {
   }
 
   const requestNotifications = async () => {
-    // Нативные уведомления подключаются Capacitor-плагином (следующий заход + Apple-аккаунт
-    // для push). Если плагин уже есть — запросим разрешение; иначе просто продолжаем.
     try {
       const ln = (window as any).Capacitor?.Plugins?.LocalNotifications
       if (ln?.requestPermissions) await ln.requestPermissions()
@@ -268,24 +259,29 @@ export function NativeOnboarding() {
     finishPerms()
   }
 
+  const FEATURES = [
+    tr('onb.featShifts'), tr('onb.featRevenue'), tr('onb.featStock'), tr('onb.featSchedule'),
+    tr('onb.featPayroll'), tr('onb.featMenu'), tr('onb.featInventory'), tr('onb.featHookah'), tr('onb.featGeo'),
+  ]
+
   const PERMS = [
     {
-      key: 'faceid', title: 'Вход по Face ID', desc: 'Следующий вход — без ввода PIN, мгновенно и безопасно.',
-      cta: 'Включить Face ID', onAllow: requestFaceId,
+      key: 'faceid', title: tr('onb.faceidTitle'), desc: tr('onb.faceidDesc'),
+      cta: tr('onb.faceidCta'), onAllow: requestFaceId,
       icon: (
         <svg width="40" height="40" fill="none" stroke="#fff" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" /><path d="M9 10v1M15 10v1M9.5 15a3.5 3.5 0 0 0 5 0" /></svg>
       ),
     },
     {
-      key: 'notif', title: 'Уведомления', desc: 'Новые заказы, заканчивающийся табак, конец смены — вовремя.',
-      cta: 'Разрешить уведомления', onAllow: requestNotifications,
+      key: 'notif', title: tr('onb.notifTitle'), desc: tr('onb.notifDesc'),
+      cta: tr('onb.notifCta'), onAllow: requestNotifications,
       icon: (
         <svg width="40" height="40" fill="none" stroke="#fff" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
       ),
     },
     {
-      key: 'geo', title: 'Геолокация', desc: 'Отметка «Я пришёл» на смене работает по месту заведения.',
-      cta: 'Разрешить геолокацию', onAllow: requestLocation,
+      key: 'geo', title: tr('onb.geoTitle'), desc: tr('onb.geoDesc'),
+      cta: tr('onb.geoCta'), onAllow: requestLocation,
       icon: (
         <svg width="40" height="40" fill="none" stroke="#fff" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>
       ),
@@ -324,16 +320,15 @@ export function NativeOnboarding() {
         <div style={{ width: 64, height: 64, borderRadius: 18, background: 'rgba(255,69,58,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
           <svg width="32" height="32" fill="none" stroke="#ff453a" strokeWidth="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" /></svg>
         </div>
-        <div style={{ fontWeight: 700, fontSize: 19, marginBottom: 8 }}>Не получилось</div>
+        <div style={{ fontWeight: 700, fontSize: 19, marginBottom: 8 }}>{tr('onb.errorTitle')}</div>
         <div style={{ color: C.sub, fontSize: 14, lineHeight: 1.5, maxWidth: 280, marginBottom: 28 }}>{errorMsg}</div>
-        <button onClick={() => { setErrorMsg(''); setPhase('connect') }} style={btnPrimary}>Сканировать ещё раз</button>
+        <button onClick={() => { setErrorMsg(''); setPhase('connect') }} style={btnPrimary}>{tr('onb.scanAgain')}</button>
       </div>
     </div>
   )
 
   if (phase === 'welcome') return (
     <div style={screen}><style>{keyframes}</style>
-      {/* фоновые всплывающие фразы */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
         {FEATURES.map((f, i) => (
           <div key={f} style={{
@@ -346,11 +341,11 @@ export function NativeOnboarding() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative', zIndex: 1 }}>
         <AnimatedWordmark size={72} />
         <div style={{ marginTop: 18, fontSize: 16, color: C.sub, fontWeight: 500, textAlign: 'center', maxWidth: 280, lineHeight: 1.45 }}>
-          Управление рестораном — в одном приложении
+          {tr('onb.tagline')}
         </div>
       </div>
       <div style={{ width: '100%', maxWidth: 420, padding: '0 24px 28px', position: 'relative', zIndex: 1 }}>
-        <button onClick={() => setPhase('connect')} style={btnPrimary}>Войти</button>
+        <button onClick={() => setPhase('connect')} style={btnPrimary}>{tr('onb.signIn')}</button>
       </div>
     </div>
   )
@@ -359,13 +354,13 @@ export function NativeOnboarding() {
     <div style={screen}><style>{keyframes}</style>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 24px', width: '100%', maxWidth: 420 }}>
         <div style={{ textAlign: 'center', marginBottom: 28, animation: 'upFade .4s ease' }}>
-          <div style={{ fontWeight: 700, fontSize: 22, letterSpacing: -0.4, marginBottom: 10 }}>Отсканируйте QR заведения</div>
+          <div style={{ fontWeight: 700, fontSize: 22, letterSpacing: -0.4, marginBottom: 10 }}>{tr('onb.scanQrTitle')}</div>
           <div style={{ color: C.sub, fontSize: 14, lineHeight: 1.5, maxWidth: 300, margin: '0 auto' }}>
-            Индивидуальный QR-код вам покажет владелец — в дашборде Mise, раздел «Доступ».
+            {tr('onb.scanQrHint')}
           </div>
         </div>
-        <Scanner onResult={handleScan} />
-        <button onClick={() => setPhase('welcome')} style={{ ...btnGhost, marginTop: 28 }}>Назад</button>
+        <Scanner onResult={handleScan} t={tr} />
+        <button onClick={() => setPhase('welcome')} style={{ ...btnGhost, marginTop: 28 }}>{tr('onb.back')}</button>
       </div>
     </div>
   )
@@ -378,7 +373,7 @@ export function NativeOnboarding() {
             ? <img src={restaurant.logo_url} alt="" style={{ width: 64, height: 64, borderRadius: 16, objectFit: 'cover' }} />
             : <AnimatedWordmark size={40} />}
           <div style={{ fontWeight: 700, fontSize: 19 }}>{restaurant?.name}</div>
-          <div style={{ fontSize: 13, color: C.sub }}>Введите PIN сотрудника</div>
+          <div style={{ fontSize: 13, color: C.sub }}>{tr('onb.enterPin')}</div>
         </div>
         <div style={{ display: 'flex', gap: 18, marginBottom: 36, animation: shaking ? 'shake .5s ease' : 'none' }}>
           {[0, 1, 2, 3].map(i => (
@@ -397,7 +392,7 @@ export function NativeOnboarding() {
             >{k}</button>
           ))}
         </div>
-        <button onClick={() => { localStorage.removeItem('mise_restaurant_id'); setPhase('connect') }} style={{ ...btnGhost, marginTop: 32 }}>Сменить заведение</button>
+        <button onClick={() => { localStorage.removeItem('mise_restaurant_id'); setPhase('connect') }} style={{ ...btnGhost, marginTop: 32 }}>{tr('auth.gate.changeVenue')}</button>
       </div>
     </div>
   )
@@ -419,7 +414,7 @@ export function NativeOnboarding() {
         </div>
         <div style={{ width: '100%', maxWidth: 420, padding: '0 24px 28px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button onClick={p.onAllow} style={btnPrimary}>{p.cta}</button>
-          <button onClick={skipPerm} style={btnGhost}>Не сейчас</button>
+          <button onClick={skipPerm} style={btnGhost}>{tr('onb.notNow')}</button>
         </div>
       </div>
     )

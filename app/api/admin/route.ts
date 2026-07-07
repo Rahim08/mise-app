@@ -5,7 +5,8 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'raxim98@gmail.com'
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL
+if (!ADMIN_EMAIL) console.warn('[admin] ADMIN_EMAIL not set — admin route will be inaccessible')
 
 async function isAdmin(req: NextRequest): Promise<boolean> {
   const supabase = createServerClient(

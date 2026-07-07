@@ -287,13 +287,13 @@ final class ManagerModel {
                 .eq("date", key(currentDate)).list(HkSale.self) {
                 let paid = sales.filter { $0.is_free != true }.reduce(0) { $0 + Int($1.quantity ?? 0) }
                 let rev = sales.filter { $0.is_free != true }.reduce(0.0) { $0 + ($1.quantity ?? 0) * ($1.price ?? 0) }
-                if paid > 0 { hk = " · Кальяны \(paid) (\(Money.s(rev)))" }
+                if paid > 0 { hk = " · \(t("mg.dHookah")) \(paid) (\(Money.s(rev)))" }
             }
-            var digest = "Выручка \(Money.s(c.inc))"
-            if c.card > 0 { digest += " + карта \(Money.s(c.card))" }
-            digest += " · Расход \(Money.s(c.totalExp))"
-            if c.ink > 0 { digest += " · Инкасс \(Money.s(c.ink))" }
-            digest += " · Касса \(Money.s(c.balance))" + hk
+            var digest = "\(t("mg.dRevenue")) \(Money.s(c.inc))"
+            if c.card > 0 { digest += " + \(t("mg.dCard")) \(Money.s(c.card))" }
+            digest += " · \(t("mg.dExpense")) \(Money.s(c.totalExp))"
+            if c.ink > 0 { digest += " · \(t("mg.dCollection")) \(Money.s(c.ink))" }
+            digest += " · \(t("mg.dCash")) \(Money.s(c.balance))" + hk
             await Notify.send(type: "cash_close", title: t("mg.pushCashClosed"), body: t("mg.pushShiftClosed"),
                               audience: ["managers": true],
                               secureBody: digest)

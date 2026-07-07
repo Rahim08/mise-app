@@ -163,7 +163,7 @@ final class PeopleModel {
             try? await DB.from("staff_tasks").insert(v).run()
             if tid != myId {
                 try? await DB.from("notifications").insert([
-                    "restaurant_id": rid, "staff_id": tid, "type": "task", "title": "Новая задача", "body": title,
+                    "restaurant_id": rid, "staff_id": tid, "type": "task", "title": t("pe.newTask"), "body": title,
                 ]).run()
             }
         }
@@ -434,7 +434,7 @@ final class PeopleModel {
             try await DB.from("attendance_records").insert(payload).run()
             UserDefaults.standard.removeObject(forKey: pendingCheckInKey)
             pendingCheckIn = false
-            await Notify.send(type: "attendance", title: "Сотрудник на смене", body: "\(myName.isEmpty ? "Сотрудник" : myName) пришёл(а)", audience: ["managers": true])
+            await Notify.send(type: "attendance", title: t("pe.onShift"), body: myName.isEmpty ? t("pe.iCame") : "\(myName) \(t("pe.iCame"))", audience: ["managers": true])
             flash(t("pe.checkedIn"))
             await loadAttendance()
         } catch {
