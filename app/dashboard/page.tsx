@@ -1635,7 +1635,22 @@ export default function Dashboard() {
     const params = new URLSearchParams(window.location.search)
     const t = params.get('tab')
     if (t) setTab(t === 'categories' ? 'settings' : t) // категории переехали в настройки
-    supabase.auth.getSession().then(async ({ data }) => {
+
+    // Super-admin "view as client" (set from /admin) — bypasses owner Supabase session
+    // entirely, since loadRestaurant's own owner_id filter would otherwise combine with
+    // the server-forced restaurant scope and always return empty.
+    fetch('/api/auth/admin-view').then(async res => {
+      if (!res.ok) return false
+      const { restaurantId } = await res.json()
+      if (!restaurantId) return false
+      const { data: rest } = await db.from('restaurants').select('*').single()
+      setRestaurant(rest)
+      setUser({ id: 'admin-view' })
+      setAuthChecked(true)
+      return true
+    }).then(handled => {
+      if (handled) return
+      supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session?.user) {
         setAuthChecked(true)
         router.replace('/auth/login')
@@ -1655,6 +1670,7 @@ export default function Dashboard() {
           if (rest && (rest.subscription_status === 'active' || rest.subscription_status === 'trialing')) break
         }
       }
+      })
     })
   }, [])
 

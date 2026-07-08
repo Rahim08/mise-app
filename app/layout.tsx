@@ -5,6 +5,7 @@ import { ErrorReporter } from "@/components/ErrorReporter";
 import { CookieConsent } from "@/components/CookieConsent";
 import { Analytics } from "@/components/Analytics";
 import { OfflineBanner } from "@/components/OfflineBanner";
+import { ImpersonationBanner } from "@/components/ImpersonationBanner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -50,6 +51,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <ErrorReporter />
         <OfflineBanner />
+        <ImpersonationBanner />
         {children}
         <CookieConsent />
         <Suspense fallback={null}><Analytics /></Suspense>

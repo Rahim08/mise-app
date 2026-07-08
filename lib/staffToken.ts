@@ -74,3 +74,38 @@ export function verifyStaffToken(token: string | undefined | null): StaffTokenPa
 
 export const STAFF_COOKIE = COOKIE_NAME
 export const STAFF_COOKIE_MAXAGE = TTL_SECONDS
+
+// Super-admin "view as client" token — lets the single ADMIN_EMAIL account (see
+// app/api/admin/route.ts) open any restaurant's web dashboard for support, without a PIN
+// or owner Supabase session. Separate cookie/short TTL so it never collides with a real
+// staff/owner session and can't be replayed long after the admin closes the tab.
+const ADMIN_VIEW_COOKIE = 'mise_admin_view'
+const ADMIN_VIEW_TTL_SECONDS = 60 * 60 // 1 hour
+
+export interface AdminViewPayload { rid: string; iat: number; exp: number }
+
+export function issueAdminViewToken(rid: string): string {
+  const now = Math.floor(Date.now() / 1000)
+  const payload: AdminViewPayload = { rid, iat: now, exp: now + ADMIN_VIEW_TTL_SECONDS }
+  const body = b64url(JSON.stringify(payload))
+  return `${body}.${sign(body, secret())}`
+}
+
+export function verifyAdminViewToken(token: string | undefined | null): AdminViewPayload | null {
+  if (!token) return null
+  const [body, sig] = token.split('.')
+  if (!body || !sig) return null
+  const expected = sign(body, secret())
+  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null
+  try {
+    const payload = JSON.parse(Buffer.from(body.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString()) as AdminViewPayload
+    if (!payload.rid || typeof payload.exp !== 'number') return null
+    if (Math.floor(Date.now() / 1000) > payload.exp) return null
+    return payload
+  } catch {
+    return null
+  }
+}
+
+export const ADMIN_VIEW_COOKIE_NAME = ADMIN_VIEW_COOKIE
+export const ADMIN_VIEW_COOKIE_MAXAGE = ADMIN_VIEW_TTL_SECONDS

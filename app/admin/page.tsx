@@ -245,6 +245,13 @@ export default function AdminPage() {
               </div>
               <div style={{ fontSize: '.8rem', color: t.text3, marginBottom: 16 }}>{emails[selected.owner_id] || '—'}</div>
 
+              <button
+                onClick={async () => { await adminApi({ action: 'impersonate', restaurantId: selected.id }); window.open('/dashboard', '_blank') }}
+                style={{ ...btn(t, 'primary'), width: '100%', marginBottom: 16 }}
+              >
+                Открыть дашборд клиента
+              </button>
+
               {/* Subscription */}
               <div style={{ fontSize: '.72rem', color: t.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>Подписка</div>
               {!editSub ? (

@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
+import { issueAdminViewToken, ADMIN_VIEW_COOKIE_NAME, ADMIN_VIEW_COOKIE_MAXAGE } from '@/lib/staffToken'
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL
 if (!ADMIN_EMAIL) console.warn('[admin] ADMIN_EMAIL not set — admin route will be inaccessible')
@@ -91,6 +92,27 @@ export async function POST(req: NextRequest) {
     case 'setAI': {
       await admin.from('restaurants').update({ ai_enabled: !!aiEnabled }).eq('id', restaurantId)
       return NextResponse.json({ ok: true })
+    }
+    case 'impersonate': {
+      if (!restaurantId) return NextResponse.json({ error: 'Missing restaurantId' }, { status: 400 })
+      const { data: rest } = await admin.from('restaurants').select('id, name').eq('id', restaurantId).single()
+      if (!rest) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      const res = NextResponse.json({ ok: true, name: rest.name })
+      res.cookies.set(ADMIN_VIEW_COOKIE_NAME, issueAdminViewToken(restaurantId), {
+        httpOnly: true, sameSite: 'lax', secure: true, path: '/', maxAge: ADMIN_VIEW_COOKIE_MAXAGE,
+      })
+      // Readable companion (mirrors mise_token_until pattern): lets client JS show a
+      // "viewing as <client>" banner without exposing the signed token itself.
+      res.cookies.set('mise_admin_view_label', rest.name, {
+        httpOnly: false, sameSite: 'lax', secure: true, path: '/', maxAge: ADMIN_VIEW_COOKIE_MAXAGE,
+      })
+      return res
+    }
+    case 'stopImpersonating': {
+      const res = NextResponse.json({ ok: true })
+      res.cookies.delete(ADMIN_VIEW_COOKIE_NAME)
+      res.cookies.delete('mise_admin_view_label')
+      return res
     }
     default:
       return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

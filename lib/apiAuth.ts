@@ -6,11 +6,17 @@
 import { NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
-import { verifyStaffToken, STAFF_COOKIE } from '@/lib/staffToken'
+import { verifyStaffToken, STAFF_COOKIE, verifyAdminViewToken, ADMIN_VIEW_COOKIE_NAME } from '@/lib/staffToken'
 
 export interface Caller { rid: string; owner: boolean; apps: string[] }
 
 export async function resolveCaller(req: NextRequest): Promise<Caller | null> {
+  // Super-admin "view as client" — unconditional priority so it works even when the
+  // admin's own Supabase session (they may own a restaurant themselves) would otherwise
+  // win below. Scope: full owner access to the impersonated restaurant only.
+  const adminView = verifyAdminViewToken(req.cookies.get(ADMIN_VIEW_COOKIE_NAME)?.value)
+  if (adminView) return { rid: adminView.rid, owner: true, apps: ['manager', 'analytics', 'stash', 'people'] }
+
   const staff = verifyStaffToken(req.cookies.get(STAFF_COOKIE)?.value)
 
   // Owner может тестировать PIN-приложения в том же браузере → есть и staff-кука, и

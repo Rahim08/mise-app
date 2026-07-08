@@ -145,6 +145,13 @@ export function AuthGate({ appId, appName, onAuth }: {
   useEffect(() => { initAuth() }, [])
 
   const initAuth = async () => {
+    // Super-admin "view as client" (set from /admin) — bypasses PIN/owner-session entirely.
+    const viewRes = await fetch('/api/auth/admin-view')
+    if (viewRes.ok) {
+      const { restaurantId } = await viewRes.json()
+      if (restaurantId) { onAuth(restaurantId); return }
+    }
+
     const { data } = await supabase.auth.getUser()
     if (data.user) {
       // Owner has a Supabase session → resolve their restaurant via the gateway.
