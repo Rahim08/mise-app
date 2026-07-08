@@ -131,7 +131,7 @@ struct NewsView: View {
             if let m {
                 AppTabPage(refresh: { await m.load() }) {
                     if m.loading && m.posts.isEmpty {
-                        ProgressView().tint(NW_ACCENT).frame(maxWidth: .infinity).padding(.top, 40)
+                        RowListSkeleton(rows: 4)
                     } else if m.posts.isEmpty {
                         emptyState
                     } else {
@@ -173,7 +173,7 @@ struct NewsView: View {
                     }
                 }
             } else {
-                Color.miseBg
+                NewsSkeleton()
             }
         }
         .tabEdgeSwipe(tabs: ["only"], selection: .constant("only"),

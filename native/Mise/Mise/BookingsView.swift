@@ -315,7 +315,7 @@ struct BookingsView: View {
                             }
                             if (selectedRange == .today ? m.loading : m.rangeLoading) &&
                                (selectedRange == .today ? m.bookings : m.rangeBookings).isEmpty {
-                                ProgressView().tint(BK_ACCENT).frame(maxWidth: .infinity).padding(.top, 40)
+                                RowListSkeleton(rows: 4)
                             } else {
                                 let list = selectedRange == .today ? filteredBookings(m) : filteredRange(m)
                                 if list.isEmpty {
@@ -329,7 +329,7 @@ struct BookingsView: View {
                         } else {
                             // Week view — grouped by day
                             if m.rangeLoading && m.rangeBookings.isEmpty {
-                                ProgressView().tint(BK_ACCENT).frame(maxWidth: .infinity).padding(.top, 40)
+                                RowListSkeleton(rows: 4)
                             } else {
                                 let groups = groupedByDay(filteredRange(m))
                                 if groups.isEmpty {
@@ -420,7 +420,7 @@ struct BookingsView: View {
                 }
 
             } else {
-                Color.miseBg
+                BookingsSkeleton()
             }
         }
         .tabEdgeSwipe(tabs: ["only"], selection: .constant("only"),

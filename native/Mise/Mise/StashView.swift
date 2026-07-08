@@ -45,6 +45,7 @@ final class StashModel {
     var showLowOnly = false
     var showOutOfStock = false
     var movMode = "in"
+    var warehouseLoading = true
 
     init(rid: String, canSeeMoney: Bool) { self.rid = rid; self.canSeeMoney = canSeeMoney }
 
@@ -207,8 +208,9 @@ final class StashModel {
 
     func loadWarehouse() async {
         #if DEBUG
-        if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { return }
+        if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { warehouseLoading = false; return }
         #endif
+        defer { warehouseLoading = false }
         async let sR = try? DB.from("tobacco_stock").select().order("brand").order("flavor").list(StockItem.self)
         async let mvR = try? DB.from("tobacco_movements").select().order("created_at", ascending: false).limit(200).list(Movement.self)
         async let ivR = try? DB.from("tobacco_inventories").select().order("created_at", ascending: false).limit(50).list(Inventory.self)
@@ -789,6 +791,9 @@ private struct ShiftTab: View {
 private struct StockTab: View {
     @Bindable var m: StashModel
     var body: some View {
+        if m.warehouseLoading {
+            RowListSkeleton(rows: 5)
+        } else {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.4))
@@ -853,6 +858,7 @@ private struct StockTab: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
             }
         }
+        }
     }
 }
 
@@ -876,7 +882,9 @@ private struct MovementsTab: View {
                 .background(BrandKit.stash.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
         }
 
-        if m.movementBatches.isEmpty {
+        if m.warehouseLoading {
+            RowListSkeleton(rows: 5)
+        } else if m.movementBatches.isEmpty {
             Text(t("st.noMovements")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 30)
         } else {
             ForEach(m.movementBatches, id: \.0) { batchId, items in
@@ -1295,7 +1303,9 @@ private struct InventoryTab: View {
                 .frame(maxWidth: .infinity).padding(.vertical, 13)
                 .background(BrandKit.stash.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
         }
-        if m.inventories.isEmpty {
+        if m.warehouseLoading {
+            RowListSkeleton(rows: 5)
+        } else if m.inventories.isEmpty {
             Text(t("st.noInventories")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 30)
         } else {
             ForEach(m.inventories) { inv in InventoryRow(inv: inv) }

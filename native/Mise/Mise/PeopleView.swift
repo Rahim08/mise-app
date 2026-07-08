@@ -1266,7 +1266,7 @@ private struct ReportsTab: View {
     var body: some View {
         Group {
             if !m.reportsLoaded {
-                ProgressView().tint(.primary).padding(.top, 40)
+                RowListSkeleton(rows: 3)
             } else {
                 Button { showForm = true } label: {
                     Label(t("pe.newReport"), systemImage: "paperplane")
@@ -1379,7 +1379,7 @@ private struct PeopleSalaryTab: View {
 
     var body: some View {
         if !m.salaryLoaded {
-            ProgressView().tint(.primary).padding(.top, 40)
+            RowListSkeleton(rows: 3)
         } else if m.salaryRows.isEmpty {
             Text(t("pe.noSalary")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)
         } else if !m.isManager, let r = m.salaryRows.first {
@@ -1579,7 +1579,7 @@ private struct AttendanceTab: View {
     var body: some View {
         Group {
             if !m.attLoaded {
-                ProgressView().tint(.primary).padding(.top, 40)
+                RowListSkeleton(rows: 3)
             } else if m.isManager {
                 managerView
             } else {
@@ -1714,7 +1714,7 @@ private struct DisciplineTab: View {
     var body: some View {
         Group {
             if !m.discLoaded {
-                ProgressView().tint(.primary).padding(.top, 40)
+                RowListSkeleton(rows: 3)
             } else if let sel = m.discSel {
                 detail(sel)
             } else {
@@ -1926,7 +1926,7 @@ private struct SwapsTab: View {
     var body: some View {
         Group {
             if !m.swapsLoaded {
-                ProgressView().tint(.primary).padding(.top, 40)
+                RowListSkeleton(rows: 3)
             } else {
                 if !m.isManager {
                     Button { showCreate = true } label: {
@@ -2202,7 +2202,7 @@ private struct ShiftsTab: View {
 
     var body: some View {
         if !m.schedLoaded {
-            ProgressView().tint(.primary).padding(.top, 40)
+            RowListSkeleton(rows: 3)
         } else {
             ShiftsCalendar(m: m)
             if m.isManager { managerControls }
@@ -2393,7 +2393,7 @@ private struct PurchaseTab: View {
 
             let list = m.purchaseSeg == "todo" ? m.purchaseTodo : m.purchaseDone
             if !m.purchaseLoaded {
-                ProgressView().tint(.primary).padding(.top, 40)
+                RowListSkeleton(rows: 3)
             } else if list.isEmpty {
                 VStack(spacing: 4) {
                     Text(m.purchaseSeg == "todo" ? t("pe.pEmpty") : t("pe.pDone")).font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary.opacity(0.7))
@@ -2556,7 +2556,7 @@ private struct ChecklistsTab: View {
     var body: some View {
         Group {
             if !m.checklistsLoaded {
-                ProgressView().tint(.primary).padding(.top, 40)
+                RowListSkeleton(rows: 3)
             } else {
                 if m.openShiftId == nil { inactiveBanner }
                 Picker("", selection: $m.clType) {
@@ -2718,7 +2718,7 @@ private struct ChecklistHistorySheet: View {
                 ScrollView {
                     VStack(spacing: 12) {
                         if !m.clHistoryLoaded {
-                            ProgressView().tint(.primary).padding(.top, 40)
+                            RowListSkeleton(rows: 3)
                         } else if m.historyByDate.isEmpty {
                             Text(t("pe.historyEmpty")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 60)
                         } else {
@@ -2793,7 +2793,7 @@ private struct TechCardsTab: View {
     var body: some View {
         Group {
             if !m.techLoaded {
-                ProgressView().tint(.primary).padding(.top, 40)
+                RowListSkeleton(rows: 3)
             } else {
                 if m.isManager {
                     Button { edit = TechEdit(cardId: nil, name: "", category: "dish", items: [""]) } label: {
@@ -2911,7 +2911,7 @@ private struct OrdersInbox: View {
 
         let list = m.ordersSeg == "active" ? m.activeOrders : m.finishedOrders
         if !m.ordersLoaded {
-            ProgressView().tint(.primary).padding(.top, 40)
+            RowListSkeleton(rows: 3)
         } else if list.isEmpty {
             Text(m.ordersSeg == "active" ? t("pe.noActive") : t("empty"))
                 .font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)
@@ -3029,7 +3029,7 @@ private struct StopTab: View {
     @Bindable var m: PeopleModel
     var body: some View {
         if !m.menuLoaded {
-            ProgressView().tint(.primary).padding(.top, 40)
+            RowListSkeleton(rows: 3)
         } else if m.menu.isEmpty {
             Text(t("pe.menuEmpty")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)
         } else {

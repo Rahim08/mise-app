@@ -157,6 +157,73 @@ struct AnalyticsSkeleton: View {
     }
 }
 
+// MARK: - Generic row list (inline loading — People sub-tabs, Bookings/News reloads)
+//
+// One reusable shape for "list of cards" loading states instead of a bare ProgressView() —
+// avatar circle is optional since some lists (reports, checklists) don't have one.
+
+struct RowListSkeleton: View {
+    var rows: Int = 4
+    var avatar: Bool = false
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ForEach(0..<rows, id: \.self) { _ in
+                HStack(spacing: 12) {
+                    if avatar { Sk(w: 38, h: 38, r: 19) }
+                    VStack(alignment: .leading, spacing: 6) { Sk(w: 150, h: 14); Sk(w: 100, h: 10, r: 4) }
+                    Spacer()
+                }
+                .padding(12)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+            }
+        }
+    }
+}
+
+// MARK: - Bookings skeleton
+
+struct BookingsSkeleton: View {
+    var body: some View {
+        ZStack {
+            Color.miseBg.ignoresSafeArea()
+            VStack(spacing: 12) {
+                Sk(h: 40, r: 12)          // поиск
+                Sk(h: 32, r: 8)           // сегмент-контрол диапазона
+                ScrollView {
+                    RowListSkeleton(rows: 5)
+                }
+            }
+            .padding(16)
+        }
+    }
+}
+
+// MARK: - News skeleton
+
+struct NewsSkeleton: View {
+    var body: some View {
+        ZStack {
+            Color.miseBg.ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 12) {
+                    ForEach(0..<4, id: \.self) { _ in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack { Sk(w: 24, h: 24, r: 6); Sk(w: 90, h: 12, r: 4); Spacer() }
+                            Sk(w: 200, h: 15)
+                            Sk(h: 12, r: 4)
+                            Sk(w: 240, h: 12, r: 4)
+                        }
+                        .padding(14)
+                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+                    }
+                }
+                .padding(16)
+            }
+        }
+    }
+}
+
 // MARK: - People skeleton
 
 struct PeopleSkeleton: View {
