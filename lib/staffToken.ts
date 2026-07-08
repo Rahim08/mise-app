@@ -29,8 +29,8 @@ function b64url(buf: Buffer | string): string {
   return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-function sign(data: string): string {
-  return b64url(crypto.createHmac('sha256', secret()).update(data).digest())
+function sign(data: string, key: string): string {
+  return b64url(crypto.createHmac('sha256', key).update(data).digest())
 }
 
 export function issueStaffToken(input: { rid: string; sid: string; owner: boolean; apps: string[] }): string {
@@ -40,16 +40,28 @@ export function issueStaffToken(input: { rid: string; sid: string; owner: boolea
     iat: now, exp: now + TTL_SECONDS,
   }
   const body = b64url(JSON.stringify(payload))
-  return `${body}.${sign(body)}`
+  return `${body}.${sign(body, secret())}`
+}
+
+// Tokens issued before the 2026-07-07 MISE_TOKEN_SECRET rotation were signed with
+// SUPABASE_SERVICE_ROLE_KEY (the old fallback). Accept that signature too so already
+// logged-in staff aren't kicked out mid-shift. Safe to remove after the 7-day TTL
+// window closes (~2026-07-14), once no pre-rotation cookies remain.
+function legacySecrets(): string[] {
+  const legacy = process.env.SUPABASE_SERVICE_ROLE_KEY
+  return legacy ? [legacy] : []
 }
 
 export function verifyStaffToken(token: string | undefined | null): StaffTokenPayload | null {
   if (!token) return null
   const [body, sig] = token.split('.')
   if (!body || !sig) return null
-  // Constant-time comparison
-  const expected = sign(body)
-  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null
+  // Constant-time comparison against the current secret, then legacy secrets.
+  const matches = (key: string) => {
+    const expected = sign(body, key)
+    return sig.length === expected.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))
+  }
+  if (![secret(), ...legacySecrets()].some(matches)) return null
   try {
     const payload = JSON.parse(Buffer.from(body.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString()) as StaffTokenPayload
     if (!payload.rid || typeof payload.exp !== 'number') return null
