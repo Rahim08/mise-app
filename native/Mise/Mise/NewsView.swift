@@ -107,8 +107,8 @@ final class NewsModel {
             "created_by_name": author.1,
         ]
         try? await DB.from("news_posts").insert(values).run()
-        let pfx = priority == "urgent" ? "СРОЧНО · " : (priority == "important" ? "Важно · " : "")
-        let head = pfx + ((title?.isEmpty == false) ? title! : (NewsKind(rawValue: kind)?.label ?? "Новость"))
+        let pfx = priority == "urgent" ? t("nw.pUrgent") + " · " : (priority == "important" ? t("nw.pImportant") + " · " : "")
+        let head = pfx + ((title?.isEmpty == false) ? title! : (NewsKind(rawValue: kind)?.label ?? t("nw.post")))
         await Notify.send(type: "news", title: head, body: body,
                           audience: ["all": true], data: ["module": "news"])
         await load()
