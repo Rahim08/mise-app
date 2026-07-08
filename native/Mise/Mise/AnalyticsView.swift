@@ -493,11 +493,24 @@ final class AnalyticsModel {
     }
     private func typeName(_ id: String) -> String { types.first { $0.id == id }?.name ?? "—" }
 
+    // Бесплатные — по категории (владелец/сотрудник/кальянщик и т.д., см. StashView
+    // freeCats), не по виду кальяна: категория списания хранится в поле flavor.
+    struct CatLine: Identifiable { let id: String; let name: String; let count: Int }
+    private func freeByCategory(_ rows: [HookahSale]) -> [CatLine] {
+        var m: [String: Int] = [:]
+        for r in rows where r.is_free == true {
+            let cat = (r.flavor?.isEmpty == false) ? r.flavor! : "—"
+            m[cat, default: 0] += Int(r.quantity ?? 0)
+        }
+        return m.map { CatLine(id: $0.key, name: $0.key, count: $0.value) }.sorted { $0.count > $1.count }
+    }
+    var freeByCat: [CatLine] { freeByCategory(hookahRows) }
+
     var venueStockG: Double { stockG }                                  // на складе
     var venueAtPlaceG: Double { issuedG - allHookah.reduce(0) { $0 + rowG($1) } } // в заведении: выдано − продано (может быть минус)
 
     struct TypeLine: Identifiable { let id: String; let name: String; let paid: Int; let free: Int; let grams: Double; let revenue: Double }
-    struct DayHookah: Identifiable { let id: String; let date: String; let qty: Int; let free: Int; let revenue: Double; let types: [TypeLine] }
+    struct DayHookah: Identifiable { let id: String; let date: String; let qty: Int; let free: Int; let revenue: Double; let types: [TypeLine]; let freeByCat: [CatLine] }
     var hookahByDay: [DayHookah] {
         var byDate: [String: [HookahSale]] = [:]
         for r in hookahRows { byDate[r.date ?? "", default: []].append(r) }
@@ -516,7 +529,7 @@ final class AnalyticsModel {
             }
             let tList = tm.map { TypeLine(id: $0.key, name: typeName($0.key), paid: $0.value.paid, free: $0.value.free, grams: $0.value.grams, revenue: $0.value.rev) }
                 .sorted { ($0.paid + $0.free) > ($1.paid + $1.free) }
-            return DayHookah(id: date, date: date, qty: qty, free: free, revenue: rev, types: tList)
+            return DayHookah(id: date, date: date, qty: qty, free: free, revenue: rev, types: tList, freeByCat: freeByCategory(rows))
         }
         .sorted { $0.date > $1.date }
     }
@@ -1152,12 +1165,23 @@ private struct AdvanceAddSheet: View {
 
 private struct HookahTab: View {
     @Bindable var m: AnalyticsModel
+    @State private var showBreakdown = false
+    private var breakdownMenu: some View {
+        Button { showBreakdown = true } label: { Label(t("an.breakdown"), systemImage: "chart.pie.fill") }
+    }
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-            stat(t("st.sold"), "\(m.qtyMonth)", BrandKit.stash)
+            stat(t("st.sold"), "\(m.qtyMonth)", BrandKit.stash).contextMenu { breakdownMenu }
             stat(t("st.revenue"), cur(m.revMonth), BrandKit.analytics)
-            stat(t("st.free"), "\(m.qtyFree)", BrandKit.people)
+            stat(t("st.free"), "\(m.qtyFree)", BrandKit.people).contextMenu { breakdownMenu }
             stat(t("st.tobacco"), kg(m.usedMonthG), BrandKit.manager)
+        }
+        .sheet(isPresented: $showBreakdown) {
+            HookahBreakdownSheet(
+                title: t("tab.hookah"),
+                paid: m.byType.map { (name: $0.name, count: $0.paid) },
+                free: m.freeByCat.map { (name: $0.name, count: $0.count) }
+            )
         }
         // Где какой объём табака: на складе и в заведении
         HStack(spacing: 10) {
@@ -1385,6 +1409,7 @@ private struct KassaTab: View {
 private struct DayRow: View {
     let day: AnalyticsModel.DayHookah
     @State private var open = false
+    @State private var showBreakdown = false
     var body: some View {
         VStack(spacing: 0) {
             Button { withAnimation(.easeInOut(duration: 0.18)) { open.toggle() } } label: {
@@ -1415,6 +1440,55 @@ private struct DayRow: View {
             }
         }
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .contextMenu {
+            Button { showBreakdown = true } label: { Label(t("an.breakdown"), systemImage: "chart.pie.fill") }
+        }
+        .sheet(isPresented: $showBreakdown) {
+            HookahBreakdownSheet(
+                title: dayLabelRu(day.date),
+                paid: day.types.map { (name: $0.name, count: $0.paid) },
+                free: day.freeByCat.map { (name: $0.name, count: $0.count) }
+            )
+        }
+    }
+}
+
+// Долгое нажатие на карточку "продано"/"бесплатно" → сколько именно по видам кальяна
+// (продано) и по категориям списания (бесплатно — владелец/сотрудник/кальянщик и т.д.,
+// см. StashView.freeCats), без пересечения этих двух разрезов.
+private struct HookahBreakdownSheet: View {
+    let title: String
+    let paid: [(name: String, count: Int)]
+    let free: [(name: String, count: Int)]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section(t("an.byType")) {
+                    if paid.isEmpty {
+                        Text("—").foregroundStyle(.primary.opacity(0.4))
+                    } else {
+                        ForEach(paid, id: \.name) { row in
+                            HStack { Text(row.name); Spacer(); Text("\(row.count)").fontWeight(.semibold) }
+                        }
+                    }
+                }
+                Section(t("an.byCategory")) {
+                    if free.isEmpty {
+                        Text("—").foregroundStyle(.primary.opacity(0.4))
+                    } else {
+                        ForEach(free, id: \.name) { row in
+                            HStack { Text(row.name); Spacer(); Text("\(row.count)").fontWeight(.semibold) }
+                        }
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(t("done")) { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 
