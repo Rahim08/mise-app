@@ -163,9 +163,16 @@ final class DBQuery: @unchecked Sendable {
     }
 
     /// Генерация ключа кеша на основе payload запроса.
+    ///
+    /// ВАЖНО: раньше ключ обрезался до первых 32 hex-символов (=16 байт сырого JSON) —
+    /// это не хеш, а обрезка. Запросы с одинаковым table/op/columns, но разными значениями
+    /// фильтра (например, датой), сериализуются в JSON с общим префиксом длиннее 16 байт
+    /// (значение фильтра стоит ПОСЛЕ него) → получали ОДИНАКОВЫЙ "ключ" и коллизировали:
+    /// первый ответ кешировался, все последующие запросы с другой датой получали тот же
+    /// закешированный результат. Использовать весь hex — коллизий не будет.
     private func cacheKey(_ p: [String: Any]) -> String {
         guard let data = try? JSONSerialization.data(withJSONObject: p, options: .sortedKeys) else { return table }
-        let hash = data.map { String(format: "%02x", $0) }.joined().prefix(32)
+        let hash = data.map { String(format: "%02x", $0) }.joined()
         return "\(table):\(hash)"
     }
 
