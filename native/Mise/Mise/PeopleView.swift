@@ -2667,6 +2667,7 @@ private struct ChecklistEditSheet: View {
     @Bindable var m: PeopleModel
     @Environment(\.dismiss) private var dismiss
     @State var edit: ChecklistsTab.ChecklistEdit
+    @State private var saving = false
 
     var body: some View {
         NavigationStack {
@@ -2692,8 +2693,14 @@ private struct ChecklistEditSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(t("save")) {
-                        Task { await m.saveChecklistTemplate(id: edit.listId, role: edit.role, items: edit.items); dismiss() }
-                    }
+                        guard !saving else { return }
+                        saving = true
+                        Task {
+                            defer { saving = false }
+                            await m.saveChecklistTemplate(id: edit.listId, role: edit.role, items: edit.items)
+                            dismiss()
+                        }
+                    }.disabled(saving)
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
@@ -2852,6 +2859,7 @@ private struct TechCardSheet: View {
     @Bindable var m: PeopleModel
     @Environment(\.dismiss) private var dismiss
     @State var edit: TechCardsTab.TechEdit
+    @State private var saving = false
 
     var body: some View {
         NavigationStack {
@@ -2878,8 +2886,14 @@ private struct TechCardSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(t("save")) {
-                        Task { await m.saveTechCard(id: edit.cardId, name: edit.name, category: edit.category, items: edit.items); dismiss() }
-                    }
+                        guard !saving else { return }
+                        saving = true
+                        Task {
+                            defer { saving = false }
+                            await m.saveTechCard(id: edit.cardId, name: edit.name, category: edit.category, items: edit.items)
+                            dismiss()
+                        }
+                    }.disabled(saving)
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
