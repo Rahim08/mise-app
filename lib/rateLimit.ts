@@ -1,19 +1,21 @@
-// Simple in-memory rate limiter for API routes.
-// Per-IP sliding window. Fine for serverless — each instance has its own map,
-// but Vercel's routing distributes requests fairly evenly across instances.
+// DB-backed rate limiter for API routes (atomic UPSERT via rate_limit_hit RPC —
+// see docs/migrations/rate-limit-atomic-2026-07.sql). In-memory Map doesn't work
+// across Vercel serverless instances, which don't share memory.
 
-const windows = new Map<string, { count: number; resetAt: number }>()
+import { createClient } from '@supabase/supabase-js'
 
-export function checkRateLimit(key: string, max: number, windowMs: number): boolean {
-  const now = Date.now()
-  const entry = windows.get(key)
-  if (!entry || now > entry.resetAt) {
-    windows.set(key, { count: 1, resetAt: now + windowMs })
-    return true
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+)
+
+export async function checkRateLimit(key: string, max: number, windowMs: number): Promise<boolean> {
+  const { data, error } = await supabase.rpc('rate_limit_hit', { p_key: key, p_max: max, p_window_ms: windowMs })
+  if (error) {
+    console.error('[rateLimit] rate_limit_hit failed:', error.message)
+    return true // fail-open: a DB hiccup shouldn't lock out legitimate traffic
   }
-  if (entry.count >= max) return false
-  entry.count++
-  return true
+  return data === true
 }
 
 export function rateLimitKey(req: Request, prefix: string): string {

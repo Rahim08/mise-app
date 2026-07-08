@@ -32,7 +32,7 @@ Numbers as digit strings only (no currency symbols).`
 
 export async function POST(req: NextRequest) {
   const rlKey = rateLimitKey(req, 'ai')
-  if (!checkRateLimit(rlKey, 20, 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
+  if (!await checkRateLimit(rlKey, 20, 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
 
   const restaurantId = await getRestaurantId(req)
   if (!restaurantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

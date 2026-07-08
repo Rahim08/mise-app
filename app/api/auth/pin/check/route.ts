@@ -41,12 +41,10 @@ async function getAttempts(key: string): Promise<{ count: number; blockedUntil: 
   return { count: data.count || 0, blockedUntil: data.blocked_until ? new Date(data.blocked_until).getTime() : 0 }
 }
 
-async function recordFailure(key: string, count: number) {
-  await supabase.from('pin_attempts').upsert({
-    key, count,
-    blocked_until: count >= MAX_ATTEMPTS ? new Date(Date.now() + BLOCK_MS).toISOString() : null,
-    updated_at: new Date().toISOString(),
-  })
+async function recordFailure(key: string) {
+  // Атомарный UPSERT-инкремент в SQL (rate-limit-atomic-2026-07.sql) — закрывает
+  // TOCTOU-гонку read-then-write, где конкурентные запросы могли обойти лимит попыток.
+  await supabase.rpc('pin_record_failure', { p_key: key, p_max_attempts: MAX_ATTEMPTS, p_block_ms: BLOCK_MS })
 }
 
 async function clearAttempts(key: string) {
@@ -117,6 +115,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  await recordFailure(key, entry.count + 1)
+  await recordFailure(key)
   return NextResponse.json({ match: false })
 }

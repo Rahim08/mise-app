@@ -9,7 +9,7 @@ const ALLOWED = new Set(['view', 'item_view', 'add_to_cart', 'order'])
 
 export async function POST(req: NextRequest) {
   const rlKey = rateLimitKey(req, 'menu-event')
-  if (!checkRateLimit(rlKey, 60, 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
+  if (!await checkRateLimit(rlKey, 60, 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
   let body: any
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Bad request' }, { status: 400 }) }
   const { slug, type, item_id, session_id, table_number } = body || {}

@@ -2,28 +2,11 @@
 // Без внешнего сервиса: смотреть в Supabase Table Editor. Заменится на Sentry позже.
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-
-// In-memory rate limit: max 10 requests per minute per IP
-const rateLimit = new Map<string, { count: number; resetAt: number }>()
-const RATE_LIMIT_MAX = 10
-const RATE_LIMIT_WINDOW = 60_000
-
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now()
-  const entry = rateLimit.get(ip)
-  if (!entry || now > entry.resetAt) {
-    rateLimit.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW })
-    return true
-  }
-  if (entry.count >= RATE_LIMIT_MAX) return false
-  entry.count++
-  return true
-}
+import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
 export async function POST(req: NextRequest) {
   try {
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0] ?? 'unknown'
-    if (!checkRateLimit(ip)) return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 })
+    if (!await checkRateLimit(rateLimitKey(req, 'log'), 10, 60_000)) return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 })
 
     const { message, stack, url, source } = await req.json()
     if (!message || typeof message !== 'string') return NextResponse.json({ ok: false }, { status: 400 })
