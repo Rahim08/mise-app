@@ -612,7 +612,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {employees.map(emp => {
-            const s = staffFor(emp.name)
+            const s = staffFor(emp)
             return (
               <Card key={emp.id} style={{ padding: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
