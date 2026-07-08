@@ -1166,14 +1166,15 @@ private struct AdvanceAddSheet: View {
 private struct HookahTab: View {
     @Bindable var m: AnalyticsModel
     @State private var showBreakdown = false
-    private var breakdownMenu: some View {
-        Button { showBreakdown = true } label: { Label(t("an.breakdown"), systemImage: "chart.pie.fill") }
+    private func openBreakdown() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        showBreakdown = true
     }
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-            stat(t("st.sold"), "\(m.qtyMonth)", BrandKit.stash).contextMenu { breakdownMenu }
+            stat(t("st.sold"), "\(m.qtyMonth)", BrandKit.stash).onLongPressGesture(minimumDuration: 0.4) { openBreakdown() }
             stat(t("st.revenue"), cur(m.revMonth), BrandKit.analytics)
-            stat(t("st.free"), "\(m.qtyFree)", BrandKit.people).contextMenu { breakdownMenu }
+            stat(t("st.free"), "\(m.qtyFree)", BrandKit.people).onLongPressGesture(minimumDuration: 0.4) { openBreakdown() }
             stat(t("st.tobacco"), kg(m.usedMonthG), BrandKit.manager)
         }
         .sheet(isPresented: $showBreakdown) {
@@ -1440,8 +1441,9 @@ private struct DayRow: View {
             }
         }
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
-        .contextMenu {
-            Button { showBreakdown = true } label: { Label(t("an.breakdown"), systemImage: "chart.pie.fill") }
+        .onLongPressGesture(minimumDuration: 0.4) {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            showBreakdown = true
         }
         .sheet(isPresented: $showBreakdown) {
             HookahBreakdownSheet(
