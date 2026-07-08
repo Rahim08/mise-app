@@ -407,7 +407,11 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
   const toggleApp = (appId: string) => {
     setForm(f => ({ ...f, apps: f.apps.includes(appId) ? f.apps.filter(a => a !== appId) : [...f.apps, appId] }))
   }
-  const staffFor = (name: string) => staff.find(s => s.name === name)
+  // Матч по employee_id (FK, надёжно переживает переименование); имя — только
+  // запасной вариант для строк staff, ещё не прошедших бэкофилл
+  // (docs/migrations/attendance-automation.sql).
+  const staffFor = (emp: { id: string; name: string }) =>
+    staff.find(s => s.employee_id === emp.id) ?? staff.find(s => !s.employee_id && s.name === emp.name)
 
   // One save handles both HR (employees) and access (staff).
   const save = async () => {
@@ -415,15 +419,20 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
     setSaving(true)
     const name = form.name.trim()
     const empPayload = { restaurant_id: restaurantId, name, salary: +form.salary || 0, deduct_per_absence: +form.deduct || 0, card_amount: +form.card || 0, is_active: true }
-    if (editingEmpId) await db.from('employees').update(empPayload).eq('id', editingEmpId)
-    else await db.from('employees').insert(empPayload)
+    let empId = editingEmpId
+    if (editingEmpId) {
+      await db.from('employees').update(empPayload).eq('id', editingEmpId)
+    } else {
+      const { data: newEmp } = await db.from('employees').insert(empPayload).select().single()
+      empId = newEmp?.id ?? null
+    }
 
-    const existing = staffFor(name)
+    const existing = empId ? staffFor({ id: empId, name }) : undefined
     if (form.apps.length) {
       if (!existing && (form.pin.length !== 4 || !/^\d+$/.test(form.pin))) { alert(tr('dash.setPinForAccess')); setSaving(false); return }
       let pinHash: string | undefined
       if (form.pin) { const r = await fetch('/api/auth/pin/hash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: form.pin }) }); pinHash = (await r.json()).hash }
-      const sp: any = { restaurant_id: restaurantId, name, apps: form.apps, role: form.role, is_active: true }
+      const sp: any = { restaurant_id: restaurantId, name, apps: form.apps, role: form.role, is_active: true, employee_id: empId }
       if (pinHash) sp.pin_hash = pinHash
       if (existing) await db.from('staff').update(sp).eq('id', existing.id)
       else { await db.from('staff').insert(sp); track('team_member_invited', { apps_count: form.apps.length }) }
@@ -435,13 +444,13 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
 
   const removePerson = async (emp: any) => {
     await db.from('employees').update({ is_active: false }).eq('id', emp.id)
-    const s = staffFor(emp.name); if (s) await db.from('staff').update({ is_active: false }).eq('id', s.id)
+    const s = staffFor(emp); if (s) await db.from('staff').update({ is_active: false }).eq('id', s.id)
     load()
   }
   const resetDevice = async (id: string) => { await db.from('staff').update({ device_id: null }).eq('id', id); load() }
 
   const startEdit = (emp: any) => {
-    const s = staffFor(emp.name)
+    const s = staffFor(emp)
     setForm({ name: emp.name, role: s?.role || 'waiter', salary: String(emp.salary || ''), deduct: String(emp.deduct_per_absence || ''), card: String(emp.card_amount || ''), pin: '', apps: s?.apps || [] })
     setEditingEmpId(emp.id); setShowForm(true)
   }
@@ -580,7 +589,7 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
             </div>
             {form.apps.length > 0 && (
               <Field
-                label={staffFor(form.name.trim()) ? tr('dash.newPinOptional') : tr('dash.pinForLogin')}
+                label={(editingEmpId && staffFor({ id: editingEmpId, name: form.name.trim() })) ? tr('dash.newPinOptional') : tr('dash.pinForLogin')}
                 value={form.pin} onChange={(v: string) => setForm({ ...form, pin: v.replace(/\D/g, '').slice(0, 4) })}
                 placeholder="1234" type="password"
               />
@@ -692,6 +701,7 @@ function GeoSettingsCard() {
   }
 
   const save = async () => {
+    if (saving) return
     setSaving(true)
     const payload: any = {
       attendance_enabled: f.attendance_enabled,
@@ -738,7 +748,7 @@ function GeoSettingsCard() {
         ? <Field label={tr('dash.hoursBefore')} value={f.reminder_hours} onChange={(v: string) => setF({ ...f, reminder_hours: v })} type="number" placeholder="12" />
         : <Field label={tr('dash.timeEve')} value={f.reminder_time} onChange={(v: string) => setF({ ...f, reminder_time: v })} type="time" />}
 
-      <Btn onClick={save}>{saving ? tr('dash.saving') : saved ? tr('dash.savedCheck') : tr('dash.save')}</Btn>
+      <Btn onClick={save} disabled={saving}>{saving ? tr('dash.saving') : saved ? tr('dash.savedCheck') : tr('dash.save')}</Btn>
     </Card>
   )
 }
@@ -808,6 +818,7 @@ function HookahSettingsCard() {
 
   const save = async () => {
     if (!edit || !edit.name.trim()) { alert(tr('dash.enterTitle')); return }
+    if (saving) return
     setSaving(true)
     const payload = {
       name: edit.name.trim(),
@@ -853,7 +864,7 @@ function HookahSettingsCard() {
           </div>
           <Field label={tr('dash.brandsField')} value={edit.brands} onChange={(v: string) => setEdit({ ...edit, brands: v })} placeholder="Darkside, Element" />
           <div style={{ display: 'flex', gap: 8 }}>
-            <Btn onClick={save}>{saving ? tr('dash.saving') : tr('dash.saveType')}</Btn>
+            <Btn onClick={save} disabled={saving}>{saving ? tr('dash.saving') : tr('dash.saveType')}</Btn>
             <Btn variant="gray" onClick={() => setEdit(null)}>{tr('dash.cancel')}</Btn>
           </div>
         </div>
@@ -919,7 +930,7 @@ function SettingsTab({ restaurant, theme, onUpdate }: { restaurant: Restaurant |
   }
 
   const save = async () => {
-    if (!restaurant) return
+    if (!restaurant || saving) return
     setSaving(true)
     const { error } = await db.from('restaurants').update({ name, currency }).eq('id', restaurant.id)
     if (error) { alert(tr('dash.notSaved') + error.message); setSaving(false); return }
@@ -972,7 +983,7 @@ function SettingsTab({ restaurant, theme, onUpdate }: { restaurant: Restaurant |
             { value: '$', label: 'dash.curUsd' },
           ]}
         />
-        <Btn onClick={save}>{saving ? tr('dash.saving') : saved ? tr('dash.savedCheck') : tr('dash.save')}</Btn>
+        <Btn onClick={save} disabled={saving}>{saving ? tr('dash.saving') : saved ? tr('dash.savedCheck') : tr('dash.save')}</Btn>
       </Card>
 
       {restaurant && <CategoriesCard restaurantId={restaurant.id} />}
