@@ -15,6 +15,7 @@ interface Restaurant {
   subscription_status: string; subscription_plan: string
   subscription_ends_at: string | null; created_at: string
   device_limit: number | null; ai_enabled: boolean
+  staff_limit: number | null
 }
 interface Stats { shifts: number; movements: number; employees: number; lastActive: string | null }
 
@@ -56,11 +57,18 @@ export default function AdminPage() {
   const [perksSaved, setPerksSaved] = useState(false)
   const [deviceLimit, setDeviceLimit] = useState<string>('')
   const [deviceLimitSaved, setDeviceLimitSaved] = useState(false)
+  const [staffLimit, setStaffLimit] = useState<string>('')
+  const [staffLimitSaved, setStaffLimitSaved] = useState(false)
   const [aiEnabled, setAiEnabled] = useState(false)
   const [aiSaved, setAiSaved] = useState(false)
 
-  const adminApi = (body: any) =>
-    fetch('/api/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
+  const adminApi = async (body: any) => {
+    const json = await fetch('/api/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
+    // Раньше ошибки записи (например, при отсутствующей колонке в БД) молча
+    // проглатывались — UI показывал "Сохранено", хотя ничего не сохранялось.
+    if (json?.error) alert(`Ошибка: ${json.error}`)
+    return json
+  }
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
@@ -84,6 +92,7 @@ export default function AdminPage() {
     setSubForm({ status: r.subscription_status || 'active', plan: r.subscription_plan || 'business', ends_at: r.subscription_ends_at ? r.subscription_ends_at.slice(0, 10) : '' })
     setPerks({ apps: (r as any).comp_apps || [], discount: String((r as any).discount_pct || 0) })
     setDeviceLimit(r.device_limit != null ? String(r.device_limit) : '')
+    setStaffLimit(r.staff_limit != null ? String(r.staff_limit) : '')
     setAiEnabled(!!r.ai_enabled)
     setEditSub(false); await loadNotes(r.id)
   }
@@ -100,6 +109,14 @@ export default function AdminPage() {
     await adminApi({ action: 'setDeviceLimit', restaurantId: selected.id, deviceLimit: deviceLimit !== '' ? deviceLimit : null })
     setSelected({ ...selected, device_limit: dl })
     setDeviceLimitSaved(true); setTimeout(() => setDeviceLimitSaved(false), 2000)
+    await loadAll()
+  }
+  const saveStaffLimit = async () => {
+    if (!selected) return
+    const sl = staffLimit !== '' ? parseInt(staffLimit) || null : null
+    await adminApi({ action: 'setStaffLimit', restaurantId: selected.id, staffLimit: staffLimit !== '' ? staffLimit : null })
+    setSelected({ ...selected, staff_limit: sl })
+    setStaffLimitSaved(true); setTimeout(() => setStaffLimitSaved(false), 2000)
     await loadAll()
   }
   const saveAI = async (enabled: boolean) => {
@@ -336,11 +353,33 @@ export default function AdminPage() {
                 <button onClick={savePerks} style={btn(t, 'primary')}>{perksSaved ? '✓ Сохранено' : 'Сохранить привилегии'}</button>
               </div>
 
-              {/* Device limit override */}
+              {/* Staff (app-access) limit override — это лимит, который реально блокирует
+                  выдачу приложения сотруднику (checkStaffPlanLimit в /api/db). */}
+              <div style={{ borderTop: `1px solid ${t.sep2}`, paddingTop: 16, marginBottom: 16 }}>
+                <div style={{ fontSize: '.72rem', color: t.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>Лимит сотрудников с доступом</div>
+                <div style={{ fontSize: '.72rem', color: t.text4, marginBottom: 10 }}>
+                  Сколько сотрудников могут иметь доступ к приложениям. По тарифу: starter=2 · business=5 · pro=10. Именно этот лимит блокирует выдачу приложения новому сотруднику.
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input type="number" min={1} value={staffLimit}
+                    onChange={e => setStaffLimit(e.target.value)}
+                    placeholder={`по тарифу (${{ starter: 2, business: 5, pro: 10 }[selected.subscription_plan] ?? 5})`}
+                    style={{ width: 100, padding: '7px 10px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: '.85rem', color: t.text, background: t.fill2, fontFamily: 'inherit', outline: 'none', textAlign: 'right' }} />
+                  <span style={{ fontSize: '.78rem', color: t.text3 }}>сотрудников</span>
+                  {staffLimit !== '' && (
+                    <button onClick={() => { setStaffLimit(''); saveStaffLimit() }} style={{ ...btn(t, 'gray'), padding: '7px 10px', fontSize: '.72rem' }}>Сбросить</button>
+                  )}
+                  <button onClick={saveStaffLimit} style={btn(t, 'primary')}>{staffLimitSaved ? '✓' : 'Сохранить'}</button>
+                </div>
+              </div>
+
+              {/* Device limit override — ограничивает число ПРИВЯЗАННЫХ УСТРОЙСТВ
+                  (device_id), проверяется при первом входе по PIN. Не путать с лимитом
+                  сотрудников с доступом выше. */}
               <div style={{ borderTop: `1px solid ${t.sep2}`, paddingTop: 16, marginBottom: 16 }}>
                 <div style={{ fontSize: '.72rem', color: t.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>Лимит устройств</div>
                 <div style={{ fontSize: '.72rem', color: t.text4, marginBottom: 10 }}>
-                  По тарифу: starter=2 · business=5 · pro=10. Укажи число, чтобы переопределить вручную.
+                  Сколько разных телефонов/планшетов могут быть привязаны к PIN-входу. По тарифу: starter=2 · business=5 · pro=10.
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <input type="number" min={1} value={deviceLimit}

@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   if (!await checkRateLimit(rlKey, 30, 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
   if (!await isAdmin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { action, restaurantId, note, status, plan, ends_at, endsAt, compApps, discountPct, deviceLimit, aiEnabled } = await req.json()
+  const { action, restaurantId, note, status, plan, ends_at, endsAt, compApps, discountPct, deviceLimit, staffLimit, aiEnabled } = await req.json()
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
   switch (action) {
@@ -63,34 +63,49 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true })
     }
     case 'updateSub': {
-      await admin.from('restaurants').update({
+      const { error } = await admin.from('restaurants').update({
         subscription_status: status, subscription_plan: plan, subscription_ends_at: ends_at || null,
       }).eq('id', restaurantId)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       return NextResponse.json({ ok: true })
     }
     case 'extendSub': {
-      await admin.from('restaurants').update({ subscription_ends_at: endsAt, subscription_status: 'active' }).eq('id', restaurantId)
+      const { error } = await admin.from('restaurants').update({ subscription_ends_at: endsAt, subscription_status: 'active' }).eq('id', restaurantId)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       return NextResponse.json({ ok: true })
     }
     case 'perks': {
       // Ручной доступ к приложениям поверх тарифа + скидка (admin-perks-2026-06.sql)
-      await admin.from('restaurants').update({
+      const { error } = await admin.from('restaurants').update({
         comp_apps: Array.isArray(compApps) ? compApps.filter((a: string) => ['stash', 'people', 'menu'].includes(a)) : [],
         discount_pct: Math.max(0, Math.min(100, parseInt(discountPct) || 0)),
       }).eq('id', restaurantId)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       return NextResponse.json({ ok: true })
     }
     case 'freeze': {
-      await admin.from('restaurants').update({ subscription_status: 'frozen' }).eq('id', restaurantId)
+      const { error } = await admin.from('restaurants').update({ subscription_status: 'frozen' }).eq('id', restaurantId)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       return NextResponse.json({ ok: true })
     }
     case 'setDeviceLimit': {
       const dl = deviceLimit != null && deviceLimit !== '' ? Math.max(1, parseInt(deviceLimit) || 1) : null
-      await admin.from('restaurants').update({ device_limit: dl }).eq('id', restaurantId)
+      const { error } = await admin.from('restaurants').update({ device_limit: dl }).eq('id', restaurantId)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      return NextResponse.json({ ok: true })
+    }
+    case 'setStaffLimit': {
+      // Лимит сотрудников с реальным доступом к приложениям (staff.apps непустой) —
+      // проверяется в /api/db checkStaffPlanLimit. Отдельно от setDeviceLimit выше
+      // (тот про привязку устройств, этот — про billable-доступ).
+      const sl = staffLimit != null && staffLimit !== '' ? Math.max(1, parseInt(staffLimit) || 1) : null
+      const { error } = await admin.from('restaurants').update({ staff_limit: sl }).eq('id', restaurantId)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       return NextResponse.json({ ok: true })
     }
     case 'setAI': {
-      await admin.from('restaurants').update({ ai_enabled: !!aiEnabled }).eq('id', restaurantId)
+      const { error } = await admin.from('restaurants').update({ ai_enabled: !!aiEnabled }).eq('id', restaurantId)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       return NextResponse.json({ ok: true })
     }
     case 'impersonate': {

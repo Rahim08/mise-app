@@ -85,10 +85,12 @@ async function checkStaffPlanLimit(admin: any, rid: string, values: any, filters
   const grantsApps = rows.some(v => Array.isArray(v?.apps) && v.apps.length > 0)
   if (!grantsApps) return null
 
-  const { data: rest } = await admin.from('restaurants').select('subscription_plan, comp_apps').eq('id', rid).single()
+  const { data: rest } = await admin.from('restaurants').select('subscription_plan, comp_apps, staff_limit').eq('id', rid).single()
   const plan = PLAN_LIMITS[rest?.subscription_plan] || PLAN_LIMITS.starter
   // comp_apps — приложения, выданные супер-админом поверх тарифа
   const allowedApps = [...plan.apps, ...(rest?.comp_apps || [])]
+  // staff_limit — ручной override числа сотрудников с доступом (Super Admin), NULL = лимит тарифа
+  const maxStaff: number = rest?.staff_limit ?? plan.maxStaff
 
   for (const v of rows) {
     for (const app of (v.apps || [])) {
@@ -101,7 +103,7 @@ async function checkStaffPlanLimit(admin: any, rid: string, values: any, filters
   const updatedIds = new Set((filters || []).filter((f: any) => f.col === 'id' && f.op === 'eq').map((f: any) => f.val))
   const withAccess = (staff || []).filter((s: any) => Array.isArray(s.apps) && s.apps.length > 0 && !updatedIds.has(s.id)).length
   const newGrants = rows.filter(v => Array.isArray(v?.apps) && v.apps.length > 0).length
-  if (withAccess + newGrants > plan.maxStaff) return `Лимит тарифа: до ${plan.maxStaff} сотрудников с доступом`
+  if (withAccess + newGrants > maxStaff) return `Лимит тарифа: до ${maxStaff} сотрудников с доступом`
   return null
 }
 

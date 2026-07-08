@@ -19,6 +19,7 @@ type Restaurant = {
   subscription_status: string; subscription_plan: string
   subscription_ends_at: string; stripe_customer_id?: string
   logo_url?: string; owner_pin?: string
+  staff_limit?: number | null
 }
 
 const APPS = [
@@ -362,7 +363,8 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
   const { t: tr } = useI18n()
   const restaurantId = restaurant?.id || ''
   const plan = restaurant?.subscription_plan || 'starter'
-  const maxStaff = PLANS.find(p => p.id === plan)?.maxStaff || 2
+  // staff_limit — ручной override от Super Admin (см. staff-access-limit-2026-07.sql), NULL = лимит тарифа
+  const maxStaff = restaurant?.staff_limit ?? (PLANS.find(p => p.id === plan)?.maxStaff || 2)
 
   const [staff, setStaff] = useState<any[]>([])
   const [employees, setEmployees] = useState<any[]>([])
@@ -434,8 +436,14 @@ function TeamTab({ restaurant }: { restaurant: Restaurant | null }) {
       if (form.pin) { const r = await fetch('/api/auth/pin/hash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: form.pin }) }); pinHash = (await r.json()).hash }
       const sp: any = { restaurant_id: restaurantId, name, apps: form.apps, role: form.role, is_active: true, employee_id: empId }
       if (pinHash) sp.pin_hash = pinHash
-      if (existing) await db.from('staff').update(sp).eq('id', existing.id)
-      else { await db.from('staff').insert(sp); track('team_member_invited', { apps_count: form.apps.length }) }
+      const { error } = existing ? await db.from('staff').update(sp).eq('id', existing.id) : await db.from('staff').insert(sp)
+      if (error) {
+        // Тарифный лимит (checkStaffPlanLimit в /api/db) — раньше проваливался молча,
+        // выглядело как "PIN не сохраняется" без объяснения причины.
+        alert(error.message || tr('dash.saveFailed'))
+        setSaving(false); return
+      }
+      if (!existing) track('team_member_invited', { apps_count: form.apps.length })
     } else if (existing) {
       await db.from('staff').update({ is_active: false }).eq('id', existing.id) // access revoked
     }
