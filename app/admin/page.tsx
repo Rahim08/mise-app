@@ -6,6 +6,9 @@ import { useTheme } from '@/hooks/useTheme'
 
 const ADMIN_EMAIL = 'raxim98@gmail.com'
 const PLAN_PRICE: Record<string, number> = { starter: 14, business: 24, pro: 39 }
+// Приложения, уже включённые тарифом (app/api/db/route.ts) — привилегии не должны
+// повторно предлагать то, что и так есть по тарифу.
+const PLAN_APPS: Record<string, string[]> = { starter: [], business: ['stash', 'people', 'menu'], pro: ['stash', 'people', 'menu'] }
 
 interface Restaurant {
   id: string; name: string; currency: string; owner_id: string
@@ -97,6 +100,7 @@ export default function AdminPage() {
     await adminApi({ action: 'setDeviceLimit', restaurantId: selected.id, deviceLimit: deviceLimit !== '' ? deviceLimit : null })
     setSelected({ ...selected, device_limit: dl })
     setDeviceLimitSaved(true); setTimeout(() => setDeviceLimitSaved(false), 2000)
+    await loadAll()
   }
   const saveAI = async (enabled: boolean) => {
     if (!selected) return
@@ -104,6 +108,7 @@ export default function AdminPage() {
     setSelected({ ...selected, ai_enabled: enabled })
     setAiEnabled(enabled)
     setAiSaved(true); setTimeout(() => setAiSaved(false), 2000)
+    await loadAll()
   }
   const saveNote = async () => {
     if (!note.trim() || !selected) return
@@ -294,18 +299,33 @@ export default function AdminPage() {
               {/* Perks: доступ поверх тарифа + скидка */}
               <div style={{ borderTop: `1px solid ${t.sep2}`, paddingTop: 16, marginBottom: 16 }}>
                 <div style={{ fontSize: '.72rem', color: t.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 10 }}>Привилегии</div>
-                <div style={{ fontSize: '.72rem', color: t.text3, marginBottom: 8 }}>Доступ к приложениям независимо от тарифа:</div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-                  {[['stash', 'Stash'], ['people', 'People'], ['menu', 'QR-меню']].map(([id, label]) => {
-                    const on = perks.apps.includes(id)
+                {(() => {
+                  const includedByPlan = PLAN_APPS[selected.subscription_plan] || []
+                  const extraApps = [['stash', 'Stash'], ['people', 'People'], ['menu', 'QR-меню']].filter(([id]) => !includedByPlan.includes(id))
+                  if (extraApps.length === 0) {
                     return (
-                      <button key={id} onClick={() => setPerks(p => ({ ...p, apps: on ? p.apps.filter(a => a !== id) : [...p.apps, id] }))}
-                        style={{ padding: '6px 14px', borderRadius: 980, border: `1px solid ${on ? t.green : t.sep2}`, background: on ? `${t.green}1a` : 'transparent', color: on ? t.green : t.text3, fontFamily: 'inherit', fontSize: '.78rem', fontWeight: 600, cursor: 'pointer' }}>
-                        {on ? '✓ ' : ''}{label}
-                      </button>
+                      <div style={{ fontSize: '.78rem', color: t.text3, marginBottom: 12 }}>
+                        Тариф «{selected.subscription_plan}» уже включает Stash, People и QR-меню — выдавать нечего.
+                      </div>
                     )
-                  })}
-                </div>
+                  }
+                  return (
+                    <>
+                      <div style={{ fontSize: '.72rem', color: t.text3, marginBottom: 8 }}>Доступ к приложениям сверх тарифа (для тарифа «{selected.subscription_plan}»):</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                        {extraApps.map(([id, label]) => {
+                          const on = perks.apps.includes(id)
+                          return (
+                            <button key={id} onClick={() => setPerks(p => ({ ...p, apps: on ? p.apps.filter(a => a !== id) : [...p.apps, id] }))}
+                              style={{ padding: '6px 14px', borderRadius: 980, border: `1px solid ${on ? t.green : t.sep2}`, background: on ? `${t.green}1a` : 'transparent', color: on ? t.green : t.text3, fontFamily: 'inherit', fontSize: '.78rem', fontWeight: 600, cursor: 'pointer' }}>
+                              {on ? '✓ ' : ''}{label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </>
+                  )
+                })()}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                   <span style={{ fontSize: '.78rem', color: t.text3 }}>Скидка</span>
                   <input type="number" value={perks.discount} onChange={e => setPerks(p => ({ ...p, discount: e.target.value }))}
@@ -373,7 +393,6 @@ export default function AdminPage() {
               <div style={{ borderTop: `1px solid ${t.sep2}`, paddingTop: 16, marginBottom: 16 }}>
                 <div style={{ fontSize: '.72rem', color: t.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 10 }}>Действия</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <button onClick={() => extendSub(30)} style={btn(t, 'orange')}>Продлить на 30 дней</button>
                   <button onClick={freeze} style={btn(t, 'danger')}>Заморозить</button>
                 </div>
               </div>
