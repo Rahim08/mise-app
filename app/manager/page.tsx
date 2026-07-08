@@ -120,8 +120,9 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     // Resilient to duplicate (restaurant_id, date) rows: take one instead of erroring on maybeSingle.
     const { data: shList } = await db.from('shifts').select('*').eq('restaurant_id', rid).eq('date', dateStr).order('opened_at', { ascending: true }).limit(1)
     const sh = (Array.isArray(shList) ? shList[0] : shList) || null
-    const yesterday = new Date(date); yesterday.setDate(yesterday.getDate() - 1)
-    const { data: prevList } = await db.from('shifts').select('closing_balance').eq('restaurant_id', rid).eq('date', fmtDate(yesterday)).order('opened_at', { ascending: false }).limit(1)
+    // Last shift strictly before today — not exactly "yesterday", so a skipped day
+    // (closed Monday, forgot to open a shift, holiday) doesn't silently zero the balance.
+    const { data: prevList } = await db.from('shifts').select('closing_balance').eq('restaurant_id', rid).lt('date', dateStr).order('date', { ascending: false }).order('opened_at', { ascending: false }).limit(1)
     const openingBalance = (Array.isArray(prevList) ? prevList[0] : prevList)?.closing_balance || 0
 
     if (sh) {

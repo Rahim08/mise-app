@@ -90,10 +90,12 @@ final class ManagerModel {
         await loadDay(currentDate)
     }
 
+    // Последняя смена НЕ ПОЗЖЕ вчера (не обязательно ровно вчера) — пропущенный день
+    // (выходной, забыли открыть смену) не должен молча обнулять остаток кассы.
     private func prevClosing(before date: Date) async -> Double {
         let y = Calendar.current.date(byAdding: .day, value: -1, to: date) ?? date
         let rows = (try? await DB.from("shifts").select("closing_balance")
-            .eq("date", key(y)).order("opened_at", ascending: false).limit(1).list(ClosingOnly.self)) ?? []
+            .lte("date", key(y)).order("date", ascending: false).order("opened_at", ascending: false).limit(1).list(ClosingOnly.self)) ?? []
         return rows.first?.closing_balance ?? 0
     }
 
