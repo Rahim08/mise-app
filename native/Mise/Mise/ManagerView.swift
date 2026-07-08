@@ -431,7 +431,7 @@ private struct ManagerBody: View {
             }
             // Spotlight-эффект под ИИ-чатом: слегка размываем реальный контент модуля,
             // а не показываем матовую панель поверх (см. AIButton.swift AIChat).
-            .blur(radius: AIChat.shared.open ? 4 : 0)
+            .blur(radius: AIChat.shared.open ? 2 : 0)
             .animation(.easeInOut(duration: 0.25), value: AIChat.shared.open)
 
             if let toast = m.toast {

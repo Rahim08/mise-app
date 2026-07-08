@@ -787,7 +787,7 @@ private struct AnalyticsBody: View {
                                   onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
                 }
             }
-            .blur(radius: AIChat.shared.open ? 4 : 0)
+            .blur(radius: AIChat.shared.open ? 2 : 0)
             .animation(.easeInOut(duration: 0.25), value: AIChat.shared.open)
             if aiEnabled {
                 AIButton(module: "analytics") { msg in await m.handleAI(msg) }

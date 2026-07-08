@@ -12,22 +12,21 @@ import Combine
     private init() {}
 }
 
-// MARK: - Neural Bloom mark
+// MARK: - Ink Drop mark
 //
-// Ядро-градиент, вокруг которого расходятся кольца-«ауры». Кольца плавно
-// растворяются (opacity = sin(phase·π): 0 → 1 → 0), поэтому на стыке цикла
-// нет вспышки — кольцо именно растворяется, а не мигает и исчезает.
-// Движение задаётся временем (TimelineView), а не повторяющейся анимацией —
-// цикл бесшовный.
-private struct BloomRings: View {
+// Капля туши в воде: кольца равномерно расширяются и растворяются (монотонное
+// угасание scale 1→maxScale, opacity intensity→0 — не пульсация 0→1→0), три кольца
+// стартуют со сдвигом по фазе на треть периода каждое → непрерывная рябь без швов.
+// Движение задаётся временем (TimelineView), а не повторяющейся анимацией.
+private struct InkRings: View {
     var palette: [Color]
-    /// Период одного «вдоха» кольца, сек. Меньше = энергичнее (слушает/думает).
+    /// Период одной ряби, сек. Меньше = энергичнее (слушает/думает).
     var period: Double = 2.6
     /// До какого масштаба от базового кадра расходится кольцо.
-    var maxScale: CGFloat = 2.0
-    /// Общая яркость колец (0…1).
-    var intensity: Double = 0.9
-    var lineWidth: CGFloat = 1.5
+    var maxScale: CGFloat = 2.3
+    /// Яркость кольца в момент рождения (0…1) — дальше монотонно гаснет до 0.
+    var intensity: Double = 0.55
+    var lineWidth: CGFloat = 1.4
 
     private let ringCount = 3
 
@@ -38,8 +37,8 @@ private struct BloomRings: View {
                 ForEach(0..<ringCount, id: \.self) { i in
                     let phase = ((t / period) + Double(i) / Double(ringCount))
                         .truncatingRemainder(dividingBy: 1)
-                    let scale = 0.5 + CGFloat(phase) * (maxScale - 0.5)
-                    let op = sin(phase * .pi) * intensity   // 0→1→0, бесшовно
+                    let scale = 1 + CGFloat(phase) * (maxScale - 1)
+                    let op = (1 - phase) * intensity
                     Circle()
                         .strokeBorder(
                             LinearGradient(colors: palette,
@@ -55,7 +54,7 @@ private struct BloomRings: View {
 
 // MARK: - The orb / send button (one object, two states)
 //
-// `morphed == false` — плавающий Neural-Bloom шар (кнопка вызова ИИ).
+// `morphed == false` — плавающая Ink Drop капля (кнопка вызова ИИ).
 // `morphed == true`  — пристыкованная кнопка «отправить» (стрелка вверх).
 // Переход между состояниями делает matchedGeometryEffect снаружи —
 // объект физически перелетает и перетекает формой.
@@ -70,21 +69,23 @@ private struct BloomOrb: View {
 
     var body: some View {
         ZStack {
-            // Аура-кольца только у плавающего шара (за пределами диска — не клипуем).
+            // Кольца-рябь только у плавающей капли (за пределами диска — не клипуем).
             if !morphed {
-                BloomRings(palette: palette,
-                           period: active ? 1.5 : 2.8,
-                           maxScale: (active ? 1.6 : 1.35) + CGFloat(audioLevel) * 0.4,
-                           intensity: active ? 0.6 : 0.35,
-                           lineWidth: 0.8)
+                InkRings(palette: palette,
+                         period: active ? 1.4 : 2.6,
+                         maxScale: (active ? 2.6 : 2.3) + CGFloat(audioLevel) * 0.4,
+                         intensity: active ? 0.75 : 0.55,
+                         lineWidth: 0.9)
                     .frame(width: size, height: size)
             }
 
             // Базовая форма с градиентом — общая для обоих состояний (плавный морф).
+            // Радиальный градиент со смещённым центром — «ядро капли», а не вращающийся диск.
             RoundedRectangle(cornerRadius: morphed ? size * 0.34 : size / 2, style: .continuous)
-                .fill(AngularGradient(
-                    gradient: Gradient(colors: palette + [palette[0]]),
-                    center: .center))
+                .fill(RadialGradient(
+                    colors: palette,
+                    center: UnitPoint(x: 0.32, y: 0.28),
+                    startRadius: 0, endRadius: size * 0.85))
                 .overlay(   // стеклянный блик
                     RoundedRectangle(cornerRadius: morphed ? size * 0.34 : size / 2, style: .continuous)
                         .fill(RadialGradient(
@@ -369,7 +370,7 @@ struct AIButton: View {
     }
 
     private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             HStack {
                 TextField(t("ai.ask"), text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)

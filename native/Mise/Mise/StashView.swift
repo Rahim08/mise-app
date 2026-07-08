@@ -566,7 +566,7 @@ private struct StashBody: View {
             .tabEdgeSwipe(tabs: ["shift", "stock", "movements", "inventory"],
                           selection: $m.tab,
                           onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
-            .blur(radius: AIChat.shared.open ? 4 : 0)
+            .blur(radius: AIChat.shared.open ? 2 : 0)
             .animation(.easeInOut(duration: 0.25), value: AIChat.shared.open)
 
             if let toast = m.toast {
