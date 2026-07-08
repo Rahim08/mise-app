@@ -20,23 +20,27 @@ func parseISO(_ s: String?) -> Date? {
 
 /// Валюта заведения. Владелец выбирает её в веб-дашборде (restaurants.currency);
 /// нативное приложение только читает символ и подставляет во все суммы.
-/// Устанавливается один раз после входа (AppModel) и читается из View (главный поток),
-/// поэтому nonisolated(unsafe) безопасен.
+/// Устанавливается после входа (AppModel, @MainActor) и читается из View — @MainActor
+/// на enum'е реально изолирует доступ, никакого nonisolated(unsafe) не нужно.
 @MainActor
 enum Money {
-    nonisolated(unsafe) static var symbol = "€"
-    /// «<symbol>1 500»; отрицательные — «−<symbol>1 500».
-    static func s(_ v: Double) -> String {
-        // Всегда 2 знака после запятой — как на вебе (app/manager/page.tsx fv).
-        // «95,60», «1 500,00». Копейки не теряются и формат единый во всех приложениях.
+    static var symbol = "€"
+    // Неразрывный пробел: «1 234,00» не переносится по разделителю тысяч на 2 строки.
+    // Формат фиксирован (не зависит от symbol/locale), поэтому форматтер можно кэшировать.
+    private static let formatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .decimal
-        // Неразрывный пробел: «1 234,00» не переносится по разделителю тысяч на 2 строки.
         f.groupingSeparator = "\u{00A0}"
         f.decimalSeparator = ","
         f.minimumFractionDigits = 2
         f.maximumFractionDigits = 2
-        let body = f.string(from: NSNumber(value: abs(v))) ?? "0"
+        return f
+    }()
+    /// «<symbol>1 500»; отрицательные — «−<symbol>1 500».
+    static func s(_ v: Double) -> String {
+        // Всегда 2 знака после запятой — как на вебе (app/manager/page.tsx fv).
+        // «95,60», «1 500,00». Копейки не теряются и формат единый во всех приложениях.
+        let body = formatter.string(from: NSNumber(value: abs(v))) ?? "0"
         return (v < 0 ? "−" + symbol : symbol) + body
     }
 }

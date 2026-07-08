@@ -100,6 +100,7 @@ struct AIButton: View {
                 .presentationDetents([.height(240)])
                 .presentationDragIndicator(.visible)
         }
+        .onDisappear { _ = speech.stop() }
     }
 
     // MARK: - Button circle

@@ -48,7 +48,10 @@ actor CacheStore {
     func clearAll() { store.removeAll() }
 }
 
-final class DBQuery {
+// Мутабельное состояние строится и потребляется инлайн в одной цепочке вызовов —
+// экземпляр никогда не переживает await-границу и не шарится между вызовами,
+// но конформанс объявляем явно, а не полагаемся на выведенную MainActor-изоляцию.
+final class DBQuery: @unchecked Sendable {
     private let table: String
     private var op = "select"
     private var columns = "*"

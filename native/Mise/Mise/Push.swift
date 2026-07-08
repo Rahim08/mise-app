@@ -38,10 +38,17 @@ final class PushManager: NSObject, UNUserNotificationCenterDelegate {
             values["staff_id"] = s.id
         }
         // restaurant_id форсируется на сервере по сессии.
-        try? await DB.from("push_subscriptions").upsert(values, onConflict: "restaurant_id,device_token").run()
+        do {
+            try await DB.from("push_subscriptions").upsert(values, onConflict: "restaurant_id,device_token").run()
+            d.set(false, forKey: "mise_push_upload_pending")
+        } catch {
+            // Не теряем ошибку молча — отметим и повторим при следующем возврате в foreground.
+            d.set(true, forKey: "mise_push_upload_pending")
+        }
     }
 
-    /// Повторная выгрузка сохранённого токена (например, после смены пользователя на устройстве).
+    /// Повторная выгрузка сохранённого токена (например, после смены пользователя на устройстве,
+    /// или после неудачной попытки — см. mise_push_upload_pending в upload(token:)).
     func reuploadIfPossible() {
         if let token = d.string(forKey: "mise_apns_token") {
             Task { await upload(token: token) }
