@@ -175,7 +175,7 @@ final class DBQuery: @unchecked Sendable {
         do {
             let wrap = try JSONDecoder().decode(Wrap<[Lossy<T>]>.self, from: data)
             let rows = (wrap.data ?? []).compactMap { $0.value }
-            print("[DB] \(table) list -> \(rows.count) rows (raw: \(String(data: data, encoding: .utf8)?.prefix(200) ?? ""))")
+            print("[DB] \(table) list filters=\(filters) -> \(rows.count) rows (raw: \(String(data: data, encoding: .utf8)?.prefix(200) ?? ""))")
             return rows
         } catch {
             print("[DB] \(table) list DECODE FAILED: \(error) raw: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "")")
