@@ -145,7 +145,10 @@ final class DBQuery: @unchecked Sendable {
             } catch {
                 last = error
                 // не ретраить осмысленные ответы сервера (4xx) — только сетевые/5xx
-                if case APIError.http(let code, _) = error, (400..<500).contains(code) { throw error }
+                if case APIError.http(let code, _) = error, (400..<500).contains(code) {
+                    print("[DB] \(table) \(op) HTTP \(code): \(error)")
+                    throw error
+                }
                 if i < attempts { try? await Task.sleep(nanoseconds: UInt64(i) * 400_000_000) }
             }
         }
@@ -155,6 +158,7 @@ final class DBQuery: @unchecked Sendable {
             return stale // UI покажет "stale" индикатор
         }
 
+        print("[DB] \(table) \(op) failed after retries: \(last)")
         throw last
     }
 
@@ -168,15 +172,27 @@ final class DBQuery: @unchecked Sendable {
     /// SELECT множества строк (битые строки пропускаются, не роняя весь список).
     func list<T: Decodable>(_ type: T.Type) async throws -> [T] {
         let data = try await dbRequestResilient()
-        let wrap = try JSONDecoder().decode(Wrap<[Lossy<T>]>.self, from: data)
-        return (wrap.data ?? []).compactMap { $0.value }
+        do {
+            let wrap = try JSONDecoder().decode(Wrap<[Lossy<T>]>.self, from: data)
+            let rows = (wrap.data ?? []).compactMap { $0.value }
+            print("[DB] \(table) list -> \(rows.count) rows (raw: \(String(data: data, encoding: .utf8)?.prefix(200) ?? ""))")
+            return rows
+        } catch {
+            print("[DB] \(table) list DECODE FAILED: \(error) raw: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "")")
+            throw error
+        }
     }
 
     /// SELECT одной строки (maybeSingle) или INSERT/UPDATE с возвратом строки (single).
     func single<T: Decodable>(_ type: T.Type) async throws -> T? {
         returning = op == "select" ? "maybeSingle" : "single"
         let data = try await dbRequestResilient()
-        return try JSONDecoder().decode(Wrap<T>.self, from: data).data
+        do {
+            return try JSONDecoder().decode(Wrap<T>.self, from: data).data
+        } catch {
+            print("[DB] \(table) single DECODE FAILED: \(error) raw: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "")")
+            throw error
+        }
     }
 
     /// Запись без возврата (INSERT/UPDATE/DELETE). Инвалидирует кеш таблицы.
