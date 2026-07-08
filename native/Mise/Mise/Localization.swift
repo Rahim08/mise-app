@@ -657,6 +657,7 @@ let STRINGS: [String: [Lang: String]] = [
     "bk.stNone":          tr("No status", "Без статуса", "Senza stato", "Sans statut", "Statussuz", "Durumsuz", "Без статусу", "Статуссыз"),
     "bk.stConfirmed":     tr("Confirmed", "Подтверждена", "Confermata", "Confirmée", "Təsdiqləndi", "Onaylandı", "Підтверджена", "Расталды"),
     "bk.stCancelled":     tr("Cancelled", "Отменена", "Annullata", "Annulée", "Ləğv edildi", "İptal", "Скасована", "Бас тартылды"),
+    "bk.stNoShow":        tr("No-show", "Не пришёл", "Non presentato", "Absent", "Gəlmədi", "Gelmedi", "Не з'явився", "Келмеді"),
     "bk.stArrived":       tr("Arrived", "Пришёл", "Arrivato", "Arrivé", "Gəldi", "Geldi", "Прийшов", "Келді"),
     "bk.stLate":          tr("Late", "Опаздывает", "In ritardo", "En retard", "Gecikir", "Gecikiyor", "Запізнюється", "Кешігеді"),
     "bk.empty":           tr("No bookings", "Нет броней", "Nessuna prenotazione", "Aucune réservation", "Rezerv yoxdur", "Rezervasyon yok", "Немає броней", "Брон жоқ"),
@@ -701,6 +702,7 @@ let STRINGS: [String: [Lang: String]] = [
     "nw.bodyPh":          tr("What's new?…", "Что нового?…", "Cosa c'è di nuovo?…", "Quoi de neuf ?…", "Nə yenilik var?…", "Ne var ne yok?…", "Що нового?…", "Не жаңалық?…"),
     "nw.new":             tr("New post", "Новый пост", "Nuovo post", "Nouveau post", "Yeni paylaşım", "Yeni gönderi", "Новий допис", "Жаңа жазба"),
     "nw.publish":         tr("Publish", "Опубликовать", "Pubblica", "Publier", "Yerləşdir", "Yayınla", "Опублікувати", "Жариялау"),
+    "nw.post":            tr("News", "Новость", "Novità", "Actualité", "Xəbər", "Haber", "Новина", "Жаңалық"),
 
     // People — дополнительные (свайп-действия, офлайн-явка)
     "pe.cancelOrder":       tr("Cancel order?", "Отменить заказ?", "Annullare l'ordine?", "Annuler la commande ?", "Sifarişi ləğv et?", "Siparişi iptal et?", "Скасувати замовлення?", "Тапсырысты болдырмау?"),
@@ -773,6 +775,7 @@ let STRINGS: [String: [Lang: String]] = [
     // Guests (loyalty)
     "gs.title":           tr("Guests", "Гости", "Ospiti", "Invités", "Qonaqlar", "Misafirler", "Гості", "Қонақтар"),
     "gs.visits":          tr("{n} visits", "{n} визитов", "{n} visite", "{n} visites", "{n} ziyarət", "{n} ziyaret", "{n} візитів", "{n} рет келген"),
+    "gs.noShows":         tr("{n} no-shows", "{n} неявок", "{n} assenze", "{n} absences", "{n} gəlməmə", "{n} gelmeme", "{n} неявок", "{n} келмеу"),
     "gs.lastVisit":       tr("Last visit", "Последний визит", "Ultima visita", "Dernière visite", "Son ziyarət", "Son ziyaret", "Останній візит", "Соңғы келуі"),
     "gs.totalGuests":     tr("{n} people total", "Всего {n} гостей", "Totale {n} ospiti", "{n} personnes au total", "Cəmi {n} qonaq", "Toplam {n} kişi", "Всього {n} гостей", "Барлығы {n} қонақ"),
     "gs.history":         tr("Booking history", "История броней", "Storico prenotazioni", "Historique des réservations", "Rezerv tarixçəsi", "Rezervasyon geçmişi", "Історія броней", "Брондар тарихы"),

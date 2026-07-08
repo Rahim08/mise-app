@@ -11,7 +11,7 @@ private let BK_ACCENT = BrandKit.bookings
 // MARK: Статусы
 
 private enum BkStatus: String, CaseIterable {
-    case new, confirmed, arrived, late, cancelled
+    case new, confirmed, arrived, late, cancelled, noShow = "no_show"
     var color: Color {
         switch self {
         case .new:       return BrandKit.manager
@@ -19,6 +19,7 @@ private enum BkStatus: String, CaseIterable {
         case .arrived:   return BrandKit.analytics
         case .late:      return BrandKit.stash
         case .cancelled: return BrandKit.accent
+        case .noShow:    return BrandKit.accent
         }
     }
     var label: String {
@@ -28,6 +29,7 @@ private enum BkStatus: String, CaseIterable {
         case .arrived:   return t("bk.stArrived")
         case .late:      return t("bk.stLate")
         case .cancelled: return t("bk.stCancelled")
+        case .noShow:    return t("bk.stNoShow")
         }
     }
 }
@@ -206,6 +208,7 @@ struct GuestProfile: Identifiable {
     var displayName: String
     var phone: String?
     var visitCount: Int
+    var noShowCount: Int = 0
     var lastVisitDate: String?   // "yyyy-MM-dd"
     var totalGuests: Int
     var bookings: [Booking]
@@ -227,6 +230,8 @@ struct BookingsView: View {
     @State private var showDuplicateDialog = false
     @State private var prefillName: String?     // префилл для «Новая бронь» из карточки гостя
     @State private var prefillPhone: String?
+    @State private var prefillVisits = 0
+    @State private var prefillNoShows = 0
 
     private func canEdit(_ b: Booking) -> Bool {
         app.isOfficial || (b.created_by != nil && b.created_by == app.staff?.id)
@@ -275,7 +280,7 @@ struct BookingsView: View {
         return allBookings.filter { other in
             guestKey(other) == key &&
             (other.booking_date ?? "") < bDate &&
-            other.status != "cancelled"
+            other.status != "cancelled" && other.status != "no_show"
         }.count
     }
 
@@ -374,14 +379,18 @@ struct BookingsView: View {
                         onDelete: { b in Task { await m.delete(b) } },
                         author: (app.staff?.id ?? "owner", app.staff?.name ?? t("role.owner")),
                         prefillName: prefillName,
-                        prefillPhone: prefillPhone
+                        prefillPhone: prefillPhone,
+                        prefillVisits: prefillVisits,
+                        prefillNoShows: prefillNoShows
                     )
                 }
                 .sheet(isPresented: $showGuests) {
-                    GuestsView(m: m, onNewBooking: { name, phone in
+                    GuestsView(m: m, onNewBooking: { name, phone, visits, noShows in
                         // Закрываем шит гостей и открываем редактор с префиллом.
                         showGuests = false
-                        prefillName = name; prefillPhone = phone; editing = nil
+                        prefillName = name; prefillPhone = phone
+                        prefillVisits = visits; prefillNoShows = noShows
+                        editing = nil
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showEditor = true }
                     })
                 }
@@ -422,7 +431,10 @@ struct BookingsView: View {
                 async let l: () = model.load()
                 async let lm: () = model.loadMonth()
                 async let lr: () = loadInitialRange(model)
-                _ = await (l, lm, lr)
+                // Нужно не только для «карточки гостя» — бейдж «постоянный гость» на строке
+                // брони тоже читает allBookings, иначе он не появляется до захода в Guests.
+                async let la: () = model.loadAllBookings()
+                _ = await (l, lm, lr, la)
             }
         }
         .onChange(of: selectedRange) { _, _ in
@@ -607,7 +619,8 @@ struct BookingsView: View {
 
     private var addButton: some View {
         Button {
-            editing = nil; prefillName = nil; prefillPhone = nil; showEditor = true
+            editing = nil; prefillName = nil; prefillPhone = nil
+            prefillVisits = 0; prefillNoShows = 0; showEditor = true
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         } label: {
             Image(systemName: "plus").font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
@@ -849,6 +862,8 @@ private struct BookingEditor: View {
     let author: (String, String)
     var prefillName: String? = nil     // префилл для «Новая бронь» из карточки гостя
     var prefillPhone: String? = nil
+    var prefillVisits: Int = 0         // визитов/неявок у гостя — подсказка при создании из карточки
+    var prefillNoShows: Int = 0
 
     @Environment(\.dismiss) private var dismiss
 
@@ -873,6 +888,24 @@ private struct BookingEditor: View {
                         field(t("bk.name"), text: $name)
                         field(t("bk.phone"), text: $phone).keyboardType(.phonePad)
                         field(t("bk.guests"), text: $guests).keyboardType(.numberPad)
+                        // Подсказка сотруднику при создании брони из карточки известного гостя —
+                        // для брони «с нуля» (без выбора гостя) не показываем, данных ещё нет.
+                        if isNew && (prefillVisits > 0 || prefillNoShows > 0) {
+                            HStack(spacing: 6) {
+                                if prefillVisits >= 3 {
+                                    Label(t("gs.regularBadge"), systemImage: "star.fill")
+                                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(BrandKit.bookings)
+                                }
+                                if prefillVisits > 0 {
+                                    Text(t("gs.visits", ["n": "\(prefillVisits)"]))
+                                        .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.55))
+                                }
+                                if prefillNoShows > 0 {
+                                    Text(t("gs.noShows", ["n": "\(prefillNoShows)"]))
+                                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(BrandKit.accent)
+                                }
+                            }
+                        }
                     }
                     Section(t("bk.secBooking")) {
                         Toggle(t("bk.setTime"), isOn: $hasTime).tint(BK_ACCENT)
@@ -887,7 +920,7 @@ private struct BookingEditor: View {
                         Section(t("bk.status")) {
                             Picker(t("bk.status"), selection: $status) {
                                 Text(t("bk.stNone")).tag(String?.none)
-                                ForEach([BkStatus.arrived, .late, .cancelled], id: \.rawValue) { s in
+                                ForEach([BkStatus.arrived, .late, .cancelled, .noShow], id: \.rawValue) { s in
                                     Text(s.label).tag(Optional(s.rawValue))
                                 }
                             }.pickerStyle(.segmented)
