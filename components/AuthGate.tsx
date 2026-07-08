@@ -101,6 +101,13 @@ function QRScanner({ onResult, onClose, t }: { onResult: (data: string) => void;
 
 type AuthPhase = 'loading' | 'qr' | 'pin' | 'biometric_offer' | 'error'
 
+interface RestaurantInfo {
+  id: string
+  name?: string
+  logo_url?: string | null
+  has_owner_pin?: boolean
+}
+
 // Is the (httpOnly) staff data-token still valid? Read the readable companion cookie.
 function staffTokenValid(): boolean {
   if (typeof document === 'undefined') return false
@@ -128,7 +135,7 @@ export function AuthGate({ appId, appName, onAuth }: {
   const router = useRouter()
   const [phase, setPhase] = useState<AuthPhase>('loading')
   const [showQRScanner, setShowQRScanner] = useState(false)
-  const [restaurant, setRestaurant] = useState<any>(null)
+  const [restaurant, setRestaurant] = useState<RestaurantInfo | null>(null)
   const [pin, setPin] = useState('')
   const [pinError, setPinError] = useState(false)
   const [shaking, setShaking] = useState(false)
@@ -197,9 +204,9 @@ export function AuthGate({ appId, appName, onAuth }: {
 
   const tryBiometric = async (rid: string): Promise<boolean> => {
     try {
-      const result = await (navigator.credentials as any).get({
+      const result = await navigator.credentials.get({
         publicKey: { challenge: new Uint8Array(32), timeout: 60000, userVerification: 'required' }
-      })
+      } as CredentialRequestOptions)
       return !!result
     } catch { return false }
   }

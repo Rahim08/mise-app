@@ -55,7 +55,11 @@ class Query<T = any> implements PromiseLike<Result<T>> {
   maybeSingle(): Promise<Result<T>> { this.returning = 'maybeSingle'; this.wantsReturn = true; return this.exec() }
 
   private async exec(): Promise<Result<T>> {
-    const payload: any = { table: this.table, op: this.op }
+    interface DbPayload {
+      table: string; op: string; columns?: string; values?: unknown; onConflict?: string
+      returning?: string; filters?: unknown[]; order?: unknown[]; limit?: number
+    }
+    const payload: DbPayload = { table: this.table, op: this.op }
     if (this.op === 'select') {
       payload.columns = this.columns
       payload.returning = this.returning
@@ -84,13 +88,13 @@ class Query<T = any> implements PromiseLike<Result<T>> {
         const json = await res.json()
         if (!res.ok) return { data: null as any, error: { message: json?.error || `HTTP ${res.status}`, code: json?.code } }
         return { data: json.data as T, error: null }
-      } catch (err: any) {
+      } catch (err: unknown) {
         // Только сетевой сбой (fetch бросил). HTTP-ошибки выше не ретраятся.
         if (attempt < maxAttempts) {
           await new Promise(r => setTimeout(r, 500 * 2 ** (attempt - 1))) // 0.5s, 1s
           continue
         }
-        return { data: null as any, error: { message: err?.message || 'Network error' } }
+        return { data: null as any, error: { message: err instanceof Error ? err.message : 'Network error' } }
       }
     }
   }
