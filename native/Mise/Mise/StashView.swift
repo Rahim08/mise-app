@@ -564,6 +564,8 @@ private struct StashBody: View {
             .tabEdgeSwipe(tabs: ["shift", "stock", "movements", "inventory"],
                           selection: $m.tab,
                           onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
+            .blur(radius: AIChat.shared.open ? 4 : 0)
+            .animation(.easeInOut(duration: 0.25), value: AIChat.shared.open)
 
             if let toast = m.toast {
                 Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
@@ -688,6 +690,9 @@ private struct ShiftTab: View {
         }
     }
 
+    // Не LazyVGrid: ленивые сетки не участвуют в transition/offset родителя (карточки
+    // "всплывают" на месте, пока остальной контент едет снизу вверх) — плиток тут всего
+    // 3-4, лень не нужна, а обычный Grid корректно наследует анимацию входа.
     private var stats: some View {
         let items: [(String, String, Color)] = {
             var a: [(String, String, Color)] = [(t("st.sold"), "\(m.paidTotal)", BrandKit.stash),
@@ -696,14 +701,23 @@ private struct ShiftTab: View {
             a.append((t("st.tobacco"), grams(m.gramsUsed), BrandKit.manager))
             return a
         }()
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: m.canSeeMoney ? 2 : 3), spacing: 8) {
-            ForEach(items, id: \.0) { it in
-                VStack(spacing: 3) {
-                    Text(it.1).font(.system(size: 17, weight: .heavy)).foregroundStyle(it.2)
-                    Text(it.0).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.45))
+        let columns = m.canSeeMoney ? 2 : 3
+        let rows = stride(from: 0, to: items.count, by: columns).map {
+            Array(items[$0..<min($0 + columns, items.count)])
+        }
+        func tile(_ it: (String, String, Color)) -> some View {
+            VStack(spacing: 3) {
+                Text(it.1).font(.system(size: 17, weight: .heavy)).foregroundStyle(it.2)
+                Text(it.0).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.45))
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 12)
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        }
+        return Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, rowItems in
+                GridRow {
+                    ForEach(rowItems, id: \.0) { it in tile(it) }
                 }
-                .frame(maxWidth: .infinity).padding(.vertical, 12)
-                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
             }
         }
     }

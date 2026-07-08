@@ -150,7 +150,7 @@ private struct AccessoryWidgetView: View {
                 case .cash:
                     Label("Касса дня", systemImage: "creditcard.fill").font(.system(size: 12, weight: .semibold))
                     Text(money(snap.cashClosing)).font(.system(size: 18, weight: .bold))
-                    Text("Приход \(money(snap.cashIncome))").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("Выручка \(money(snap.cashIncome))").font(.system(size: 11)).foregroundStyle(.secondary)
                 case .hookahs:
                     Label("Кальяны", systemImage: "smoke.fill").font(.system(size: 12, weight: .semibold))
                     Text("\(snap.hookahPaid) платных").font(.system(size: 16, weight: .bold))
@@ -227,7 +227,7 @@ private struct CashWidget: View {
             } else {
                 Spacer(minLength: 8)
                 HStack(spacing: 12) {
-                    cell("Приход", money(snap.cashIncome), accent)
+                    cell("Выручка", money(snap.cashIncome), accent)
                     cell("Расход", money(snap.cashExpense), .white.opacity(0.55))
                 }
                 Spacer(minLength: 8)

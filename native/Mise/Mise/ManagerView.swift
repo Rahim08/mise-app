@@ -401,32 +401,38 @@ private struct ManagerBody: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.miseBg.ignoresSafeArea()
-            ScrollView {
-                VStack(spacing: 14) {
-                    dateRow
-                    Group {
-                        if m.loadError {
-                            loadErrorState
-                                .transition(.opacity)
-                        } else if m.shift == nil {
-                            emptyState
-                                .transition(.opacity)
-                        } else {
-                            shiftBody
-                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            Group {
+                Color.miseBg.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 14) {
+                        dateRow
+                        Group {
+                            if m.loadError {
+                                loadErrorState
+                                    .transition(.opacity)
+                            } else if m.shift == nil {
+                                emptyState
+                                    .transition(.opacity)
+                            } else {
+                                shiftBody
+                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            }
                         }
+                        .animation(.spring(duration: 0.4, bounce: 0.08), value: m.shift == nil)
+                        .animation(.easeInOut(duration: 0.25), value: m.loadError)
                     }
-                    .animation(.spring(duration: 0.4, bounce: 0.08), value: m.shift == nil)
-                    .animation(.easeInOut(duration: 0.25), value: m.loadError)
+                    .padding(16)
+                    .padding(.bottom, 40)
+                    .opacity(m.loading ? 0 : 1)
+                    .offset(y: m.loading ? 18 : 0)
+                    .animation(.spring(duration: 0.45, bounce: 0.1), value: m.loading)
                 }
-                .padding(16)
-                .padding(.bottom, 40)
-                .opacity(m.loading ? 0 : 1)
-                .offset(y: m.loading ? 18 : 0)
-                .animation(.spring(duration: 0.45, bounce: 0.1), value: m.loading)
+                .refreshable { await m.loadDay(m.currentDate) }
             }
-            .refreshable { await m.loadDay(m.currentDate) }
+            // Spotlight-эффект под ИИ-чатом: слегка размываем реальный контент модуля,
+            // а не показываем матовую панель поверх (см. AIButton.swift AIChat).
+            .blur(radius: AIChat.shared.open ? 4 : 0)
+            .animation(.easeInOut(duration: 0.25), value: AIChat.shared.open)
 
             if let toast = m.toast {
                 Text(toast)

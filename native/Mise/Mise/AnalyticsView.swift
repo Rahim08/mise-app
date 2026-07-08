@@ -86,14 +86,18 @@ final class AnalyticsModel {
             return line
         }.joined(separator: "; ")
 
+        // ИИ должен видеть полную выручку (нал+карта) независимо от переключателя
+        // includeCard, который влияет только на то, что владелец решил показывать в UI.
         let last = shiftsRaw.last
         let lastDay = last.map { s in
-            "Last shift \(s.date): income \(Money.s(s.income ?? 0)), expenses \(Money.s(s.total_expense ?? 0)), kassa \(Money.s(s.closing_balance ?? 0))."
+            "Last shift \(s.date): income \(Money.s((s.income ?? 0) + (s.income_card ?? 0))), expenses \(Money.s(s.total_expense ?? 0)), kassa \(Money.s(s.closing_balance ?? 0))."
         } ?? "No shifts yet."
+        let totalIncomeCombined = shiftsRaw.reduce(0) { $0 + ($1.income ?? 0) + ($1.income_card ?? 0) }
+        let prevIncomeCombined = prevShiftsRaw.reduce(0) { $0 + ($1.income ?? 0) + ($1.income_card ?? 0) }
 
         let ctx = """
             Period: \(navLabel).
-            Revenue: \(Money.s(totalIncome)) (prev month: \(Money.s(prevIncome))).
+            Revenue: \(Money.s(totalIncomeCombined)) (prev month: \(Money.s(prevIncomeCombined))).
             Expenses: \(Money.s(totalExpense)) (prev month: \(Money.s(prevExpense))).
             Expense breakdown this period: \(catLines.isEmpty ? "none" : catLines).
             \(empLines.isEmpty ? "" : "Employee extras this period: \(empLines).")
@@ -747,27 +751,31 @@ private struct AnalyticsBody: View {
 
     var body: some View {
         ZStack {
-            Color.miseBg.ignoresSafeArea()
-            VStack(spacing: 0) {
-                monthNav
-                TabView(selection: $m.tab) {
-                    AppTabPage(refresh: { await m.load() }) { PeriodTab(m: m, aiEnabled: aiEnabled) }
-                        .tabItem { Label(t("tab.period"), systemImage: "calendar") }.tag("period")
-                    AppTabPage(refresh: { await m.load() }) { KassaTab(m: m) }
-                        .tabItem { Label(t("tab.kassa"), systemImage: "banknote.fill") }.tag("kassa")
-                    AppTabPage(refresh: { await m.load() }) { ForecastTab(m: m) }
-                        .tabItem { Label(t("tab.forecast"), systemImage: "chart.line.uptrend.xyaxis") }.tag("forecast")
-                    AppTabPage(refresh: { await m.load() }) { SalaryTab(m: m) }
-                        .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
-                    AppTabPage(refresh: { await m.load() }) { HookahTab(m: m) }
-                        .tabItem { Label(t("tab.hookah"), systemImage: "flame.fill") }.tag("hookah")
+            Group {
+                Color.miseBg.ignoresSafeArea()
+                VStack(spacing: 0) {
+                    monthNav
+                    TabView(selection: $m.tab) {
+                        AppTabPage(refresh: { await m.load() }) { PeriodTab(m: m, aiEnabled: aiEnabled) }
+                            .tabItem { Label(t("tab.period"), systemImage: "calendar") }.tag("period")
+                        AppTabPage(refresh: { await m.load() }) { KassaTab(m: m) }
+                            .tabItem { Label(t("tab.kassa"), systemImage: "banknote.fill") }.tag("kassa")
+                        AppTabPage(refresh: { await m.load() }) { ForecastTab(m: m) }
+                            .tabItem { Label(t("tab.forecast"), systemImage: "chart.line.uptrend.xyaxis") }.tag("forecast")
+                        AppTabPage(refresh: { await m.load() }) { SalaryTab(m: m) }
+                            .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
+                        AppTabPage(refresh: { await m.load() }) { HookahTab(m: m) }
+                            .tabItem { Label(t("tab.hookah"), systemImage: "flame.fill") }.tag("hookah")
+                    }
+                    .tint(BrandKit.analytics)
+                    .sensoryFeedback(.selection, trigger: m.tab)
+                    .tabEdgeSwipe(tabs: ["period", "kassa", "forecast", "salary", "hookah"],
+                                  selection: $m.tab,
+                                  onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
                 }
-                .tint(BrandKit.analytics)
-                .sensoryFeedback(.selection, trigger: m.tab)
-                .tabEdgeSwipe(tabs: ["period", "kassa", "forecast", "salary", "hookah"],
-                              selection: $m.tab,
-                              onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
             }
+            .blur(radius: AIChat.shared.open ? 4 : 0)
+            .animation(.easeInOut(duration: 0.25), value: AIChat.shared.open)
             if aiEnabled {
                 AIButton(module: "analytics") { msg in await m.handleAI(msg) }
             }

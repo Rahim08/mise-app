@@ -75,7 +75,8 @@ enum SnapshotWriter {
         func activity(_ s: Shift) -> Double { (s.income ?? 0) + (s.total_expense ?? 0) + (s.inkassation ?? 0) }
         let sh = shifts.max { activity($0) < activity($1) } ?? shifts[0]
         return CashResult(
-            income: sh.income ?? 0,
+            // Выручка = наличные + карта, как везде в аналитике (см. AnalyticsModel.pTotal).
+            income: (sh.income ?? 0) + (sh.income_card ?? 0),
             expense: sh.total_expense ?? 0,
             closing: sh.closing_balance ?? 0,
             available: true
