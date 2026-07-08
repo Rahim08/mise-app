@@ -98,7 +98,7 @@ final class StashModel {
         paid = p; free = fr
         // Списание «с заведения» = движение writeoff без бренда/вкуса (общий вес зала).
         let venueWriteoff = venueWo.filter { $0.brand.isEmpty && $0.flavor.isEmpty }.reduce(0) { $0 + $1.quantity_g }
-        venueBase = outs.reduce(0) { $0 + $1.quantity_g } - pastGrams - venueWriteoff
+        venueBase = max(0, outs.reduce(0) { $0 + $1.quantity_g } - pastGrams - venueWriteoff)
     }
 
     // MARK: KPI-цели
@@ -170,7 +170,7 @@ final class StashModel {
     var freeTotal: Int { types.reduce(0) { $0 + freeTotalOf($1.id) } }
     var revenue: Double { types.reduce(0) { $0 + Double(paidOf($1.id)) * ($1.price ?? 0) } }
     var gramsUsed: Double { types.reduce(0) { $0 + Double(paidOf($1.id) + freeTotalOf($1.id)) * ($1.portion_g ?? 0) } }
-    var venueLeft: Double { venueBase - gramsUsed }
+    var venueLeft: Double { max(0, venueBase - gramsUsed) }
 
     func saveShift() async {
         saving = true; defer { saving = false }
@@ -341,17 +341,22 @@ final class StashModel {
             let existing = fresh.first { norm($0.brand) == norm(r.brand) && norm($0.flavor) == norm(r.flavor) }
             let brand = existing?.brand ?? r.brand
             let flavor = existing?.flavor ?? r.flavor
-            try await DB.from("tobacco_movements").insert([
-                "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty,
-                "type": movMode, "batch_id": batchId, "reason": defReason,
-            ]).run()
-            if let ex = existing {
-                let delta = movMode == "in" ? qty : -qty
-                try await DB.from("tobacco_stock").update(["quantity_g": ex.quantity_g + delta]).eq("id", ex.id).run()
-            } else if movMode == "in" {
-                try await DB.from("tobacco_stock").insert([
-                    "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty, "flavor_name": flavor,
+            do {
+                try await DB.from("tobacco_movements").insert([
+                    "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty,
+                    "type": movMode, "batch_id": batchId, "reason": defReason,
                 ]).run()
+                if let ex = existing {
+                    let delta = movMode == "in" ? qty : -qty
+                    try await DB.from("tobacco_stock").update(["quantity_g": ex.quantity_g + delta]).eq("id", ex.id).run()
+                } else if movMode == "in" {
+                    try await DB.from("tobacco_stock").insert([
+                        "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty, "flavor_name": flavor,
+                    ]).run()
+                }
+            } catch {
+                flash(t("ai.errGeneric"))
+                return false
             }
         }
         await loadWarehouse()
@@ -559,8 +564,6 @@ private struct StashBody: View {
             .tabEdgeSwipe(tabs: ["shift", "stock", "movements", "inventory"],
                           selection: $m.tab,
                           onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
-            .blur(radius: AIChat.shared.open ? 2 : 0)
-            .animation(.easeOut(duration: 0.3), value: AIChat.shared.open)
 
             if let toast = m.toast {
                 Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)

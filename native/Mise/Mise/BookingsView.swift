@@ -203,8 +203,8 @@ final class BookingsModel {
 
 struct GuestProfile: Identifiable {
     let id: String       // нормализованный ключ: телефон-цифры или lowercase-имя
-    let displayName: String
-    let phone: String?
+    var displayName: String
+    var phone: String?
     var visitCount: Int
     var lastVisitDate: String?   // "yyyy-MM-dd"
     var totalGuests: Int

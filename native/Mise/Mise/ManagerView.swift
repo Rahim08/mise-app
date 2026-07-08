@@ -425,16 +425,15 @@ private struct ManagerBody: View {
                 .animation(.spring(duration: 0.45, bounce: 0.1), value: m.loading)
             }
             .refreshable { await m.loadDay(m.currentDate) }
-            .blur(radius: AIChat.shared.open ? 2 : 0)
-            .animation(.easeOut(duration: 0.3), value: AIChat.shared.open)
 
             if let toast = m.toast {
                 Text(toast)
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
                     .padding(.horizontal, 18).padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: Capsule())
-                    .padding(.top, 8)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .padding(.bottom, 60)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
             if aiEnabled {
@@ -713,11 +712,16 @@ private struct ManagerBody: View {
 
 // MARK: - даты
 
+// Кэшированные форматтеры (аллокация DateFormatter не бесплатна) — locale обновляется
+// на каждый вызов (дёшево), т.к. может смениться при смене языка в настройках.
+private let displayDateFormatter: DateFormatter = { let f = DateFormatter(); f.dateFormat = "d MMMM"; return f }()
+private let dowFormatter: DateFormatter = { let f = DateFormatter(); f.dateFormat = "EEEE"; return f }()
+
 private func displayDate(_ d: Date) -> String {
-    let f = DateFormatter(); f.locale = appLocale(); f.dateFormat = "d MMMM"
-    return f.string(from: d)
+    displayDateFormatter.locale = appLocale()
+    return displayDateFormatter.string(from: d)
 }
 private func dow(_ d: Date) -> String {
-    let f = DateFormatter(); f.locale = appLocale(); f.dateFormat = "EEEE"
-    return f.string(from: d).capitalized
+    dowFormatter.locale = appLocale()
+    return dowFormatter.string(from: d).capitalized
 }

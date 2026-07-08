@@ -43,15 +43,13 @@ struct MainView: View {
             }
         }
         // Снимок для виджета: считаем при входе и при возврате на передний план.
-        // Перед пересчётом разбираем очередь интерактивных действий из виджета.
         .task {
-            await SnapshotWriter.drainWidgetActions()
             await SnapshotWriter.refresh(canSeeMoney: app.canSeeMoney)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                PushManager.shared.reuploadIfPossible()
                 Task {
-                    await SnapshotWriter.drainWidgetActions()
                     await SnapshotWriter.refresh(canSeeMoney: app.canSeeMoney, force: true)
                 }
             }
@@ -289,6 +287,7 @@ struct NotificationSettingsView: View {
     @Environment(AppModel.self) private var app
 
     @State private var loaded = false
+    @State private var saving = false
     @State private var rowId: String?
     @State private var shiftReminder = true
     @State private var task = true
@@ -369,7 +368,8 @@ struct NotificationSettingsView: View {
     }
 
     private func save() {
-        guard loaded else { return }
+        guard loaded, !saving else { return }
+        saving = true
         let prefs: [String: Any] = [
             "shift_reminder": shiftReminder, "task": task, "swap": swap, "attendance": attendance,
             "cash_open": cashOpen, "cash_close": cashClose, "purchase": purchase,
@@ -378,6 +378,7 @@ struct NotificationSettingsView: View {
             "low_stock": lowStock, "voice_tasks": voiceTasks,
         ]
         Task {
+            defer { saving = false }
             if let id = rowId {
                 try? await DB.from("notification_prefs").update(["prefs": prefs, "updated_at": ISO8601DateFormatter().string(from: Date())]).eq("id", id).run()
             } else {
