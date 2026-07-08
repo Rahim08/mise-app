@@ -46,35 +46,13 @@ export async function POST(req: NextRequest) {
 
     const rid = restaurant.id
 
-    // Explicit deletion order mirrors demo-seed.sql — not all tables have ON DELETE CASCADE
-    const tables = [
-      'hookah_sales', 'tobacco_movements', 'tobacco_stock',
-      'shift_expenses', 'shift_absences', 'inkassations',
-      'monthly_card_amounts', 'attendance_records', 'staff_schedules',
-      'notifications', 'menu_orders', 'menu_items', 'menu_categories',
-      'menu_settings', 'expense_categories', 'hookah_types',
-      'shifts', 'staff', 'employees', 'restaurant_settings',
-    ]
-    for (const table of tables) {
-      const { error } = await supabaseAdmin.from(table).delete().eq('restaurant_id', rid)
-      if (error) return NextResponse.json({ error: `step:delete_${table}`, detail: error.message }, { status: 500 })
-    }
-
-    // profiles has no CASCADE on restaurant_id
-    const { error: profilesError } = await supabaseAdmin
-      .from('profiles')
-      .delete()
-      .or(`id.eq.${user.id},restaurant_id.eq.${rid}`)
-    if (profilesError) {
-      return NextResponse.json({ error: 'step:delete_profiles', detail: profilesError.message }, { status: 500 })
-    }
-
-    const { error: restaurantDeleteError } = await supabaseAdmin
-      .from('restaurants')
-      .delete()
-      .eq('id', rid)
-    if (restaurantDeleteError) {
-      return NextResponse.json({ error: 'step:delete_restaurant', detail: restaurantDeleteError.message }, { status: 500 })
+    // Single Postgres function call = one implicit transaction (atomic rollback on any
+    // failure). See docs/migrations/account-delete-atomic-2026-07.sql for the table list.
+    const { error: deleteError } = await supabaseAdmin.rpc('delete_restaurant_account', {
+      p_restaurant_id: rid, p_user_id: user.id,
+    })
+    if (deleteError) {
+      return NextResponse.json({ error: 'step:delete_restaurant_account', detail: deleteError.message }, { status: 500 })
     }
   } else {
     await supabaseAdmin.from('profiles').delete().eq('id', user.id)
