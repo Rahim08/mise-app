@@ -7,7 +7,17 @@ export interface NotifyPayload {
   type: string
   title: string
   body?: string
+  /** Если задан — сервер рендерит текст на языке КАЖДОГО получателя вместо title/body
+   *  выше (те остаются лишь EN-фолбэком). См. lib/notifyStrings.ts на сервере. */
+  titleKey?: string
+  titleParams?: Record<string, string | number>
+  bodyKey?: string
+  bodyParams?: Record<string, string | number>
+  bodySegments?: { key?: string; value: string; sep?: string }[]
   secureBody?: string
+  /** Сегменты дайджеста (напр. касса с суммами) — лейбл каждого переводится сервером на
+   *  язык получателя, value (готовая сумма) — как есть. См. lib/notifyStrings.ts. */
+  secureBodySegments?: { key?: string; value: string; sep?: string }[]
   data?: Record<string, unknown>
   audience: NotifyAudience
 }
