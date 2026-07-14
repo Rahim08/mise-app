@@ -5,6 +5,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 import { issueAdminViewToken, ADMIN_VIEW_COOKIE_NAME, ADMIN_VIEW_COOKIE_MAXAGE } from '@/lib/staffToken'
+import { ALL_MODULES } from '@/lib/plans'
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL
 if (!ADMIN_EMAIL) console.warn('[admin] ADMIN_EMAIL not set — admin route will be inaccessible')
@@ -24,7 +25,7 @@ export async function POST(req: NextRequest) {
   if (!await checkRateLimit(rlKey, 30, 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
   if (!await isAdmin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { action, restaurantId, note, status, plan, ends_at, endsAt, compApps, discountPct, deviceLimit, staffLimit, aiEnabled } = await req.json()
+  const { action, restaurantId, note, status, plan, ends_at, endsAt, compApps, discountPct, staffLimit, aiEnabled, addonModules, extraSeats, addonAI, billingInterval, trialEndsAt } = await req.json()
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
   switch (action) {
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest) {
     case 'perks': {
       // Ручной доступ к приложениям поверх тарифа + скидка (admin-perks-2026-06.sql)
       const { error } = await admin.from('restaurants').update({
-        comp_apps: Array.isArray(compApps) ? compApps.filter((a: string) => ['stash', 'people', 'menu'].includes(a)) : [],
+        comp_apps: Array.isArray(compApps) ? compApps.filter((a: string) => (ALL_MODULES as string[]).includes(a)) : [],
         discount_pct: Math.max(0, Math.min(100, parseInt(discountPct) || 0)),
       }).eq('id', restaurantId)
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -88,18 +89,33 @@ export async function POST(req: NextRequest) {
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       return NextResponse.json({ ok: true })
     }
-    case 'setDeviceLimit': {
-      const dl = deviceLimit != null && deviceLimit !== '' ? Math.max(1, parseInt(deviceLimit) || 1) : null
-      const { error } = await admin.from('restaurants').update({ device_limit: dl }).eq('id', restaurantId)
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-      return NextResponse.json({ ok: true })
-    }
     case 'setStaffLimit': {
       // Лимит сотрудников с реальным доступом к приложениям (staff.apps непустой) —
       // проверяется в /api/db checkStaffPlanLimit. Отдельно от setDeviceLimit выше
       // (тот про привязку устройств, этот — про billable-доступ).
       const sl = staffLimit != null && staffLimit !== '' ? Math.max(1, parseInt(staffLimit) || 1) : null
       const { error } = await admin.from('restaurants').update({ staff_limit: sl }).eq('id', restaurantId)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      return NextResponse.json({ ok: true })
+    }
+    case 'setAddons': {
+      // Ручная правка аддонов (биллинг v2). Stripe НЕ трогаем: для платящих клиентов
+      // менять состав через дашборд клиента (/api/stripe/update), это — для комп/ручных.
+      const { error } = await admin.from('restaurants').update({
+        addon_modules: Array.isArray(addonModules) ? addonModules.filter((a: string) => (ALL_MODULES as string[]).includes(a)) : [],
+        extra_seats: Math.max(0, Math.min(200, parseInt(extraSeats) || 0)),
+        addon_ai: !!addonAI,
+        ...(billingInterval === 'month' || billingInterval === 'year' ? { billing_interval: billingInterval } : {}),
+      }).eq('id', restaurantId)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      return NextResponse.json({ ok: true })
+    }
+    case 'extendTrial': {
+      // Продление DB-триала: двигаем trial_ends_at и subscription_ends_at, статус trialing.
+      if (!trialEndsAt) return NextResponse.json({ error: 'Missing trialEndsAt' }, { status: 400 })
+      const { error } = await admin.from('restaurants').update({
+        trial_ends_at: trialEndsAt, subscription_ends_at: trialEndsAt, subscription_status: 'trialing',
+      }).eq('id', restaurantId)
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       return NextResponse.json({ ok: true })
     }

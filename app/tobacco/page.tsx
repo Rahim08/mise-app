@@ -8,6 +8,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
 import { AppLoading } from '@/components/AppLoading'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
+import { Spinner } from '@/components/ui'
 import { fmtDate as fmtDay } from '@/lib/format'
 import { useI18n, tCurrent } from '@/lib/i18n'
 
@@ -334,11 +335,16 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
 }
 
 
-export default function StashApp() {
-  const t = useTheme()
+export default function StashApp({ rid = '' }: { rid?: string }) {
+  // rid задан → embedded-режим: рендер внутри дашборд-shell (/dashboard/stash),
+  // без AuthGate/PIN, без фикс-хрома, тема дашборда.
+  const embedded = !!rid
+  // Desktop-режим внутри shell: шире мобильных 860px. Staff-приложение не трогаем.
+  const contentMaxWidth = embedded ? 1100 : 860
+  const t = useTheme(embedded ? 'mise_dash_dark' : undefined)
   const { t: tr, locale } = useI18n()
 
-  const [restaurantId, setRestaurantId] = useState('')
+  const [restaurantId, setRestaurantId] = useState(rid)
   const [tab, setTab] = useState<'shift' | 'stock' | 'movements' | 'inventory'>('shift')
   const [movMode, setMovMode] = useState<'in' | 'out' | 'writeoff'>('in')
   const [movReason, setMovReason] = useState('')
@@ -507,7 +513,9 @@ export default function StashApp() {
 
   if (!restaurantId) return <AuthGate appId="stash" appName="Mise Stash" onAuth={setRestaurantId} />
 
-  if (!mounted || loading) return <AppLoading app="stash" bg={t.bg} fill={t.fill} accent={t.orange} />
+  if (!mounted || loading) return embedded
+    ? <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}><Spinner /></div>
+    : <AppLoading app="stash" bg={t.bg} fill={t.fill} accent={t.orange} />
 
   const batches = groupedMovements()
 
@@ -551,7 +559,9 @@ export default function StashApp() {
   ]
 
   return (
-    <div style={{ height: '100vh', overflow: 'hidden', background: t.bg, fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased' }}>
+    <div style={embedded
+      ? { display: 'flex', flexDirection: 'column', fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }
+      : { height: '100vh', overflow: 'hidden', background: t.bg, fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased' }}>
       <style>{`
         @keyframes spin { to { transform: rotate(360deg) } }
         @keyframes fadeUp { from { opacity:0; transform:translateY(10px) } to { opacity:1; transform:translateY(0) } }
@@ -560,8 +570,11 @@ export default function StashApp() {
         input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none }
       `}</style>
 
-      {/* ── HEADER ── */}
-      <div style={{
+      {/* ── HEADER: standalone — фикс-шапка; embedded — строка контролов в потоке ── */}
+      <div style={embedded ? {
+        order: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 12,
+        maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center', boxSizing: 'border-box' as const,
+      } : {
         position: 'fixed', top: 0, left: 0, right: 0, zIndex: 300,
         height: 56, background: t.hbg,
         backdropFilter: 'saturate(200%) blur(24px)',
@@ -569,9 +582,9 @@ export default function StashApp() {
         borderBottom: `0.5px solid ${t.sep2}`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {!embedded && <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <AppSwitchBrand name="Stash" accent={t.orange} color={t.text} muted={t.text3} size={18} />
-        </div>
+        </div>}
         <button
           onClick={() => { setEditBatch(null); setMovRows([newRow()]); setMovReason(''); setShowAddMov(true) }}
           style={{
@@ -589,8 +602,10 @@ export default function StashApp() {
       </div>
 
       {/* ── CONTENT ── */}
-      <div style={{ position: 'fixed', top: 56, left: 0, right: 0, bottom: 82, overflowY: 'auto', background: t.bg }}>
-        <div style={{ padding: '16px 16px 28px', maxWidth: 860, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
+      <div style={embedded
+        ? { order: 2 }
+        : { position: 'fixed', top: 56, left: 0, right: 0, bottom: 82, overflowY: 'auto', background: t.bg }}>
+        <div style={{ padding: embedded ? '0 0 28px' : '16px 16px 28px', maxWidth: contentMaxWidth, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
 
           {/* ══ HOOKAH SHIFT ══ */}
           {tab === 'shift' && !loading && (
@@ -882,8 +897,11 @@ export default function StashApp() {
         </div>
       </div>
 
-      {/* ── BOTTOM NAV ── */}
-      <div style={{
+      {/* ── NAV: standalone — фикс-бар снизу; embedded — сегмент-строка над контентом ── */}
+      <div style={embedded ? {
+        order: 1, display: 'flex', gap: 2, background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16,
+        maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center', boxSizing: 'border-box' as const,
+      } : {
         position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 300,
         height: 82, background: t.nbg,
         backdropFilter: 'saturate(200%) blur(24px)',
@@ -894,6 +912,11 @@ export default function StashApp() {
       }}>
         {NAV_TABS.map(navTab => {
           const active = tab === navTab.id
+          if (embedded) return (
+            <button key={navTab.id} onClick={() => setTab(navTab.id as any)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: active ? 700 : 500, cursor: 'pointer', background: active ? t.surface : 'transparent', color: active ? t.orange : t.text3, boxShadow: active ? t.sh2 : 'none', transition: 'all .18s' }}>
+              {navTab.label}
+            </button>
+          )
           return (
             <button
               key={navTab.id}

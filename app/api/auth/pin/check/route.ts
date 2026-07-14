@@ -2,16 +2,21 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import bcrypt from 'bcryptjs'
 import { issueStaffToken, STAFF_COOKIE, STAFF_COOKIE_MAXAGE } from '@/lib/staffToken'
+import { entitlements } from '@/lib/plans'
+
+// secure-куки на http://localhost Safari отбрасывает — токен «не запоминался» в dev,
+// и PIN спрашивался при каждом входе. В проде (https) — всегда secure.
+const SECURE_COOKIE = process.env.NODE_ENV === 'production'
 
 function withStaffCookie(body: any, token: string) {
   const res = NextResponse.json(body)
   res.cookies.set(STAFF_COOKIE, token, {
-    httpOnly: true, sameSite: 'lax', secure: true, path: '/', maxAge: STAFF_COOKIE_MAXAGE,
+    httpOnly: true, sameSite: 'lax', secure: SECURE_COOKIE, path: '/', maxAge: STAFF_COOKIE_MAXAGE,
   })
   // Readable companion: lets the client know the (httpOnly) token is still valid before
   // skipping PIN via Face ID. Holds only the expiry epoch — no secret.
   res.cookies.set('mise_token_until', String(Math.floor(Date.now() / 1000) + STAFF_COOKIE_MAXAGE), {
-    httpOnly: false, sameSite: 'lax', secure: true, path: '/', maxAge: STAFF_COOKIE_MAXAGE,
+    httpOnly: false, sameSite: 'lax', secure: SECURE_COOKIE, path: '/', maxAge: STAFF_COOKIE_MAXAGE,
   })
   return res
 }
@@ -96,12 +101,11 @@ export async function POST(req: NextRequest) {
       if (staff.device_id && deviceId !== staff.device_id) {
         return NextResponse.json({ error: 'pin_device_mismatch' }, { status: 403 })
       }
-      // Bind device on first login — check plan device limit first.
+      // Bind device on first login — «место» = сотрудник с доступом + 1 устройство
+      // (billing v2: device_limit deprecated, единый лимит — entitlements().seats).
       if (deviceId && !staff.device_id) {
-        const PLAN_LIMITS: Record<string, number> = { starter: 2, business: 5, pro: 10 }
-        const { data: rest } = await supabase.from('restaurants').select('subscription_plan, device_limit').eq('id', restaurantId).single()
-        const planLimit = PLAN_LIMITS[rest?.subscription_plan ?? 'business'] ?? 5
-        const limit: number = rest?.device_limit ?? planLimit
+        const { data: rest } = await supabase.from('restaurants').select('subscription_plan, staff_limit, extra_seats').eq('id', restaurantId).single()
+        const limit = entitlements(rest).seats
         const { count } = await supabase.from('staff').select('id', { count: 'exact', head: true }).eq('restaurant_id', restaurantId).not('device_id', 'is', null)
         if ((count ?? 0) >= limit) {
           return NextResponse.json({ error: 'device_limit_reached' }, { status: 403 })

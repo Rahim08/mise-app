@@ -3,12 +3,11 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/hooks/useTheme'
+import { PLANS, ALL_MODULES, monthlyRevenue, type PlanId } from '@/lib/plans'
 
 const ADMIN_EMAIL = 'raxim98@gmail.com'
-const PLAN_PRICE: Record<string, number> = { starter: 14, business: 24, pro: 39 }
-// Приложения, уже включённые тарифом (app/api/db/route.ts) — привилегии не должны
-// повторно предлагать то, что и так есть по тарифу.
-const PLAN_APPS: Record<string, string[]> = { starter: [], business: ['stash', 'people', 'menu'], pro: ['stash', 'people', 'menu'] }
+// Цены/состав тарифов и расчёт MRR — из lib/plans.ts (биллинг v2), не дублируем.
+const MODULE_LABELS: Record<string, string> = { stash: 'Stash', people: 'People', menu: 'QR-меню', bookings: 'Bookings', news: 'News' }
 
 interface Restaurant {
   id: string; name: string; currency: string; owner_id: string
@@ -16,6 +15,10 @@ interface Restaurant {
   subscription_ends_at: string | null; created_at: string
   device_limit: number | null; ai_enabled: boolean
   staff_limit: number | null
+  stripe_customer_id?: string | null; subscription_id?: string | null
+  addon_modules?: string[]; extra_seats?: number; addon_ai?: boolean
+  billing_interval?: string; trial_ends_at?: string | null
+  comp_apps?: string[]; discount_pct?: number
 }
 interface Stats { shifts: number; movements: number; employees: number; lastActive: string | null }
 
@@ -55,8 +58,9 @@ export default function AdminPage() {
   // Привилегии: доступ к приложениям поверх тарифа + скидка %
   const [perks, setPerks] = useState<{ apps: string[]; discount: string }>({ apps: [], discount: '0' })
   const [perksSaved, setPerksSaved] = useState(false)
-  const [deviceLimit, setDeviceLimit] = useState<string>('')
-  const [deviceLimitSaved, setDeviceLimitSaved] = useState(false)
+  // Аддоны (биллинг v2): ручная правка entitlements без Stripe
+  const [addons, setAddons] = useState<{ modules: string[]; seats: string; ai: boolean; interval: string }>({ modules: [], seats: '0', ai: false, interval: 'month' })
+  const [addonsSaved, setAddonsSaved] = useState(false)
   const [staffLimit, setStaffLimit] = useState<string>('')
   const [staffLimitSaved, setStaffLimitSaved] = useState(false)
   const [aiEnabled, setAiEnabled] = useState(false)
@@ -91,7 +95,7 @@ export default function AdminPage() {
     setSelected(r)
     setSubForm({ status: r.subscription_status || 'active', plan: r.subscription_plan || 'business', ends_at: r.subscription_ends_at ? r.subscription_ends_at.slice(0, 10) : '' })
     setPerks({ apps: (r as any).comp_apps || [], discount: String((r as any).discount_pct || 0) })
-    setDeviceLimit(r.device_limit != null ? String(r.device_limit) : '')
+    setAddons({ modules: r.addon_modules || [], seats: String(r.extra_seats || 0), ai: !!r.addon_ai, interval: r.billing_interval || 'month' })
     setStaffLimit(r.staff_limit != null ? String(r.staff_limit) : '')
     setAiEnabled(!!r.ai_enabled)
     setEditSub(false); await loadNotes(r.id)
@@ -103,12 +107,21 @@ export default function AdminPage() {
     setSelected({ ...(selected as any), comp_apps: perks.apps, discount_pct: parseInt(perks.discount) || 0 })
     setPerksSaved(true); setTimeout(() => setPerksSaved(false), 2000); await loadAll()
   }
-  const saveDeviceLimit = async () => {
+  const saveAddons = async () => {
     if (!selected) return
-    const dl = deviceLimit !== '' ? parseInt(deviceLimit) || null : null
-    await adminApi({ action: 'setDeviceLimit', restaurantId: selected.id, deviceLimit: deviceLimit !== '' ? deviceLimit : null })
-    setSelected({ ...selected, device_limit: dl })
-    setDeviceLimitSaved(true); setTimeout(() => setDeviceLimitSaved(false), 2000)
+    const seats = parseInt(addons.seats) || 0
+    await adminApi({ action: 'setAddons', restaurantId: selected.id, addonModules: addons.modules, extraSeats: seats, addonAI: addons.ai, billingInterval: addons.interval })
+    setSelected({ ...selected, addon_modules: addons.modules, extra_seats: seats, addon_ai: addons.ai, billing_interval: addons.interval })
+    setAddonsSaved(true); setTimeout(() => setAddonsSaved(false), 2000)
+    await loadAll()
+  }
+  const extendTrial = async (days: number) => {
+    if (!selected) return
+    const base = selected.trial_ends_at && new Date(selected.trial_ends_at) > new Date() ? new Date(selected.trial_ends_at) : new Date()
+    base.setDate(base.getDate() + days)
+    const iso = base.toISOString()
+    await adminApi({ action: 'extendTrial', restaurantId: selected.id, trialEndsAt: iso })
+    setSelected({ ...selected, trial_ends_at: iso, subscription_ends_at: iso, subscription_status: 'trialing' })
     await loadAll()
   }
   const saveStaffLimit = async () => {
@@ -170,7 +183,8 @@ export default function AdminPage() {
 
   const totalActive = restaurants.filter(r => r.subscription_status === 'active').length
   const totalTrial = restaurants.filter(r => r.subscription_status === 'trialing').length
-  const mrr = restaurants.filter(r => r.subscription_status === 'active').reduce((s, r) => s + (PLAN_PRICE[r.subscription_plan] || 0), 0)
+  // MRR с учётом аддонов, годового интервала и скидок (lib/plans.ts)
+  const mrr = Math.round(restaurants.reduce((s, r) => s + monthlyRevenue(r), 0))
 
   const card: React.CSSProperties = { background: t.surface, borderRadius: 16, boxShadow: t.sh }
   const chip = (active: boolean): React.CSSProperties => ({ padding: '9px 15px', borderRadius: 12, border: 'none', fontFamily: 'inherit', fontSize: '.82rem', fontWeight: 600, cursor: 'pointer', background: active ? t.text : t.surface, color: active ? t.bg : t.text3, boxShadow: active ? 'none' : t.sh2 })
@@ -280,7 +294,7 @@ export default function AdminPage() {
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                     <span style={{ background: `${statusColor(selected.subscription_status)}1a`, color: statusColor(selected.subscription_status), fontSize: '.72rem', fontWeight: 700, padding: '3px 10px', borderRadius: 980 }}>{statusLabel(selected.subscription_status)}</span>
-                    <span style={{ fontSize: '.82rem', color: t.text3 }}>{selected.subscription_plan || 'business'} · €{PLAN_PRICE[selected.subscription_plan] || 0}/мес</span>
+                    <span style={{ fontSize: '.82rem', color: t.text3 }}>{selected.subscription_plan || 'business'} · €{monthlyRevenue({ ...selected, subscription_status: 'active' })}/мес{selected.billing_interval === 'year' ? ' (год)' : ''}</span>
                   </div>
                   {selected.subscription_ends_at && (
                     <div style={{ fontSize: '.82rem', color: t.text3, marginBottom: 8 }}>
@@ -288,10 +302,19 @@ export default function AdminPage() {
                       {daysLeft(selected.subscription_ends_at) !== null && <span style={{ color: (daysLeft(selected.subscription_ends_at) || 0) > 7 ? t.green : t.red, marginLeft: 6 }}>({daysLeft(selected.subscription_ends_at)}д)</span>}
                     </div>
                   )}
+                  {/* Stripe-связка: реально ли клиент платит или сидит на ручном статусе */}
+                  <div style={{ fontSize: '.76rem', color: selected.subscription_id ? t.green : t.text4, marginBottom: 8 }}>
+                    {selected.subscription_id
+                      ? <>Stripe: подписка активна{selected.stripe_customer_id && <> · <a href={`https://dashboard.stripe.com/customers/${selected.stripe_customer_id}`} target="_blank" rel="noreferrer" style={{ color: t.blue }}>открыть клиента</a></>}</>
+                      : 'Stripe: подписки нет (триал или ручной статус)'}
+                  </div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     <button onClick={() => setEditSub(true)} style={btn(t, 'ghost')}>Изменить</button>
                     <button onClick={() => extendSub(30)} style={btn(t, 'gray')}>+30 дней</button>
                     <button onClick={() => extendSub(7)} style={btn(t, 'gray')}>+7 дней</button>
+                    {selected.subscription_status === 'trialing' && !selected.subscription_id && (
+                      <button onClick={() => extendTrial(7)} style={btn(t, 'orange')}>Триал +7</button>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -317,8 +340,8 @@ export default function AdminPage() {
               <div style={{ borderTop: `1px solid ${t.sep2}`, paddingTop: 16, marginBottom: 16 }}>
                 <div style={{ fontSize: '.72rem', color: t.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 10 }}>Привилегии</div>
                 {(() => {
-                  const includedByPlan = PLAN_APPS[selected.subscription_plan] || []
-                  const extraApps = [['stash', 'Stash'], ['people', 'People'], ['menu', 'QR-меню']].filter(([id]) => !includedByPlan.includes(id))
+                  const includedByPlan = (PLANS[selected.subscription_plan as PlanId] || PLANS.starter).modules as string[]
+                  const extraApps = ALL_MODULES.filter(id => !includedByPlan.includes(id)).map(id => [id, MODULE_LABELS[id] || id])
                   if (extraApps.length === 0) {
                     return (
                       <div style={{ fontSize: '.78rem', color: t.text3, marginBottom: 12 }}>
@@ -358,12 +381,12 @@ export default function AdminPage() {
               <div style={{ borderTop: `1px solid ${t.sep2}`, paddingTop: 16, marginBottom: 16 }}>
                 <div style={{ fontSize: '.72rem', color: t.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>Лимит сотрудников с доступом</div>
                 <div style={{ fontSize: '.72rem', color: t.text4, marginBottom: 10 }}>
-                  Сколько сотрудников могут иметь доступ к приложениям. По тарифу: starter=2 · business=5 · pro=10. Именно этот лимит блокирует выдачу приложения новому сотруднику.
+                  Сколько сотрудников могут иметь доступ к приложениям («места»). По тарифу: starter=3 · business=7 · pro=15, плюс купленные доп. места. Оверрайд заменяет сумму целиком.
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <input type="number" min={1} value={staffLimit}
                     onChange={e => setStaffLimit(e.target.value)}
-                    placeholder={`по тарифу (${{ starter: 2, business: 5, pro: 10 }[selected.subscription_plan] ?? 5})`}
+                    placeholder={`по тарифу (${(PLANS[selected.subscription_plan as PlanId] || PLANS.starter).seats + (selected.extra_seats || 0)})`}
                     style={{ width: 100, padding: '7px 10px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: '.85rem', color: t.text, background: t.fill2, fontFamily: 'inherit', outline: 'none', textAlign: 'right' }} />
                   <span style={{ fontSize: '.78rem', color: t.text3 }}>сотрудников</span>
                   {staffLimit !== '' && (
@@ -373,25 +396,41 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Device limit override — ограничивает число ПРИВЯЗАННЫХ УСТРОЙСТВ
-                  (device_id), проверяется при первом входе по PIN. Не путать с лимитом
-                  сотрудников с доступом выше. */}
+              {/* Аддоны (биллинг v2) — ручная правка entitlements. Stripe не трогается:
+                  платящим клиентам состав меняет их дашборд (/api/stripe/update). */}
               <div style={{ borderTop: `1px solid ${t.sep2}`, paddingTop: 16, marginBottom: 16 }}>
-                <div style={{ fontSize: '.72rem', color: t.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>Лимит устройств</div>
-                <div style={{ fontSize: '.72rem', color: t.text4, marginBottom: 10 }}>
-                  Сколько разных телефонов/планшетов могут быть привязаны к PIN-входу. По тарифу: starter=2 · business=5 · pro=10.
+                <div style={{ fontSize: '.72rem', color: t.text3, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8 }}>Аддоны</div>
+                {(() => {
+                  const included = (PLANS[selected.subscription_plan as PlanId] || PLANS.starter).modules as string[]
+                  const buyable = ALL_MODULES.filter(id => !included.includes(id))
+                  return buyable.length > 0 && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                      {buyable.map(id => {
+                        const on = addons.modules.includes(id)
+                        return (
+                          <button key={id} onClick={() => setAddons(a => ({ ...a, modules: on ? a.modules.filter(x => x !== id) : [...a.modules, id] }))}
+                            style={{ padding: '6px 14px', borderRadius: 980, border: `1px solid ${on ? t.blue : t.sep2}`, background: on ? `${t.blue}1a` : 'transparent', color: on ? t.blue : t.text3, fontFamily: 'inherit', fontSize: '.78rem', fontWeight: 600, cursor: 'pointer' }}>
+                            {on ? '✓ ' : ''}{MODULE_LABELS[id] || id}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '.78rem', color: t.text3 }}>Доп. мест</span>
+                  <input type="number" min={0} value={addons.seats} onChange={e => setAddons(a => ({ ...a, seats: e.target.value }))}
+                    style={{ width: 70, padding: '7px 10px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: '.85rem', color: t.text, background: t.fill2, fontFamily: 'inherit', outline: 'none', textAlign: 'right' }} />
+                  <button onClick={() => setAddons(a => ({ ...a, ai: !a.ai }))}
+                    style={{ padding: '6px 14px', borderRadius: 980, border: `1px solid ${addons.ai ? t.green : t.sep2}`, background: addons.ai ? `${t.green}1a` : 'transparent', color: addons.ai ? t.green : t.text3, fontFamily: 'inherit', fontSize: '.78rem', fontWeight: 600, cursor: 'pointer' }}>
+                    {addons.ai ? '✓ ' : ''}AI-аддон
+                  </button>
+                  <select value={addons.interval} onChange={e => setAddons(a => ({ ...a, interval: e.target.value }))} style={{ ...sel(t), width: 110, padding: '7px 10px' }}>
+                    <option value="month">месяц</option>
+                    <option value="year">год</option>
+                  </select>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <input type="number" min={1} value={deviceLimit}
-                    onChange={e => setDeviceLimit(e.target.value)}
-                    placeholder={`по тарифу (${{ starter: 2, business: 5, pro: 10 }[selected.subscription_plan] ?? 5})`}
-                    style={{ width: 100, padding: '7px 10px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: '.85rem', color: t.text, background: t.fill2, fontFamily: 'inherit', outline: 'none', textAlign: 'right' }} />
-                  <span style={{ fontSize: '.78rem', color: t.text3 }}>устройств</span>
-                  {deviceLimit !== '' && (
-                    <button onClick={() => { setDeviceLimit(''); saveDeviceLimit() }} style={{ ...btn(t, 'gray'), padding: '7px 10px', fontSize: '.72rem' }}>Сбросить</button>
-                  )}
-                  <button onClick={saveDeviceLimit} style={btn(t, 'primary')}>{deviceLimitSaved ? '✓' : 'Сохранить'}</button>
-                </div>
+                <button onClick={saveAddons} style={btn(t, 'primary')}>{addonsSaved ? '✓ Сохранено' : 'Сохранить аддоны'}</button>
               </div>
 
               {/* AI assistant toggle */}

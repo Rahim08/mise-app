@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { notify as pushNotify } from '@/lib/notifyClient'
+import { renderNotify, renderCategory } from '@/lib/notifyStrings'
 import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
@@ -129,7 +130,7 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
     }
     await Promise.all(targets.map(tid => db.from('staff_tasks').insert({ ...base, assigned_to: tid })))
     const notifyIds = targets.filter(tid => tid !== myId)
-    if (notifyIds.length) pushNotify({ type: 'task', title: 'Новая задача', body: form.title.trim(), audience: { staff_ids: notifyIds } })
+    if (notifyIds.length) pushNotify({ type: 'task', title: 'New task', body: form.title.trim(), titleKey: 'notify.newTaskTitle', audience: { staff_ids: notifyIds } })
     setSaving(false); setShowForm(false); setForm({ title: '', description: '', assigned_to: '', priority: 'medium', due_date: '' })
     toast(targets.length > 1 ? tr('pe.taskCreatedFor', { n: targets.length }) : tr('pe.taskCreated')); await load()
   }
@@ -348,8 +349,8 @@ function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boo
   const sched = (id: string) => schedules.find(s => s.id === id)
   const myUpcoming = schedules.filter(s => s.staff_id === myId && s.published && s.date >= fmtDate(new Date())).sort((a, b) => a.date.localeCompare(b.date))
 
-  const notify = (staffId: string, type: string, title: string, body: string) =>
-    pushNotify({ type, title, body, audience: { staff_ids: [staffId] } })
+  const notify = (staffId: string, type: string, title: string, body: string, keys?: { titleKey?: string; bodyKey?: string; bodyParams?: Record<string, string | number> }) =>
+    pushNotify({ type, title, body, titleKey: keys?.titleKey, bodyKey: keys?.bodyKey, bodyParams: keys?.bodyParams, audience: { staff_ids: [staffId] } })
   const now = () => new Date().toISOString()
 
   const create = async () => {
@@ -360,7 +361,8 @@ function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boo
       schedule_id: form.schedule_id, requester_id: myId, target_id: form.target_id,
       status: 'pending_peer', note: form.note || null,
     })
-    await notify(form.target_id, 'swap_request', 'Запрос на обмен', `${me.name || 'Коллега'} предлагает обмен сменой ${sc ? dayLabel(sc.date) : ''}`)
+    await notify(form.target_id, 'swap_request', tr('pe.swapRequestTitle'), tr('pe.swapRequestBody', { name: me.name || tr('pe.colleague'), date: sc ? dayLabel(sc.date) : '' }),
+      { titleKey: 'notify.swapRequestTitle', bodyKey: 'notify.swapRequestBody', bodyParams: { name: me.name || tr('pe.colleague'), date: sc ? dayLabel(sc.date) : '' } })
     setSaving(false); setShowForm(false); setForm({ schedule_id: '', target_id: '', note: '' })
     toast(tr('pe.reportSent')); await load()
   }
@@ -371,24 +373,27 @@ function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boo
   }
   const peerAccept = async (r: any) => {
     await db.from('shift_swap_requests').update({ status: 'peer_accepted', peer_responded_at: now() }).eq('id', r.id)
-    pushNotify({ type: 'swap_request', title: 'Обмен на согласование', body: 'Коллега принял обмен — нужно одобрение менеджера', audience: { managers: true } })
+    pushNotify({ type: 'swap_request', title: tr('pe.swapPendingTitle'), body: tr('pe.swapPendingBody'), titleKey: 'notify.swapPendingTitle', bodyKey: 'notify.swapPendingBody', audience: { managers: true } })
     await load()
   }
   const peerDecline = async (r: any) => {
     await db.from('shift_swap_requests').update({ status: 'peer_declined', peer_responded_at: now() }).eq('id', r.id)
-    await notify(r.requester_id, 'swap_result', 'Обмен отклонён', 'Коллега отклонил запрос на обмен')
+    await notify(r.requester_id, 'swap_result', tr('pe.swapDeclinedTitle'), tr('pe.swapDeclinedByPeerBody'),
+      { titleKey: 'notify.swapDeclinedTitle', bodyKey: 'notify.swapDeclinedByPeerBody' })
     await load()
   }
   const managerReject = async (r: any) => {
     await db.from('shift_swap_requests').update({ status: 'rejected', manager_id: me.is_owner ? null : myId, manager_responded_at: now() }).eq('id', r.id)
-    await notify(r.requester_id, 'swap_result', 'Обмен отклонён', 'Менеджер отклонил обмен')
+    await notify(r.requester_id, 'swap_result', tr('pe.swapDeclinedTitle'), tr('pe.swapDeclinedByManagerBody'),
+      { titleKey: 'notify.swapDeclinedTitle', bodyKey: 'notify.swapDeclinedByManagerBody' })
     await load()
   }
   const approve = async (r: any) => {
     // Reassign the shift to the target, then mark approved.
     await db.from('staff_schedules').update({ staff_id: r.target_id }).eq('id', r.schedule_id)
     await db.from('shift_swap_requests').update({ status: 'approved', manager_id: me.is_owner ? null : myId, manager_responded_at: now() }).eq('id', r.id)
-    await notify(r.requester_id, 'swap_result', 'Обмен одобрен', 'Смена переназначена коллеге')
+    await notify(r.requester_id, 'swap_result', tr('pe.swapApprovedTitle'), tr('pe.swapApprovedBody'),
+      { titleKey: 'notify.swapApprovedTitle', bodyKey: 'notify.swapApprovedBody' })
     toast(tr('pe.swapApprovedToast')); await load()
   }
 
@@ -573,7 +578,14 @@ function AttendanceTab({ me, isManager, accent, t, toast, onOpenDiscipline }: { 
     )
     // Уведомляем владельца/менеджеров о приходе сотрудника на смену.
     const lateTxt = status === 'late' ? ` (+${late} мин)` : ''
-    pushNotify({ type: 'attendance', title: 'Сотрудник на смене', body: `${me.name || 'Сотрудник'} пришёл(а)${lateTxt}`, audience: { managers: true } })
+    const attName = me.name || 'Сотрудник'
+    pushNotify({
+      type: 'attendance', title: 'Staff on shift', body: `${attName} checked in${lateTxt}`,
+      titleKey: 'notify.attendanceTitle',
+      bodyKey: status === 'late' ? 'notify.attendanceBodyLate' : 'notify.attendanceBody',
+      bodyParams: status === 'late' ? { name: attName, min: late ?? 0 } : { name: attName },
+      audience: { managers: true },
+    })
     toast(status === 'late' ? tr('pe.checkedLate', { n: late! }) : tr('pe.checkedIn')); await load()
   }
 
@@ -877,9 +889,19 @@ function HistoryList({ records, withName, name, t, accent }: { records: any[]; w
 // ── NOTIFICATIONS TAB ────────────────────────────────────────────────────────────
 
 function NotificationsTab({ myId, accent, t }: { myId: string; accent: string; t: any }) {
-  const { t: tr } = useI18n()
+  const { t: tr, locale } = useI18n()
   const [items, setItems] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  // Запись хранит title/body как EN-фолбэк + *_key/*_params — перерендериваем на языке
+  // ЗРИТЕЛЯ (а не отправителя, каким текст был бы без ключей). См. AUDIT-2026-07-12.md #3.
+  const renderTitle = (n: any) => {
+    if (!n.title_key) return n.title
+    const params = n.title_key === 'notify.purchaseTitle' && n.title_params?.category
+      ? { ...n.title_params, category: renderCategory(locale, String(n.title_params.category)) }
+      : n.title_params
+    return renderNotify(locale, n.title_key, params || undefined)
+  }
+  const renderBody = (n: any) => n.body_key ? renderNotify(locale, n.body_key, n.body_params || undefined) : n.body
 
   useEffect(() => {
     db.from('notifications').select('*').eq('staff_id', myId).order('created_at', { ascending: false }).limit(50)
@@ -906,8 +928,8 @@ function NotificationsTab({ myId, accent, t }: { myId: string; accent: string; t
         <div key={n.id} style={{ background: t.surface, borderRadius: 14, padding: '14px 16px', boxShadow: t.sh, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
           <div style={{ width: 8, height: 8, borderRadius: '50%', background: n.read_at ? 'transparent' : accent, marginTop: 6, flexShrink: 0 }} />
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{n.title}</div>
-            {n.body && <div style={{ fontSize: 13, color: t.text3, marginTop: 2 }}>{n.body}</div>}
+            <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{renderTitle(n)}</div>
+            {n.body && <div style={{ fontSize: 13, color: t.text3, marginTop: 2 }}>{renderBody(n)}</div>}
             <div style={{ fontSize: 11, color: t.text4, marginTop: 4 }}>{new Date(n.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
           </div>
         </div>
@@ -1480,10 +1502,16 @@ function PurchaseTab({ me, isManager, accent, t, toast }: { me: any; isManager: 
     if (error) { toast(error.message); return }
     // Push владельцу/менеджерам (с учётом их персональных настроек и режима дайджеста).
     const who = me.name || (me.is_owner ? tr('role.owner') : '')
+    const whoPrefix = who ? who + ': ' : ''
     const summary = valid.length === 1
-      ? `${who ? who + ': ' : ''}${valid[0].name}`
-      : `${who ? who + ' — ' : ''}${valid.length} ${tr('pe.pTab').toLowerCase()}`
-    pushNotify({ type: 'purchase', title: `${catLabel(cat)} · ${tr('pe.pTab')}`, body: summary, audience: { managers: true }, data: { category: cat } })
+      ? `${whoPrefix}${valid[0].name}`
+      : `${whoPrefix}${valid.length} ${tr('pe.pTab').toLowerCase()}`
+    pushNotify({
+      type: 'purchase', title: `${catLabel(cat)} · ${tr('pe.pTab')}`, body: summary,
+      titleKey: 'notify.purchaseTitle', titleParams: { category: cat },
+      ...(valid.length > 1 ? { bodyKey: 'notify.purchasePositionsBody', bodyParams: { who: whoPrefix, n: valid.length } } : {}),
+      audience: { managers: true }, data: { category: cat },
+    })
     setShowForm(false); setRows([{ name: '', qty: '', unit: '' }]); setCat('kitchen')
     load()
   }
@@ -1931,12 +1959,16 @@ function ShiftsHub({ me, isManager, restaurantId, accent, t, toast }: { me: any;
 
 // ── MAIN ─────────────────────────────────────────────────────────────────────────
 
-function PeopleApp({ restaurantId }: { restaurantId: string }) {
+// embedded: рендер внутри дашборд-shell (/dashboard/people) — без фикс-хрома,
+// тема дашборда, вошедший всегда owner (staff-выбора mise_me_ у него нет).
+export function PeopleApp({ restaurantId, embedded = false }: { restaurantId: string; embedded?: boolean }) {
   const { t: tr } = useI18n()
   const router = useRouter()
-  const t = useTheme('mise_people_dark')
+  const t = useTheme(embedded ? 'mise_dash_dark' : 'mise_people_dark')
+  // Desktop-режим внутри shell: шире мобильных 640px. Staff-приложение не трогаем.
+  const contentMaxWidth = embedded ? 1100 : 640
   const accent = t.dark ? '#5e5ce6' : '#5856d6'
-  const me = getMe(restaurantId)
+  const me = embedded ? { is_owner: true } as ReturnType<typeof getMe> : getMe(restaurantId)
   const isManager = !!me.is_owner || me.role === 'manager'
   const [tab, setTab] = useState<string>('shifts')
   const [toast, setToast] = useState('')
@@ -1962,7 +1994,7 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
   }, [])
 
   if (!t.mounted) return (
-    <div style={{ minHeight: '100vh', background: t.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div style={{ minHeight: embedded ? 240 : '100vh', background: embedded ? 'transparent' : t.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ width: 24, height: 24, border: `2.5px solid ${accent}33`, borderTopColor: accent, borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
@@ -1979,15 +2011,19 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
   ]
 
   return (
-    <div style={{ height: '100vh', overflow: 'hidden', background: t.bg, fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }}>
+    <div style={embedded
+      ? { display: 'flex', flexDirection: 'column', fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }
+      : { height: '100vh', overflow: 'hidden', background: t.bg, fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}} @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}} *{box-sizing:border-box} input[type=time]{ -webkit-appearance:none }`}</style>
 
-      {/* HEADER */}
-      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 300, height: 56, background: t.hbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderBottom: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {/* HEADER: standalone — фикс-шапка; embedded — строка контролов в потоке */}
+      <div style={embedded
+        ? { order: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 12, maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center', boxSizing: 'border-box' as const }
+        : { position: 'fixed', top: 0, left: 0, right: 0, zIndex: 300, height: 56, background: t.hbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderBottom: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
+        {!embedded && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <AppSwitchBrand name="People" accent={accent} color={t.text} muted={t.text3} size={18} />
           <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4, color: accent, background: `${accent}1a`, padding: '2px 6px', borderRadius: 6, textTransform: 'uppercase' }}>Beta</span>
-        </div>
+        </div>}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {me.id && (
             <button onClick={() => setShowNotif(true)} style={{ position: 'relative', width: 36, height: 36, borderRadius: '50%', background: t.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text }}>
@@ -1998,20 +2034,22 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
           <button onClick={() => setShowNotifSettings(true)} style={{ width: 36, height: 36, borderRadius: '50%', background: t.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text }} aria-label={tr('pe.nsTitle')}>
             <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" /></svg>
           </button>
-          <button onClick={t.toggle} style={{ width: 36, height: 36, borderRadius: '50%', background: t.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text }}>
+          {!embedded && <button onClick={t.toggle} style={{ width: 36, height: 36, borderRadius: '50%', background: t.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text }}>
             {t.dark
               ? <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" /></svg>
               : <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z" /></svg>}
-          </button>
-          <button onClick={() => supabase.auth.signOut().then(() => { localStorage.removeItem('mise_restaurant_id'); router.replace('/auth/login') })} style={{ width: 36, height: 36, borderRadius: '50%', background: `${t.red}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          </button>}
+          {!embedded && <button onClick={() => supabase.auth.signOut().then(() => { localStorage.removeItem('mise_restaurant_id'); router.replace('/auth/login') })} style={{ width: 36, height: 36, borderRadius: '50%', background: `${t.red}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <svg width="16" height="16" fill="none" stroke={t.red} strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" /></svg>
-          </button>
+          </button>}
         </div>
       </div>
 
       {/* CONTENT */}
-      <div style={{ position: 'fixed', top: 56, left: 0, right: 0, bottom: 82, overflowY: 'auto', background: t.bg }}>
-        <div style={{ padding: '16px 16px 28px', maxWidth: 640, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
+      <div style={embedded
+        ? { order: 2 }
+        : { position: 'fixed', top: 56, left: 0, right: 0, bottom: 82, overflowY: 'auto', background: t.bg }}>
+        <div style={{ padding: embedded ? '0 0 28px' : '16px 16px 28px', maxWidth: contentMaxWidth, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
           {tab === 'shifts' && <ShiftsHub me={me} isManager={isManager} restaurantId={restaurantId} accent={accent} t={t} toast={showToast} />}
           {tab === 'tasks' && <TasksTab isManager={isManager} myId={me.id || ''} accent={accent} t={t} toast={showToast} />}
           {tab === 'ops' && <OpsTab me={me} isManager={isManager} accent={accent} t={t} toast={showToast} />}
@@ -2040,16 +2078,25 @@ function PeopleApp({ restaurantId }: { restaurantId: string }) {
         </Sheet>
       )}
 
-      {/* BOTTOM NAV */}
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 300, height: 82, background: t.nbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderTop: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'flex-start', paddingTop: 10, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+      {/* NAV: standalone — фикс-бар снизу; embedded — сегмент-строка над контентом */}
+      <div style={embedded
+        ? { order: 1, display: 'flex', gap: 2, background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center', boxSizing: 'border-box' as const }
+        : { position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 300, height: 82, background: t.nbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderTop: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'flex-start', paddingTop: 10, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
         {TABS.map(tb => (
-          <button key={tb.id} onClick={() => setTab(tb.id)} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer', color: tab === tb.id ? accent : t.text3, border: 'none', background: 'none', fontFamily: 'inherit', padding: 0, fontSize: 10, fontWeight: tab === tb.id ? 700 : 500 }}>
-            <span style={{ position: 'relative', transform: tab === tb.id ? 'scale(1.08)' : 'scale(1)', transition: 'transform .18s', display: 'flex' }}>
-              {tb.icon(tab === tb.id)}
-              {tb.id === 'ops' && newOrders > 0 && <span style={{ position: 'absolute', top: -3, right: -7, minWidth: 15, height: 15, borderRadius: 8, background: t.red, color: '#fff', fontSize: 9, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px' }}>{newOrders > 9 ? '9+' : newOrders}</span>}
-            </span>
-            {tb.label}
-          </button>
+          embedded ? (
+            <button key={tb.id} onClick={() => setTab(tb.id)} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: tab === tb.id ? 700 : 500, cursor: 'pointer', background: tab === tb.id ? t.surface : 'transparent', color: tab === tb.id ? accent : t.text3, boxShadow: tab === tb.id ? t.sh2 : 'none', transition: 'all .18s' }}>
+              {tb.label}
+              {tb.id === 'ops' && newOrders > 0 && <span style={{ minWidth: 15, height: 15, borderRadius: 8, background: t.red, color: '#fff', fontSize: 9, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px' }}>{newOrders > 9 ? '9+' : newOrders}</span>}
+            </button>
+          ) : (
+            <button key={tb.id} onClick={() => setTab(tb.id)} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer', color: tab === tb.id ? accent : t.text3, border: 'none', background: 'none', fontFamily: 'inherit', padding: 0, fontSize: 10, fontWeight: tab === tb.id ? 700 : 500 }}>
+              <span style={{ position: 'relative', transform: tab === tb.id ? 'scale(1.08)' : 'scale(1)', transition: 'transform .18s', display: 'flex' }}>
+                {tb.icon(tab === tb.id)}
+                {tb.id === 'ops' && newOrders > 0 && <span style={{ position: 'absolute', top: -3, right: -7, minWidth: 15, height: 15, borderRadius: 8, background: t.red, color: '#fff', fontSize: 9, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px' }}>{newOrders > 9 ? '9+' : newOrders}</span>}
+              </span>
+              {tb.label}
+            </button>
+          )
         ))}
       </div>
 

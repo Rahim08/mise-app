@@ -6,10 +6,20 @@ import { db } from '@/lib/db'
 import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
 import { AppLoading } from '@/components/AppLoading'
+import { Spinner } from '@/components/ui'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n, tCurrent } from '@/lib/i18n'
 import { fmtDate, fv, dd } from '@/lib/format'
 const COLORS = ['#34c759', '#ff3b30', '#007aff', '#ff9500', '#af52de', '#00c7be', '#ff6b35', '#5856d6']
+
+// «Вход» дня N = «Касса» дня N-1 из этого же (уже отсортированного по дате) списка,
+// а не хранимое поле opening_balance — оно пишется один раз при открытии смены и
+// может «застыть» на 0, если предыдущий день был закрыт позже (баг SO 2026-07-07).
+// prevClosing — закрытие последней смены ДО списка, чтобы и первая строка не осталась
+// на сыром (потенциально «застывшем») opening_balance.
+function withDerivedOpening<T extends { opening_balance?: number; closing_balance?: number }>(rows: T[], prevClosing?: number): T[] {
+  return rows.map((r, i) => (i === 0 ? (prevClosing != null ? { ...r, opening_balance: prevClosing } : r) : { ...r, opening_balance: rows[i - 1].closing_balance }))
+}
 
 // ── CSV EXPORT (Excel-compatible: ';' delimiter + UTF-8 BOM for Cyrillic) ──────
 function downloadCSV(filename: string, rows: (string | number)[][]) {
@@ -397,14 +407,20 @@ function ProgressRing({ value, max, color, size = 56, label }: { value: number; 
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
 
-export default function AnalyticsApp() {
-  const t = useTheme('mise_ana_dark')
+export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
+  // rid задан → embedded-режим: рендер внутри дашборд-shell (/dashboard/analytics),
+  // без AuthGate/PIN, без фикс-хрома (шапка и таб-бар в обычном потоке), тема дашборда.
+  const embedded = !!rid
+  // Desktop-режим внутри shell: контент шире мобильных 640px. Staff-приложение
+  // (standalone /analytics на телефоне) не трогаем — там maxWidth всегда 640.
+  const contentMaxWidth = embedded ? 1100 : 640
+  const t = useTheme(embedded ? 'mise_dash_dark' : 'mise_ana_dark')
   const { t: tr, locale } = useI18n()
   const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1)
   const mFull = (d: Date) => cap(d.toLocaleDateString(locale, { month: 'long' }))
   const mShort = (d: Date) => mFull(d).slice(0, 3)
   const dowShort = (d: Date) => cap(d.toLocaleDateString(locale, { weekday: 'short' }))
-  const [restaurantId, setRestaurantId] = useState('')
+  const [restaurantId, setRestaurantId] = useState(rid)
   const [currency, setCurrency] = useState('€')
   const [isPro, setIsPro] = useState(false)
   const [tab, setTab] = useState<'period' | 'kassa' | 'forecast' | 'salary' | 'hookah'>('period')
@@ -524,6 +540,12 @@ export default function AnalyticsApp() {
   const shifts = useMemo(() => adjustCard(shiftsRaw), [shiftsRaw, adjustCard])
   const prevShifts = useMemo(() => adjustCard(prevShiftsRaw), [prevShiftsRaw, adjustCard])
   const allShifts = useMemo(() => adjustCard(allShiftsRaw), [allShiftsRaw, adjustCard])
+  // Единый источник для всех «Вход»-зависимых видов (неделя/касса/экспорт) — дериватив
+  // считается один раз по полному месяцу, включая первую строку (см. withDerivedOpening).
+  const shiftsDisplay = useMemo(
+    () => withDerivedOpening(shifts, prevShifts[prevShifts.length - 1]?.closing_balance),
+    [shifts, prevShifts]
+  )
 
   const totalIncome = shifts.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
   const totalExpense = shifts.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
@@ -571,7 +593,7 @@ export default function AnalyticsApp() {
 
   const exportShifts = () => {
     const rows: (string | number)[][] = [[tr('an.csvDate'), tr('an.csvEntry'), tr('an.csvIncome'), tr('an.csvExpense'), tr('an.csvDeposit'), tr('an.csvCash')]]
-    shifts.forEach((s: any) => rows.push([
+    shiftsDisplay.forEach((s: any) => rows.push([
       s.date,
       (s.opening_balance || 0).toFixed(2),
       (s.income || 0).toFixed(2),
@@ -587,7 +609,7 @@ export default function AnalyticsApp() {
     const doc = await makePdfDoc()
     const headers = [tr('an.csvDate'), tr('an.csvEntry'), tr('an.csvIncome'), tr('an.csvExpense'), tr('an.csvDeposit'), tr('an.csvCash')]
     const colX = [40, 130, 220, 310, 400, 485]
-    const rows: string[][] = shifts.map((s: any) => [
+    const rows: string[][] = shiftsDisplay.map((s: any) => [
       s.date,
       pdfCur + fv(s.opening_balance || 0),
       pdfCur + fv(s.income || 0),
@@ -598,6 +620,57 @@ export default function AnalyticsApp() {
     rows.push([tr('an.csvTotal'), '', pdfCur + fv(totalIncome), pdfCur + fv(totalExpense), pdfCur + fv(totalInkass), pdfCur + fv(lastShift?.closing_balance || 0)])
     pdfTable(doc, `Смены — ${monthTitle}`, headers, rows, colX)
     doc.save(`smeny_${monthTag}.pdf`)
+  }
+
+  // Экспорт одной смены (сессии) — вкладка «Период» → День.
+  const sessionData = () => {
+    const dayStr = fmtDate(currentDate)
+    const dayShift = shifts.find((s: any) => s.date === dayStr)
+    const dayExps = (dayShift ? expenses.filter((e: any) => e.shift_id === dayShift.id && !e.employee_id) : [])
+      .sort((a: any, b: any) => ((pinnedCats.has(b.category_name) ? 1 : 0) - (pinnedCats.has(a.category_name) ? 1 : 0)) || b.amount - a.amount)
+    return { dayStr, dayShift, dayExps }
+  }
+
+  const exportSession = () => {
+    const { dayStr, dayShift, dayExps } = sessionData()
+    if (!dayShift) return
+    const rows: (string | number)[][] = [[tr('an.csvDate'), tr('an.csvEntry'), tr('an.csvIncome'), tr('an.csvExpense'), tr('an.csvDeposit'), tr('an.csvCash')]]
+    rows.push([
+      dayStr,
+      (dayShift.opening_balance || 0).toFixed(2),
+      (dayShift.income || 0).toFixed(2),
+      (dayShift.total_expense || 0).toFixed(2),
+      (dayShift.inkassation || 0).toFixed(2),
+      (dayShift.closing_balance || 0).toFixed(2),
+    ])
+    if (dayExps.length) {
+      rows.push([])
+      rows.push([tr('an.csvCategory'), tr('an.csvAmount')])
+      dayExps.forEach((e: any) => rows.push([e.category_name, (e.amount || 0).toFixed(2)]))
+    }
+    downloadCSV(`smena_${dayStr}.csv`, rows)
+  }
+
+  const exportSessionPDF = async () => {
+    const { dayStr, dayShift, dayExps } = sessionData()
+    if (!dayShift) return
+    const doc = await makePdfDoc()
+    const headers = [tr('an.csvDate'), tr('an.csvEntry'), tr('an.csvIncome'), tr('an.csvExpense'), tr('an.csvDeposit'), tr('an.csvCash')]
+    const colX = [40, 130, 220, 310, 400, 485]
+    const rows: string[][] = [[
+      dayStr,
+      pdfCur + fv(dayShift.opening_balance || 0),
+      pdfCur + fv(dayShift.income || 0),
+      pdfCur + fv(dayShift.total_expense || 0),
+      pdfCur + fv(dayShift.inkassation || 0),
+      pdfCur + fv(dayShift.closing_balance || 0),
+    ]]
+    pdfTable(doc, `Смена — ${dd(dayStr)}`, headers, rows, colX)
+    if (dayExps.length) {
+      doc.addPage()
+      pdfTable(doc, `${tr('an.dayExpenses')} — ${dd(dayStr)}`, [tr('an.csvCategory'), tr('an.csvAmount')], dayExps.map((e: any) => [e.category_name, pdfCur + fv(e.amount || 0)]), [40, 300])
+    }
+    doc.save(`smena_${dayStr}.pdf`)
   }
 
   // Сумма на карту за выбранный месяц: помесячная перекрывает фиксированную (employees.card_amount).
@@ -646,7 +719,7 @@ export default function AnalyticsApp() {
       const start = new Date(currentDate); const day = start.getDay()
       start.setDate(start.getDate() - (day === 0 ? 6 : day - 1))
       const end = new Date(start); end.setDate(start.getDate() + 6)
-      return shifts.filter((s: any) => s.date >= fmtDate(start) && s.date <= fmtDate(end))
+      return shiftsDisplay.filter((s: any) => s.date >= fmtDate(start) && s.date <= fmtDate(end))
     }
 
     if (periodMode === 'day') {
@@ -672,6 +745,16 @@ export default function AnalyticsApp() {
             <StatCard label={tr('an.income')} value={`${currency}${fv(dayShift.income)}`} rawValue={dayShift.income} color={t.green} sm t={t} />
             <StatCard label={tr('an.expense')} value={`${currency}${fv(dayShift.total_expense)}`} rawValue={dayShift.total_expense} color={t.red} sm t={t} />
             <StatCard label={tr('an.cKassa')} value={`${currency}${fv(dayShift.closing_balance)}`} rawValue={dayShift.closing_balance} color={t.blue} sm t={t} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginBottom: 4 }}>
+            <button onClick={exportSession} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.green}18`, border: 'none', borderRadius: 16, padding: '5px 12px', fontSize: 12, fontWeight: 600, color: t.green, cursor: 'pointer', fontFamily: 'inherit' }}>
+              <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+              Excel
+            </button>
+            <button onClick={exportSessionPDF} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.red}14`, border: 'none', borderRadius: 16, padding: '5px 12px', fontSize: 12, fontWeight: 600, color: t.red, cursor: 'pointer', fontFamily: 'inherit' }}>
+              <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+              PDF
+            </button>
           </div>
           {dayExps.length > 0 && <>
             <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.dayExpenses')}</div>
@@ -837,7 +920,7 @@ export default function AnalyticsApp() {
   }
 
   const renderKassa = () => {
-    const filled = shifts.filter((s: any) => s.income > 0 || s.total_expense > 0)
+    const filled = shiftsDisplay.filter((s: any) => s.income > 0 || s.total_expense > 0)
     const balArr = filled.map((s: any) => s.closing_balance || 0)
 
     if (kassaMode === 'kassa') {
@@ -880,9 +963,9 @@ export default function AnalyticsApp() {
             {filled.map((s: any, i: number) => (
               <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '44px 1fr 1fr 1fr 1fr', padding: '12px 14px', gap: 4, borderBottom: i < filled.length - 1 ? `0.5px solid ${t.sep2}` : 'none', fontSize: 13 }}>
                 <span style={{ color: t.text3 }}>{dd(s.date)}</span>
-                <span style={{ color: t.blue }}>{s.opening_balance > 0 ? `${currency}${fv(s.opening_balance)}` : '—'}</span>
                 <span style={{ color: t.green, fontWeight: 600 }}>{s.income > 0 ? `${currency}${fv(s.income)}` : '—'}</span>
-                <span style={{ color: t.red }}>{s.total_expense > 0 ? `${currency}${fv(s.total_expense)}` : '—'}</span>
+                <span style={{ color: t.red }}>{Math.max((s.total_expense || 0) - (s.inkassation || 0), 0) > 0 ? `${currency}${fv(Math.max(s.total_expense - (s.inkassation || 0), 0))}` : '—'}</span>
+                <span style={{ color: t.orange }}>{s.inkassation > 0 ? `${currency}${fv(s.inkassation)}` : '—'}</span>
                 <span style={{ color: t.blue, fontWeight: 700 }}>{currency}{fv(s.closing_balance)}</span>
               </div>
             ))}
@@ -1031,7 +1114,9 @@ export default function AnalyticsApp() {
 
   if (!restaurantId) return <AuthGate appId="analytics" appName="Mise Analytics" onAuth={setRestaurantId} />
 
-  if (!t.mounted || loading) return <AppLoading app="analytics" bg={t.bg} fill={t.fill} accent={t.blue} />
+  if (!t.mounted || loading) return embedded
+    ? <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}><Spinner /></div>
+    : <AppLoading app="analytics" bg={t.bg} fill={t.fill} accent={t.blue} />
 
   const TABS = [
     { id: 'period', label: tr('an.tabPeriod'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },
@@ -1042,7 +1127,9 @@ export default function AnalyticsApp() {
   ] as const
 
   return (
-    <div style={{ height: '100vh', overflow: 'hidden', background: t.bg, fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }}>
+    <div style={embedded
+      ? { display: 'flex', flexDirection: 'column', fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }
+      : { height: '100vh', overflow: 'hidden', background: t.bg, fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }}>
       <style>{`
         @keyframes spin{to{transform:rotate(360deg)}}
         @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
@@ -1052,16 +1139,18 @@ export default function AnalyticsApp() {
         ::-webkit-scrollbar { display: none }
       `}</style>
 
-      {/* HEADER */}
-      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 300, height: 56, background: t.hbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderBottom: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
-        <AppSwitchBrand name="Analytics" accent={t.green} color={t.text} muted={t.text3} size={18} />
+      {/* HEADER: standalone — фикс-шапка с брендом и темой; embedded — строка контролов в потоке */}
+      <div style={embedded
+        ? { order: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 12, maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center', boxSizing: 'border-box' as const }
+        : { position: 'fixed', top: 0, left: 0, right: 0, zIndex: 300, height: 56, background: t.hbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderBottom: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
+        {!embedded && <AppSwitchBrand name="Analytics" accent={t.green} color={t.text} muted={t.text3} size={18} />}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button onClick={t.toggle} style={{ width: 36, height: 36, borderRadius: '50%', background: t.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text }}>
+          {!embedded && <button onClick={t.toggle} style={{ width: 36, height: 36, borderRadius: '50%', background: t.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text }}>
             {t.dark
               ? <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>
               : <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
             }
-          </button>
+          </button>}
           <button onClick={() => setShowMonthPicker(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.green}18`, borderRadius: 20, padding: '7px 14px', cursor: 'pointer', fontSize: 14, fontWeight: 600, color: t.green, border: 'none', fontFamily: 'inherit' }}>
             {mShort(currentDate)} {currentDate.getFullYear()}
             <svg width="10" height="6" fill="none" stroke={t.green} strokeWidth="2.5" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" /></svg>
@@ -1077,8 +1166,10 @@ export default function AnalyticsApp() {
       </div>
 
       {/* CONTENT */}
-      <div style={{ position: 'fixed', top: 56, left: 0, right: 0, bottom: 82, overflowY: 'auto', background: t.bg }}>
-        <div style={{ padding: '16px 16px 28px', maxWidth: 640, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
+      <div style={embedded
+        ? { order: 2 }
+        : { position: 'fixed', top: 56, left: 0, right: 0, bottom: 82, overflowY: 'auto', background: t.bg }}>
+        <div style={{ padding: embedded ? '0 0 28px' : '16px 16px 28px', maxWidth: contentMaxWidth, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
 
           {tab === 'period' && (
             <>
@@ -1379,13 +1470,21 @@ export default function AnalyticsApp() {
         </div>
       </div>
 
-      {/* BOTTOM NAV */}
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 300, height: 82, background: t.nbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderTop: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'flex-start', paddingTop: 10, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+      {/* NAV: standalone — фикс-бар снизу; embedded — сегмент-строка над контентом (order 1) */}
+      <div style={embedded
+        ? { order: 1, display: 'flex', gap: 2, background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center', boxSizing: 'border-box' as const }
+        : { position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 300, height: 82, background: t.nbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderTop: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'flex-start', paddingTop: 10, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
         {TABS.map(tb => (
-          <button key={tb.id} onClick={() => setTab(tb.id as any)} style={{ flex: 1, display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: 3, cursor: 'pointer', color: tab === tb.id ? t.green : t.text3, border: 'none', background: 'none', fontFamily: 'inherit', padding: 0, fontSize: 10, fontWeight: tab === tb.id ? 700 : 500, transition: 'color .18s' }}>
-            <span style={{ transform: tab === tb.id ? 'scale(1.08)' : 'scale(1)', transition: 'transform .18s ease', display: 'flex' }}>{tb.icon(tab === tb.id)}</span>
-            {tb.label}
-          </button>
+          embedded ? (
+            <button key={tb.id} onClick={() => setTab(tb.id as any)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: tab === tb.id ? 700 : 500, cursor: 'pointer', background: tab === tb.id ? t.surface : 'transparent', color: tab === tb.id ? t.green : t.text3, boxShadow: tab === tb.id ? t.sh2 : 'none', transition: 'all .18s' }}>
+              {tb.label}
+            </button>
+          ) : (
+            <button key={tb.id} onClick={() => setTab(tb.id as any)} style={{ flex: 1, display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: 3, cursor: 'pointer', color: tab === tb.id ? t.green : t.text3, border: 'none', background: 'none', fontFamily: 'inherit', padding: 0, fontSize: 10, fontWeight: tab === tb.id ? 700 : 500, transition: 'color .18s' }}>
+              <span style={{ transform: tab === tb.id ? 'scale(1.08)' : 'scale(1)', transition: 'transform .18s ease', display: 'flex' }}>{tb.icon(tab === tb.id)}</span>
+              {tb.label}
+            </button>
+          )
         ))}
       </div>
 

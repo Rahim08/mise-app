@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { resolveCaller, type Caller } from '@/lib/apiAuth'
+import { entitlements } from '@/lib/plans'
 
 type AppId = 'manager' | 'analytics' | 'stash' | 'people'
 
@@ -70,27 +71,21 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
 
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'like', 'ilike'])
 
-// Plan limits — must match PLANS in app/dashboard/page.tsx. Enforced server-side so the
-// UI gate can't be bypassed by calling the gateway directly.
-const PLAN_LIMITS: Record<string, { maxStaff: number; apps: string[] }> = {
-  starter:  { maxStaff: 2,  apps: ['manager', 'analytics'] },
-  business: { maxStaff: 5,  apps: ['manager', 'analytics', 'stash', 'people'] },
-  pro:      { maxStaff: 10, apps: ['manager', 'analytics', 'stash', 'people'] },
-}
-
-// Granting app access on `staff` is the billable action: check the count of active staff
-// with access and the per-plan app whitelist. Returns an error message or null.
+// Granting app access on `staff` is the billable action: «место» = сотрудник с доступом.
+// Лимиты и состав модулей считает entitlements() из lib/plans.ts (тариф + addon_modules +
+// extra_seats + comp_apps/staff_limit супер-админа). Enforced server-side so the UI gate
+// can't be bypassed by calling the gateway directly.
 async function checkStaffPlanLimit(admin: any, rid: string, values: any, filters: any[]): Promise<string | null> {
   const rows = Array.isArray(values) ? values : [values]
   const grantsApps = rows.some(v => Array.isArray(v?.apps) && v.apps.length > 0)
   if (!grantsApps) return null
 
-  const { data: rest } = await admin.from('restaurants').select('subscription_plan, comp_apps, staff_limit').eq('id', rid).single()
-  const plan = PLAN_LIMITS[rest?.subscription_plan] || PLAN_LIMITS.starter
-  // comp_apps — приложения, выданные супер-админом поверх тарифа
-  const allowedApps = [...plan.apps, ...(rest?.comp_apps || [])]
-  // staff_limit — ручной override числа сотрудников с доступом (Super Admin), NULL = лимит тарифа
-  const maxStaff: number = rest?.staff_limit ?? plan.maxStaff
+  // select('*'): явный список новых колонок дал бы 400 на БД без миграции billing-v2 —
+  // а это горячий путь прода (iOS). entitlements() терпит отсутствующие поля.
+  const { data: rest } = await admin.from('restaurants').select('*').eq('id', rid).single()
+  const ent = entitlements(rest)
+  const allowedApps: string[] = ent.modules
+  const maxStaff: number = ent.seats
 
   for (const v of rows) {
     for (const app of (v.apps || [])) {

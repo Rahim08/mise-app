@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18n } from '@/lib/i18n'
+import { entitlements, isActiveStatus } from '@/lib/plans'
 import {
   MENU_LOCALES, LOCALE_LABEL, MENU_TAGS, MENU_FONTS, THEME_PRESETS,
   WEEKDAY_KEYS, fontStack, googleFontsHref, type I18nContent, type Schedule,
@@ -125,7 +126,8 @@ function Sortable({ id, style: extra, children }: { id: string; style?: React.CS
 
 export default function MenuEditor() {
   const router = useRouter()
-  const t = useTheme()
+  // Страница живёт внутри дашборд-shell (route group (shell)) — тема дашборда, хром в потоке.
+  const t = useTheme('mise_dash_dark')
   const { t: tr } = useI18n()
   const appOrigin = typeof window !== 'undefined' ? window.location.origin : ''
   const appHost = typeof window !== 'undefined' ? window.location.host : ''
@@ -208,11 +210,11 @@ export default function MenuEditor() {
   const init = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.replace('/auth/login'); return }
-    const { data: rest } = await db.from('restaurants').select('id, currency, logo_url, subscription_plan, subscription_status, comp_apps').eq('owner_id', user.id).single()
+    const { data: rest } = await db.from('restaurants').select('*').eq('owner_id', user.id).single()
     if (!rest?.id) { setLoading(false); return }
-    const subActive = ['active', 'trialing', 'canceling'].includes((rest as any).subscription_status || '')
-    if (!subActive || (!['business', 'pro'].includes(rest.subscription_plan) && !(rest.comp_apps || []).includes('menu'))) {
-      router.replace('/dashboard?tab=billing'); return
+    // Гейт через entitlements(): учитывает addon_modules/comp_apps (биллинг v2), не только план.
+    if (!isActiveStatus(rest.subscription_status) || !entitlements(rest).modules.includes('menu')) {
+      router.replace('/dashboard/billing'); return
     }
     const rid = rest.id
     setRestaurantId(rid)
@@ -521,7 +523,7 @@ export default function MenuEditor() {
   }
 
   if (loading) return (
-    <div style={{ minHeight: '100vh', background: t.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
+    <div style={{ minHeight: 320, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
       <IconMenu color={t.purple} size={64} />
       <div style={{ width: 24, height: 24, border: `2.5px solid ${t.fill}`, borderTopColor: t.purple, borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
@@ -536,7 +538,7 @@ export default function MenuEditor() {
   ] as const
 
   return (
-    <div style={{ height: '100vh', overflow: 'hidden', background: t.bg, fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }}>
       <style>{`
         @keyframes spin{to{transform:rotate(360deg)}}
         @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
@@ -547,8 +549,8 @@ export default function MenuEditor() {
         input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
       `}</style>
 
-      {/* HEADER */}
-      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 300, height: 56, background: t.hbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderBottom: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
+      {/* HEADER: строка статуса в потоке (shell даёт сайдбар/шапку) */}
+      <div style={{ order: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, maxWidth: 1100, width: '100%', alignSelf: 'center', boxSizing: 'border-box' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <IconMenu color={t.purple} size={28} />
           <span style={{ fontWeight: 700, fontSize: 17, color: t.text, letterSpacing: -0.3 }}>Mise Menu</span>
@@ -566,8 +568,8 @@ export default function MenuEditor() {
       </div>
 
       {/* CONTENT */}
-      <div style={{ position: 'fixed', top: 56, left: 0, right: 0, bottom: 82, overflowY: 'auto', background: t.bg }}>
-        <div style={{ padding: '12px 16px 28px', maxWidth: 640, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
+      <div style={{ order: 2 }}>
+        <div style={{ padding: '0 0 28px', maxWidth: 1100, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
 
           {/* MENU SWITCHER */}
           {tab !== 'analytics' && (
@@ -919,11 +921,10 @@ export default function MenuEditor() {
         </div>
       </div>
 
-      {/* BOTTOM NAV */}
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 300, height: 82, background: t.hbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderTop: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'flex-start', paddingTop: 10, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+      {/* NAV: сегмент-строка над контентом (внутри shell) */}
+      <div style={{ order: 1, display: 'flex', gap: 2, background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, maxWidth: 1100, width: '100%', alignSelf: 'center', boxSizing: 'border-box' }}>
         {TABS.map(tb => (
-          <button key={tb.id} onClick={() => setTab(tb.id as any)} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer', color: tab === tb.id ? t.purple : t.text3, border: 'none', background: 'none', fontFamily: 'inherit', padding: 0, fontSize: 10, fontWeight: tab === tb.id ? 700 : 500 }}>
-            <span style={{ transform: tab === tb.id ? 'scale(1.08)' : 'scale(1)', transition: 'transform .18s ease', display: 'flex' }}>{tb.icon(tab === tb.id)}</span>
+          <button key={tb.id} onClick={() => setTab(tb.id as any)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: tab === tb.id ? 700 : 500, cursor: 'pointer', background: tab === tb.id ? t.surface : 'transparent', color: tab === tb.id ? t.purple : t.text3, boxShadow: tab === tb.id ? t.sh2 : 'none', transition: 'all .18s' }}>
             {tb.label}
           </button>
         ))}

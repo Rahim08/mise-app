@@ -59,6 +59,22 @@ async function sendTrialReminders(admin: any, now: Date): Promise<number> {
   }
 }
 
+// Биллинг v2: триал 14 дней живёт только в БД (без Stripe) — истёкшие гасим сами.
+// Только ряды без subscription_id: триалы, начатые через Stripe-checkout (старый флоу),
+// закрывает вебхук.
+async function expireTrials(admin: any, now: Date): Promise<number> {
+  try {
+    const { data, error } = await admin.from('restaurants')
+      .update({ subscription_status: 'inactive' })
+      .eq('subscription_status', 'trialing')
+      .is('subscription_id', null)
+      .lt('subscription_ends_at', now.toISOString())
+      .select('id')
+    if (error) return 0
+    return data?.length || 0
+  } catch { return 0 }
+}
+
 // Авто-прогул: для опубликованных смен сегодня, где с начала смены прошло grace-часов
 // и нет гео-чек-ина, ставим черновик shift_absences (source='auto'). Менеджер увидит «X»
 // при закрытии смены и подтвердит/снимет. Server-side, без фоновой геолокации → батарея не тратится.
@@ -182,9 +198,10 @@ export async function GET(req: NextRequest) {
     .eq('published', true).in('date', [today, tomorrow])
   if (!schedules?.length) {
     const trialEmails = await sendTrialReminders(admin, now)
+    const trialsExpired = await expireTrials(admin, now)
     const noShows = await autoMarkNoShows(admin, now)
     const purchaseDigest = await sendPurchaseDigest(admin, now)
-    return NextResponse.json({ ok: true, sent: 0, trialEmails, noShows, purchaseDigest })
+    return NextResponse.json({ ok: true, sent: 0, trialEmails, trialsExpired, noShows, purchaseDigest })
   }
 
   // Уже отправленные напоминания за последние 2 дня → set(schedule_id)
@@ -221,7 +238,8 @@ export async function GET(req: NextRequest) {
   }
 
   const trialEmails = await sendTrialReminders(admin, now)
+  const trialsExpired = await expireTrials(admin, now)
   const noShows = await autoMarkNoShows(admin, now)
   const purchaseDigest = await sendPurchaseDigest(admin, now)
-  return NextResponse.json({ ok: true, sent: inserts.length, pushed, trialEmails, noShows, purchaseDigest })
+  return NextResponse.json({ ok: true, sent: inserts.length, pushed, trialEmails, trialsExpired, noShows, purchaseDigest })
 }

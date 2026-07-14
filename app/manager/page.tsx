@@ -180,7 +180,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
         setShift({ ...sh, opening_balance: openingBalance })
         await loadAbsencesByDate(restaurantId, fmtDate(currentDate)) // подтянуть авто-прогулы дня
         showToast(tr('mg.shiftOpened'))
-        pushNotify({ type: 'cash_open', title: tr('mg.pushCashOpen'), body: tr('mg.pushShiftOpened'), audience: { managers: true } })
+        pushNotify({ type: 'cash_open', title: tr('mg.pushCashOpen'), body: tr('mg.pushShiftOpened'), titleKey: 'notify.cashOpenTitle', bodyKey: 'notify.cashOpenBody', audience: { managers: true } })
       } else if (error?.code === '23505') {
         // Shift already exists — reload it
         await loadDay(restaurantId, currentDate, employees, categories)
@@ -270,11 +270,21 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     setLocked(true)
     showToast(tr('mg.shiftSaved'))
     const c = calc()
-    pushNotify({ type: 'cash_close', title: tr('mg.pushCashClosed'), body: tr('mg.pushShiftClosed'), secureBody: `${tr('mg.sumRevenue')} €${fv(c.inc)} · ${tr('mg.cellBalance')} €${fv(c.balance)}`, audience: { managers: true } })
+    pushNotify({
+      type: 'cash_close', title: tr('mg.pushCashClosed'), body: tr('mg.pushShiftClosed'),
+      titleKey: 'notify.cashCloseTitle', bodyKey: 'notify.cashCloseBody',
+      secureBody: `${tr('mg.sumRevenue')} €${fv(c.inc)} · ${tr('mg.cellBalance')} €${fv(c.balance)}`,
+      secureBodySegments: [
+        { key: 'notify.dRevenue', value: `€${fv(c.inc)}` },
+        { key: 'notify.dBalance', value: `€${fv(c.balance)}` },
+      ],
+      audience: { managers: true },
+    })
     setSaving(false)
   }
 
-  const { inc, card, ink, totalExp, balance, opening, salary, inkNet } = calc()
+  const { inc, card, ink, catTotal, empExtraTotal, totalExp, balance, opening, salary, inkNet } = calc()
+  const netExpense = catTotal + empExtraTotal
   const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
   const dowRaw = currentDate.toLocaleDateString(locale, { weekday: 'long' })
   const dowName = dowRaw.charAt(0).toUpperCase() + dowRaw.slice(1)
@@ -506,9 +516,9 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                 )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5px', background: t.sep2 }}>
                   {[
-                    { label: tr('mg.cellIn'), val: opening, color: t.blue },
+                    { label: tr('mg.expense'), val: netExpense, color: t.red },
+                    { label: tr('mg.cellInk'), val: ink, color: t.orange },
                     { label: tr('mg.cash'), val: inc, color: t.green },
-                    { label: tr('mg.expense'), val: totalExp, color: t.red },
                     { label: tr('mg.cellBalance'), val: balance, color: t.blue },
                   ].map(cell => (
                     <div key={cell.label} style={{ background: t.surface, padding: '12px 14px' }}>

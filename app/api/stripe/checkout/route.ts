@@ -1,18 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { verifyOwner } from '@/lib/stripeAuth'
+import { PLANS, ALL_MODULES, stripeLookupKey, type PlanId } from '@/lib/plans'
+import { resolvePriceIds } from '@/lib/stripePrices'
 
-const PLANS: Record<string, { priceId: string }> = {
-  starter:  { priceId: process.env.STRIPE_PRICE_STARTER! },
-  business: { priceId: process.env.STRIPE_PRICE_BUSINESS! },
-  pro:      { priceId: process.env.STRIPE_PRICE_PRO! },
-}
-
+// Биллинг v2: одна подписка = план + аддоны (модули/места/AI) одним набором items.
+// Какие ИМЕННО модули куплены, Stripe не знает — это хранит restaurants.addon_modules
+// (пишется вебхуком из metadata); Stripe только считает деньги по количествам.
 export async function POST(req: NextRequest) {
   try {
-    const { plan, restaurantId } = await req.json()
+    const body = await req.json()
+    const { restaurantId } = body
+    const plan = String(body.plan || '') as PlanId
+    const interval: 'month' | 'year' = body.interval === 'year' ? 'year' : 'month'
     const planData = PLANS[plan]
     if (!planData) return NextResponse.json({ error: 'Invalid plan' }, { status: 400 })
+
+    // Аддоны валидируем против тарифа: нельзя купить модуль, который уже включён.
+    const addonModules = [...new Set<string>((Array.isArray(body.addonModules) ? body.addonModules : [])
+      .filter((m: any) => ALL_MODULES.includes(m) && !planData.modules.includes(m)))]
+    const extraSeats = Math.min(200, Math.max(0, parseInt(body.extraSeats) || 0))
+    const addonAI = !!body.addonAI && !planData.ai
 
     // userId/email — из проверенной сессии владельца, а не из тела запроса.
     const auth = await verifyOwner(req, restaurantId)
@@ -44,14 +52,35 @@ export async function POST(req: NextRequest) {
       if (custErr) throw new Error(`save stripe_customer_id: ${custErr.message}`)
     }
 
+    const lookupKeys = [
+      stripeLookupKey(plan, interval),
+      ...(addonModules.length ? [stripeLookupKey('addon_module', interval)] : []),
+      ...(extraSeats > 0 ? [stripeLookupKey('addon_seat', interval)] : []),
+      ...(addonAI ? [stripeLookupKey('addon_ai', interval)] : []),
+    ]
+    const prices = await resolvePriceIds(stripe, lookupKeys)
+
+    const line_items = [
+      { price: prices[stripeLookupKey(plan, interval)], quantity: 1 },
+      ...(addonModules.length ? [{ price: prices[stripeLookupKey('addon_module', interval)], quantity: addonModules.length }] : []),
+      ...(extraSeats > 0 ? [{ price: prices[stripeLookupKey('addon_seat', interval)], quantity: extraSeats }] : []),
+      ...(addonAI ? [{ price: prices[stripeLookupKey('addon_ai', interval)], quantity: 1 }] : []),
+    ]
+
+    // Триала в checkout больше нет: 14 дней Pro клиент получил при регистрации (в БД).
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ['card'],
       mode: 'subscription',
-      line_items: [{ price: planData.priceId, quantity: 1 }],
+      line_items,
       subscription_data: {
-        trial_period_days: 7,
-        metadata: { restaurantId, plan },
+        metadata: {
+          restaurantId, plan,
+          addon_modules: addonModules.join(','),
+          extra_seats: String(extraSeats),
+          addon_ai: addonAI ? '1' : '0',
+          interval,
+        },
       },
       success_url: `${req.nextUrl.origin}/dashboard?tab=billing&success=1`,
       cancel_url: `${req.nextUrl.origin}/dashboard?tab=billing`,

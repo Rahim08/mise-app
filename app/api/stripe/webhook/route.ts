@@ -4,6 +4,19 @@ import { sendPaymentReceiptEmail } from '@/lib/email'
 
 // Stripe moved current_period_end onto subscription items in newer API versions.
 // Read item-level first, fall back to the (legacy) top-level field, never crash on Invalid Date.
+// Биллинг v2: аддоны/интервал живут в metadata подписки (пишется checkout-ом и
+// /api/stripe/update). Из metadata → колонки restaurants.
+function entitlementFields(md: any): Record<string, any> {
+  if (!md) return {}
+  return {
+    ...(md.plan ? { subscription_plan: md.plan } : {}),
+    ...('addon_modules' in md ? { addon_modules: String(md.addon_modules || '').split(',').filter(Boolean) } : {}),
+    ...('extra_seats' in md ? { extra_seats: parseInt(md.extra_seats) || 0 } : {}),
+    ...('addon_ai' in md ? { addon_ai: md.addon_ai === '1' } : {}),
+    ...(md.interval ? { billing_interval: md.interval } : {}),
+  }
+}
+
 function periodEndISO(sub: any): string | null {
   const ts = sub?.items?.data?.[0]?.current_period_end ?? sub?.current_period_end
   if (!ts || typeof ts !== 'number') return null
@@ -48,8 +61,8 @@ export async function POST(req: NextRequest) {
       const endsAt = periodEndISO(sub)
       await updateRestaurant(restaurantId, {
         subscription_status: (sub as any).status,
-        subscription_plan: plan,
         subscription_id: sub.id,
+        ...entitlementFields((sub as any).metadata),
         ...(endsAt ? { subscription_ends_at: endsAt } : {}),
       })
 
@@ -123,7 +136,7 @@ export async function POST(req: NextRequest) {
       const endsAt = periodEndISO(obj)
       await updateRestaurant(restaurantId, {
         subscription_status: obj.cancel_at_period_end ? 'canceling' : obj.status,
-        ...(obj.metadata?.plan ? { subscription_plan: obj.metadata.plan } : {}),
+        ...entitlementFields(obj.metadata),
         ...(endsAt ? { subscription_ends_at: endsAt } : {}),
       })
     }
