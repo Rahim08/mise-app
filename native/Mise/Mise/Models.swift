@@ -280,6 +280,22 @@ nonisolated struct Booking: Codable, Identifiable, Sendable {
     let created_by_name: String?
 }
 
+// Google-отзывы (Places API sync) — read-only во всех клиентах, пишет только сервер.
+nonisolated struct GoogleReview: Codable, Identifiable, Sendable {
+    let id: String
+    var author_name: String?
+    var rating: Int?
+    var review_text: String?
+    var relative_time: String?
+    var review_time: String?
+}
+
+nonisolated struct GoogleRatingSnapshot: Codable, Sendable {
+    var captured_at: String?
+    var rating: Double?
+    var ratings_total: Int?
+}
+
 nonisolated struct HookahGoal: Codable, Identifiable, Sendable {
     let id: String
     var title: String?

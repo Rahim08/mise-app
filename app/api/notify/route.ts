@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
   let body: any
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Bad request' }, { status: 400 }) }
 
-  const { type, title, body: msgBody, secureBody, data, audience } = body || {}
+  const { type, title, body: msgBody, titleKey, titleParams, bodyKey, bodyParams, bodySegments, secureBody, secureBodySegments, data, audience } = body || {}
   if (!type || !title) return NextResponse.json({ error: 'type and title required' }, { status: 400 })
 
   const aud: Audience = audience || {}
@@ -29,7 +29,9 @@ export async function POST(req: NextRequest) {
 
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
   try {
-    const result = await dispatchNotification(admin, caller.rid, { type, title, body: msgBody, secureBody, data, audience: aud })
+    const result = await dispatchNotification(admin, caller.rid, {
+      type, title, body: msgBody, titleKey, titleParams, bodyKey, bodyParams, bodySegments, secureBody, secureBodySegments, data, audience: aud,
+    })
     return NextResponse.json({ ok: true, ...result })
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })

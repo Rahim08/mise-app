@@ -181,6 +181,10 @@ private struct AppContainer: View {
 /// под нативный таб-бар (liquid glass на iOS 26).
 struct AppTabPage<Content: View>: View {
     var refresh: (() async -> Void)? = nil
+    // Не-nil только там, где нужен сброс скролла к началу при каждом переключении
+    // вкладки (см. AnalyticsView) — прочие вызовы оставляют nil и поведение не меняется,
+    // т.к. onChange никогда не срабатывает на переходе nil → nil.
+    var scrollResetKey: String? = nil
     @ViewBuilder var content: Content
 
     @State private var appeared = false
@@ -188,14 +192,18 @@ struct AppTabPage<Content: View>: View {
     var body: some View {
         ZStack {
             Color.miseBg.ignoresSafeArea()
-            ScrollView {
-                VStack(spacing: 12) { content }
-                    .padding(16).padding(.bottom, 24)
-                    .opacity(appeared ? 1 : 0)
-                    .offset(y: appeared ? 0 : 18)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 12) { content }
+                        .padding(16).padding(.bottom, 24)
+                        .opacity(appeared ? 1 : 0)
+                        .offset(y: appeared ? 0 : 18)
+                        .id("top")
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .refreshable { await refresh?() }
+                .onChange(of: scrollResetKey) { _, _ in proxy.scrollTo("top", anchor: .top) }
             }
-            .scrollDismissesKeyboard(.interactively)
-            .refreshable { await refresh?() }
         }
         .onAppear {
             guard !appeared else { return }
@@ -248,6 +256,11 @@ struct SettingsView: View {
                             NotificationSettingsView()
                         } label: {
                             Label(t("pe.nsTitle"), systemImage: "bell.badge")
+                        }
+                        NavigationLink {
+                            ReportExportView()
+                        } label: {
+                            Label(t("rp.title"), systemImage: "doc.richtext")
                         }
                     }
                     Section {

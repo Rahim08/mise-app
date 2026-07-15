@@ -313,6 +313,65 @@ function GeoSettingsCard() {
   )
 }
 
+// ── GOOGLE REVIEWS (вкладка «Отзывы» в Bookings) ──────────────────────────────
+// Владелец вписывает свой Place ID + Google Cloud API-ключ (Places API (New), без OAuth
+// в бизнес-аккаунт). После сохранения сразу дёргаем /api/google-reviews/sync-now — рейтинг
+// и последние отзывы появляются мгновенно, не дожидаясь ночного cron.
+function GoogleReviewsSettingsCard() {
+  const { t: tr } = useI18n()
+  const [row, setRow] = useState<any>(null)
+  const [placeId, setPlaceId] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  useEffect(() => {
+    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
+      const r = Array.isArray(data) ? data[0] : data
+      if (r) { setRow(r); setPlaceId(r.google_place_id || ''); setApiKey(r.google_places_api_key || '') }
+    })
+  }, [])
+
+  const saveAndSync = async () => {
+    if (saving) return
+    setSaving(true); setResult(null)
+    const payload = { google_place_id: placeId.trim() || null, google_places_api_key: apiKey.trim() || null }
+    const res = row?.id
+      ? await db.from('restaurant_settings').update(payload).eq('id', row.id)
+      : await db.from('restaurant_settings').insert(payload).select().single()
+    if (res.error) { setResult({ ok: false, msg: res.error.message }); setSaving(false); return }
+    if (!row?.id && res.data) setRow(res.data)
+
+    try {
+      const r = await fetch('/api/google-reviews/sync-now', { method: 'POST' })
+      const data = await r.json()
+      if (!r.ok) setResult({ ok: false, msg: data.error || tr('dash.googleReviewsSyncError') })
+      else setResult({ ok: true, msg: tr('dash.googleReviewsSynced').replace('{rating}', String(data.rating ?? '—')).replace('{count}', String(data.ratingsTotal ?? '—')) })
+    } catch {
+      setResult({ ok: false, msg: tr('dash.googleReviewsSyncError') })
+    }
+    setSaving(false)
+  }
+
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>{tr('dash.googleReviewsTitle')}</div>
+      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2, marginBottom: 14, maxWidth: 420 }}>{tr('dash.googleReviewsSub')}</div>
+
+      <Field label={tr('dash.placeId')} value={placeId} onChange={setPlaceId} placeholder="ChIJ..." helper={tr('dash.placeIdHelper')} />
+      <Field label={tr('dash.googleApiKey')} value={apiKey} onChange={setApiKey} type="password" placeholder="AIza..." helper={tr('dash.googleApiKeyHelper')} />
+
+      <Btn onClick={saveAndSync} disabled={saving}>{saving ? tr('dash.saving') : tr('dash.saveAndSync')}</Btn>
+
+      {result && (
+        <div style={{ marginTop: 10, fontSize: '.8rem', fontWeight: 600, color: result.ok ? 'var(--ok)' : 'var(--danger)' }}>
+          {result.msg}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 // ── PAGE ──────────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const { t: tr, locale, setLocale } = useI18n()
@@ -415,6 +474,8 @@ export default function SettingsPage() {
       <AnalyticsSettingsCard />
 
       <GeoSettingsCard />
+
+      <GoogleReviewsSettingsCard />
 
       <Card>
         <div style={{ marginBottom: 12 }}>

@@ -92,10 +92,12 @@ final class ManagerModel {
 
     // Последняя смена НЕ ПОЗЖЕ вчера (не обязательно ровно вчера) — пропущенный день
     // (выходной, забыли открыть смену) не должен молча обнулять остаток кассы.
-    private func prevClosing(before date: Date) async -> Double {
+    // throws: ошибка сети НЕ равна «предыдущих смен нет» — иначе openShift навсегда
+    // записывал бы opening_balance = 0 при обычном обрыве связи («замороженный 0»).
+    private func prevClosing(before date: Date) async throws -> Double {
         let y = Calendar.current.date(byAdding: .day, value: -1, to: date) ?? date
-        let rows = (try? await DB.from("shifts").select("closing_balance")
-            .lte("date", key(y)).order("date", ascending: false).order("opened_at", ascending: false).limit(1).list(ClosingOnly.self)) ?? []
+        let rows = try await DB.from("shifts").select("closing_balance")
+            .lte("date", key(y)).order("date", ascending: false).order("opened_at", ascending: false).limit(1).list(ClosingOnly.self)
         return rows.first?.closing_balance ?? 0
     }
 
@@ -123,7 +125,8 @@ final class ManagerModel {
             return
         }
         guard gen == loadGen else { return }   // пользователь уже сменил дату — игнор
-        let opening = await prevClosing(before: date)
+        // nil = не смогли узнать остаток (сеть) → оставить хранимое значение, не показывать 0
+        let opening = try? await prevClosing(before: date)
 
         // На случай дублей на одну дату (до миграции shifts-date-fix.sql) берём смену
         // с наибольшими данными, чтобы не показывать пустую/«открыть смену».
@@ -135,7 +138,7 @@ final class ManagerModel {
             catAmounts = [:]; catNotes = [:]; empExtras = [:]; absences = []; autoAbsences = []
             return
         }
-        sh.opening_balance = opening
+        if let opening { sh.opening_balance = opening }
         shift = sh
         locked = (sh.income ?? 0) > 0 || (sh.total_expense ?? 0) > 0 || (sh.inkassation ?? 0) > 0
         income = (sh.income ?? 0) > 0 ? trimNum(sh.income!) : ""
@@ -178,14 +181,30 @@ final class ManagerModel {
     // MARK: действия
 
     func changeDate(_ dir: Int) async {
-        if shift != nil && !locked { _ = try? await persist() }
+        if shift != nil && !locked {
+            do { try await persist() } catch {
+                flash(t("saveFailed", ["err": error.localizedDescription])); return
+            }
+        }
         currentDate = Calendar.current.date(byAdding: .day, value: dir, to: currentDate) ?? currentDate
         await loadDay(currentDate)
     }
 
+    func setDate(_ d: Date) async {
+        if shift != nil && !locked {
+            do { try await persist() } catch {
+                flash(t("saveFailed", ["err": error.localizedDescription])); return
+            }
+        }
+        currentDate = d
+        await loadDay(d)
+    }
+
     func openShift() async {
         saving = true; defer { saving = false }
-        let opening = await prevClosing(before: currentDate)
+        guard let opening = try? await prevClosing(before: currentDate) else {
+            flash(t("refreshFailed")); return
+        }
         // Защита от дублей: если смена на эту дату уже есть — используем её, не создаём новую.
         let existing = (try? await DB.from("shifts").select()
             .eq("date", key(currentDate)).order("opened_at").list(Shift.self)) ?? []
@@ -198,16 +217,21 @@ final class ManagerModel {
             "opening_balance": opening, "income": 0, "inkassation": 0,
             "closing_balance": opening, "status": "open",
         ]
-        if var sh = try? await DB.from("shifts").insert(values).single(Shift.self) {
+        do {
+            guard var sh = try await DB.from("shifts").insert(values).single(Shift.self) else {
+                flash(t("refreshFailed")); return
+            }
             sh.opening_balance = opening
             shift = sh
             await loadAbsences(key(currentDate))
             flash(t("mg.shiftOpened"))
-            await Notify.send(type: "cash_open", title: t("mg.pushCashOpen"), body: t("mg.pushShiftOpened"), audience: ["managers": true])
+            await Notify.send(type: "cash_open", title: t("mg.pushCashOpen"), body: t("mg.pushShiftOpened"),
+                              audience: ["managers": true], titleKey: "notify.cashOpenTitle", bodyKey: "notify.cashOpenBody")
             // Запланировать напоминание о закрытии смены
             if ShiftReminder.isEnabled() { ShiftReminder.schedule() }
-        } else {
-            await loadDay(currentDate)
+        } catch {
+            // Раньше try? молчал: пользователь жмёт «Открыть смену», ничего не происходит.
+            flash(t("saveFailed", ["err": error.localizedDescription]))
         }
     }
 
@@ -225,22 +249,18 @@ final class ManagerModel {
         autoAbsences.remove(empId)
     }
 
-    @discardableResult
-    private func persist() async throws -> Double? {
-        guard let sh = shift else { return nil }
-        let c = calc
-
-        try await DB.from("shifts").update([
-            "income": c.inc, "income_card": c.card, "inkassation": c.ink,
-            "total_expense": c.totalExp, "closing_balance": c.balance,
-        ]).eq("id", sh.id).run()
-
-        try? await DB.from("shift_expenses").delete().eq("shift_id", sh.id).run()
+    // Расходы: СНАЧАЛА вставить новые, удалить старые по id — ПОТОМ.
+    // Старая схема delete→insert при обрыве сети между шагами молча стирала
+    // все расходы смены. Если теперь упадёт delete — будут видимые дубли,
+    // которые следующее успешное сохранение само подчистит (старые id уже собраны).
+    private func persistExpenses(shiftId: String) async throws {
+        let oldExpenses = try await DB.from("shift_expenses").select("id")
+            .eq("shift_id", shiftId).list(ShiftExpense.self)
         var catInserts: [[String: Any]] = []
         for cat in categories {
             let amt = num(catAmounts[cat.id] ?? "")
             if amt > 0 {
-                catInserts.append(["shift_id": sh.id, "restaurant_id": rid, "category_id": cat.id,
+                catInserts.append(["shift_id": shiftId, "restaurant_id": rid, "category_id": cat.id,
                                    "category_name": cat.name, "amount": amt, "note": catNotes[cat.id] ?? ""])
             }
         }
@@ -252,23 +272,49 @@ final class ManagerModel {
         for emp in employees {
             let extra = num(empExtras[emp.id] ?? "")
             if extra > 0 {
-                empInserts.append(["shift_id": sh.id, "restaurant_id": rid, "employee_id": emp.id,
+                empInserts.append(["shift_id": shiftId, "restaurant_id": rid, "employee_id": emp.id,
                                    "category_name": emp.name + " (экстра)", "amount": extra])
             }
         }
         if !empInserts.isEmpty { try? await DB.from("shift_expenses").insert(empInserts).run() }
+        if !oldExpenses.isEmpty {
+            try await DB.from("shift_expenses").delete().in("id", oldExpenses.map(\.id)).run()
+        }
+    }
 
-        try await DB.from("inkassations").delete().eq("shift_id", sh.id).run()
+    private func persistInkassation(shiftId: String, _ c: Calc) async throws {
+        try await DB.from("inkassations").delete().eq("shift_id", shiftId).run()
         if c.ink > 0 || !inkExpense.isEmpty || !inkReason.isEmpty || c.salary > 0 || !inkSalaryNote.isEmpty {
             try await DB.from("inkassations").insert([
-                "shift_id": sh.id, "restaurant_id": rid, "date": key(currentDate),
+                "shift_id": shiftId, "restaurant_id": rid, "date": key(currentDate),
                 "amount": c.ink, "expense": num(inkExpense), "reason": inkReason,
                 "salary": c.salary, "salary_note": inkSalaryNote, "total": c.inkNet,
             ]).run()
         }
+    }
+
+    @discardableResult
+    private func persist() async throws -> Double? {
+        guard let sh = shift else { return nil }
+        let c = calc
+
+        // Смена/расходы/инкассация/прогулы трогают разные таблицы и не зависят друг от
+        // друга — параллелим, чтобы не ждать 7 сетевых round-trip'ов подряд. Порядок
+        // ВНУТРИ каждой цепочки (например insert-перед-delete в расходах) не меняется.
+        async let shiftUpdate: () = DB.from("shifts").update([
+            "income": c.inc, "income_card": c.card, "inkassation": c.ink,
+            "total_expense": c.totalExp, "closing_balance": c.balance,
+        ]).eq("id", sh.id).run()
+        async let expensesResult: () = persistExpenses(shiftId: sh.id)
+        async let inkResult: () = persistInkassation(shiftId: sh.id, c)
         // best-effort: подтвердить прогулы дня (привязать к смене, снять авто-черновик)
-        _ = try? await DB.from("shift_absences").update(["shift_id": sh.id, "source": "manager"])
-            .eq("date", key(currentDate)).run()
+        async let absResult: Void = { _ = try? await DB.from("shift_absences").update(["shift_id": sh.id, "source": "manager"])
+            .eq("date", key(currentDate)).run() }()
+
+        try await shiftUpdate
+        try await expensesResult
+        try await inkResult
+        await absResult
         autoAbsences = []
         return c.balance
     }
@@ -284,11 +330,11 @@ final class ManagerModel {
             let c = calc
             // Дайджест дня: сводка в защищённом теле (показывается, если включён show_cash_amount).
             nonisolated struct HkSale: Codable, Sendable { let quantity: Double?; let price: Double?; let is_free: Bool? }
-            var hk = ""
+            var hk = "", paid = 0, rev = 0.0
             if let sales = try? await DB.from("hookah_sales").select("quantity, price, is_free, date")
                 .eq("date", key(currentDate)).list(HkSale.self) {
-                let paid = sales.filter { $0.is_free != true }.reduce(0) { $0 + Int($1.quantity ?? 0) }
-                let rev = sales.filter { $0.is_free != true }.reduce(0.0) { $0 + ($1.quantity ?? 0) * ($1.price ?? 0) }
+                paid = sales.filter { $0.is_free != true }.reduce(0) { $0 + Int($1.quantity ?? 0) }
+                rev = sales.filter { $0.is_free != true }.reduce(0.0) { $0 + ($1.quantity ?? 0) * ($1.price ?? 0) }
                 if paid > 0 { hk = " · \(t("mg.dHookah")) \(paid) (\(Money.s(rev)))" }
             }
             var digest = "\(t("mg.dRevenue")) \(Money.s(c.inc))"
@@ -296,9 +342,18 @@ final class ManagerModel {
             digest += " · \(t("mg.dExpense")) \(Money.s(c.totalExp))"
             if c.ink > 0 { digest += " · \(t("mg.dCollection")) \(Money.s(c.ink))" }
             digest += " · \(t("mg.dCash")) \(Money.s(c.balance))" + hk
+
+            var segs: [[String: String]] = [["key": "notify.dRevenue", "value": Money.s(c.inc)]]
+            if c.card > 0 { segs.append(["key": "notify.dCard", "value": Money.s(c.card), "sep": " + "]) }
+            segs.append(["key": "notify.dExpense", "value": Money.s(c.totalExp)])
+            if c.ink > 0 { segs.append(["key": "notify.dCollection", "value": Money.s(c.ink)]) }
+            segs.append(["key": "notify.dCash", "value": Money.s(c.balance)])
+            if paid > 0 { segs.append(["key": "notify.dHookah", "value": "\(paid) (\(Money.s(rev)))"]) }
+
             await Notify.send(type: "cash_close", title: t("mg.pushCashClosed"), body: t("mg.pushShiftClosed"),
                               audience: ["managers": true],
-                              secureBody: digest)
+                              titleKey: "notify.cashCloseTitle", bodyKey: "notify.cashCloseBody",
+                              secureBody: digest, secureBodySegments: segs)
         } catch {
             flash(t("saveFailed", ["err": error.localizedDescription]))
         }
@@ -398,6 +453,7 @@ private struct ManagerBody: View {
     @Bindable var m: ManagerModel
     let aiEnabled: Bool
     private let accent = BrandKit.manager
+    @State private var showDatePicker = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -456,16 +512,36 @@ private struct ManagerBody: View {
     private var dateRow: some View {
         HStack(spacing: 12) {
             circleBtn("chevron.left") { Task { await m.changeDate(-1) } }
-            VStack(spacing: 2) {
-                Text(displayDate(m.currentDate))
-                    .font(.system(size: 17, weight: .bold)).foregroundStyle(.primary)
-                Text(dow(m.currentDate)).font(.system(size: 13, weight: .medium)).foregroundStyle(accent)
+            Button { showDatePicker = true } label: {
+                VStack(spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(displayDate(m.currentDate))
+                            .font(.system(size: 17, weight: .bold)).foregroundStyle(.primary)
+                        Image(systemName: "calendar").font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
+                    }
+                    Text(dow(m.currentDate)).font(.system(size: 13, weight: .medium)).foregroundStyle(accent)
+                }
             }
+            .buttonStyle(.plain)
             .frame(maxWidth: .infinity)
             circleBtn("chevron.right") { Task { await m.changeDate(1) } }
         }
         .padding(14)
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .sheet(isPresented: $showDatePicker) {
+            NavigationStack {
+                ZStack {
+                    Color.miseBg.ignoresSafeArea()
+                    DatePicker(t("an.date"), selection: Binding(get: { m.currentDate }, set: { d in Task { await m.setDate(d) } }),
+                               displayedComponents: .date)
+                        .datePickerStyle(.graphical).tint(accent).padding()
+                }
+                .navigationTitle(t("an.pickDay")).navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button(t("done")) { showDatePicker = false } } }
+                .toolbarBackground(Color.miseBg, for: .navigationBar)
+            }
+            .presentationDetents([.medium])
+        }
     }
 
     private var emptyState: some View {
@@ -606,9 +682,9 @@ private struct ManagerBody: View {
 
     private func summary(_ c: ManagerModel.Calc) -> some View {
         VStack(spacing: 0) {
-            sumRow(t("mg.openingBalance"), money(c.opening))
             sumRow(t("mg.cashRevenue"), money(c.inc))
-            sumRow(t("mg.expenses"), "−" + money(c.totalExp).replacingOccurrences(of: "−", with: ""))
+            sumRow(t("mg.expenses"), "−" + money(c.catTotal + c.empExtraTotal).replacingOccurrences(of: "−", with: ""))
+            sumRow(t("mg.cellInk"), money(c.ink))
             Divider().overlay(Color.primary.opacity(0.12)).padding(.vertical, 4)
             HStack {
                 Text(t("mg.closingBalance")).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)

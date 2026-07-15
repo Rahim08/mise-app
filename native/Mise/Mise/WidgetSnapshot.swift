@@ -42,6 +42,9 @@ enum SnapshotWriter {
             generatedAt: Date(),
             currencySymbol: symbol,
             cashIncome: c.income,
+            cashCash: c.cash,
+            cashCard: c.card,
+            cashInkassation: c.inkassation,
             cashExpense: c.expense,
             cashClosing: c.closing,
             cashAvailable: c.available,
@@ -63,21 +66,28 @@ enum SnapshotWriter {
 
     // MARK: cash (Касса дня)
 
-    private struct CashResult { var income = 0.0; var expense = 0.0; var closing = 0.0; var available = false }
+    private struct CashResult {
+        var income = 0.0; var cash = 0.0; var card = 0.0; var inkassation = 0.0
+        var expense = 0.0; var closing = 0.0; var available = false
+    }
 
     private static func loadCash(today: String, canSeeMoney: Bool) async -> CashResult {
         guard canSeeMoney else { return CashResult() }
-        // Same source as ManagerView: today's shift(s), pick the one with most activity.
+        // Касса — это текущий остаток, а не только "смена сегодня": если сегодняшнюю ещё
+        // не открыли, показываем последнюю закрытую (тот же принцип, что prevClosing в
+        // ManagerView для переноса остатка). shifts уникальны по (restaurant_id, date).
         guard let shifts = try? await DB.from("shifts").select()
-            .eq("date", today).order("opened_at").list(Shift.self), !shifts.isEmpty else {
+            .lte("date", today).order("date", ascending: false).order("opened_at", ascending: false)
+            .limit(1).list(Shift.self), let sh = shifts.first else {
             return CashResult()
         }
-        func activity(_ s: Shift) -> Double { (s.income ?? 0) + (s.total_expense ?? 0) + (s.inkassation ?? 0) }
-        let sh = shifts.max { activity($0) < activity($1) } ?? shifts[0]
         return CashResult(
             // Выручка = наличные + карта, как везде в аналитике (см. AnalyticsModel.pTotal).
             income: (sh.income ?? 0) + (sh.income_card ?? 0),
-            expense: sh.total_expense ?? 0,
+            cash: sh.income ?? 0,
+            card: sh.income_card ?? 0,
+            inkassation: sh.inkassation ?? 0,
+            expense: (sh.total_expense ?? 0) - (sh.inkassation ?? 0),
             closing: sh.closing_balance ?? 0,
             available: true
         )

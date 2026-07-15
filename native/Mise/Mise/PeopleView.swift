@@ -136,11 +136,15 @@ final class PeopleModel {
     func setStatus(_ task: StaffTask, _ status: String) async {
         if let i = tasks.firstIndex(where: { $0.id == task.id }) { tasks[i].status = status }
         let completed: Any = status == "done" ? ISO8601DateFormatter().string(from: Date()) : NSNull()
-        try? await DB.from("staff_tasks").update(["status": status, "completed_at": completed]).eq("id", task.id).run()
+        do {
+            try await DB.from("staff_tasks").update(["status": status, "completed_at": completed]).eq("id", task.id).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadTasks() }
     }
     func removeTask(_ id: String) async {
         tasks.removeAll { $0.id == id }
-        try? await DB.from("staff_tasks").delete().eq("id", id).run()
+        do {
+            try await DB.from("staff_tasks").delete().eq("id", id).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadTasks() }
     }
     func canDelete(_ t: StaffTask) -> Bool { isManager || t.created_by == myId }
 
@@ -158,16 +162,21 @@ final class PeopleModel {
             targets = dir.filter { $0.role == role }.map(\.id)
             if targets.isEmpty { flash(t("pe.noRoleStaff")); return false }
         }
+        var failed = 0, lastError: Error?
         for tid in targets {
             var v = base; v["assigned_to"] = tid
-            try? await DB.from("staff_tasks").insert(v).run()
-            if tid != myId {
-                try? await DB.from("notifications").insert([
-                    "restaurant_id": rid, "staff_id": tid, "type": "task", "title": t("pe.newTask"), "body": title,
-                ]).run()
-            }
+            do {
+                try await DB.from("staff_tasks").insert(v).run()
+                if tid != myId {
+                    await Notify.send(type: "task", title: t("pe.newTask"), body: title, audience: ["staff_ids": [tid]], titleKey: "notify.newTaskTitle")
+                }
+            } catch { failed += 1; lastError = error }
         }
-        flash(targets.count > 1 ? t("pe.taskCreatedN", ["n": "\(targets.count)"]) : t("pe.taskCreated"))
+        if failed == targets.count, let lastError {
+            flash(t("saveFailed", ["err": lastError.localizedDescription]))
+        } else {
+            flash(targets.count > 1 ? t("pe.taskCreatedN", ["n": "\(targets.count)"]) : t("pe.taskCreated"))
+        }
         await loadTasks()
         return true
     }
@@ -220,7 +229,9 @@ final class PeopleModel {
             "author_id": myId == "owner" || myId.isEmpty ? NSNull() : myId,
         ]
         if !desc.isEmpty { v["description"] = desc }
-        try? await DB.from("staff_reports").insert(v).run()
+        do {
+            try await DB.from("staff_reports").insert(v).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
         flash(t("pe.reportSent"))
         await loadReports()
         return true
@@ -228,11 +239,15 @@ final class PeopleModel {
     func setReportStatus(_ r: StaffReport, _ status: String) async {
         if let i = reports.firstIndex(where: { $0.id == r.id }) { reports[i].status = status }
         let resolvedAt: Any = status == "resolved" ? ISO8601DateFormatter().string(from: Date()) : NSNull()
-        try? await DB.from("staff_reports").update(["status": status, "resolved_at": resolvedAt]).eq("id", r.id).run()
+        do {
+            try await DB.from("staff_reports").update(["status": status, "resolved_at": resolvedAt]).eq("id", r.id).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadReports() }
     }
     func deleteReport(_ id: String) async {
         reports.removeAll { $0.id == id }
-        try? await DB.from("staff_reports").delete().eq("id", id).run()
+        do {
+            try await DB.from("staff_reports").delete().eq("id", id).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadReports() }
     }
     func canDeleteReport(_ r: StaffReport) -> Bool { isManager || r.author_id == myId }
 
@@ -328,14 +343,18 @@ final class PeopleModel {
         var v: [String: Any] = ["restaurant_id": rid, "staff_id": staffId, "date": date,
                                 "shift_start": start, "shift_end": end]
         if !note.isEmpty { v["note"] = note }
-        try? await DB.from("staff_schedules").insert(v).run()
+        do {
+            try await DB.from("staff_schedules").insert(v).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
         flash(t("pe.shiftAdded"))
         await loadSchedule()
         return true
     }
     func deleteSchedule(_ id: String) async {
         schedules.removeAll { $0.id == id }
-        try? await DB.from("staff_schedules").delete().eq("id", id).run()
+        do {
+            try await DB.from("staff_schedules").delete().eq("id", id).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadSchedule() }
     }
     /// Пакетное добавление: один сотрудник на несколько дат с одним временем.
     func createSchedules(staffId: String, dates: [String], start: String, end: String, note: String) async -> Bool {
@@ -347,7 +366,9 @@ final class PeopleModel {
             if !note.isEmpty { v["note"] = note }
             inserts.append(v)
         }
-        try? await DB.from("staff_schedules").insert(inserts).run()
+        do {
+            try await DB.from("staff_schedules").insert(inserts).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
         flash(t("pe.copied", ["n": "\(inserts.count)"]))
         await loadSchedule()
         return true
@@ -370,7 +391,11 @@ final class PeopleModel {
             if let n = s.note { v["note"] = n }
             inserts.append(v)
         }
-        if !inserts.isEmpty { try? await DB.from("staff_schedules").insert(inserts).run() }
+        if !inserts.isEmpty {
+            do {
+                try await DB.from("staff_schedules").insert(inserts).run()
+            } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+        }
         flash(t("pe.copied", ["n": "\(inserts.count)"]))
         await loadSchedule()
     }
@@ -434,7 +459,9 @@ final class PeopleModel {
             try await DB.from("attendance_records").insert(payload).run()
             UserDefaults.standard.removeObject(forKey: pendingCheckInKey)
             pendingCheckIn = false
-            await Notify.send(type: "attendance", title: t("pe.onShift"), body: myName.isEmpty ? t("pe.iCame") : "\(myName) \(t("pe.iCame"))", audience: ["managers": true])
+            await Notify.send(type: "attendance", title: t("pe.onShift"), body: myName.isEmpty ? t("pe.iCame") : "\(myName) \(t("pe.iCame"))",
+                              audience: ["managers": true], titleKey: "notify.attendanceTitle",
+                              bodyKey: "notify.attendanceBody", bodyParams: ["name": myName])
             flash(t("pe.checkedIn"))
             await loadAttendance()
         } catch {
@@ -499,7 +526,9 @@ final class PeopleModel {
 
     private func patchSwap(_ r: SwapRequest, _ status: String) async {
         if let i = swaps.firstIndex(where: { $0.id == r.id }) { swaps[i].status = status }
-        try? await DB.from("shift_swap_requests").update(["status": status]).eq("id", r.id).run()
+        do {
+            try await DB.from("shift_swap_requests").update(["status": status]).eq("id", r.id).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadSwaps() }
     }
     func swapPeerAccept(_ r: SwapRequest) async { await patchSwap(r, "peer_accepted") }
     func swapPeerDecline(_ r: SwapRequest) async { await patchSwap(r, "peer_declined") }
@@ -507,7 +536,9 @@ final class PeopleModel {
     func swapReject(_ r: SwapRequest) async { await patchSwap(r, "rejected") }
     func swapApprove(_ r: SwapRequest) async {
         if let sid = r.schedule_id, let tid = r.target_id {
-            try? await DB.from("staff_schedules").update(["staff_id": tid]).eq("id", sid).run()
+            do {
+                try await DB.from("staff_schedules").update(["staff_id": tid]).eq("id", sid).run()
+            } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
         }
         await patchSwap(r, "approved")
         flash(t("pe.swapApproved"))
@@ -571,35 +602,43 @@ final class PeopleModel {
         let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
         if let i = completions.firstIndex(where: { $0.checklist_id == list.id }), let cid = completions[i].id as String? {
             completions[i].items_state = state
-            try? await DB.from("shift_checklist_completions").update(["items_state": state, "completed_at": completedAt]).eq("id", cid).run()
+            do {
+                try await DB.from("shift_checklist_completions").update(["items_state": state, "completed_at": completedAt]).eq("id", cid).run()
+            } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadChecklists(); return }
         } else {
-            try? await DB.from("shift_checklist_completions").insert([
-                "restaurant_id": rid, "checklist_id": list.id, "shift_id": sid, "date": key(Date()),
-                "staff_id": myId == "owner" || myId.isEmpty ? NSNull() : myId,
-                "items_state": state, "completed_at": completedAt,
-            ]).run()
+            do {
+                try await DB.from("shift_checklist_completions").insert([
+                    "restaurant_id": rid, "checklist_id": list.id, "shift_id": sid, "date": key(Date()),
+                    "staff_id": myId == "owner" || myId.isEmpty ? NSNull() : myId,
+                    "items_state": state, "completed_at": completedAt,
+                ]).run()
+            } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
             await loadChecklists()
         }
-        if allDone { flash(clType == "open" ? "Открытие готово" : "Закрытие готово") }
+        if allDone { flash(clType == "open" ? t("pe.checklistOpenDone") : t("pe.checklistCloseDone")) }
     }
 
     func saveChecklistTemplate(id: String?, role: String?, items: [String]) async {
         let clean = items.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         guard !clean.isEmpty else { flash(t("pe.addItem")); return }
         let roleVal: Any = role ?? NSNull()
-        if let id {
-            try? await DB.from("shift_checklists").update(["items": clean, "role": roleVal]).eq("id", id).run()
-        } else {
-            try? await DB.from("shift_checklists").insert([
-                "restaurant_id": rid, "type": clType, "items": clean, "role": roleVal,
-            ]).run()
-        }
+        do {
+            if let id {
+                try await DB.from("shift_checklists").update(["items": clean, "role": roleVal]).eq("id", id).run()
+            } else {
+                try await DB.from("shift_checklists").insert([
+                    "restaurant_id": rid, "type": clType, "items": clean, "role": roleVal,
+                ]).run()
+            }
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
         flash(t("pe.checklistSaved"))
         await loadChecklists()
     }
     func deleteChecklist(_ id: String) async {
         checklists.removeAll { $0.id == id }
-        try? await DB.from("shift_checklists").delete().eq("id", id).run()
+        do {
+            try await DB.from("shift_checklists").delete().eq("id", id).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadChecklists() }
     }
 
     // MARK: техкарты
@@ -616,17 +655,21 @@ final class PeopleModel {
     func saveTechCard(id: String?, name: String, category: String, items: [String]) async {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { flash(t("pe.needName")); return }
         let clean = items.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        if let id {
-            try? await DB.from("tech_cards").update(["name": name, "category": category, "items": clean]).eq("id", id).run()
-        } else {
-            try? await DB.from("tech_cards").insert(["restaurant_id": rid, "name": name, "category": category, "items": clean]).run()
-        }
+        do {
+            if let id {
+                try await DB.from("tech_cards").update(["name": name, "category": category, "items": clean]).eq("id", id).run()
+            } else {
+                try await DB.from("tech_cards").insert(["restaurant_id": rid, "name": name, "category": category, "items": clean]).run()
+            }
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
         flash(t("pe.saved"))
         await loadTechCards()
     }
     func deleteTechCard(_ id: String) async {
         techCards.removeAll { $0.id == id }
-        try? await DB.from("tech_cards").update(["is_active": false]).eq("id", id).run()
+        do {
+            try await DB.from("tech_cards").update(["is_active": false]).eq("id", id).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadTechCards() }
     }
 
     // создание обмена сотрудником
@@ -636,14 +679,15 @@ final class PeopleModel {
     func createSwap(scheduleId: String, targetId: String, note: String) async -> Bool {
         guard !scheduleId.isEmpty, !targetId.isEmpty else { flash(t("pe.pickShiftPeer")); return false }
         let noteVal: Any = note.isEmpty ? NSNull() : note
-        try? await DB.from("shift_swap_requests").insert([
-            "restaurant_id": rid, "schedule_id": scheduleId, "requester_id": myId,
-            "target_id": targetId, "status": "pending_peer", "note": noteVal,
-        ]).run()
-        try? await DB.from("notifications").insert([
-            "restaurant_id": rid, "staff_id": targetId, "type": "swap_request",
-            "title": "Запрос на обмен", "body": "\(myName) предлагает обмен сменой",
-        ]).run()
+        do {
+            try await DB.from("shift_swap_requests").insert([
+                "restaurant_id": rid, "schedule_id": scheduleId, "requester_id": myId,
+                "target_id": targetId, "status": "pending_peer", "note": noteVal,
+            ]).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
+        await Notify.send(type: "swap_request", title: t("pe.swapRequestTitle"), body: t("pe.swapRequestBody", ["name": myName]),
+                          audience: ["staff_ids": [targetId]], titleKey: "notify.swapRequestTitle",
+                          bodyKey: "notify.swapRequestBody", bodyParams: ["name": myName, "date": ""])
         flash(t("pe.requestSent"))
         await loadSwaps()
         return true
@@ -664,7 +708,9 @@ final class PeopleModel {
         guard let i = menu.firstIndex(where: { $0.id == item.id }) else { return }
         let next = !(menu[i].is_available ?? true)
         menu[i].is_available = next
-        try? await DB.from("menu_items").update(["is_available": next]).eq("id", item.id).run()
+        do {
+            try await DB.from("menu_items").update(["is_available": next]).eq("id", item.id).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadMenu() }
     }
     var stopCount: Int { menu.filter { $0.is_available == false }.count }
 
@@ -684,7 +730,9 @@ final class PeopleModel {
     var finishedOrders: [MenuOrder] { orders.filter { $0.status == "done" || $0.status == "cancelled" } }
     func setOrderStatus(_ o: MenuOrder, _ status: String) async {
         if let i = orders.firstIndex(where: { $0.id == o.id }) { orders[i].status = status }
-        try? await DB.from("menu_orders").update(["status": status]).eq("id", o.id).run()
+        do {
+            try await DB.from("menu_orders").update(["status": status]).eq("id", o.id).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadOrders() }
     }
 
     // закуп
@@ -713,10 +761,16 @@ final class PeopleModel {
             v["unit"] = unitTrim.isEmpty ? NSNull() : unitTrim
             return v
         }
-        try? await DB.from("purchase_items").insert(payload).run()
+        do {
+            try await DB.from("purchase_items").insert(payload).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
         let who = myName.isEmpty ? "" : "\(myName): "
-        let body = valid.count == 1 ? "\(who)\(valid[0].0)" : "\(who)\(valid.count)"
-        await Notify.send(type: "purchase", title: "\(catLabel) · \(t("pe.pTab"))", body: body, audience: ["managers": true], data: ["category": category])
+        let body = valid.count == 1 ? "\(who)\(valid[0].0)" : "\(who)\(t("st.positions", ["n": "\(valid.count)"]))"
+        await Notify.send(type: "purchase", title: "\(catLabel) · \(t("pe.pTab"))", body: body,
+                          audience: ["managers": true], titleKey: "notify.purchaseTitle", titleParams: ["category": category],
+                          bodyKey: valid.count > 1 ? "notify.purchasePositionsBody" : nil,
+                          bodyParams: valid.count > 1 ? ["who": who, "n": "\(valid.count)"] : nil,
+                          data: ["category": category])
         await loadPurchase()
     }
 
@@ -726,12 +780,16 @@ final class PeopleModel {
         let boughtBy: Any = (status == "bought" && myId != "owner") ? myId : NSNull()
         v["bought_by"] = boughtBy
         v["bought_at"] = status == "bought" ? ISO8601DateFormatter().string(from: Date()) : NSNull()
-        try? await DB.from("purchase_items").update(v).eq("id", it.id).run()
+        do {
+            try await DB.from("purchase_items").update(v).eq("id", it.id).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadPurchase() }
     }
 
     func removePurchase(_ it: PurchaseItem) async {
         purchase.removeAll { $0.id == it.id }
-        try? await DB.from("purchase_items").delete().eq("id", it.id).run()
+        do {
+            try await DB.from("purchase_items").delete().eq("id", it.id).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadPurchase() }
     }
 
     /// Текст списка к закупке (по цехам) — для копирования/отправки поставщику.
@@ -797,8 +855,11 @@ final class PeopleModel {
     }
 
     func saveDiscGrace(_ v: Int) async {
+        let prev = discGrace
         discGrace = v
-        try? await DB.from("restaurant_settings").update(["late_grace_min": v]).run()
+        do {
+            try await DB.from("restaurant_settings").update(["late_grace_min": v]).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); discGrace = prev }
     }
 
     func flash(_ m: String) {

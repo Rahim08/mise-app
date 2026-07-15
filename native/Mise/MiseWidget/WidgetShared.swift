@@ -14,6 +14,11 @@ public let kMiseAppGroup = "group.com.rahim.mise"
 /// UserDefaults key for the encoded snapshot inside the App Group suite.
 public let kMiseSnapshotKey = "mise.widget.snapshot.v1"
 
+/// UserDefaults key for the app's current language (Lang.rawValue), mirrored into the
+/// App Group suite so the widget extension (separate process/sandbox — can't read
+/// UserDefaults.standard of the main app) renders text in the same language as the app.
+public let kMiseWidgetLangKey = "mise.widget.lang"
+
 /// A small, self-contained snapshot of the three widget metrics.
 /// Money values are stored as raw Double + a currency symbol so the widget can
 /// format them identically to the app without depending on app-only code.
@@ -22,7 +27,10 @@ public struct MiseSnapshot: Codable, Sendable {
     public var currencySymbol: String
 
     // Касса дня / Cash of the day
-    public var cashIncome: Double
+    public var cashIncome: Double        // общая выручка (нал + карта)
+    public var cashCash: Double          // из неё — наличными
+    public var cashCard: Double          // из неё — картой
+    public var cashInkassation: Double   // инкассация смены
     public var cashExpense: Double
     public var cashClosing: Double
     /// false when the user is not allowed to see money (waiter / hookah master),
@@ -40,6 +48,9 @@ public struct MiseSnapshot: Codable, Sendable {
     public init(generatedAt: Date = Date(),
                 currencySymbol: String = "€",
                 cashIncome: Double = 0,
+                cashCash: Double = 0,
+                cashCard: Double = 0,
+                cashInkassation: Double = 0,
                 cashExpense: Double = 0,
                 cashClosing: Double = 0,
                 cashAvailable: Bool = false,
@@ -50,6 +61,9 @@ public struct MiseSnapshot: Codable, Sendable {
         self.generatedAt = generatedAt
         self.currencySymbol = currencySymbol
         self.cashIncome = cashIncome
+        self.cashCash = cashCash
+        self.cashCard = cashCard
+        self.cashInkassation = cashInkassation
         self.cashExpense = cashExpense
         self.cashClosing = cashClosing
         self.cashAvailable = cashAvailable
@@ -61,7 +75,8 @@ public struct MiseSnapshot: Codable, Sendable {
 
     public static let placeholder = MiseSnapshot(
         currencySymbol: "€",
-        cashIncome: 1850, cashExpense: 420, cashClosing: 1630, cashAvailable: true,
+        cashIncome: 4599.70, cashCash: 3210, cashCard: 1389.70, cashInkassation: 800,
+        cashExpense: 1548, cashClosing: 613.30, cashAvailable: true,
         hookahPaid: 14, hookahFree: 2, hookahRevenue: 1260,
         bookings: [
             SnapBooking(time: "19:00", guest: "Anna", table: "T4", party: 4),

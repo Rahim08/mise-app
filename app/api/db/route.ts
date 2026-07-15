@@ -67,6 +67,10 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   news_posts:                  { read: ['manager', 'analytics', 'stash', 'people'], write: ['manager', 'analytics', 'stash', 'people'] },
   // Заметки о гостях (CRM-бронирование): доступ — любой модуль.
   guest_notes:                 { read: ['manager', 'analytics', 'stash', 'people'], write: ['manager', 'analytics', 'stash', 'people'] },
+  // Google-отзывы (вкладка внутри Bookings): пишет только сервер (cron/sync-now
+  // через service-role напрямую, не через этот шлюз) — клиент только читает.
+  google_reviews:              { read: ['manager', 'analytics', 'stash', 'people'], write: [] },
+  google_rating_snapshots:     { read: ['manager', 'analytics', 'stash', 'people'], write: [] },
 }
 
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'like', 'ilike'])

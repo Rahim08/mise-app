@@ -253,7 +253,7 @@ final class StashModel {
 
     // MARK: подсказки бренда/вкуса (память склада — логика app/tobacco/page.tsx)
 
-    private func norm(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+    nonisolated private func norm(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
 
     /// Все известные бренды (включая нулевой остаток — это «память»).
     var allBrands: [String] {
@@ -322,10 +322,26 @@ final class StashModel {
 
     func saveMovement(_ rows: [MovRow], reason: String) async -> Bool {
         // Тримим ввод, чтобы лишние пробелы не плодили дубли на складе.
-        let filled = rows
+        var filled = rows
             .map { MovRow(brand: $0.brand.trimmingCharacters(in: .whitespaces), flavor: $0.flavor.trimmingCharacters(in: .whitespaces), grams: $0.grams) }
             .filter { !$0.brand.isEmpty && !$0.flavor.isEmpty && (Double($0.grams) ?? 0) > 0 }
         if filled.isEmpty { flash(t("st.fillRow")); return false }
+        // Схлопываем повторяющиеся бренд/вкус (сумма граммов) до параллельной записи —
+        // иначе два запроса по одному и тому же товару читают один и тот же "fresh"
+        // остаток и один апдейт затирает дельту другого.
+        do {
+            var merged: [String: MovRow] = [:]
+            var order: [String] = []
+            for r in filled {
+                let key = norm(r.brand) + "\u{0}" + norm(r.flavor)
+                if let ex = merged[key] {
+                    merged[key] = MovRow(brand: ex.brand, flavor: ex.flavor, grams: String((Double(ex.grams) ?? 0) + (Double(r.grams) ?? 0)))
+                } else {
+                    merged[key] = r; order.append(key)
+                }
+            }
+            filled = order.compactMap { merged[$0] }
+        }
         for r in filled where movMode != "in" {
             guard let item = stockOf(r.brand, r.flavor) else {
                 flash(t("st.notInStock", ["b": r.brand, "fl": r.flavor])); return false
@@ -336,31 +352,45 @@ final class StashModel {
         saving = true; defer { saving = false }
         let batchId = UUID().uuidString
         let fresh = (try? await DB.from("tobacco_stock").select().list(StockItem.self)) ?? stock
-        let defReason = reason.isEmpty ? (movMode == "in" ? "Поставка" : movMode == "out" ? "Выдача в зал" : "Списание") : reason
-        for r in filled {
-            let qty = Double(r.grams) ?? 0
-            // Нечувствительный к регистру/пробелам поиск + канонические бренд/вкус из склада — не плодим дубли.
-            let existing = fresh.first { norm($0.brand) == norm(r.brand) && norm($0.flavor) == norm(r.flavor) }
-            let brand = existing?.brand ?? r.brand
-            let flavor = existing?.flavor ?? r.flavor
-            do {
-                try await DB.from("tobacco_movements").insert([
-                    "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty,
-                    "type": movMode, "batch_id": batchId, "reason": defReason,
-                ]).run()
-                if let ex = existing {
-                    let delta = movMode == "in" ? qty : -qty
-                    try await DB.from("tobacco_stock").update(["quantity_g": ex.quantity_g + delta]).eq("id", ex.id).run()
-                } else if movMode == "in" {
-                    try await DB.from("tobacco_stock").insert([
-                        "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty, "flavor_name": flavor,
-                    ]).run()
+        let mode = movMode
+        let rid = rid
+        let defReason = reason.isEmpty ? (mode == "in" ? "Поставка" : mode == "out" ? "Выдача в зал" : "Списание") : reason
+        // Каждая строка — свой товар (после схлопывания дублей), запросы независимы →
+        // шлём параллельно вместо последовательной цепочки (было ~2×N round-trip'ов подряд).
+        // Значения из MainActor (mode/rid) сняты в локальные let ДО addTask — дочерние
+        // задачи не изолированы на MainActor и не могут читать его свойства напрямую.
+        let ok = await withTaskGroup(of: Bool.self) { group in
+            for r in filled {
+                group.addTask { [norm] in
+                    let qty = Double(r.grams) ?? 0
+                    // Нечувствительный к регистру/пробелам поиск + канонические бренд/вкус из склада — не плодим дубли.
+                    let existing = fresh.first { norm($0.brand) == norm(r.brand) && norm($0.flavor) == norm(r.flavor) }
+                    let brand = existing?.brand ?? r.brand
+                    let flavor = existing?.flavor ?? r.flavor
+                    do {
+                        try await DB.from("tobacco_movements").insert([
+                            "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty,
+                            "type": mode, "batch_id": batchId, "reason": defReason,
+                        ]).run()
+                        if let ex = existing {
+                            let delta = mode == "in" ? qty : -qty
+                            try await DB.from("tobacco_stock").update(["quantity_g": ex.quantity_g + delta]).eq("id", ex.id).run()
+                        } else if mode == "in" {
+                            try await DB.from("tobacco_stock").insert([
+                                "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty, "flavor_name": flavor,
+                            ]).run()
+                        }
+                        return true
+                    } catch {
+                        return false
+                    }
                 }
-            } catch {
-                flash(t("ai.errGeneric"))
-                return false
             }
+            var allOk = true
+            for await r in group where !r { allOk = false }
+            return allOk
         }
+        guard ok else { flash(t("ai.errGeneric")); await loadWarehouse(); return false }
         await loadWarehouse()
         // Выдача в зал (out) меняет venueBase — нужно сразу пересчитать смену.
         if movMode == "out" { await loadShift() }
@@ -377,13 +407,14 @@ final class StashModel {
         let lowItems = stock.filter { isLow($0) }
         guard !lowItems.isEmpty else { return }
         let names = lowItems.prefix(3).map { "\($0.brand) \($0.flavor)" }.joined(separator: ", ")
-        let suffix = lowItems.count > 3 ? " и ещё \(lowItems.count - 3)" : ""
+        let suffix = lowItems.count > 3 ? " " + t("st.andMore", ["n": String(lowItems.count - 3)]) : ""
         Task {
             await Notify.send(
                 type: "low_stock",
                 title: t("st.lowStock"),
                 body: "\(names)\(suffix)",
-                audience: ["managers": true]
+                audience: ["managers": true],
+                titleKey: "notify.lowStockTitle"
             )
         }
     }
@@ -1014,8 +1045,20 @@ private struct AddMovementSheet: View {
     @State private var writeoffVenue = false           // списание: false=со склада, true=с заведения
     @State private var venueGrams = ""                 // вес списания с заведения
     @State private var primed = false
+    @State private var confirmDiscard = false
 
     private var isEditing: Bool { editBatch != nil }
+    // Есть введённые данные → свайп вниз не должен молча их стирать (см. случай, когда
+    // заполнили много строк, пролистнули вверх перепроверить — и свайп закрыл лист).
+    private var isDirty: Bool {
+        !reason.trimmingCharacters(in: .whitespaces).isEmpty
+            || !venueGrams.isEmpty
+            || !picks.values.contains { !$0.isEmpty }
+            || rows.contains { !$0.brand.isEmpty || !$0.flavor.isEmpty || !$0.grams.isEmpty }
+    }
+    private func requestClose() {
+        if isDirty { confirmDiscard = true } else { dismiss() }
+    }
     private var totalLabel: String {
         switch m.movMode {
         case "in":  return t("st.totalIn")
@@ -1126,12 +1169,17 @@ private struct AddMovementSheet: View {
             }
             .navigationTitle(isEditing ? t("st.editMovement") : t("st.movement")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { requestClose() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(t("save")) { Task { await commit() } }.disabled(m.saving)
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
+            .interactiveDismissDisabled(isDirty)
+            .confirmationDialog(t("discard.title"), isPresented: $confirmDiscard, titleVisibility: .visible) {
+                Button(t("discard.confirm"), role: .destructive) { dismiss() }
+                Button(t("cancel"), role: .cancel) {}
+            } message: { Text(t("discard.msg")) }
             .onChange(of: m.movMode) { _, mode in if mode != "writeoff" { writeoffVenue = false } }
             .onAppear {
                 guard !primed else { return }
@@ -1231,9 +1279,14 @@ private struct AddInventorySheet: View {
     @Bindable var m: StashModel
     @Environment(\.dismiss) private var dismiss
     @State private var actuals: [String: String] = [:]
+    @State private var confirmDiscard = false
 
     private var items: [StockItem] {
         m.stock.sorted { "\($0.brand)\($0.flavor)" < "\($1.brand)\($1.flavor)" }
+    }
+    private var isDirty: Bool { actuals.values.contains { !$0.isEmpty } }
+    private func requestClose() {
+        if isDirty { confirmDiscard = true } else { dismiss() }
     }
 
     var body: some View {
@@ -1270,7 +1323,7 @@ private struct AddInventorySheet: View {
             }
             .navigationTitle(t("st.doInventory")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { requestClose() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(t("save")) {
                         Task {
@@ -1287,6 +1340,11 @@ private struct AddInventorySheet: View {
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
+            .interactiveDismissDisabled(isDirty)
+            .confirmationDialog(t("discard.title"), isPresented: $confirmDiscard, titleVisibility: .visible) {
+                Button(t("discard.confirm"), role: .destructive) { dismiss() }
+                Button(t("cancel"), role: .cancel) {}
+            } message: { Text(t("discard.msg")) }
         }
     }
 }

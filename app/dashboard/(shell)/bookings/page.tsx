@@ -10,7 +10,7 @@ import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
 import {
   Card, Btn, Badge, Field, SectionTitle, Segmented, SplitView, EmptyState, Spinner, Container,
-  Table, type TableColumn, type Tone,
+  Table, StatTile, type TableColumn, type Tone,
 } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
 
@@ -57,7 +57,7 @@ export default function BookingsPage() {
   const { t: tr, locale } = useI18n()
   const { restaurant } = useDash()
   const restaurantId = restaurant?.id || ''
-  const [tab, setTab] = useState<'bookings' | 'guests'>('bookings')
+  const [tab, setTab] = useState<'bookings' | 'guests' | 'reviews'>('bookings')
 
   // ── БРОНИ ──
   const [visibleMonth, setVisibleMonth] = useState(() => new Date())
@@ -196,6 +196,36 @@ export default function BookingsPage() {
     setNoteSaving(false)
   }
 
+  // ── ОТЗЫВЫ (Google Maps, через Places API) ──
+  type GReview = {
+    id: string; author_name?: string | null; rating?: number | null
+    review_text?: string | null; relative_time?: string | null; review_time?: string | null
+  }
+  type GSnapshot = { captured_at: string; rating?: number | null; ratings_total?: number | null }
+  const [placeConfigured, setPlaceConfigured] = useState<boolean | null>(null)
+  const [gReviews, setGReviews] = useState<GReview[] | null>(null)
+  const [gSnapshots, setGSnapshots] = useState<GSnapshot[] | null>(null)
+
+  useEffect(() => {
+    if (tab !== 'reviews' || placeConfigured !== null || !restaurantId) return
+    ;(async () => {
+      const { data: settings } = await db.from('restaurant_settings').select('google_place_id').limit(1)
+      const row = Array.isArray(settings) ? settings[0] : settings
+      const configured = !!row?.google_place_id
+      setPlaceConfigured(configured)
+      if (!configured) return
+      const [{ data: reviews }, { data: snaps }] = await Promise.all([
+        db.from('google_reviews').select('*').eq('restaurant_id', restaurantId).order('review_time', { ascending: false }),
+        db.from('google_rating_snapshots').select('captured_at, rating, ratings_total').eq('restaurant_id', restaurantId).order('captured_at', { ascending: true }).limit(90),
+      ])
+      setGReviews(reviews || []); setGSnapshots(snaps || [])
+    })()
+  }, [tab, restaurantId])
+
+  const latestSnapshot = gSnapshots && gSnapshots.length ? gSnapshots[gSnapshots.length - 1] : null
+  const ratingTrend = useMemo(() => (gSnapshots || []).map(s => s.rating || 0).filter(v => v > 0), [gSnapshots])
+  const stars = (n: number) => { const f = Math.max(0, Math.min(5, Math.round(n))); return '★'.repeat(f) + '☆'.repeat(5 - f) }
+
   const guestColumns: TableColumn<Guest>[] = [
     { key: 'name', label: tr('bk.name'), sortable: true, render: g => <span style={{ fontWeight: 600, color: 'var(--tx)' }}>{g.name}</span> },
     { key: 'phone', label: tr('bk.phone'), render: g => g.phone || <span style={{ color: 'var(--tx3)' }}>—</span> },
@@ -216,7 +246,7 @@ export default function BookingsPage() {
     <Container size="wide">
       <SectionTitle title={tr('dash.navBookings')} sub={tr('bk.sub')}
         right={<Segmented small value={tab} onChange={v => setTab(v as any)}
-          options={[{ value: 'bookings', label: tr('bk.tabBookings') }, { value: 'guests', label: tr('bk.tabGuests') }]} />} />
+          options={[{ value: 'bookings', label: tr('bk.tabBookings') }, { value: 'guests', label: tr('bk.tabGuests') }, { value: 'reviews', label: tr('bk.tabReviews') }]} />} />
 
       {tab === 'bookings' ? (
         <SplitView
@@ -327,7 +357,7 @@ export default function BookingsPage() {
             />
           )}
         />
-      ) : (
+      ) : tab === 'guests' ? (
         <div>
           {allBookings === null ? <Spinner /> : (
             <div className="ui-split">
@@ -369,7 +399,75 @@ export default function BookingsPage() {
             </div>
           )}
         </div>
+      ) : (
+        <div>
+          {placeConfigured === null ? <Spinner /> : !placeConfigured ? (
+            <EmptyState
+              icon={<svg width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0119 9.5C19 14.8 12 21 12 21z" /><circle cx="12" cy="9.5" r="2.4" /></svg>}
+              title={tr('bk.rvNotConfigured')} sub={tr('bk.rvNotConfiguredSub')}
+              action={<Btn onClick={() => window.location.assign('/dashboard/settings')}>{tr('bk.rvGoSettings')}</Btn>}
+            />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+                <StatTile label={tr('bk.rvRating')} value={latestSnapshot?.rating ?? '—'} tone="accent" trend={ratingTrend} />
+                <StatTile label={tr('bk.rvTotal')} value={latestSnapshot?.ratings_total ?? '—'} tone="ok" />
+              </div>
+
+              {gSnapshots && gSnapshots.length >= 2 && (
+                <Card>
+                  <div style={{ fontSize: '.72rem', fontWeight: 700, color: 'var(--tx2)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>{tr('bk.rvTrend')}</div>
+                  <RatingTrendSVG points={gSnapshots.map(s => ({ rating: s.rating || 0 }))} />
+                </Card>
+              )}
+
+              <div>
+                <div style={{ fontSize: '.72rem', fontWeight: 700, color: 'var(--tx2)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>{tr('bk.rvList')}</div>
+                {gReviews === null ? <Spinner compact /> : gReviews.length === 0 ? (
+                  <Card><div style={{ textAlign: 'center', padding: '16px 0', color: 'var(--tx2)', fontSize: '.85rem' }}>{tr('bk.rvNone')}</div></Card>
+                ) : (
+                  <Card pad={0}>
+                    {gReviews.map(r => (
+                      <div key={r.id} style={{ padding: '12px 16px', borderBottom: 'var(--hairline)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                          <span style={{ fontWeight: 600, fontSize: '.85rem', color: 'var(--tx)' }}>{r.author_name || tr('bk.rvAnon')}</span>
+                          <span style={{ fontSize: '.74rem', color: 'var(--tx3)', flexShrink: 0 }}>{r.relative_time}</span>
+                        </div>
+                        <div style={{ color: 'var(--accent)', fontSize: '.8rem', margin: '2px 0 4px', letterSpacing: 1 }}>{stars(r.rating || 0)}</div>
+                        {r.review_text && <div style={{ fontSize: '.82rem', color: 'var(--tx2)', lineHeight: 1.4 }}>{r.review_text}</div>}
+                      </div>
+                    ))}
+                  </Card>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </Container>
+  )
+}
+
+// Рейтинг во времени (1-5), собранный своими снэпшотами при каждом sync — простой
+// hand-rolled SVG в стиле графиков app/analytics/page.tsx, без завязки на валюту.
+function RatingTrendSVG({ points }: { points: { rating: number }[] }) {
+  const W = 320, H = 110
+  const pad = { top: 10, right: 10, bottom: 6, left: 18 }
+  const min = 1, max = 5
+  const toX = (i: number) => pad.left + (i / (points.length - 1)) * (W - pad.left - pad.right)
+  const toY = (v: number) => pad.top + ((max - v) / (max - min)) * (H - pad.top - pad.bottom)
+  const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(p.rating).toFixed(1)}`).join(' ')
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: H }}>
+      {[1, 2, 3, 4, 5].map(v => (
+        <g key={v}>
+          <line x1={pad.left} x2={W - pad.right} y1={toY(v)} y2={toY(v)} stroke="currentColor" strokeOpacity="0.06" />
+          <text x={2} y={toY(v) + 3} fontSize="8" fill="currentColor" fillOpacity="0.35">{v}</text>
+        </g>
+      ))}
+      <path d={path} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      {points.map((p, i) => <circle key={i} cx={toX(i)} cy={toY(p.rating)} r="2.5" fill="var(--accent)" />)}
+    </svg>
   )
 }

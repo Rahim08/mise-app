@@ -10,10 +10,11 @@ enum DB {
     static func from(_ table: String) -> DBQuery { DBQuery(table) }
 
     /// Очистить кеш для конкретной таблицы (вызывать после мутаций).
-    static func invalidateCache(table: String) { CacheStore.shared.invalidate(table: table) }
+    /// Fire-and-forget: порядок не критичен — кеш и так живёт максимум 5 минут (TTL).
+    static func invalidateCache(table: String) { Task { await CacheStore.shared.invalidate(table: table) } }
 
     /// Очистить весь кеш.
-    static func clearCache() { CacheStore.shared.clearAll() }
+    static func clearCache() { Task { await CacheStore.shared.clearAll() } }
 }
 
 // MARK: - In-memory cache (оффлайн-поддержка)
@@ -146,7 +147,9 @@ final class DBQuery: @unchecked Sendable {
                 last = error
                 // не ретраить осмысленные ответы сервера (4xx) — только сетевые/5xx
                 if case APIError.http(let code, _) = error, (400..<500).contains(code) {
+                    #if DEBUG
                     print("[DB] \(table) \(op) HTTP \(code): \(error)")
+                    #endif
                     throw error
                 }
                 if i < attempts { try? await Task.sleep(nanoseconds: UInt64(i) * 400_000_000) }
@@ -158,7 +161,9 @@ final class DBQuery: @unchecked Sendable {
             return stale // UI покажет "stale" индикатор
         }
 
+        #if DEBUG
         print("[DB] \(table) \(op) failed after retries: \(last)")
+        #endif
         throw last
     }
 
@@ -182,10 +187,14 @@ final class DBQuery: @unchecked Sendable {
         do {
             let wrap = try JSONDecoder().decode(Wrap<[Lossy<T>]>.self, from: data)
             let rows = (wrap.data ?? []).compactMap { $0.value }
+            #if DEBUG
             print("[DB] \(table) list filters=\(filters) -> \(rows.count) rows (raw: \(String(data: data, encoding: .utf8)?.prefix(200) ?? ""))")
+            #endif
             return rows
         } catch {
+            #if DEBUG
             print("[DB] \(table) list DECODE FAILED: \(error) raw: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "")")
+            #endif
             throw error
         }
     }
@@ -197,7 +206,9 @@ final class DBQuery: @unchecked Sendable {
         do {
             return try JSONDecoder().decode(Wrap<T>.self, from: data).data
         } catch {
+            #if DEBUG
             print("[DB] \(table) single DECODE FAILED: \(error) raw: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "")")
+            #endif
             throw error
         }
     }

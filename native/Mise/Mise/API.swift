@@ -17,6 +17,16 @@ enum APIError: Error, LocalizedError {
 enum API {
     static let base = "https://www.misesuite.com"
 
+    /// Сервер отверг PIN-сессию (истёкший/невалидный cookie), пока клиент считал себя
+    /// авторизованным (кэш в UserDefaults ещё "валиден"). Без этого хука экран остаётся
+    /// пустым/замороженным — все ошибки в DB.swift глотаются через `try?`. AppModel
+    /// подписывается в start() и возвращает на PIN вместо мёртвого экрана.
+    static var onUnauthorized: (@Sendable () -> Void)?
+
+    private static func checkAuth(_ code: Int) {
+        if code == 401 { onUnauthorized?() }
+    }
+
     static func postJSON<T: Decodable>(_ path: String, body: [String: String], as type: T.Type) async throws -> T {
         guard let url = URL(string: base + path) else { throw APIError.badURL }
         var req = URLRequest(url: url)
@@ -66,7 +76,10 @@ enum API {
         req.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1, nil) }
-        guard (200..<300).contains(http.statusCode) else { throw APIError.http(http.statusCode, serverMessage(data)) }
+        guard (200..<300).contains(http.statusCode) else {
+            checkAuth(http.statusCode)
+            throw APIError.http(http.statusCode, serverMessage(data))
+        }
         return data
     }
 }
@@ -81,6 +94,16 @@ struct Restaurant: Codable, Identifiable, Sendable {
     let has_owner_pin: Bool?
     let subscription_plan: String?
     let ai_enabled: Bool?
+    // Биллинг v2 (веб уже читает через lib/plans.ts entitlements()) — без этих полей
+    // iOS не видит купленный AI-аддон и статус триала/отмены подписки.
+    let subscription_status: String?
+    let addon_ai: Bool?
+    let addon_modules: [String]?
+    let comp_apps: [String]?
+    let extra_seats: Int?
+    let staff_limit: Int?
+    let billing_interval: String?
+    let trial_ends_at: String?
 }
 
 struct RestaurantInfoResponse: Codable, Sendable {

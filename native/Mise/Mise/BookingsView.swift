@@ -162,8 +162,10 @@ final class BookingsModel {
             values["created_by"] = b.created_by ?? NSNull()
             values["created_by_name"] = b.created_by_name ?? NSNull()
             try? await DB.from("bookings").insert(values).run()
+            let segs = notifyBodySegments(b)
             await Notify.send(type: "booking", title: t("bk.new"), body: notifyBody(b),
-                              audience: ["managers": true], data: ["module": "bookings"])
+                              audience: ["managers": true], titleKey: "notify.bookingTitle",
+                              bodySegments: segs.isEmpty ? nil : segs, data: ["module": "bookings"])
         } else {
             values["updated_at"] = ISO8601DateFormatter().string(from: Date())
             try? await DB.from("bookings").update(values).eq("id", b.id).run()
@@ -173,7 +175,8 @@ final class BookingsModel {
         allBookingsLoaded = false // invalidate cache
     }
 
-    /// Краткий текст пуша по брони: «Анна · 4 гостя · 19:30 · стол 5».
+    /// Краткий текст пуша по брони: «Анна · 4 гостя · 19:30 · стол 5». Литерал-фолбэк
+    /// (язык отправителя) — реальный рендер получателю уходит через notifyBodySegments.
     private func notifyBody(_ b: Booking) -> String {
         var parts: [String] = []
         if let n = b.guest_name, !n.isEmpty { parts.append(n) }
@@ -183,6 +186,19 @@ final class BookingsModel {
         let day = b.booking_date ?? key(Date())
         if day != key(Date()) { parts.append(day) }
         return parts.isEmpty ? t("bk.new") : parts.joined(separator: " · ")
+    }
+
+    /// То же самое, но «стол» переводится сервером на язык получателя — остальные части
+    /// (имя, число, время, дата) без лейбла, переводить нечего.
+    private func notifyBodySegments(_ b: Booking) -> [[String: String]] {
+        var segs: [[String: String]] = []
+        if let n = b.guest_name, !n.isEmpty { segs.append(["value": n]) }
+        if let g = b.guests_count { segs.append(["value": "\(g)"]) }
+        if let tm = b.booking_time, !tm.isEmpty { segs.append(["value": tm]) }
+        if let tbl = b.table_label, !tbl.isEmpty { segs.append(["key": "notify.bookingTable", "value": tbl]) }
+        let day = b.booking_date ?? key(Date())
+        if day != key(Date()) { segs.append(["value": day]) }
+        return segs
     }
 
     func delete(_ b: Booking) async {
@@ -223,6 +239,7 @@ struct BookingsView: View {
     @State private var showEditor = false
     @State private var pendingDelete: Booking?
     @State private var showGuests = false
+    @State private var showReviews = false
     @State private var selectedRange: BookingRange = .today
     @State private var searchText = ""
     @State private var duplicating: Booking?
@@ -348,6 +365,7 @@ struct BookingsView: View {
                 }
                 .overlay(alignment: .bottomTrailing) {
                     VStack(spacing: 12) {
+                        reviewsButton
                         guestsButton(m)
                         addButton
                     }
@@ -383,6 +401,9 @@ struct BookingsView: View {
                         prefillVisits: prefillVisits,
                         prefillNoShows: prefillNoShows
                     )
+                }
+                .sheet(isPresented: $showReviews) {
+                    GoogleReviewsView()
                 }
                 .sheet(isPresented: $showGuests) {
                     GuestsView(m: m, onNewBooking: { name, phone, visits, noShows in
@@ -470,7 +491,7 @@ struct BookingsView: View {
     private func bookingRow(_ b: Booking, m: BookingsModel) -> some View {
         let visits = pastVisitCount(for: b, in: m.allBookings)
         // WhatsApp-свайп: вправо=пришёл, неполный влево=[опаздывает][удалить], полный влево=удалить (с подтв.).
-        return SwipeActionRow(
+        SwipeActionRow(
             leading: canEdit(b) ? SwipeAction(label: t("bk.stArrived"), systemImage: "checkmark.circle.fill", tint: BrandKit.analytics) {
                 Task { await m.setStatus(b, to: "arrived") }
             } : nil,
@@ -601,6 +622,19 @@ struct BookingsView: View {
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40)
+    }
+
+    private var reviewsButton: some View {
+        Button {
+            showReviews = true
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+            Image(systemName: "star.fill").font(.system(size: 18, weight: .semibold)).foregroundStyle(BK_ACCENT)
+                .frame(width: 46, height: 46)
+                .background(.ultraThinMaterial, in: Circle())
+                .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+        }
+        .padding(.trailing, 20)
     }
 
     private func guestsButton(_ m: BookingsModel) -> some View {

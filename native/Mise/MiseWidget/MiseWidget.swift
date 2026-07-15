@@ -118,8 +118,8 @@ private struct AccessoryWidgetView: View {
         case .accessoryInline:
             switch metric {
             case .cash:     Text("\(money(snap.cashClosing))")
-            case .hookahs:  Text("\(snap.hookahPaid) кальянов")
-            case .bookings: Text(nextBooking.map { "\($0.time) \($0.guest)" } ?? "Броней нет")
+            case .hookahs:  Text("\(snap.hookahPaid) \(wt("wg.hookahsShort"))")
+            case .bookings: Text(nextBooking.map { "\($0.time) \($0.guest)" } ?? wt("wg.noBookings"))
             }
 
         case .accessoryCircular:
@@ -148,21 +148,21 @@ private struct AccessoryWidgetView: View {
             VStack(alignment: .leading, spacing: 2) {
                 switch metric {
                 case .cash:
-                    Label("Касса дня", systemImage: "creditcard.fill").font(.system(size: 12, weight: .semibold))
+                    Label(wt("wg.cashTitle"), systemImage: "creditcard.fill").font(.system(size: 12, weight: .semibold))
                     Text(money(snap.cashClosing)).font(.system(size: 18, weight: .bold))
-                    Text("Выручка \(money(snap.cashIncome))").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("\(wt("wg.revenue")) \(money(snap.cashIncome))").font(.system(size: 11)).foregroundStyle(.secondary)
                 case .hookahs:
-                    Label("Кальяны", systemImage: "smoke.fill").font(.system(size: 12, weight: .semibold))
-                    Text("\(snap.hookahPaid) платных").font(.system(size: 16, weight: .bold))
-                    Text("+\(snap.hookahFree) бесплатных").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Label(wt("wg.hookahShort"), systemImage: "smoke.fill").font(.system(size: 12, weight: .semibold))
+                    Text("\(snap.hookahPaid) \(wt("wg.paid"))").font(.system(size: 16, weight: .bold))
+                    Text("+\(snap.hookahFree) \(wt("wg.free"))").font(.system(size: 11)).foregroundStyle(.secondary)
                 case .bookings:
-                    Label("Брони", systemImage: "calendar.badge.clock").font(.system(size: 12, weight: .semibold))
+                    Label(wt("wg.bookingsShort"), systemImage: "calendar.badge.clock").font(.system(size: 12, weight: .semibold))
                     if let b = nextBooking {
                         Text("\(b.time) · \(b.guest)").font(.system(size: 15, weight: .bold)).lineLimit(1)
-                        Text(b.table.isEmpty ? "\(b.party) гост." : "\(b.table) · \(b.party) гост.")
+                        Text(b.table.isEmpty ? "\(b.party) \(wt("wg.guestsShort"))" : "\(b.table) · \(b.party) \(wt("wg.guestsShort"))")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                     } else {
-                        Text("Броней нет").font(.system(size: 13)).foregroundStyle(.secondary)
+                        Text(wt("wg.noBookings")).font(.system(size: 13)).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -201,6 +201,8 @@ private struct EmptyState: View {
 
 // MARK: - Касса дня
 
+/// Владельцу важнее состав кассы (выручка, нал/карта, расход, инкассация), чем итоговый
+/// остаток — его показываем мелкой пометкой в углу, а не героем экрана.
 private struct CashWidget: View {
     let snap: MiseSnapshot
     let accent: Color
@@ -208,43 +210,75 @@ private struct CashWidget: View {
 
     private func money(_ v: Double) -> String { SnapMoney.s(v, symbol: snap.currencySymbol) }
 
+    private var cashRatio: CGFloat {
+        let total = snap.cashCash + snap.cashCard
+        guard total > 0 else { return 0.5 }
+        return CGFloat(snap.cashCash / total)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            WidgetHeader(title: "Касса дня", symbol: "creditcard.fill", accent: accent)
+            WidgetHeader(title: wt("wg.cashTitle"), symbol: "creditcard.fill", accent: accent)
             if !snap.cashAvailable {
-                EmptyState(text: "Нет смены")
+                EmptyState(text: wt("wg.noShift"))
             } else if family == .systemSmall {
                 Spacer(minLength: 4)
-                Text("Остаток").font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
-                Text(money(snap.cashClosing)).font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
+                Text(wt("wg.revenue")).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
+                Text(money(snap.cashIncome)).font(.system(size: 21, weight: .bold)).foregroundStyle(accent)
                     .minimumScaleFactor(0.6).lineLimit(1)
                 Spacer(minLength: 6)
                 HStack(spacing: 4) {
-                    Image(systemName: "arrow.up").font(.system(size: 9, weight: .bold)).foregroundStyle(accent)
-                    Text(money(snap.cashIncome)).font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.8))
-                        .minimumScaleFactor(0.6).lineLimit(1)
-                }
+                    Text(wt("wg.cash")).font(.system(size: 10)).foregroundStyle(.white.opacity(0.45))
+                    Text(money(snap.cashCash)).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.8))
+                }.minimumScaleFactor(0.6).lineLimit(1)
             } else {
-                Spacer(minLength: 8)
-                HStack(spacing: 12) {
-                    cell("Выручка", money(snap.cashIncome), accent)
-                    cell("Расход", money(snap.cashExpense), .white.opacity(0.55))
+                Spacer(minLength: 6)
+                Text(money(snap.cashIncome)).font(.system(size: 26, weight: .bold)).foregroundStyle(accent)
+                    .minimumScaleFactor(0.6).lineLimit(1)
+                // Полоска сравнения нал/карта — обе нейтральные (без акцента), различаются
+                // только яркостью; акцент зарезервирован за итоговой выручкой выше.
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        Capsule().fill(Color.white.opacity(0.85)).frame(width: geo.size.width * cashRatio)
+                        Capsule().fill(Color.white.opacity(0.26))
+                    }
                 }
-                Spacer(minLength: 8)
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Остаток").font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                .frame(height: 7)
+                .padding(.top, 9)
+                HStack {
+                    splitLabel(wt("wg.cash"), money(snap.cashCash))
                     Spacer()
-                    Text(money(snap.cashClosing)).font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
-                        .minimumScaleFactor(0.6).lineLimit(1)
+                    splitLabel(wt("wg.card"), money(snap.cashCard), trailing: true)
+                }.padding(.top, 7)
+                Spacer(minLength: 6)
+                HStack(spacing: 12) {
+                    cell(wt("wg.expense"), money(snap.cashExpense), .white.opacity(0.55))
+                    cell(wt("wg.inkassation"), money(snap.cashInkassation), .white.opacity(0.55))
                 }
             }
+        }
+        .overlay(alignment: .topTrailing) {
+            if snap.cashAvailable && family != .systemSmall {
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(wt("wg.balance")).font(.system(size: 9.5)).foregroundStyle(.white.opacity(0.35))
+                    Text(money(snap.cashClosing)).font(.system(size: 11.5, weight: .bold)).foregroundStyle(.white.opacity(0.6))
+                }
+            }
+        }
+    }
+
+    private func splitLabel(_ label: String, _ value: String, trailing: Bool = false) -> some View {
+        VStack(alignment: trailing ? .trailing : .leading, spacing: 1) {
+            Text(label).font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.5))
+            Text(value).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(.white.opacity(0.85))
+                .minimumScaleFactor(0.6).lineLimit(1)
         }
     }
 
     private func cell(_ label: String, _ value: String, _ c: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
-            Text(value).font(.system(size: 16, weight: .semibold)).foregroundStyle(c)
+            Text(value).font(.system(size: 14, weight: .semibold)).foregroundStyle(c)
                 .minimumScaleFactor(0.6).lineLimit(1)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -259,22 +293,22 @@ private struct HookahWidget: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            WidgetHeader(title: "Кальяны смены", symbol: "smoke.fill", accent: accent)
+            WidgetHeader(title: wt("wg.hookahTitle"), symbol: "smoke.fill", accent: accent)
             if family == .systemSmall {
                 Spacer(minLength: 4)
                 Text("\(snap.hookahPaid)").font(.system(size: 30, weight: .bold)).foregroundStyle(.white)
-                Text("платных").font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
+                Text(wt("wg.paid")).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
                 Spacer(minLength: 6)
-                Text("+\(snap.hookahFree) бесплатных").font(.system(size: 11)).foregroundStyle(.white.opacity(0.6))
+                Text("+\(snap.hookahFree) \(wt("wg.free"))").font(.system(size: 11)).foregroundStyle(.white.opacity(0.6))
             } else {
                 Spacer(minLength: 8)
                 HStack(spacing: 12) {
-                    stat("\(snap.hookahPaid)", "платных", accent)
-                    stat("\(snap.hookahFree)", "бесплатных", .white.opacity(0.6))
+                    stat("\(snap.hookahPaid)", wt("wg.paid"), accent)
+                    stat("\(snap.hookahFree)", wt("wg.free"), .white.opacity(0.6))
                 }
                 Spacer(minLength: 8)
                 HStack(alignment: .firstTextBaseline) {
-                    Text("Выручка").font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                    Text(wt("wg.revenue")).font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
                     Spacer()
                     Text(SnapMoney.s(snap.hookahRevenue, symbol: snap.currencySymbol))
                         .font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
@@ -305,9 +339,9 @@ private struct BookingWidget: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            WidgetHeader(title: "Ближайшие брони", symbol: "calendar.badge.clock", accent: accent)
+            WidgetHeader(title: wt("wg.bookingsTitle"), symbol: "calendar.badge.clock", accent: accent)
             if rows.isEmpty {
-                EmptyState(text: "Броней нет")
+                EmptyState(text: wt("wg.noBookings"))
             } else {
                 Spacer(minLength: 6)
                 VStack(alignment: .leading, spacing: family == .systemSmall ? 6 : 8) {
@@ -324,7 +358,7 @@ private struct BookingWidget: View {
                 .font(.system(size: 13, weight: .bold)).foregroundStyle(accent)
                 .frame(width: 42, alignment: .leading)
             VStack(alignment: .leading, spacing: 1) {
-                Text(b.guest.isEmpty ? "Гость" : b.guest)
+                Text(b.guest.isEmpty ? wt("wg.guest") : b.guest)
                     .font(.system(size: 13, weight: .medium)).foregroundStyle(.white).lineLimit(1)
                 if family != .systemSmall {
                     HStack(spacing: 6) {

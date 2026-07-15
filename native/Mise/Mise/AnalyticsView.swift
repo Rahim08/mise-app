@@ -285,6 +285,22 @@ final class AnalyticsModel {
 
     // касса
     var filledShifts: [Shift] { shifts.filter { ($0.income ?? 0) > 0 || ($0.total_expense ?? 0) > 0 } }
+    var lastFilledDate: Date? { filledShifts.last.flatMap { df.date(from: $0.date) } }
+    // «Вход» дня N считаем как «Кассу» дня N-1 из этого же списка, а не хранимое поле:
+    // opening_balance пишется один раз при открытии смены и может «застыть» на 0,
+    // если предыдущий день был закрыт позже (см. баг SO 2026-07-07/07-01).
+    // Первая строка — единственная без предыдущей строки в этом же списке; она же
+    // всегда первый активный день выбранного месяца, поэтому её «до» берём из закрытия
+    // последней смены прошлого месяца (prevShifts уже загружен для сравнения периодов).
+    var filledShiftsDisplay: [Shift] {
+        var rows = filledShifts
+        guard !rows.isEmpty else { return rows }
+        if rows.count > 1 {
+            for i in 1..<rows.count { rows[i].opening_balance = rows[i - 1].closing_balance }
+        }
+        if let prevClose = prevShifts.last?.closing_balance { rows[0].opening_balance = prevClose }
+        return rows
+    }
     var shiftsWithInk: [Shift] { shifts.filter { ($0.inkassation ?? 0) > 0 || (inkDetails[$0.id]?.expense ?? 0) > 0 } }
 
     // прогноз
@@ -353,11 +369,11 @@ final class AnalyticsModel {
         }
     }
 
-    struct DailyIncome: Identifiable { let id = UUID(); let day: Int; let income: Double }
+    struct DailyIncome: Identifiable { let id = UUID(); let day: Int; let date: String; let income: Double }
     var dailyIncome: [DailyIncome] {
         periodShifts.compactMap { s in
             guard let d = Int(s.date.suffix(2)) else { return nil }
-            return DailyIncome(day: d, income: s.income ?? 0)
+            return DailyIncome(day: d, date: s.date, income: s.income ?? 0)
         }
     }
 
@@ -541,7 +557,7 @@ final class AnalyticsModel {
         let cols = [t("an.csvDate"), t("an.csvOpening"), t("an.csvIncome"),
                     t("an.csvExpense"), t("an.csvInkass"), t("an.csvClosing")]
         var lines = [cols.joined(separator: ",")]
-        for s in filledShifts {
+        for s in filledShiftsDisplay {
             let row = [
                 s.date,
                 String(format: "%.2f", s.opening_balance ?? 0),
@@ -575,10 +591,14 @@ final class AnalyticsModel {
         return url
     }
 
-    /// Render a clean A4 analytics report (header + summary cards + daily table).
+    /// Render an A4 analytics report: header, trend-aware summary cards, an income/expense
+    /// mini bar chart, and a shaded, monospaced-digit daily table for legibility at print size.
     func buildPDF() -> Data {
         let pageW: CGFloat = 595, pageH: CGFloat = 842, margin: CGFloat = 40
         let accent = UIColor(red: 0.20, green: 0.78, blue: 0.35, alpha: 1)   // BrandKit.analytics
+        let expenseColor = UIColor.systemRed
+        let inkassColor = UIColor.systemOrange
+        let avgColor = UIColor.systemGray
 
         let cols: [(String, CGFloat)] = [
             (t("an.csvDate"),    95),
@@ -591,18 +611,25 @@ final class AnalyticsModel {
         let tableW = cols.reduce(0) { $0 + $1.1 }
 
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageW, height: pageH))
-        return renderer.pdfData { ctx in
+        // Форсируем светлую тему для резолва семантических цветов — см. коммент
+        // в ReportExportView.buildPDF (та же причина нечитаемого PDF в тёмной теме).
+        // performAsCurrent мостится из ObjC как Void-closure, результат — через var.
+        var pdf = Data()
+        UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+        pdf = renderer.pdfData { ctx in
             ctx.beginPage()
             var y: CGFloat = 0
 
-            // helper: draw text in a rect (clips/aligns).
+            // helper: draw text in a rect (clips/aligns); mono uses tabular figures so
+            // decimal points in money columns line up vertically.
             func text(_ s: String, _ x: CGFloat, _ yy: CGFloat, size: CGFloat,
                       weight: UIFont.Weight = .regular, color: UIColor = .label,
-                      width: CGFloat? = nil, align: NSTextAlignment = .left) {
+                      width: CGFloat? = nil, align: NSTextAlignment = .left, mono: Bool = false) {
                 let p = NSMutableParagraphStyle(); p.alignment = align; p.lineBreakMode = .byTruncatingTail
+                let font = mono ? UIFont.monospacedDigitSystemFont(ofSize: size, weight: weight)
+                                : UIFont.systemFont(ofSize: size, weight: weight)
                 let attrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: size, weight: weight),
-                    .foregroundColor: color, .paragraphStyle: p,
+                    .font: font, .foregroundColor: color, .paragraphStyle: p,
                 ]
                 (s as NSString).draw(in: CGRect(x: x, y: yy, width: width ?? (pageW - x - margin), height: size + 8),
                                      withAttributes: attrs)
@@ -612,58 +639,116 @@ final class AnalyticsModel {
             accent.setFill(); UIRectFill(CGRect(x: 0, y: 0, width: pageW, height: 6))
             y = margin
             text(t("an.pdfTitle"), margin, y, size: 22, weight: .bold)
-            let df = DateFormatter(); df.dateFormat = "dd.MM.yyyy"; df.locale = appLocale()
-            text(t("an.pdfGenerated") + " " + df.string(from: Date()), margin, y + 6,
+            let genDf = DateFormatter(); genDf.dateFormat = "dd.MM.yyyy"; genDf.locale = appLocale()
+            text(t("an.pdfGenerated") + " " + genDf.string(from: Date()), margin, y + 6,
                  size: 11, color: .secondaryLabel, width: tableW, align: .right)
             y += 32
             text(navLabel, margin, y, size: 13, weight: .semibold, color: .secondaryLabel)
-            y += 34
+            y += 30
 
-            // Summary cards
+            // Summary cards — colored edge stripe + trend vs. previous month on income/expense
             let gap: CGFloat = 10
             let cardW = (tableW - gap * 3) / 4
-            let cardH: CGFloat = 58
-            let cards: [(String, String, UIColor)] = [
-                (t("an.income"),    Money.s(totalIncome),          accent),
-                (t("an.expense"),   Money.s(totalExpense),         .systemRed),
-                (t("mg.inkass"),    Money.s(totalInkass),          .systemOrange),
-                (t("an.avgPerDay"), Money.s(dailyAvg.rounded()),   .systemGray),
+            let cardH: CGFloat = 64
+            struct Card { let label: String; let value: String; let color: UIColor; let delta: Double? }
+            let incomeDelta: Double? = prevIncome > 0 ? (totalIncome - prevIncome) / prevIncome * 100 : nil
+            let expenseDelta: Double? = prevExpense > 0 ? (totalExpense - prevExpense) / prevExpense * 100 : nil
+            let cards: [Card] = [
+                Card(label: t("an.income"),    value: Money.s(totalIncome),        color: accent,       delta: incomeDelta),
+                Card(label: t("an.expense"),   value: Money.s(totalExpense),       color: expenseColor, delta: expenseDelta),
+                Card(label: t("mg.inkass"),    value: Money.s(totalInkass),        color: inkassColor,  delta: nil),
+                Card(label: t("an.avgPerDay"), value: Money.s(dailyAvg.rounded()), color: avgColor,      delta: nil),
             ]
             for (i, c) in cards.enumerated() {
                 let cx = margin + CGFloat(i) * (cardW + gap)
-                let path = UIBezierPath(roundedRect: CGRect(x: cx, y: y, width: cardW, height: cardH), cornerRadius: 10)
-                UIColor.systemGray6.setFill(); path.fill()
-                text(c.0.uppercased(), cx + 10, y + 9, size: 8, weight: .semibold, color: .secondaryLabel, width: cardW - 20)
-                text(c.1, cx + 10, y + 26, size: 15, weight: .bold, color: c.2, width: cardW - 20)
+                let cardRect = CGRect(x: cx, y: y, width: cardW, height: cardH)
+                UIColor.systemGray6.setFill(); UIBezierPath(roundedRect: cardRect, cornerRadius: 10).fill()
+                c.color.setFill()
+                UIBezierPath(roundedRect: CGRect(x: cx, y: y, width: 4, height: cardH),
+                             byRoundingCorners: [.topLeft, .bottomLeft],
+                             cornerRadii: CGSize(width: 10, height: 10)).fill()
+                text(c.label.uppercased(), cx + 12, y + 9, size: 8, weight: .semibold, color: .secondaryLabel, width: cardW - 22)
+                text(c.value, cx + 12, y + 25, size: 15, weight: .bold, color: c.color, width: cardW - 22, mono: true)
+                if let d = c.delta {
+                    let up = d >= 0
+                    let dColor: UIColor = up ? accent : expenseColor
+                    let deltaStr = "\(up ? "▲" : "▼") \(String(format: "%.0f", abs(d)))% \(t("an.prevMonth"))"
+                    text(deltaStr, cx + 12, y + 46, size: 7.5, weight: .medium, color: dColor, width: cardW - 22)
+                }
             }
             y += cardH + 26
 
-            // Section title
-            text(t("an.byDay"), margin, y, size: 11, weight: .semibold, color: .secondaryLabel)
-            y += 22
-
             guard !filledShifts.isEmpty else {
-                text(t("an.noShiftData"), margin, y + 8, size: 13, color: .secondaryLabel)
+                text(t("an.byDay"), margin, y, size: 11, weight: .semibold, color: .secondaryLabel)
+                text(t("an.noShiftData"), margin, y + 26, size: 13, color: .secondaryLabel)
                 return
             }
 
-            let headerH: CGFloat = 26, rowH: CGFloat = 22
-            func drawCells(_ cells: [String], yy: CGFloat, size: CGFloat, weight: UIFont.Weight, color: UIColor) {
+            // Section title + legend
+            text(t("an.byDay"), margin, y, size: 11, weight: .semibold, color: .secondaryLabel)
+            let legendX = margin + tableW - 150
+            accent.setFill(); UIRectFill(CGRect(x: legendX, y: y + 2, width: 7, height: 7))
+            text(t("an.income"), legendX + 11, y, size: 8.5, color: .secondaryLabel)
+            expenseColor.setFill(); UIRectFill(CGRect(x: legendX + 75, y: y + 2, width: 7, height: 7))
+            text(t("an.expense"), legendX + 86, y, size: 8.5, color: .secondaryLabel)
+            y += 18
+
+            // Income vs. expense mini bar chart
+            if filledShiftsDisplay.count > 1 {
+                let chartH: CGFloat = 100
+                let chartBottom = y + chartH
+                let maxVal = max((filledShiftsDisplay.map { max($0.income ?? 0, $0.total_expense ?? 0) }.max() ?? 1) * 1.15, 1)
+
+                for frac: CGFloat in [0, 0.5, 1.0] {
+                    let gy = chartBottom - chartH * frac
+                    UIColor.systemGray5.setStroke()
+                    let grid = UIBezierPath()
+                    grid.move(to: CGPoint(x: margin, y: gy)); grid.addLine(to: CGPoint(x: margin + tableW, y: gy))
+                    grid.lineWidth = 0.5; grid.stroke()
+                }
+
+                let n = filledShiftsDisplay.count
+                let slotW = tableW / CGFloat(n)
+                let barGap: CGFloat = max((slotW - 2) / 5, 0.5)
+                let barW = max((slotW - barGap * 3) / 2, 0.8)
+                let labelStep = max(n / 8, 1)
+
+                for (i, s) in filledShiftsDisplay.enumerated() {
+                    let slotX = margin + CGFloat(i) * slotW
+                    let incH = chartH * CGFloat(min((s.income ?? 0) / maxVal, 1))
+                    let expH = chartH * CGFloat(min((s.total_expense ?? 0) / maxVal, 1))
+                    accent.setFill()
+                    UIBezierPath(roundedRect: CGRect(x: slotX + barGap, y: chartBottom - incH, width: barW, height: max(incH, 0.5)), cornerRadius: 0.8).fill()
+                    expenseColor.setFill()
+                    UIBezierPath(roundedRect: CGRect(x: slotX + barGap * 2 + barW, y: chartBottom - expH, width: barW, height: max(expH, 0.5)), cornerRadius: 0.8).fill()
+                    if i % labelStep == 0 || i == n - 1 {
+                        let dayNum = s.date.split(separator: "-").last.map(String.init) ?? ""
+                        text(dayNum, slotX, chartBottom + 4, size: 6.5, color: .tertiaryLabel, width: slotW, align: .center)
+                    }
+                }
+                y = chartBottom + 22
+            }
+
+            let headerH: CGFloat = 26, rowH: CGFloat = 24
+            func drawCells(_ cells: [String], yy: CGFloat, size: CGFloat, weight: UIFont.Weight, color: UIColor, mono: Bool = false) {
                 var x = margin
                 for (ci, col) in cols.enumerated() {
-                    text(cells[ci], x + 6, yy, size: size, weight: weight, color: color,
-                         width: col.1 - 12, align: ci == 0 ? .left : .right)
+                    text(cells[ci], x + 8, yy, size: size, weight: weight, color: color,
+                         width: col.1 - 14, align: ci == 0 ? .left : .right, mono: mono && ci > 0)
                     x += col.1
                 }
             }
 
-            // Table header
-            accent.withAlphaComponent(0.12).setFill(); UIRectFill(CGRect(x: margin, y: y, width: tableW, height: headerH))
-            drawCells(cols.map { $0.0 }, yy: y + 7, size: 9, weight: .semibold, color: .secondaryLabel)
+            // Table header — solid accent fill, white text, rounded top corners
+            let headerRect = CGRect(x: margin, y: y, width: tableW, height: headerH)
+            accent.setFill()
+            UIBezierPath(roundedRect: headerRect, byRoundingCorners: [.topLeft, .topRight],
+                         cornerRadii: CGSize(width: 8, height: 8)).fill()
+            drawCells(cols.map { $0.0 }, yy: y + 8, size: 9, weight: .bold, color: .white)
             y += headerH
 
-            // Rows (with pagination)
-            for (i, s) in filledShifts.enumerated() {
+            // Rows (with pagination) — zebra shading + hairline separators for scan-ability
+            for (i, s) in filledShiftsDisplay.enumerated() {
                 if y + rowH > pageH - margin { ctx.beginPage(); y = margin }
                 if i % 2 == 1 { UIColor.systemGray6.setFill(); UIRectFill(CGRect(x: margin, y: y, width: tableW, height: rowH)) }
                 drawCells([
@@ -673,7 +758,11 @@ final class AnalyticsModel {
                     Money.s(s.total_expense ?? 0),
                     Money.s(s.inkassation ?? 0),
                     Money.s(s.closing_balance ?? 0),
-                ], yy: y + 5, size: 10, weight: .regular, color: .label)
+                ], yy: y + 7, size: 9.5, weight: .regular, color: .label, mono: true)
+                UIColor.separator.withAlphaComponent(0.3).setStroke()
+                let sep = UIBezierPath()
+                sep.move(to: CGPoint(x: margin, y: y + rowH)); sep.addLine(to: CGPoint(x: margin + tableW, y: y + rowH))
+                sep.lineWidth = 0.4; sep.stroke()
                 y += rowH
             }
 
@@ -681,8 +770,10 @@ final class AnalyticsModel {
             if y + rowH > pageH - margin { ctx.beginPage(); y = margin }
             UIColor.systemGray5.setFill(); UIRectFill(CGRect(x: margin, y: y, width: tableW, height: rowH))
             drawCells([t("an.csvTotal"), "", Money.s(totalIncome), Money.s(totalExpense), Money.s(totalInkass), ""],
-                      yy: y + 5, size: 10, weight: .semibold, color: .label)
+                      yy: y + 7, size: 9.5, weight: .bold, color: .label, mono: true)
         }
+        }
+        return pdf
     }
 
     #if DEBUG
@@ -769,15 +860,15 @@ private struct AnalyticsBody: View {
                 VStack(spacing: 0) {
                     monthNav
                     TabView(selection: $m.tab) {
-                        AppTabPage(refresh: { await m.load() }) { PeriodTab(m: m, aiEnabled: aiEnabled) }
+                        AppTabPage(refresh: { await m.load() }, scrollResetKey: m.tab) { PeriodTab(m: m, aiEnabled: aiEnabled) }
                             .tabItem { Label(t("tab.period"), systemImage: "calendar") }.tag("period")
-                        AppTabPage(refresh: { await m.load() }) { KassaTab(m: m) }
+                        AppTabPage(refresh: { await m.load() }, scrollResetKey: m.tab) { KassaTab(m: m) }
                             .tabItem { Label(t("tab.kassa"), systemImage: "banknote.fill") }.tag("kassa")
-                        AppTabPage(refresh: { await m.load() }) { ForecastTab(m: m) }
+                        AppTabPage(refresh: { await m.load() }, scrollResetKey: m.tab) { ForecastTab(m: m) }
                             .tabItem { Label(t("tab.forecast"), systemImage: "chart.line.uptrend.xyaxis") }.tag("forecast")
-                        AppTabPage(refresh: { await m.load() }) { SalaryTab(m: m) }
+                        AppTabPage(refresh: { await m.load() }, scrollResetKey: m.tab) { SalaryTab(m: m) }
                             .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
-                        AppTabPage(refresh: { await m.load() }) { HookahTab(m: m) }
+                        AppTabPage(refresh: { await m.load() }, scrollResetKey: m.tab) { HookahTab(m: m) }
                             .tabItem { Label(t("tab.hookah"), systemImage: "flame.fill") }.tag("hookah")
                     }
                     .tint(BrandKit.analytics)
@@ -866,11 +957,16 @@ private struct PeriodTab: View {
     @Bindable var m: AnalyticsModel
     let aiEnabled: Bool
     private var isMonth: Bool { m.periodMode == "month" }
+    @State private var selectedDay: Int?
 
     var body: some View {
         Picker("", selection: $m.periodMode) {
             Text(t("an.day")).tag("day"); Text(t("an.week")).tag("week"); Text(t("an.month")).tag("month")
         }.pickerStyle(.segmented)
+        .onChange(of: m.periodMode) { _, newValue in
+            guard newValue == "day" else { return }
+            Task { await m.setDate(m.lastFilledDate ?? Date()) }
+        }
 
         incomeCard
 
@@ -879,10 +975,21 @@ private struct PeriodTab: View {
                 Text(t("an.incomeByDay")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                 Chart(m.dailyIncome) { d in
                     BarMark(x: .value("День", d.day), y: .value("Доход", d.income))
-                        .foregroundStyle(BrandKit.analytics).cornerRadius(3)
+                        .foregroundStyle(BrandKit.analytics.opacity(selectedDay == nil || selectedDay == d.day ? 1 : 0.35))
+                        .cornerRadius(3)
+                    if selectedDay == d.day {
+                        RuleMark(x: .value("День", d.day))
+                            .foregroundStyle(.primary.opacity(0.18))
+                            .lineStyle(StrokeStyle(lineWidth: 1))
+                            .zIndex(-1)
+                            .annotation(position: .top, spacing: 6, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                                dayBubble(d)
+                            }
+                    }
                 }
                 .chartXAxis { AxisMarks(values: .automatic(desiredCount: 6)) { v in AxisValueLabel().foregroundStyle(.primary.opacity(0.4)) } }
                 .chartYAxis { AxisMarks { _ in AxisValueLabel().foregroundStyle(.primary.opacity(0.4)) } }
+                .chartXSelection(value: $selectedDay)
                 .frame(height: 160)
             }
             .padding(14).frame(maxWidth: .infinity)
@@ -964,6 +1071,16 @@ private struct PeriodTab: View {
             .padding(.horizontal, 4).padding(.vertical, 10)
         }
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func dayBubble(_ d: AnalyticsModel.DailyIncome) -> some View {
+        VStack(spacing: 1) {
+            Text(cur(d.income)).font(.system(size: 12, weight: .bold)).foregroundStyle(.primary)
+            Text(dayLabelRu(d.date)).font(.system(size: 9)).foregroundStyle(.primary.opacity(0.5))
+        }
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
     }
 
     private func periodCol(_ label: String, _ value: String, _ color: Color, _ pct: String?) -> some View {
@@ -1286,6 +1403,26 @@ private struct ExportMenuButton: View {
 
 private struct KassaTab: View {
     @Bindable var m: AnalyticsModel
+    @State private var reasonPopoverShiftID: String?
+    @State private var selectedKassaDate: String?
+
+    /// Точка, для которой сейчас показан бейдж: то, что тронул пальцем, либо последний
+    /// день по умолчанию — так график всегда «говорящий», даже без взаимодействия.
+    private var effectiveKassaShift: Shift? {
+        if let selectedKassaDate { return m.filledShifts.first { $0.date == selectedKassaDate } }
+        return m.filledShifts.last
+    }
+
+    private func kassaBubble(_ s: Shift) -> some View {
+        VStack(spacing: 1) {
+            Text(cur(s.closing_balance ?? 0)).font(.system(size: 12, weight: .bold)).foregroundStyle(.primary)
+            Text(dayLabelRu(s.date)).font(.system(size: 9)).foregroundStyle(.primary.opacity(0.5))
+        }
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
+    }
+
     var body: some View {
         Picker("", selection: $m.kassaMode) {
             Text(t("tab.kassa")).tag("kassa"); Text(t("mg.inkass")).tag("inkass")
@@ -1299,13 +1436,30 @@ private struct KassaTab: View {
             if m.filledShifts.count > 1 {
                 chartCard(t("an.tillBalance")) {
                     Chart(m.filledShifts) { s in
+                        AreaMark(x: .value("Дата", s.date), y: .value("Касса", s.closing_balance ?? 0))
+                            .foregroundStyle(LinearGradient(
+                                colors: [BrandKit.manager.opacity(0.32), BrandKit.manager.opacity(0)],
+                                startPoint: .top, endPoint: .bottom))
+                            .interpolationMethod(.catmullRom)
                         LineMark(x: .value("Дата", s.date), y: .value("Касса", s.closing_balance ?? 0))
                             .foregroundStyle(BrandKit.manager).interpolationMethod(.catmullRom)
-                        PointMark(x: .value("Дата", s.date), y: .value("Касса", s.closing_balance ?? 0))
-                            .foregroundStyle(BrandKit.manager)
+                            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+                        if let eff = effectiveKassaShift, eff.id == s.id {
+                            PointMark(x: .value("Дата", s.date), y: .value("Касса", s.closing_balance ?? 0))
+                                .foregroundStyle(BrandKit.manager)
+                                .symbolSize(90)
+                            RuleMark(x: .value("Дата", s.date))
+                                .foregroundStyle(.primary.opacity(selectedKassaDate == nil ? 0 : 0.18))
+                                .lineStyle(StrokeStyle(lineWidth: 1))
+                                .zIndex(-1)
+                                .annotation(position: .top, spacing: 6, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                                    kassaBubble(eff)
+                                }
+                        }
                     }
                     .chartXAxis(.hidden)
                     .chartYAxis { AxisMarks { _ in AxisValueLabel().foregroundStyle(.primary.opacity(0.4)) } }
+                    .chartXSelection(value: $selectedKassaDate)
                     .frame(height: 150)
                 }
             }
@@ -1321,18 +1475,19 @@ private struct KassaTab: View {
                     .padding(.bottom, 8)
                     HStack {
                         Text(t("an.date")).frame(width: 44, alignment: .leading)
-                        Text(t("an.inCol")).frame(maxWidth: .infinity, alignment: .trailing)
                         Text(t("an.income")).frame(maxWidth: .infinity, alignment: .trailing)
                         Text(t("an.expense")).frame(maxWidth: .infinity, alignment: .trailing)
+                        Text(t("mg.inkass")).frame(maxWidth: .infinity, alignment: .trailing)
                         Text(t("tab.kassa")).frame(maxWidth: .infinity, alignment: .trailing)
                     }
                     .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.35)).padding(.bottom, 6)
-                    ForEach(Array(m.filledShifts.enumerated()), id: \.element.id) { i, s in
+                    ForEach(Array(m.filledShiftsDisplay.enumerated()), id: \.element.id) { i, s in
+                        let expenseNoInk = max((s.total_expense ?? 0) - (s.inkassation ?? 0), 0)
                         HStack {
                             Text(dd(s.date)).frame(width: 44, alignment: .leading).foregroundStyle(.primary.opacity(0.5))
-                            cell((s.opening_balance ?? 0) > 0 ? cur(s.opening_balance ?? 0) : "—", BrandKit.manager)
                             cell((s.income ?? 0) > 0 ? cur(s.income ?? 0) : "—", BrandKit.analytics)
-                            cell((s.total_expense ?? 0) > 0 ? cur(s.total_expense ?? 0) : "—", BrandKit.menu)
+                            cell(expenseNoInk > 0 ? cur(expenseNoInk) : "—", BrandKit.menu)
+                            cell((s.inkassation ?? 0) > 0 ? cur(s.inkassation ?? 0) : "—", BrandKit.stash)
                             cell(cur(s.closing_balance ?? 0), BrandKit.manager, bold: true)
                         }
                         .font(.system(size: 12)).padding(.vertical, 9)
@@ -1357,7 +1512,7 @@ private struct KassaTab: View {
                         Text(t("an.date")).frame(width: 44, alignment: .leading)
                         Text(t("mg.inkass")).frame(maxWidth: .infinity, alignment: .trailing)
                         Text(t("an.expense")).frame(maxWidth: .infinity, alignment: .trailing)
-                        Text(t("mg.inkReason")).frame(maxWidth: .infinity, alignment: .trailing)
+                        Spacer().frame(width: 36)
                         Text(t("an.inkNet")).frame(width: 60, alignment: .trailing)
                     }
                     .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.35))
@@ -1365,15 +1520,35 @@ private struct KassaTab: View {
                     Divider().overlay(Color.primary.opacity(0.08))
                     ForEach(Array(m.shiftsWithInk.enumerated()), id: \.element.id) { i, s in
                         let ink = m.inkDetails[s.id]
+                        let hasReason = ink?.reason?.isEmpty == false
                         HStack {
                             Text(dd(s.date)).frame(width: 44, alignment: .leading).foregroundStyle(.primary.opacity(0.5))
                             Text(cur(s.inkassation ?? 0)).frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.stash)
                             Text((ink?.expense ?? 0) > 0 ? "−" + cur(ink?.expense ?? 0) : "—")
                                 .frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.menu)
-                            Text(ink?.reason?.isEmpty == false ? (ink?.reason ?? "—") : "—")
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                                .foregroundStyle(.primary.opacity(0.45))
-                                .lineLimit(1)
+                            Button {
+                                reasonPopoverShiftID = (reasonPopoverShiftID == s.id) ? nil : s.id
+                            } label: {
+                                Image(systemName: "note.text")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(hasReason ? BrandKit.stash : .primary.opacity(0.25))
+                            }
+                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
+                            .frame(width: 36, alignment: .center)
+                            .disabled(!hasReason)
+                            .popover(isPresented: Binding(
+                                get: { reasonPopoverShiftID == s.id },
+                                set: { if !$0 { reasonPopoverShiftID = nil } }
+                            ), attachmentAnchor: .point(.top), arrowEdge: .top) {
+                                Text(ink?.reason ?? "—")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.primary)
+                                    .padding(14)
+                                    .frame(maxWidth: 230, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .presentationCompactAdaptation(.popover)
+                            }
                             Text(cur(ink?.total ?? (s.inkassation ?? 0)))
                                 .frame(width: 60, alignment: .trailing).fontWeight(.semibold)
                         }

@@ -29,10 +29,10 @@ final class AppModel {
         var role: String?
     }
 
-    /// AI доступен: Pro-тариф или ручное включение в админке.
+    /// AI доступен: Pro-тариф, купленный AI-аддон (биллинг v2) или ручное включение в админке.
     var aiEnabled: Bool {
         guard let r = restaurant else { return false }
-        if r.ai_enabled == true { return true }
+        if r.ai_enabled == true || r.addon_ai == true { return true }
         return r.subscription_plan == "pro"
     }
 
@@ -60,14 +60,29 @@ final class AppModel {
     // MARK: запуск
 
     func start() async {
+        API.onUnauthorized = { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in self.sessionExpired() }
+        }
         #if DEBUG
         // Визуальная проверка UI без реального входа: запуск с -MISE_DEMO_UI 1.
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" {
-            restaurant = Restaurant(id: "demo", name: "Mise Demo Lounge", logo_url: nil, currency: "€", has_owner_pin: false, subscription_plan: "pro", ai_enabled: true)
+            restaurant = Restaurant(id: "demo", name: "Mise Demo Lounge", logo_url: nil, currency: "€", has_owner_pin: false, subscription_plan: "pro", ai_enabled: true, subscription_status: "active", addon_ai: false, addon_modules: nil, comp_apps: nil, extra_seats: nil, staff_limit: nil, billing_interval: "month", trial_ends_at: nil)
             staff = ResolvedStaff(id: "owner", name: "Владелец",
                                   apps: ["manager", "analytics", "stash", "people"], isOwner: true, role: nil)
             currentApp = ProcessInfo.processInfo.environment["MISE_DEMO_APP"]
             phase = .authed
+            // Разовая визуальная проверка ReportExportView.buildPDF() без похода
+            // через UI/бэкенд — пишет PDF в Documents, забирается через simctl.
+            if ProcessInfo.processInfo.environment["MISE_DEMO_REPORT_PDF"] == "1" {
+                let m = ReportModel(rid: "demo")
+                if ProcessInfo.processInfo.environment["MISE_DEMO_REPORT_PERIOD"] == "all" { m.periodMode = "all" }
+                await m.load()
+                let data = m.buildPDF(venueName: restaurant?.name ?? "")
+                if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                    try? data.write(to: docs.appendingPathComponent("demo-report.pdf"))
+                }
+            }
             return
         }
         #endif
@@ -94,6 +109,16 @@ final class AppModel {
             return
         }
         phase = .welcome
+    }
+
+    /// Сервер отверг PIN-сессию, пока клиент считал себя авторизованным (см. API.onUnauthorized).
+    /// Возвращаем на PIN, не стирая restaurant/staff — тот же вход, просто заново PIN
+    /// (иначе экран остаётся пустым/замороженным, а все ошибки в DB.swift глотаются через `try?`).
+    func sessionExpired() {
+        guard phase == .authed else { return }
+        currentApp = nil
+        isReauth = true
+        phase = .pin
     }
 
     private func tokenValid() -> Bool {

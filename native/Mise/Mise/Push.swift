@@ -25,9 +25,13 @@ final class PushManager: NSObject, UNUserNotificationCenterDelegate {
         guard d.data(forKey: "mise_restaurant") != nil,
               let sData = d.data(forKey: "mise_staff"),
               let s = try? JSONDecoder().decode(AppModel.ResolvedStaff.self, from: sData) else { return }
+        // lang — читаем на MainActor (L10n изолирован); нужен серверу, чтобы рендерить пуш
+        // для ЭТОГО устройства на его языке, а не языке отправителя (см. lib/notifyStrings.ts).
+        let lang = await MainActor.run { L10n.shared.lang.rawValue }
         var values: [String: Any] = [
             "platform": "ios",
             "device_token": token,
+            "lang": lang,
             "last_seen": ISO8601DateFormatter().string(from: Date()),
         ]
         if s.isOwner {
@@ -63,34 +67,39 @@ final class PushManager: NSObject, UNUserNotificationCenterDelegate {
     }
 }
 
+/// Пересобирает Quick Actions с текущими переводами — вызывается при старте и при смене
+/// языка (иначе титулы остаются на языке запуска до перезапуска приложения).
+@MainActor func refreshQuickActionShortcuts() {
+    UIApplication.shared.shortcutItems = [
+        UIApplicationShortcutItem(type: "com.rahim.mise.openBookings",
+                                  localizedTitle: t("qa.todayBookings"),
+                                  localizedSubtitle: nil,
+                                  icon: UIApplicationShortcutIcon(systemImageName: "calendar.badge.clock"),
+                                  userInfo: nil),
+        UIApplicationShortcutItem(type: "com.rahim.mise.openManager",
+                                  localizedTitle: t("qa.openShift"),
+                                  localizedSubtitle: nil,
+                                  icon: UIApplicationShortcutIcon(systemImageName: "creditcard.fill"),
+                                  userInfo: nil),
+        UIApplicationShortcutItem(type: "com.rahim.mise.addExpense",
+                                  localizedTitle: t("qa.addExpense"),
+                                  localizedSubtitle: nil,
+                                  icon: UIApplicationShortcutIcon(systemImageName: "plus.circle"),
+                                  userInfo: nil),
+    ]
+}
+
 /// AppDelegate только ради колбэков APNs + Quick Actions — остальное приложение остаётся на SwiftUI App.
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = PushManager.shared
-        // Quick Actions (3D Touch / Haptic Touch на иконке)
-        application.shortcutItems = [
-            UIApplicationShortcutItem(type: "com.rahim.mise.openBookings",
-                                      localizedTitle: NSLocalizedString("qa.todayBookings", comment: ""),
-                                      localizedSubtitle: nil,
-                                      icon: UIApplicationShortcutIcon(systemImageName: "calendar.badge.clock"),
-                                      userInfo: nil),
-            UIApplicationShortcutItem(type: "com.rahim.mise.openManager",
-                                      localizedTitle: NSLocalizedString("qa.openShift", comment: ""),
-                                      localizedSubtitle: nil,
-                                      icon: UIApplicationShortcutIcon(systemImageName: "creditcard.fill"),
-                                      userInfo: nil),
-            UIApplicationShortcutItem(type: "com.rahim.mise.addExpense",
-                                      localizedTitle: NSLocalizedString("qa.addExpense", comment: ""),
-                                      localizedSubtitle: nil,
-                                      icon: UIApplicationShortcutIcon(systemImageName: "plus.circle"),
-                                      userInfo: nil),
-        ]
+        refreshQuickActionShortcuts()
         return true
     }
 
     func application(_ application: UIApplication,
-                     performShortcutItem shortcutItem: UIApplicationShortcutItem,
+                     performActionFor shortcutItem: UIApplicationShortcutItem,
                      completionHandler: @escaping (Bool) -> Void) {
         NotificationCenter.default.post(name: .quickAction, object: shortcutItem.type)
         completionHandler(true)
@@ -102,12 +111,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        // Без APNs-окружения (симулятор / нет capability) — просто молчим.
+        #if DEBUG
+        print("[Push] registerForRemoteNotifications failed: \(error)")
+        #endif
     }
 }
 
 extension Notification.Name {
-    static let quickAction = Notification.Name("mise.quickAction")
+    nonisolated static let quickAction = Notification.Name("mise.quickAction")
 }
 
 /// Планировщик локальных уведомлений (напоминание о смене).
@@ -141,13 +152,29 @@ enum ShiftReminder {
 /// Клиент к /api/notify — триггерит уведомление (журнал + push) для аудитории.
 enum Notify {
     /// audience: ключи "managers": true, "owner": true, "staff_ids": [..].
-    static func send(type: String, title: String, body: String, audience: [String: Any], secureBody: String? = nil, data: [String: Any]? = nil) async {
+    /// title/body — литерал на языке отправителя, используется только как фолбэк для старых
+    /// клиентов/cron. Когда заданы titleKey/bodyKey — сервер рендерит РЕАЛЬНЫЙ текст на языке
+    /// КАЖДОГО получателя (push_subscriptions.lang) из lib/notifyStrings.ts, игнорируя title/body.
+    /// secureBodySegments: [{"key": "notify.dRevenue", "value": "€120.00"}, ...] — лейбл каждого
+    /// сегмента переводится сервером на язык получателя, value (готовая сумма) — как есть.
+    static func send(type: String, title: String, body: String, audience: [String: Any],
+                      titleKey: String? = nil, titleParams: [String: String]? = nil,
+                      bodyKey: String? = nil, bodyParams: [String: String]? = nil,
+                      bodySegments: [[String: String]]? = nil,
+                      secureBody: String? = nil, secureBodySegments: [[String: String]]? = nil,
+                      data: [String: Any]? = nil) async {
         guard let url = URL(string: API.base + "/api/notify") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         var payload: [String: Any] = ["type": type, "title": title, "body": body, "audience": audience]
+        if let titleKey { payload["titleKey"] = titleKey }
+        if let titleParams { payload["titleParams"] = titleParams }
+        if let bodyKey { payload["bodyKey"] = bodyKey }
+        if let bodyParams { payload["bodyParams"] = bodyParams }
+        if let bodySegments { payload["bodySegments"] = bodySegments }
         if let secureBody { payload["secureBody"] = secureBody }
+        if let secureBodySegments { payload["secureBodySegments"] = secureBodySegments }
         if let data { payload["data"] = data }
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         _ = try? await URLSession.shared.data(for: req)
