@@ -52,6 +52,13 @@ export const NOTIFY_STRINGS: Record<string, Row> = {
   'notify.dCash':       { en: 'Cash', ru: 'Касса', it: 'Cassa', fr: 'Caisse', az: 'Kassa', tr: 'Kasa', uk: 'Каса', kk: 'Касса' },
   'notify.dHookah':     { en: 'Hookah', ru: 'Кальяны', it: 'Narghilè', fr: 'Chicha', az: 'Qəlyan', tr: 'Nargile', uk: 'Кальяни', kk: 'Кальян' },
   'notify.dBalance':    { en: 'Balance', ru: 'Остаток', it: 'Saldo', fr: 'Solde', az: 'Qalıq', tr: 'Bakiye', uk: 'Залишок', kk: 'Қалдық' },
+
+  'notify.auditAssignedTitle': { en: 'New audit', ru: 'Новый аудит', it: 'Nuovo audit', fr: 'Nouvel audit', az: 'Yeni audit', tr: 'Yeni denetim', uk: 'Новий аудит', kk: 'Жаңа аудит' },
+  'notify.auditAssignedBody':  { en: '{name} assigned "{title}"', ru: '{name} назначил(а) «{title}»', it: '{name} ha assegnato "{title}"', fr: '{name} a assigné « {title} »', az: '{name} "{title}" təyin etdi', tr: '{name} "{title}" atadı', uk: '{name} призначив(ла) «{title}»', kk: '{name} «{title}» тағайындады' },
+  'notify.violationTitle':     { en: 'Audit violation', ru: 'Нарушение по аудиту', it: 'Violazione audit', fr: 'Violation d’audit', az: 'Audit pozuntusu', tr: 'Denetim ihlali', uk: 'Порушення аудиту', kk: 'Аудит бұзушылығы' },
+  'notify.violationBody':      { en: '{item} — needs fixing', ru: '{item} — нужно исправить', it: '{item} — da correggere', fr: '{item} — à corriger', az: '{item} — düzəldilməlidir', tr: '{item} — düzeltilmeli', uk: '{item} — потрібно виправити', kk: '{item} — түзету қажет' },
+  'notify.closeChecklistReminderTitle': { en: 'Closing checklist not done', ru: 'Чек-лист закрытия не пройден', it: 'Checklist di chiusura non completata', fr: 'Checklist de clôture non terminée', az: 'Bağlanış çek-listi tamamlanmayıb', tr: 'Kapanış kontrol listesi tamamlanmadı', uk: 'Чек-лист закриття не пройдено', kk: 'Жабылу тексеру тізімі толтырылмаған' },
+  'notify.closeChecklistReminderBody':  { en: 'Not all items are checked yet', ru: 'Не все пункты отмечены', it: 'Non tutti i punti sono stati spuntati', fr: 'Tous les éléments ne sont pas cochés', az: 'Bütün bəndlər qeyd olunmayıb', tr: 'Tüm maddeler işaretlenmedi', uk: 'Не всі пункти відмічено', kk: 'Барлық тармақтар белгіленбеген' },
 }
 
 const CAT_KEYS: Record<string, string> = {

@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreLocation
+import UIKit
 
 private let PEOPLE_ACCENT = BrandKit.people
 
@@ -78,6 +79,11 @@ final class PeopleModel {
     var clHistory: [ChecklistCompletion] = []
     var clHistoryLoaded = false
 
+    // аудиты (разовые проверки, kind="audit" в тех же таблицах)
+    var audits: [ShiftChecklist] = []
+    var auditRuns: [ChecklistCompletion] = []
+    var auditsLoaded = false
+
     // техкарты
     var techCards: [TechCard] = []
     var techLoaded = false
@@ -148,7 +154,14 @@ final class PeopleModel {
     }
     func canDelete(_ t: StaffTask) -> Bool { isManager || t.created_by == myId }
 
-    func createTask(title: String, desc: String, assignee: String, priority: String, due: String) async -> Bool {
+    /// Дедуп нарушений (паттерн SafetyCulture Actions): если по этому же пункту уже есть
+    /// открытая задача — предложить открыть её, а не плодить дубль.
+    func openTaskFor(itemLabel: String) -> StaffTask? {
+        tasks.first { $0.source_item_label == itemLabel && ($0.status ?? "todo") != "done" }
+    }
+
+    func createTask(title: String, desc: String, assignee: String, priority: String, due: String,
+                     sourceCompletionId: String? = nil, sourceItemLabel: String? = nil, photoURL: String? = nil) async -> Bool {
         guard !title.trimmingCharacters(in: .whitespaces).isEmpty, !assignee.isEmpty else { flash(t("pe.taskNeedTitle")); return false }
         var base: [String: Any] = [
             "restaurant_id": rid, "title": title, "priority": priority, "status": "todo",
@@ -156,6 +169,9 @@ final class PeopleModel {
         ]
         if !desc.isEmpty { base["description"] = desc }
         if !due.isEmpty { base["due_date"] = due }
+        if let sourceCompletionId { base["source_completion_id"] = sourceCompletionId }
+        if let sourceItemLabel { base["source_item_label"] = sourceItemLabel }
+        if let photoURL { base["photo_url"] = photoURL }
         var targets = [assignee]
         if assignee.hasPrefix("role:") {
             let role = String(assignee.dropFirst(5))
@@ -566,6 +582,7 @@ final class PeopleModel {
             completions = []
         }
         checklistsLoaded = true
+        await flushPendingChecklistQueue()
     }
 
     func loadChecklistHistory() async {
@@ -586,53 +603,258 @@ final class PeopleModel {
         for c in clHistory { m[c.date ?? "", default: []].append(c) }
         return m.sorted { $0.key > $1.key }
     }
-    func checklistTitle(_ id: String?) -> ShiftChecklist? { checklists.first { $0.id == id } }
+    func checklistTitle(_ id: String?) -> ShiftChecklist? { (checklists + audits).first { $0.id == id } }
     func relevantChecklists() -> [ShiftChecklist] {
-        checklists.filter { ($0.type ?? "open") == clType && (isManager || $0.role == nil || $0.role == myRole) }
+        checklists.filter { ($0.kind ?? "shift") == "shift" && ($0.type ?? "open") == clType && (isManager || $0.role == nil || $0.role == myRole) }
     }
     func completion(_ list: ShiftChecklist) -> ChecklistCompletion? { completions.first { $0.checklist_id == list.id } }
 
-    func toggleChecklistItem(_ list: ShiftChecklist, _ idx: Int) async {
-        guard let sid = openShiftId else { flash(t("pe.openShiftFirst")); return }
-        let items = list.items ?? []
-        var state = completion(list)?.items_state ?? Array(repeating: false, count: items.count)
-        while state.count < items.count { state.append(false) }
-        state[idx].toggle()
-        let allDone = state.allSatisfy { $0 }
+    // MARK: аудиты (разовые проверки)
+
+    func loadAudits() async {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { auditsLoaded = true; return }
+        #endif
+        if let cls = try? await DB.from("shift_checklists").select().eq("kind", "audit").list(ShiftChecklist.self) { audits = cls }
+        else if !audits.isEmpty { flash(t("refreshFailed")) }
+        let from = key(Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date())
+        let auditIds = Set(audits.map(\.id))
+        auditRuns = ((try? await DB.from("shift_checklist_completions").select()
+            .gte("date", from).order("date", ascending: false).list(ChecklistCompletion.self)) ?? [])
+            .filter { auditIds.contains($0.checklist_id ?? "") }
+        if dir.isEmpty, let d = try? await DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self) { dir = d }
+        auditsLoaded = true
+        await flushPendingChecklistQueue()
+    }
+
+    /// Аудиты, релевантные текущему пользователю: менеджер видит все, сотрудник — только те,
+    /// что нацелены на всю смену / его цех / лично на него.
+    func relevantAudits() -> [ShiftChecklist] {
+        audits.filter { a in
+            isManager || a.target_scope == "venue"
+                || (a.target_scope == "role" && (a.role == nil || a.role == myRole))
+                || (a.target_scope == "staff" && a.assigned_staff_id == myId)
+        }
+    }
+    /// Только сегодняшние прогоны (аудит — разовый, не имеет смысла тащить старые в рабочий список).
+    func todayAuditRuns() -> [ChecklistCompletion] { auditRuns.filter { $0.date == todayKey } }
+    func auditRun(_ list: ShiftChecklist) -> ChecklistCompletion? { todayAuditRuns().first { $0.checklist_id == list.id } }
+
+    func toggleAuditItem(_ list: ShiftChecklist, _ idx: Int, photoURL: String? = nil) async {
+        guard await requireGeoCheckIn() else { return }
+        let itemsList = list.itemDetails ?? []
+        var state = auditRun(list)?.items_state ?? Array(repeating: ChecklistItemState(done: false), count: itemsList.count)
+        while state.count < itemsList.count { state.append(ChecklistItemState(done: false)) }
+        let willBeDone = !state[idx].done
+        if willBeDone, idx < itemsList.count, itemsList[idx].photo_required, photoURL == nil {
+            flash(t("pe.photoRequired")); return
+        }
+        state[idx].done = willBeDone
+        if let photoURL { state[idx].photo_url = photoURL }
+        let allDone = state.allSatisfy { $0.done }
         let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
-        if let i = completions.firstIndex(where: { $0.checklist_id == list.id }), let cid = completions[i].id as String? {
+        let stateDicts = state.map { $0.asDict }
+        let staffVal: Any = myId == "owner" || myId.isEmpty ? NSNull() : myId
+        if let i = auditRuns.firstIndex(where: { $0.checklist_id == list.id && $0.date == todayKey }) {
+            let cid = auditRuns[i].id
+            auditRuns[i].items_state = state
+            auditRuns[i].status = allDone ? "done" : "in_progress"
+            do {
+                try await DB.from("shift_checklist_completions").update([
+                    "items_state": stateDicts, "completed_at": completedAt,
+                    "status": allDone ? "done" : "in_progress", "staff_id": staffVal,
+                ] as [String: Any]).eq("id", cid).run()
+            } catch { queuePendingChecklistToggle(completionId: cid, idx: idx, done: state[idx].done, photoURL: photoURL) }
+        } else {
+            let attId: Any = attendance.first(where: { $0.staff_id == myId && $0.date == todayKey })?.id ?? NSNull()
+            do {
+                try await DB.from("shift_checklist_completions").insert([
+                    "restaurant_id": rid, "checklist_id": list.id, "shift_id": openShiftId ?? NSNull(), "date": todayKey,
+                    "staff_id": staffVal, "items_state": stateDicts, "completed_at": completedAt,
+                    "attendance_id": attId, "status": allDone ? "done" : "in_progress",
+                ] as [String: Any]).run()
+            } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+            await loadAudits()
+        }
+        if allDone { flash(t("pe.checklistOpenDone")) }
+    }
+
+    /// Менеджер запускает разовую проверку по существующему шаблону: заводит прогон
+    /// (status="pending") и пушит целевой аудитории.
+    func startAudit(templateId: String) async {
+        guard isManager, let template = audits.first(where: { $0.id == templateId }) else { return }
+        let items = (template.itemDetails ?? []).map { _ in ChecklistItemState(done: false).asDict }
+        do {
+            try await DB.from("shift_checklist_completions").insert([
+                "restaurant_id": rid, "checklist_id": template.id, "shift_id": openShiftId ?? NSNull(), "date": todayKey,
+                "requested_by": myId == "owner" || myId.isEmpty ? NSNull() : myId,
+                "items_state": items, "status": "pending",
+            ] as [String: Any]).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+        await loadAudits()
+        let title = template.title?.isEmpty == false ? template.title! : (template.itemDetails?.first?.label ?? t("pe.newAudit"))
+        let params = ["name": myName, "title": title]
+        switch template.target_scope {
+        case "staff":
+            if let sid = template.assigned_staff_id {
+                await Notify.send(type: "audit", title: t("pe.newAudit"), body: title, audience: ["staff_ids": [sid]],
+                                  titleKey: "notify.auditAssignedTitle", bodyKey: "notify.auditAssignedBody", bodyParams: params)
+            }
+        case "role":
+            let targets = dir.filter { $0.role == template.role }.map(\.id)
+            if !targets.isEmpty {
+                await Notify.send(type: "audit", title: t("pe.newAudit"), body: title, audience: ["staff_ids": targets],
+                                  titleKey: "notify.auditAssignedTitle", bodyKey: "notify.auditAssignedBody", bodyParams: params)
+            }
+        default: // "venue" — вся смена
+            await Notify.send(type: "audit", title: t("pe.newAudit"), body: title, audience: ["all": true],
+                              titleKey: "notify.auditAssignedTitle", bodyKey: "notify.auditAssignedBody", bodyParams: params)
+        }
+    }
+
+    /// Готовые шаблоны под общепит — по явному нажатию менеджера, не автоматически.
+    func addPresetTemplates() async {
+        guard isManager else { return }
+        let presets: [(type: String, role: String?, items: [String])] = [
+            ("open", nil, [t("pe.presetOpenHall1"), t("pe.presetOpenHall2"), t("pe.presetOpenHall3")]),
+            ("close", nil, [t("pe.presetCloseHall1"), t("pe.presetCloseHall2"), t("pe.presetCloseHall3")]),
+            ("open", "bar", [t("pe.presetOpenBar1"), t("pe.presetOpenBar2")]),
+        ]
+        for p in presets {
+            let items = p.items.map { ChecklistItem(label: $0) }
+            await saveChecklistTemplate(id: nil, role: p.role, items: items, kind: "shift", targetScope: "role", title: nil, type: p.type)
+        }
+        let sanitationItems = [t("pe.presetSanitation1"), t("pe.presetSanitation2"), t("pe.presetSanitation3"), t("pe.presetSanitation4")].map { ChecklistItem(label: $0, photo_required: true) }
+        await saveChecklistTemplate(id: nil, role: nil, items: sanitationItems, kind: "audit", targetScope: "venue", title: t("pe.presetSanitationTitle"))
+    }
+
+    /// Гео-гейт: если явка с геолокацией включена, пункт можно отмечать только если у
+    /// сотрудника уже есть сегодняшняя запись attendance_records — иначе открытая касса
+    /// (Manager) одна не доказывает физическое присутствие ИМЕННО этого человека.
+    private func requireGeoCheckIn() async -> Bool {
+        guard geo?.attendance_enabled == true else { return true }
+        if !attLoaded { await loadAttendance() }
+        guard attendance.contains(where: { $0.staff_id == myId && $0.date == todayKey }) else {
+            flash(t("pe.needCheckInFirst")); return false
+        }
+        return true
+    }
+
+    func toggleChecklistItem(_ list: ShiftChecklist, _ idx: Int, photoURL: String? = nil) async {
+        guard let sid = openShiftId else { flash(t("pe.openShiftFirst")); return }
+        guard await requireGeoCheckIn() else { return }
+        let itemsList = list.itemDetails ?? []
+        var state = completion(list)?.items_state ?? Array(repeating: ChecklistItemState(done: false), count: itemsList.count)
+        while state.count < itemsList.count { state.append(ChecklistItemState(done: false)) }
+        let willBeDone = !state[idx].done
+        if willBeDone, idx < itemsList.count, itemsList[idx].photo_required, photoURL == nil {
+            flash(t("pe.photoRequired")); return
+        }
+        state[idx].done = willBeDone
+        if let photoURL { state[idx].photo_url = photoURL }
+        let allDone = state.allSatisfy { $0.done }
+        let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
+        let stateDicts = state.map { $0.asDict }
+        if let i = completions.firstIndex(where: { $0.checklist_id == list.id }) {
+            let cid = completions[i].id
             completions[i].items_state = state
             do {
-                try await DB.from("shift_checklist_completions").update(["items_state": state, "completed_at": completedAt]).eq("id", cid).run()
-            } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadChecklists(); return }
+                try await DB.from("shift_checklist_completions").update([
+                    "items_state": stateDicts, "completed_at": completedAt,
+                    "status": allDone ? "done" : "in_progress",
+                    "staff_id": myId == "owner" || myId.isEmpty ? NSNull() : myId,
+                ] as [String: Any]).eq("id", cid).run()
+            } catch {
+                queuePendingChecklistToggle(completionId: cid, idx: idx, done: state[idx].done, photoURL: photoURL)
+            }
         } else {
+            let attId: Any = attendance.first(where: { $0.staff_id == myId && $0.date == todayKey })?.id ?? NSNull()
             do {
                 try await DB.from("shift_checklist_completions").insert([
                     "restaurant_id": rid, "checklist_id": list.id, "shift_id": sid, "date": key(Date()),
                     "staff_id": myId == "owner" || myId.isEmpty ? NSNull() : myId,
-                    "items_state": state, "completed_at": completedAt,
-                ]).run()
+                    "items_state": stateDicts, "completed_at": completedAt, "attendance_id": attId, "status": allDone ? "done" : "in_progress",
+                ] as [String: Any]).run()
             } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
             await loadChecklists()
         }
         if allDone { flash(clType == "open" ? t("pe.checklistOpenDone") : t("pe.checklistCloseDone")) }
     }
 
-    func saveChecklistTemplate(id: String?, role: String?, items: [String]) async {
-        let clean = items.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    // MARK: оффлайн-очередь отметок чек-листа/аудита (по образцу pendingCheckIn)
+
+    private struct PendingChecklistToggle: Codable { let completionId: String; let idx: Int; let done: Bool; let photoURL: String? }
+    private var pendingChecklistKey: String { "mise_pending_checklist_\(rid)_\(myId)" }
+
+    private func loadPendingChecklistQueue() -> [PendingChecklistToggle] {
+        guard let data = UserDefaults.standard.data(forKey: pendingChecklistKey),
+              let queue = try? JSONDecoder().decode([PendingChecklistToggle].self, from: data) else { return [] }
+        return queue
+    }
+
+    private func queuePendingChecklistToggle(completionId: String, idx: Int, done: Bool, photoURL: String?) {
+        var queue = loadPendingChecklistQueue()
+        queue.append(.init(completionId: completionId, idx: idx, done: done, photoURL: photoURL))
+        if let data = try? JSONEncoder().encode(queue) { UserDefaults.standard.set(data, forKey: pendingChecklistKey) }
+        flash(t("pe.checkInPending"))
+    }
+
+    /// Досылает отметки, накопленные без сети. Вызывается там же, где flushPendingCheckIn —
+    /// при загрузке раздела/возврате в foreground.
+    func flushPendingChecklistQueue() async {
+        let queue = loadPendingChecklistQueue()
+        guard !queue.isEmpty else { return }
+        var remaining: [PendingChecklistToggle] = []
+        for item in queue {
+            guard let comp = try? await DB.from("shift_checklist_completions").select().eq("id", item.completionId).limit(1).list(ChecklistCompletion.self).first else {
+                remaining.append(item); continue
+            }
+            var state = comp.items_state ?? []
+            while state.count <= item.idx { state.append(.init(done: false)) }
+            state[item.idx].done = item.done
+            if let p = item.photoURL { state[item.idx].photo_url = p }
+            let allDone = state.allSatisfy { $0.done }
+            do {
+                try await DB.from("shift_checklist_completions").update([
+                    "items_state": state.map { $0.asDict },
+                    "completed_at": allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull(),
+                    "status": allDone ? "done" : "in_progress",
+                    "staff_id": myId == "owner" || myId.isEmpty ? NSNull() : myId,
+                ] as [String: Any]).eq("id", item.completionId).run()
+            } catch { remaining.append(item) }
+        }
+        if remaining.isEmpty { UserDefaults.standard.removeObject(forKey: pendingChecklistKey) }
+        else if let data = try? JSONEncoder().encode(remaining) { UserDefaults.standard.set(data, forKey: pendingChecklistKey) }
+        if remaining.count < queue.count { await loadChecklists() }
+    }
+
+    func saveChecklistTemplate(id: String?, role: String?, items: [ChecklistItem], kind: String = "shift", targetScope: String = "role", assignedStaffId: String? = nil, title: String? = nil, type: String? = nil, recurrence: String = "none", recurrenceWeekdays: [Int]? = nil, recurrenceDayOfMonth: Int? = nil) async {
+        let clean = items.map { ChecklistItem(id: $0.id, label: $0.label.trimmingCharacters(in: .whitespaces), photo_required: $0.photo_required) }.filter { !$0.label.isEmpty }
         guard !clean.isEmpty else { flash(t("pe.addItem")); return }
         let roleVal: Any = role ?? NSNull()
+        let itemDicts = clean.map { $0.asDict }
+        // Расписание имеет смысл только для разовых аудитов — для kind="shift" всегда "none"/NULL.
+        let recurrenceVal: Any = kind == "audit" ? recurrence : "none"
+        let weekdaysVal: Any = kind == "audit" ? (recurrenceWeekdays ?? NSNull()) : NSNull()
+        let domVal: Any = kind == "audit" ? (recurrenceDayOfMonth ?? NSNull()) : NSNull()
         do {
             if let id {
-                try await DB.from("shift_checklists").update(["items": clean, "role": roleVal]).eq("id", id).run()
+                try await DB.from("shift_checklists").update([
+                    "items": itemDicts, "role": roleVal,
+                    "recurrence": recurrenceVal, "recurrence_weekdays": weekdaysVal, "recurrence_day_of_month": domVal,
+                ] as [String: Any]).eq("id", id).run()
             } else {
                 try await DB.from("shift_checklists").insert([
-                    "restaurant_id": rid, "type": clType, "items": clean, "role": roleVal,
-                ]).run()
+                    // kind="audit": type — семантика открытия/закрытия смены к разовым аудитам не относится, NULL.
+                    "restaurant_id": rid, "type": kind == "audit" ? NSNull() : (type ?? clType), "items": itemDicts, "role": roleVal,
+                    "kind": kind, "target_scope": targetScope, "assigned_staff_id": assignedStaffId ?? NSNull(),
+                    "title": title ?? NSNull(),
+                    "recurrence": recurrenceVal, "recurrence_weekdays": weekdaysVal, "recurrence_day_of_month": domVal,
+                ] as [String: Any]).run()
             }
         } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
         flash(t("pe.checklistSaved"))
-        await loadChecklists()
+        if kind == "audit" { await loadAudits() } else { await loadChecklists() }
     }
     func deleteChecklist(_ id: String) async {
         checklists.removeAll { $0.id == id }
@@ -873,9 +1095,9 @@ final class PeopleModel {
                .init(id: "e2", name: "Игорь Петров", role: "kitchen"),
                .init(id: "e3", name: "Мария Соколова", role: "bar")]
         tasks = [
-            .init(id: "t1", title: "Принять поставку", description: "Сверить накладную", assigned_to: "e2", created_by: nil, priority: "high", due_date: "2026-06-16", status: "todo"),
-            .init(id: "t2", title: "Помыть кофемашину", description: nil, assigned_to: "e3", created_by: nil, priority: "medium", due_date: nil, status: "in_progress"),
-            .init(id: "t3", title: "Обновить стоп-лист", description: nil, assigned_to: "e1", created_by: nil, priority: "low", due_date: nil, status: "done"),
+            .init(id: "t1", title: "Принять поставку", description: "Сверить накладную", assigned_to: "e2", created_by: nil, priority: "high", due_date: "2026-06-16", status: "todo", source_completion_id: nil, source_item_label: nil, photo_url: nil),
+            .init(id: "t2", title: "Помыть кофемашину", description: nil, assigned_to: "e3", created_by: nil, priority: "medium", due_date: nil, status: "in_progress", source_completion_id: nil, source_item_label: nil, photo_url: nil),
+            .init(id: "t3", title: "Обновить стоп-лист", description: nil, assigned_to: "e1", created_by: nil, priority: "low", due_date: nil, status: "done", source_completion_id: nil, source_item_label: nil, photo_url: nil),
         ]
         tasksLoaded = true
     }
@@ -937,7 +1159,7 @@ final class PeopleModel {
             .init(id: "cl2", type: "open", role: "bar", items: ["Проверить лёд", "Заправить кофемашину"]),
             .init(id: "cl3", type: "close", role: nil, items: ["Сдать кассу", "Выключить оборудование", "Закрыть зал"]),
         ]
-        completions = [.init(id: "cm1", checklist_id: "cl1", date: key(Date()), items_state: [true, true, false])]
+        completions = [.init(id: "cm1", checklist_id: "cl1", date: key(Date()), items_state: [.init(done: true), .init(done: true), .init(done: false)])]
         openShiftId = "demo-shift"
         checklistsLoaded = true
     }
@@ -2611,43 +2833,139 @@ private struct ChecklistsTab: View {
     @Bindable var m: PeopleModel
     @State private var edit: ChecklistEdit?
     @State private var showHistory = false
+    @State private var subTab = "shift" // shift | audits | stats
 
-    struct ChecklistEdit: Identifiable { var id = UUID(); var listId: String?; var role: String?; var items: [String] }
+    struct ChecklistEdit: Identifiable {
+        var id = UUID(); var listId: String?; var role: String?; var items: [ChecklistItem]
+        var kind: String = "shift"; var targetScope: String = "role"; var assignedStaffId: String?; var title: String = ""
+        var recurrence: String = "none"; var recurrenceWeekdays: Set<Int> = []; var recurrenceDayOfMonth: Int = 1
+    }
 
     var body: some View {
         Group {
             if !m.checklistsLoaded {
                 RowListSkeleton(rows: 3)
             } else {
-                if m.openShiftId == nil { inactiveBanner }
-                Picker("", selection: $m.clType) {
-                    Text(t("pe.open")).tag("open"); Text(t("pe.close")).tag("close")
-                }.pickerStyle(.segmented)
-                let lists = m.relevantChecklists()
-                if lists.isEmpty {
-                    Text(t("pe.noChecklists")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
-                } else {
-                    ForEach(lists) { list in section(list) }
-                }
                 if m.isManager {
-                    Button { edit = ChecklistEdit(listId: nil, role: nil, items: [""]) } label: {
-                        Label(t("pe.checklistForRole"), systemImage: "plus")
-                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
-                            .frame(maxWidth: .infinity).padding(.vertical, 13)
-                            .background(RoundedRectangle(cornerRadius: 14).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5])).foregroundStyle(.primary.opacity(0.2)))
-                    }
-                    .padding(.top, 4)
-                    Button { showHistory = true } label: {
-                        Label(t("pe.checklistHistory"), systemImage: "clock.arrow.circlepath")
-                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
-                            .frame(maxWidth: .infinity).padding(.vertical, 12)
-                    }
+                    Picker("", selection: $subTab) {
+                        Text(t("pe.shiftTab")).tag("shift")
+                        Text(t("pe.audits")).tag("audits")
+                        Text(t("pe.statistics")).tag("stats")
+                    }.pickerStyle(.segmented)
+                }
+                switch subTab {
+                case "audits": auditsSection
+                case "stats" where m.isManager: StatisticsSection(m: m)
+                default: shiftSection
                 }
             }
         }
         .task(id: m.opsView) { if m.opsView == "check" && !m.checklistsLoaded { await m.loadChecklists() } }
+        .task(id: subTab) { if subTab == "audits" && !m.auditsLoaded { await m.loadAudits() } }
         .sheet(item: $edit) { e in ChecklistEditSheet(m: m, edit: e) }
         .sheet(isPresented: $showHistory) { ChecklistHistorySheet(m: m) }
+    }
+
+    private var shiftSection: some View {
+        Group {
+            if m.openShiftId == nil { inactiveBanner }
+            Picker("", selection: $m.clType) {
+                Text(t("pe.open")).tag("open"); Text(t("pe.close")).tag("close")
+            }.pickerStyle(.segmented)
+            let lists = m.relevantChecklists()
+            if lists.isEmpty {
+                Text(t("pe.noChecklists")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
+            } else {
+                ForEach(lists) { list in
+                    ChecklistRunCard(m: m, list: list, run: m.completion(list), showManagerControls: m.isManager,
+                                      onToggle: { i, photo in await m.toggleChecklistItem(list, i, photoURL: photo) },
+                                      onEdit: { edit = ChecklistEdit(listId: list.id, role: list.role, items: (list.itemDetails?.isEmpty == false) ? list.itemDetails! : [ChecklistItem(label: "")]) },
+                                      onDelete: { Task { await m.deleteChecklist(list.id) } })
+                }
+            }
+            if m.isManager {
+                Button { edit = ChecklistEdit(listId: nil, role: nil, items: [ChecklistItem(label: "")]) } label: {
+                    Label(t("pe.checklistForRole"), systemImage: "plus")
+                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
+                        .frame(maxWidth: .infinity).padding(.vertical, 13)
+                        .background(RoundedRectangle(cornerRadius: 14).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5])).foregroundStyle(.primary.opacity(0.2)))
+                }
+                .padding(.top, 4)
+                Button { showHistory = true } label: {
+                    Label(t("pe.checklistHistory"), systemImage: "clock.arrow.circlepath")
+                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
+                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                }
+                Button { Task { await m.addPresetTemplates() } } label: {
+                    Label(t("pe.presetTemplates"), systemImage: "wand.and.stars")
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.5))
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                }
+            }
+        }
+    }
+
+    private var auditsSection: some View {
+        Group {
+            if m.isManager {
+                Button {
+                    edit = ChecklistEdit(listId: nil, role: nil, items: [ChecklistItem(label: "")], kind: "audit", targetScope: "venue", title: "")
+                } label: {
+                    Label(t("pe.newAuditTemplate"), systemImage: "plus")
+                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
+                        .frame(maxWidth: .infinity).padding(.vertical, 13)
+                        .background(RoundedRectangle(cornerRadius: 14).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5])).foregroundStyle(.primary.opacity(0.2)))
+                }
+                .padding(.bottom, 4)
+            }
+            let list = m.relevantAudits()
+            if list.isEmpty {
+                Text(t("pe.noChecklists")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
+            } else {
+                ForEach(list) { a in
+                    let run = m.auditRun(a)
+                    if run != nil || m.isManager {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(a.title?.isEmpty == false ? a.title! : (a.itemDetails?.first?.label ?? "—"))
+                                        .font(.system(size: 14, weight: .bold)).foregroundStyle(.primary)
+                                    if let rec = a.recurrence, rec != "none" {
+                                        HStack(spacing: 3) {
+                                            Image(systemName: "repeat").font(.system(size: 9, weight: .bold))
+                                            Text(recurrenceSummary(rec, a.recurrenceWeekdays, a.recurrenceDayOfMonth))
+                                        }
+                                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT.opacity(0.8))
+                                    }
+                                }
+                                Spacer()
+                                if m.isManager {
+                                    Button { Task { await m.startAudit(templateId: a.id) } } label: {
+                                        Image(systemName: "paperplane.fill").font(.system(size: 13)).foregroundStyle(PEOPLE_ACCENT)
+                                    }
+                                    Button {
+                                        edit = ChecklistEdit(listId: a.id, role: a.role, items: (a.itemDetails?.isEmpty == false) ? a.itemDetails! : [ChecklistItem(label: "")],
+                                                              kind: "audit", targetScope: a.target_scope ?? "venue", assignedStaffId: a.assigned_staff_id, title: a.title ?? "",
+                                                              recurrence: a.recurrence ?? "none", recurrenceWeekdays: Set(a.recurrenceWeekdays ?? []), recurrenceDayOfMonth: a.recurrenceDayOfMonth ?? 1)
+                                    } label: { Image(systemName: "pencil").font(.system(size: 13)).foregroundStyle(PEOPLE_ACCENT) }
+                                    Button { Task { await m.deleteChecklist(a.id) } } label: {
+                                        Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3))
+                                    }
+                                }
+                            }
+                            if let run {
+                                ChecklistRunCard(m: m, list: a, run: run, showManagerControls: false,
+                                                  onToggle: { i, photo in await m.toggleAuditItem(a, i, photoURL: photo) },
+                                                  onEdit: {}, onDelete: {})
+                            } else {
+                                Text(t("pe.noRunYet")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
+                            }
+                        }
+                        .padding(12).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 16))
+                    }
+                }
+            }
+        }
     }
 
     private var inactiveBanner: some View {
@@ -2662,12 +2980,36 @@ private struct ChecklistsTab: View {
         }
         .padding(14).background(BrandKit.stash.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
     }
+}
 
-    private func section(_ list: ShiftChecklist) -> some View {
-        let items = list.items ?? []
-        let state = m.completion(list)?.items_state ?? []
-        let done = items.indices.filter { $0 < state.count && state[$0] }.count
-        return VStack(alignment: .leading, spacing: 0) {
+@MainActor private func roleTitle(_ role: String?) -> String {
+    guard let role else { return t("pe.role.general") }
+    let known = ["kitchen", "bar", "hookah", "waiter", "host", "cleaner"]
+    return known.contains(role) ? t("pe.role." + role) : role
+}
+
+/// Карточка одного прогона чек-листа/аудита — используется и «Сменой», и «Аудитами».
+private struct ChecklistRunCard: View {
+    @Bindable var m: PeopleModel
+    let list: ShiftChecklist
+    let run: ChecklistCompletion?
+    let showManagerControls: Bool
+    let onToggle: (Int, String?) async -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    @State private var showCamera = false
+    @State private var pendingIndex: Int?
+    @State private var uploading = false
+    @State private var report: ReportTarget?
+
+    struct ReportTarget: Identifiable { var id = UUID(); var index: Int; var label: String }
+
+    var body: some View {
+        let items = list.itemDetails ?? []
+        let state = run?.items_state ?? []
+        let done = items.indices.filter { $0 < state.count && state[$0].done }.count
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("\(roleTitle(list.role)) · \(done)/\(items.count)")
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(list.role != nil ? PEOPLE_ACCENT : .white.opacity(0.45)).kerning(0.5)
@@ -2676,44 +3018,283 @@ private struct ChecklistsTab: View {
                     Text(t("pe.readyCaps")).font(.system(size: 11, weight: .bold)).foregroundStyle(BrandKit.analytics)
                         .padding(.horizontal, 8).padding(.vertical, 2).background(BrandKit.analytics.opacity(0.16), in: Capsule())
                 }
-                if m.isManager {
-                    Button { edit = ChecklistEdit(listId: list.id, role: list.role, items: items.isEmpty ? [""] : items) } label: {
-                        Image(systemName: "pencil").font(.system(size: 13)).foregroundStyle(PEOPLE_ACCENT)
-                    }
-                    Button { Task { await m.deleteChecklist(list.id) } } label: {
-                        Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3))
-                    }
+                if showManagerControls {
+                    Button(action: onEdit) { Image(systemName: "pencil").font(.system(size: 13)).foregroundStyle(PEOPLE_ACCENT) }
+                    Button(action: onDelete) { Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3)) }
                 }
             }
             .padding(.bottom, 8)
             VStack(spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.offset) { i, text in
-                    let on = i < state.count && state[i]
-                    Button { Task { await m.toggleChecklistItem(list, i) } } label: {
-                        HStack(spacing: 12) {
-                            ZStack {
-                                Circle().stroke(on ? PEOPLE_ACCENT : Color.primary.opacity(0.25), lineWidth: 2).frame(width: 22, height: 22)
-                                if on { Circle().fill(PEOPLE_ACCENT).frame(width: 22, height: 22)
-                                    Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.primary) }
+                ForEach(Array(items.enumerated()), id: \.offset) { i, item in
+                    let on = i < state.count && state[i].done
+                    HStack(spacing: 8) {
+                        Button {
+                            guard !uploading else { return }
+                            if item.photo_required && !on { pendingIndex = i; showCamera = true }
+                            else { Task { await onToggle(i, nil) } }
+                        } label: {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    Circle().stroke(on ? PEOPLE_ACCENT : Color.primary.opacity(0.25), lineWidth: 2).frame(width: 22, height: 22)
+                                    if on { Circle().fill(PEOPLE_ACCENT).frame(width: 22, height: 22)
+                                        Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.primary) }
+                                }
+                                Text(item.label).font(.system(size: 15)).foregroundStyle(.primary.opacity(on ? 0.5 : 1)).strikethrough(on)
+                                if item.photo_required {
+                                    Image(systemName: "camera.fill").font(.system(size: 10)).foregroundStyle(.primary.opacity(0.3))
+                                }
+                                Spacer()
                             }
-                            Text(text).font(.system(size: 15)).foregroundStyle(.primary.opacity(on ? 0.5 : 1)).strikethrough(on)
-                            Spacer()
                         }
-                        .padding(.vertical, 12).padding(.horizontal, 14)
+                        .buttonStyle(.plain)
+                        Button { report = ReportTarget(index: i, label: item.label) } label: {
+                            Image(systemName: "exclamationmark.bubble").font(.system(size: 13)).foregroundStyle(BrandKit.menu.opacity(0.6))
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .padding(.vertical, 12).padding(.horizontal, 14)
                     if i < items.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 48) }
                 }
             }
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
         }
         .padding(.top, 4)
+        .sheet(isPresented: $showCamera) {
+            CameraCaptureView { image in
+                showCamera = false
+                guard let idx = pendingIndex, let image else { return }
+                uploading = true
+                Task {
+                    defer { uploading = false }
+                    let itemId = idx < items.count ? items[idx].id : "\(idx)"
+                    if let url = await uploadAuditPhoto(image: image, restaurantId: m.rid, completionId: run?.id ?? list.id, itemId: itemId) {
+                        await onToggle(idx, url)
+                    } else {
+                        m.flash(t("saveFailed", ["err": "upload"]))
+                    }
+                }
+            }
+        }
+        .sheet(item: $report) { target in
+            ReportProblemSheet(m: m, list: list, run: run, itemIndex: target.index, itemLabel: target.label)
+        }
+    }
+}
+
+/// Камера-онли захват фото (без доступа к галерее) — антифрод-требование для фото-пунктов.
+private struct CameraCaptureView: UIViewControllerRepresentable {
+    let onCapture: (UIImage?) -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        // На симуляторе камеры нет — деградируем на галерею только для разработки,
+        // на реальном устройстве всегда .camera (антифрод: свежее фото, не из архива).
+        picker.sourceType = UIImagePickerController.isSourceTypeAvailable(.camera) ? .camera : .photoLibrary
+        picker.delegate = context.coordinator
+        return picker
+    }
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator(onCapture: onCapture) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onCapture: (UIImage?) -> Void
+        init(onCapture: @escaping (UIImage?) -> Void) { self.onCapture = onCapture }
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            onCapture(info[.originalImage] as? UIImage)
+        }
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { onCapture(nil) }
+    }
+}
+
+/// Загрузка фото пункта через серверный прокси (клиент не обращается к Supabase Storage
+/// напрямую — тот же принцип, что и /api/db для данных). Контракт:
+/// POST /api/storage/audit-photo {restaurant_id, completion_id, item_id, data_base64} -> {url}
+func uploadAuditPhoto(image: UIImage, restaurantId: String, completionId: String, itemId: String) async -> String? {
+    guard let jpeg = image.jpegData(compressionQuality: 0.7),
+          let url = URL(string: API.base + "/api/storage/audit-photo") else { return nil }
+    var req = URLRequest(url: url)
+    req.httpMethod = "POST"
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    let payload: [String: Any] = [
+        "restaurant_id": restaurantId, "completion_id": completionId, "item_id": itemId,
+        "data_base64": jpeg.base64EncodedString(),
+    ]
+    req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+    guard let (data, resp) = try? await URLSession.shared.data(for: req),
+          let http = resp as? HTTPURLResponse, http.statusCode == 200,
+          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let urlStr = obj["url"] as? String else { return nil }
+    return urlStr
+}
+
+/// «Сообщить о проблеме»: опциональное фото + назначение ответственного → задача
+/// (staff_tasks), с дедупом против уже открытой задачи по этому же пункту (паттерн
+/// SafetyCulture Actions — не плодить дубли).
+private struct ReportProblemSheet: View {
+    @Bindable var m: PeopleModel
+    @Environment(\.dismiss) private var dismiss
+    let list: ShiftChecklist
+    let run: ChecklistCompletion?
+    let itemIndex: Int
+    let itemLabel: String
+
+    @State private var assignee = ""
+    @State private var comment = ""
+    @State private var photo: UIImage?
+    @State private var showCamera = false
+    @State private var saving = false
+    @State private var existingTask: StaffTask?
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.miseBg.ignoresSafeArea()
+                Form {
+                    if let existingTask {
+                        Section {
+                            Text(t("pe.linkExistingTask")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.6))
+                            Text(existingTask.title).font(.system(size: 14, weight: .semibold))
+                        }
+                    } else {
+                        Section(t("pe.assignee")) {
+                            Picker(t("pe.assignee"), selection: $assignee) {
+                                Text(t("pe.pick")).tag("")
+                                ForEach(TASK_ROLE_CODES, id: \.self) { r in Text(checklistRoleLabel(r)).tag("role:" + r) }
+                                ForEach(m.dir) { d in Text(d.name).tag(d.id) }
+                            }
+                        }
+                        Section(t("pe.comment")) { TextField(t("pe.comment"), text: $comment, axis: .vertical) }
+                        Section {
+                            if let photo {
+                                Image(uiImage: photo).resizable().scaledToFit().frame(height: 160)
+                            }
+                            Button { showCamera = true } label: { Label(t("pe.addPhoto"), systemImage: "camera") }
+                        }
+                    }
+                }
+                .scrollContentBackground(.hidden)
+            }
+            .navigationTitle(t("pe.reportProblem")).navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(existingTask != nil ? t("pe.openExisting") : t("save")) {
+                        if existingTask != nil { dismiss(); return }
+                        guard !saving, !assignee.isEmpty else { return }
+                        saving = true
+                        Task {
+                            defer { saving = false }
+                            var photoURL: String? = nil
+                            if let photo {
+                                photoURL = await uploadAuditPhoto(image: photo, restaurantId: m.rid, completionId: run?.id ?? list.id,
+                                                                   itemId: (itemIndex < (list.itemDetails?.count ?? 0)) ? list.itemDetails![itemIndex].id : "\(itemIndex)")
+                            }
+                            _ = await m.createTask(title: itemLabel, desc: comment, assignee: assignee, priority: "high", due: m.todayKey,
+                                                    sourceCompletionId: run?.id, sourceItemLabel: itemLabel, photoURL: photoURL)
+                            dismiss()
+                        }
+                    }.disabled(existingTask == nil && (assignee.isEmpty || saving))
+                }
+            }
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
+        }
+        .sheet(isPresented: $showCamera) { CameraCaptureView { img in showCamera = false; photo = img } }
+        .task {
+            if !m.tasksLoaded { await m.loadTasks() }
+            existingTask = m.openTaskFor(itemLabel: itemLabel)
+        }
+    }
+}
+
+/// Статистика по чек-листам/аудитам за 30 дней — только менеджер/владелец.
+private struct StatisticsSection: View {
+    @Bindable var m: PeopleModel
+    @State private var loaded = false
+    @State private var completionPct = 0
+    @State private var topViolations: [(String, Int)] = []
+    @State private var staffRating: [(String, Int)] = []
+
+    var body: some View {
+        Group {
+            if !loaded {
+                RowListSkeleton(rows: 3)
+            } else if completionPct == 0 && topViolations.isEmpty && staffRating.isEmpty {
+                Text(t("pe.statsNoData")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
+            } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    statCard(title: t("pe.statsCompletionRate")) {
+                        Text("\(completionPct)%").font(.system(size: 32, weight: .bold)).foregroundStyle(PEOPLE_ACCENT)
+                    }
+                    if !topViolations.isEmpty {
+                        statCard(title: t("pe.statsTopViolations")) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(Array(topViolations.enumerated()), id: \.offset) { _, row in
+                                    HStack {
+                                        Text(row.0).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.8))
+                                        Spacer()
+                                        Text("\(row.1)").font(.system(size: 13, weight: .semibold)).foregroundStyle(BrandKit.menu)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !staffRating.isEmpty {
+                        statCard(title: t("pe.statsStaffRating")) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(Array(staffRating.enumerated()), id: \.offset) { _, row in
+                                    HStack {
+                                        Text(row.0).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.8))
+                                        Spacer()
+                                        Text("\(row.1)%").font(.system(size: 13, weight: .semibold)).foregroundStyle(BrandKit.analytics)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .task { await load() }
     }
 
-    private func roleTitle(_ role: String?) -> String {
-        guard let role else { return t("pe.role.general") }
-        let known = ["kitchen", "bar", "hookah", "waiter", "host", "cleaner"]
-        return known.contains(role) ? t("pe.role." + role) : role
+    private func statCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.5)).kerning(0.3)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14).background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func load() async {
+        if !m.clHistoryLoaded { await m.loadChecklistHistory() }
+        if !m.tasksLoaded { await m.loadTasks() }
+        var total = 0, done = 0
+        var violationCounts: [String: Int] = [:]
+        var staffTotal: [String: Int] = [:], staffDone: [String: Int] = [:]
+        for c in m.clHistory {
+            guard let cl = m.checklistTitle(c.checklist_id), let items = cl.itemDetails else { continue }
+            let state = c.items_state ?? []
+            let staffLabel = m.staffName(c.staff_id)
+            for i in items.indices {
+                total += 1
+                staffTotal[staffLabel, default: 0] += 1
+                if i < state.count && state[i].done {
+                    done += 1
+                    staffDone[staffLabel, default: 0] += 1
+                }
+            }
+        }
+        for tsk in m.tasks where tsk.source_item_label != nil {
+            violationCounts[tsk.source_item_label!, default: 0] += 1
+        }
+        completionPct = total > 0 ? Int((Double(done) / Double(total) * 100).rounded()) : 0
+        topViolations = violationCounts.sorted { $0.value > $1.value }.prefix(5).map { ($0.key, $0.value) }
+        staffRating = staffTotal.compactMap { name, tot -> (String, Int)? in
+            guard tot > 0, name != "—" else { return nil }
+            let pct = Int((Double(staffDone[name] ?? 0) / Double(tot) * 100).rounded())
+            return (name, pct)
+        }.sorted { $0.1 > $1.1 }
+        loaded = true
     }
 }
 
@@ -2735,21 +3316,63 @@ private struct ChecklistEditSheet: View {
             ZStack {
                 Color.miseBg.ignoresSafeArea()
                 Form {
-                    Section(t("pe.workshop")) {
-                        Picker(t("pe.workshop"), selection: Binding(get: { edit.role ?? "" }, set: { edit.role = $0.isEmpty ? nil : $0 })) {
-                            ForEach(CHECKLIST_ROLE_CODES, id: \.self) { code in Text(checklistRoleLabel(code)).tag(code ?? "") }
+                    if edit.kind == "audit" {
+                        Section(t("pe.auditTitle")) { TextField(t("pe.auditTitle"), text: $edit.title) }
+                        Section(t("pe.targetScope")) {
+                            Picker(t("pe.targetScope"), selection: $edit.targetScope) {
+                                Text(t("pe.targetVenue")).tag("venue")
+                                Text(t("pe.targetRole")).tag("role")
+                                Text(t("pe.targetStaff")).tag("staff")
+                            }.pickerStyle(.segmented)
+                            if edit.targetScope == "role" {
+                                Picker(t("pe.workshop"), selection: Binding(get: { edit.role ?? "" }, set: { edit.role = $0.isEmpty ? nil : $0 })) {
+                                    ForEach(CHECKLIST_ROLE_CODES, id: \.self) { code in Text(checklistRoleLabel(code)).tag(code ?? "") }
+                                }
+                            } else if edit.targetScope == "staff" {
+                                Picker(t("pe.assignee"), selection: Binding(get: { edit.assignedStaffId ?? "" }, set: { edit.assignedStaffId = $0.isEmpty ? nil : $0 })) {
+                                    Text(t("pe.pick")).tag("")
+                                    ForEach(m.dir) { d in Text(d.name).tag(d.id) }
+                                }
+                            }
+                        }
+                        Section(t("pe.recurrenceLabel")) {
+                            Picker(t("pe.recurrenceLabel"), selection: $edit.recurrence) {
+                                Text(t("pe.recurrenceNone")).tag("none")
+                                Text(t("pe.recurrenceDaily")).tag("daily")
+                                Text(t("pe.recurrenceWeekly")).tag("weekly")
+                                Text(t("pe.recurrenceMonthly")).tag("monthly")
+                            }
+                            if edit.recurrence == "weekly" {
+                                weekdayPicker
+                            } else if edit.recurrence == "monthly" {
+                                Stepper(t("pe.dayOfMonth") + ": \(edit.recurrenceDayOfMonth)", value: $edit.recurrenceDayOfMonth, in: 1...31)
+                            }
+                        }
+                    } else {
+                        Section(t("pe.workshop")) {
+                            Picker(t("pe.workshop"), selection: Binding(get: { edit.role ?? "" }, set: { edit.role = $0.isEmpty ? nil : $0 })) {
+                                ForEach(CHECKLIST_ROLE_CODES, id: \.self) { code in Text(checklistRoleLabel(code)).tag(code ?? "") }
+                            }
                         }
                     }
                     Section(t("pe.items")) {
                         ForEach(edit.items.indices, id: \.self) { i in
-                            TextField(t("pe.itemN", ["n": "\(i + 1)"]), text: $edit.items[i])
+                            HStack {
+                                TextField(t("pe.itemN", ["n": "\(i + 1)"]), text: $edit.items[i].label)
+                                Spacer()
+                                Button { edit.items[i].photo_required.toggle() } label: {
+                                    Image(systemName: edit.items[i].photo_required ? "camera.fill" : "camera")
+                                        .font(.system(size: 15))
+                                        .foregroundStyle(edit.items[i].photo_required ? PEOPLE_ACCENT : .primary.opacity(0.25))
+                                }.buttonStyle(.plain)
+                            }
                         }
-                        Button { edit.items.append("") } label: { Label(t("pe.moreItem"), systemImage: "plus") }
+                        Button { edit.items.append(ChecklistItem(label: "")) } label: { Label(t("pe.moreItem"), systemImage: "plus") }
                     }
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle(m.clType == "open" ? t("pe.checklistOpenTitle") : t("pe.checklistCloseTitle")).navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(navTitle).navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -2758,7 +3381,12 @@ private struct ChecklistEditSheet: View {
                         saving = true
                         Task {
                             defer { saving = false }
-                            await m.saveChecklistTemplate(id: edit.listId, role: edit.role, items: edit.items)
+                            await m.saveChecklistTemplate(id: edit.listId, role: edit.role, items: edit.items,
+                                                           kind: edit.kind, targetScope: edit.targetScope,
+                                                           assignedStaffId: edit.assignedStaffId, title: edit.title,
+                                                           recurrence: edit.recurrence,
+                                                           recurrenceWeekdays: edit.recurrence == "weekly" ? Array(edit.recurrenceWeekdays).sorted() : nil,
+                                                           recurrenceDayOfMonth: edit.recurrence == "monthly" ? edit.recurrenceDayOfMonth : nil)
                             dismiss()
                         }
                     }.disabled(saving)
@@ -2766,6 +3394,53 @@ private struct ChecklistEditSheet: View {
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
         }
+    }
+
+    private var navTitle: String {
+        if edit.kind == "audit" { return edit.title.isEmpty ? t("pe.newAuditTemplate") : edit.title }
+        return m.clType == "open" ? t("pe.checklistOpenTitle") : t("pe.checklistCloseTitle")
+    }
+
+    /// Мультиселект дней недели (0=вс..6=сб на проводе, показываем Пн-Вс для читаемости).
+    private var weekdayPicker: some View {
+        let order = [1, 2, 3, 4, 5, 6, 0] // Пн..Вс
+        return HStack(spacing: 6) {
+            ForEach(order, id: \.self) { d in
+                let on = edit.recurrenceWeekdays.contains(d)
+                Button {
+                    if on { edit.recurrenceWeekdays.remove(d) } else { edit.recurrenceWeekdays.insert(d) }
+                } label: {
+                    Text(weekdayShort(d))
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(on ? PEOPLE_ACCENT : Color.primary.opacity(0.08)))
+                        .foregroundStyle(on ? .white : .primary.opacity(0.6))
+                }.buttonStyle(.plain)
+            }
+        }
+        .listRowInsets(EdgeInsets())
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// Короткая подпись дня недели (0=вс..6=сб). Переиспользуй, если такой helper уже есть в проекте —
+/// не нашлось, завожу локально под чек-листы.
+private func weekdayShort(_ d: Int) -> String {
+    let keys = ["pe.wdSun", "pe.wdMon", "pe.wdTue", "pe.wdWed", "pe.wdThu", "pe.wdFri", "pe.wdSat"]
+    guard d >= 0, d < keys.count else { return "?" }
+    return t(keys[d])
+}
+
+/// Короткое summary расписания для карточки аудита (не занимает много места).
+@MainActor private func recurrenceSummary(_ recurrence: String, _ weekdays: [Int]?, _ dayOfMonth: Int?) -> String {
+    switch recurrence {
+    case "daily": return t("pe.recurrenceDaily")
+    case "weekly":
+        let days = (weekdays ?? []).sorted().map { weekdayShort($0) }
+        return days.isEmpty ? t("pe.recurrenceWeekly") : days.joined(separator: ",")
+    case "monthly": return t("pe.dayOfMonthSummary", ["n": "\(dayOfMonth ?? 1)"])
+    default: return ""
     }
 }
 
@@ -2804,7 +3479,7 @@ private struct ChecklistHistorySheet: View {
             let state = c.items_state ?? []
             for (i, it) in items.enumerated() {
                 total += 1
-                if i < state.count && state[i] { done += 1 } else { missed.append(it) }
+                if i < state.count && state[i].done { done += 1 } else { missed.append(it) }
             }
         }
         let allDone = total > 0 && done == total

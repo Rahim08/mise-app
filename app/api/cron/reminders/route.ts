@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendTrialEndingEmail } from '@/lib/email'
 import { sendPush } from '@/lib/apns'
+import { dispatchNotification } from '@/lib/notify'
 
 export const dynamic = 'force-dynamic'
 import { fmtDate } from '@/lib/format'
@@ -182,6 +183,112 @@ async function sendPurchaseDigest(admin: any, now: Date): Promise<number> {
   } catch { return 0 }
 }
 
+// Аудиты Ф2: авто-запуск разовых проверок по расписанию (kind='audit', recurrence != 'none').
+// Один прогон/день (та же Vercel Hobby-оговорка, что и у остальных функций в этом файле) —
+// daily срабатывает каждый день, weekly — если сегодняшний день недели в recurrence_weekdays,
+// monthly — если сегодняшнее число месяца === recurrence_day_of_month. Дедуп —
+// recurrence_last_run != сегодня (обновляем сразу после создания прогона).
+async function runScheduledAudits(admin: any, now: Date): Promise<number> {
+  try {
+    const today = fmtDate(now)
+    const dow = now.getUTCDay()          // 0=вс..6=сб
+    const dom = now.getUTCDate()         // 1..31
+
+    const { data: templates } = await admin.from('shift_checklists')
+      .select('id, restaurant_id, title, items, role, target_scope, assigned_staff_id, recurrence, recurrence_weekdays, recurrence_day_of_month, recurrence_last_run')
+      .eq('kind', 'audit').neq('recurrence', 'none')
+    if (!templates?.length) return 0
+
+    let created = 0
+    for (const tpl of templates) {
+      if (tpl.recurrence_last_run === today) continue // уже заведён сегодня
+      const matches =
+        tpl.recurrence === 'daily' ||
+        (tpl.recurrence === 'weekly' && Array.isArray(tpl.recurrence_weekdays) && tpl.recurrence_weekdays.includes(dow)) ||
+        (tpl.recurrence === 'monthly' && tpl.recurrence_day_of_month === dom)
+      if (!matches) continue
+
+      // Доп. страховка от задвоения: recurrence_last_run обновляется отдельным запросом от
+      // insert (не атомарно) — если между ними прервётся выполнение, следующий прогон в тот
+      // же день не должен создать второй completion на (checklist_id, date).
+      const { data: already } = await admin.from('shift_checklist_completions')
+        .select('id').eq('checklist_id', tpl.id).eq('date', today).limit(1)
+      if (already?.length) { await admin.from('shift_checklists').update({ recurrence_last_run: today }).eq('id', tpl.id); continue }
+
+      const { error: compErr } = await admin.from('shift_checklist_completions').insert({
+        checklist_id: tpl.id, date: today, status: 'pending', requested_by: null,
+      })
+      if (compErr) continue
+      await admin.from('shift_checklists').update({ recurrence_last_run: today }).eq('id', tpl.id)
+      created++
+
+      // Целевая аудитория — та же логика, что при ручном запуске (роль/сотрудник/вся точка).
+      let staffIds: string[] = []
+      if (tpl.target_scope === 'role' && tpl.role) {
+        const { data: byRole } = await admin.from('staff').select('id').eq('restaurant_id', tpl.restaurant_id).eq('is_active', true).eq('role', tpl.role)
+        staffIds = (byRole || []).map((s: any) => s.id)
+      } else if (tpl.target_scope === 'staff' && tpl.assigned_staff_id) {
+        staffIds = [tpl.assigned_staff_id]
+      } else {
+        const { data: all } = await admin.from('staff').select('id').eq('restaurant_id', tpl.restaurant_id).eq('is_active', true)
+        staffIds = (all || []).map((s: any) => s.id)
+      }
+      if (staffIds.length) {
+        await dispatchNotification(admin, tpl.restaurant_id, {
+          type: 'audit', title: 'New audit', body: tpl.title || '',
+          titleKey: 'notify.auditAssignedTitle', bodyKey: 'notify.auditAssignedBody',
+          bodyParams: { name: 'Mise', title: tpl.title || '' },
+          audience: { staff_ids: staffIds },
+        }).catch(() => {})
+      }
+    }
+    return created
+  } catch {
+    return 0
+  }
+}
+
+// Напоминание менеджеру: чек-лист закрытия смены не пройден, а смена за сегодня уже открыта
+// (значит рабочий день идёт/подходит к концу). Один раз в день на точку, дедуп через
+// notifications.type='audit_close_reminder'.
+async function remindOpenCloseChecklist(admin: any, now: Date): Promise<number> {
+  try {
+    const today = fmtDate(now)
+    const { data: shifts } = await admin.from('shifts').select('id, restaurant_id').eq('date', today)
+    if (!shifts?.length) return 0
+
+    const { data: sentRows } = await admin.from('notifications')
+      .select('restaurant_id').eq('type', 'audit_close_reminder').gte('created_at', `${today}T00:00:00Z`)
+    const alreadySent = new Set((sentRows || []).map((n: any) => n.restaurant_id))
+
+    const { data: closeLists } = await admin.from('shift_checklists').select('id, restaurant_id').eq('kind', 'shift').eq('type', 'close')
+    const closeIdsByRest: Record<string, string[]> = {}
+    ;(closeLists || []).forEach((l: any) => { (closeIdsByRest[l.restaurant_id] ||= []).push(l.id) })
+
+    const { data: completions } = await admin.from('shift_checklist_completions').select('checklist_id, status').eq('date', today)
+    const doneIds = new Set((completions || []).filter((c: any) => c.status === 'done').map((c: any) => c.checklist_id))
+
+    let sent = 0
+    for (const sh of shifts) {
+      if (alreadySent.has(sh.restaurant_id)) continue
+      const closeIds = closeIdsByRest[sh.restaurant_id]
+      if (!closeIds?.length) continue // нет чек-листа закрытия — нечего напоминать
+      const allDone = closeIds.every(id => doneIds.has(id))
+      if (allDone) continue
+
+      await dispatchNotification(admin, sh.restaurant_id, {
+        type: 'audit_close_reminder', title: 'Closing checklist not done', body: 'Not all items are checked yet',
+        titleKey: 'notify.closeChecklistReminderTitle', bodyKey: 'notify.closeChecklistReminderBody',
+        audience: { managers: true },
+      }).catch(() => {})
+      sent++
+    }
+    return sent
+  } catch {
+    return 0
+  }
+}
+
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET
   if (!secret || req.headers.get('authorization') !== `Bearer ${secret}`) {
@@ -201,7 +308,9 @@ export async function GET(req: NextRequest) {
     const trialsExpired = await expireTrials(admin, now)
     const noShows = await autoMarkNoShows(admin, now)
     const purchaseDigest = await sendPurchaseDigest(admin, now)
-    return NextResponse.json({ ok: true, sent: 0, trialEmails, trialsExpired, noShows, purchaseDigest })
+    const scheduledAudits = await runScheduledAudits(admin, now)
+    const closeReminders = await remindOpenCloseChecklist(admin, now)
+    return NextResponse.json({ ok: true, sent: 0, trialEmails, trialsExpired, noShows, purchaseDigest, scheduledAudits, closeReminders })
   }
 
   // Уже отправленные напоминания за последние 2 дня → set(schedule_id)
@@ -241,5 +350,7 @@ export async function GET(req: NextRequest) {
   const trialsExpired = await expireTrials(admin, now)
   const noShows = await autoMarkNoShows(admin, now)
   const purchaseDigest = await sendPurchaseDigest(admin, now)
-  return NextResponse.json({ ok: true, sent: inserts.length, pushed, trialEmails, trialsExpired, noShows, purchaseDigest })
+  const scheduledAudits = await runScheduledAudits(admin, now)
+  const closeReminders = await remindOpenCloseChecklist(admin, now)
+  return NextResponse.json({ ok: true, sent: inserts.length, pushed, trialEmails, trialsExpired, noShows, purchaseDigest, scheduledAudits, closeReminders })
 }
