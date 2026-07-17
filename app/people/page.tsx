@@ -98,7 +98,7 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
   const load = async () => {
     setLoading(true)
     const [{ data: tk }, { data: rp }, { data: dir }] = await Promise.all([
-      db.from('staff_tasks').select('*').order('created_at', { ascending: false }),
+      db.from('staff_tasks').select('*').order('created_at', { ascending: false }).limit(200),
       db.from('staff_reports').select('*').order('created_at', { ascending: false }),
       db.from('staff_directory').select('*').eq('is_active', true).order('name'),
     ])
