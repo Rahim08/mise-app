@@ -1211,6 +1211,8 @@ async function reportViolation(opts: {
   if (targets.length === 0) { toast(tr('pe.noActiveStaffRole')); return }
   const base = {
     title: label, description: null, created_by: myId || null, priority: 'high', status: 'todo',
+    // Corrective action со сроком (ревью Б5, паттерн SafetyCulture): по умолчанию — завтра.
+    due_date: fmtDate(new Date(Date.now() + 86400000)),
     source_completion_id: completionId || null, source_item_label: label, photo_url,
   }
   await Promise.all(targets.map(tid => db.from('staff_tasks').insert({ ...base, assigned_to: tid })))
