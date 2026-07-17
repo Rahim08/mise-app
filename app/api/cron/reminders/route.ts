@@ -189,9 +189,9 @@ async function sendPurchaseDigest(admin: any, now: Date): Promise<number> {
       // dispatchNotification не глушил push у purchase_digest='daily' (это и есть их дайджест).
       const res = await dispatchNotification(admin, rid, {
         type: 'purchase',
-        title: 'Purchase', body: `${count} items`,
-        titleKey: 'notify.purchaseTitle', titleParams: { category: 'general' },
-        bodyKey: 'notify.purchasePositionsBody', bodyParams: { who: '', n: count },
+        title: 'Purchase — daily summary', body: `${count} items to purchase`,
+        titleKey: 'notify.purchaseDigestTitle',
+        bodyKey: 'notify.purchaseDigestBody', bodyParams: { n: count },
         data: { digest: true },
         audience: {
           owner: recipients.some(r => r.to_owner),

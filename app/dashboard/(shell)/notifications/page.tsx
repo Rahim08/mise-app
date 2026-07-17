@@ -4,15 +4,17 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { db } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
+import { renderNotify, renderCategory } from '@/lib/notifyStrings'
 import { Card, Container, SectionTitle } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
 import { timeAgo } from '@/components/dash/shared'
 
 export default function NotificationsPage() {
-  const { t: tr } = useI18n()
+  const { t: tr, locale } = useI18n()
   const { restaurant } = useDash()
   const [rows, setRows] = useState<any[]>([])
   const [lowStock, setLowStock] = useState<any[]>([])
+  const [journal, setJournal] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const status = restaurant?.subscription_status || ''
 
@@ -22,15 +24,30 @@ export default function NotificationsPage() {
     Promise.all([
       db.from('menu_orders').select('*').gte('created_at', from).order('created_at', { ascending: false }).limit(50),
       db.from('tobacco_stock').select('flavor_name, brand, flavor, quantity_g, min_quantity_g'),
-    ]).then(([ord, stock]: any) => {
+      // Журнал уведомлений владельца (явка, аудиты, кассы, закуп…) — раньше был виден
+      // только в пушах и staff-колокольчике (ревью A4).
+      db.from('notifications').select('*').eq('to_owner', true).order('created_at', { ascending: false }).limit(50),
+    ]).then(([ord, stock, notif]: any) => {
       setRows(ord.data || [])
       const low = (stock.data || [])
         .filter((s: any) => Number(s.quantity_g || 0) <= Number(s.min_quantity_g ?? 100))
         .sort((a: any, b: any) => Number(a.quantity_g || 0) - Number(b.quantity_g || 0))
       setLowStock(low)
+      setJournal(notif.data || [])
       setLoading(false)
     })
   }, [restaurant?.id])
+
+  // Запись хранит EN-фолбэк + *_key/*_params — перерендериваем на языке зрителя
+  // (тот же механизм, что в staff-колокольчике people/page.tsx NotificationsTab).
+  const renderTitle = (n: any) => {
+    if (!n.title_key) return n.title
+    const params = n.title_key === 'notify.purchaseTitle' && n.title_params?.category
+      ? { ...n.title_params, category: renderCategory(locale, String(n.title_params.category)) }
+      : n.title_params
+    return renderNotify(locale, n.title_key, params || undefined)
+  }
+  const renderBody = (n: any) => n.body_key ? renderNotify(locale, n.body_key, n.body_params || undefined) : n.body
 
   const stockName = (s: any) => s.flavor_name || [s.brand, s.flavor].filter(Boolean).join(' ') || tr('dash.tobacco')
 
@@ -74,7 +91,7 @@ export default function NotificationsPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {[0, 1, 2].map(i => <div key={i} style={{ height: 64, borderRadius: 16, background: 'var(--fill)', animation: 'dashPulse 1.2s ease-in-out infinite' }} />)}
         </div>
-      ) : rows.length === 0 && lowStock.length === 0 ? (
+      ) : rows.length === 0 && lowStock.length === 0 && journal.length === 0 ? (
         <Card><div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>{tr('dash.quietNoNotifs')}</div></Card>
       ) : rows.length === 0 ? null : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -109,6 +126,29 @@ export default function NotificationsPage() {
             )
           })}
         </div>
+      )}
+
+      {/* Журнал уведомлений владельца (notifications, to_owner) — явка, аудиты, кассы, закуп. */}
+      {journal.length > 0 && (
+        <>
+          <div style={{ fontSize: '.72rem', fontWeight: 700, color: 'var(--tx3)', textTransform: 'uppercase', letterSpacing: '.5px', margin: '18px 4px 8px' }}>{tr('dash.notifJournal')}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {journal.map(n => (
+              <Card key={n.id} style={{ padding: '12px 16px' }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 10, background: 'var(--fill)', color: 'var(--tx2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><path d="M18 8.4a6 6 0 10-12 0c0 6.6-2.7 8.6-2.7 8.6h17.4S18 15 18 8.4" /><path d="M13.7 21a2 2 0 01-3.4 0" /></svg>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>{renderTitle(n)}</div>
+                    {renderBody(n) && <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 1 }}>{renderBody(n)}</div>}
+                  </div>
+                  <span style={{ fontSize: '.72rem', color: 'var(--tx3)', flexShrink: 0 }}>{timeAgo(n.created_at)}</span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </>
       )}
     </Container>
   )

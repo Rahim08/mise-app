@@ -32,6 +32,8 @@ export const NOTIFY_STRINGS: Record<string, Row> = {
   'notify.attendanceBodyLate': { en: '{name} checked in (+{min} min)', ru: '{name} пришёл(а) (+{min} мин)', it: '{name} è arrivato/a (+{min} min)', fr: '{name} est arrivé(e) (+{min} min)', az: '{name} gəldi (+{min} dəq)', tr: '{name} geldi (+{min} dk)', uk: '{name} прийшов(ла) (+{min} хв)', kk: '{name} келді (+{min} мин)' },
 
   'notify.purchaseTitle':         { en: '{category} · Purchase', ru: '{category} · Закуп', it: '{category} · Acquisti', fr: '{category} · Achats', az: '{category} · Satınalma', tr: '{category} · Satın alma', uk: '{category} · Закупівля', kk: '{category} · Сатып алу' },
+  'notify.purchaseDigestTitle':   { en: 'Purchase — daily summary', ru: 'Закуп за день', it: 'Acquisti — riepilogo del giorno', fr: 'Achats — bilan du jour', az: 'Satınalma — günün xülasəsi', tr: 'Satın alma — günlük özet', uk: 'Закупівля за день', kk: 'Күндік сатып алу қорытындысы' },
+  'notify.purchaseDigestBody':    { en: '{n} items to purchase', ru: '{n} позиц. к закупке', it: '{n} voci da acquistare', fr: '{n} articles à acheter', az: 'alınacaq {n} mövqe', tr: 'satın alınacak {n} kalem', uk: '{n} позиц. до закупівлі', kk: 'сатып алынатын {n} позиция' },
   'notify.purchasePositionsBody': { en: '{who}{n} items', ru: '{who}{n} позиц.', it: '{who}{n} voci', fr: '{who}{n} articles', az: '{who}{n} mövqe', tr: '{who}{n} kalem', uk: '{who}{n} позиц.', kk: '{who}{n} позиция' },
   'notify.catKitchen':   { en: 'Kitchen', ru: 'Кухня', it: 'Cucina', fr: 'Cuisine', az: 'Mətbəx', tr: 'Mutfak', uk: 'Кухня', kk: 'Ас үй' },
   'notify.catBar':       { en: 'Bar', ru: 'Бар', it: 'Bar', fr: 'Bar', az: 'Bar', tr: 'Bar', uk: 'Бар', kk: 'Бар' },

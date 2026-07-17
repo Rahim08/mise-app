@@ -305,11 +305,11 @@ function GeoSettingsCard() {
       </button>
       <Field label={tr('dash.radiusM')} value={f.geo_radius_m} onChange={(v: string) => setF({ ...f, geo_radius_m: v })} type="number" placeholder="150" />
 
-      <div style={{ fontWeight: 600, fontSize: '.82rem', color: 'var(--tx)', margin: '8px 0 10px' }}>{tr('dash.shiftReminder')}</div>
-      <Field label={tr('dash.mode')} value={f.reminder_mode} onChange={(v: string) => setF({ ...f, reminder_mode: v })} select options={[{ value: 'hours_before', label: tr('dash.remHoursBefore') }, { value: 'fixed_time', label: tr('dash.remFixedTime') }]} />
-      {f.reminder_mode === 'hours_before'
-        ? <Field label={tr('dash.hoursBefore')} value={f.reminder_hours} onChange={(v: string) => setF({ ...f, reminder_hours: v })} type="number" placeholder="12" />
-        : <Field label={tr('dash.timeEve')} value={f.reminder_time} onChange={(v: string) => setF({ ...f, reminder_time: v })} type="time" />}
+      <div style={{ fontWeight: 600, fontSize: '.82rem', color: 'var(--tx)', margin: '8px 0 6px' }}>{tr('dash.shiftReminder')}</div>
+      {/* Режимы «за N часов»/«в фиксированное время» скрыты: cron на текущем плане Vercel
+          запускается раз в сутки и их не исполняет — UI не должен обещать лишнего (ревью A5).
+          Поля reminder_mode/hours/time в БД сохранены — вернуть контролы после апгрейда на Pro. */}
+      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginBottom: 12 }}>{tr('dash.reminderDailyNote')}</div>
       {/* Таймзона точки: cron считает «сегодня/завтра/HH:MM» в ней (напоминания, авто-прогулы, аудиты). */}
       <Field label={tr('dash.timezone')} value={f.timezone} onChange={(v: string) => setF({ ...f, timezone: v })} select
         options={(typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : ['UTC']).map((z: string) => ({ value: z, label: z }))} />

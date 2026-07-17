@@ -1218,10 +1218,11 @@ async function reportViolation(opts: {
 }
 
 // Карточка пунктов — общая для «Смены» и разовых «Аудитов».
-function ChecklistCard({ title, items, state, canFill, restaurantId, completionId, staff, myId, accent, t, toast, onSetItem }: {
+function ChecklistCard({ title, items, state, canFill, restaurantId, completionId, staff, myId, accent, t, toast, onSetItem, actions }: {
   title: React.ReactNode; items: { id: string; label: string; photo_required: boolean }[]; state: { done: boolean; photo_url: string | null }[]
   canFill: boolean; restaurantId: string; completionId?: string; staff: any[]; myId: string; accent: string; t: any; toast: (m: string) => void
   onSetItem: (idx: number, next: { done: boolean; photo_url: string | null }) => void
+  actions?: React.ReactNode
 }) {
   const { t: tr } = useI18n()
   const [reporting, setReporting] = useState<number | null>(null)
@@ -1249,7 +1250,10 @@ function ChecklistCard({ title, items, state, canFill, restaurantId, completionI
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 10px', gap: 8 }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{title} · {doneCount}/{items.length}</span>
-        {doneCount === items.length && items.length > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: t.green, background: `${t.green}1a`, padding: '3px 9px', borderRadius: 8 }}>{tr('pe.doneCaps')}</span>}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {actions}
+          {doneCount === items.length && items.length > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: t.green, background: `${t.green}1a`, padding: '3px 9px', borderRadius: 8 }}>{tr('pe.doneCaps')}</span>}
+        </span>
       </div>
       <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
         {items.map((it, i) => {
@@ -1464,15 +1468,18 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
   const [completions, setCompletions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState<{
-    title: string; items: string[]; targetType: 'role' | 'staff' | 'venue'; targetVal: string
+    id: string | null; title: string; items: string[]; targetType: 'role' | 'staff' | 'venue'; targetVal: string
     recurrence: 'none' | 'daily' | 'weekly' | 'monthly'; recurrenceWeekdays: number[]; recurrenceDayOfMonth: number
+    origItems?: { label: string; photo_required: boolean }[]
   } | null>(null)
   const [saving, setSaving] = useState(false)
 
   const load = async () => {
+    // Только сегодняшние прогоны (как iOS todayAuditRuns): иначе отметка попадала в
+    // старый прогон повторяющегося аудита, а история грузилась вся без лимита (A1).
     const [{ data: au }, { data: cm }] = await Promise.all([
       db.from('shift_checklists').select('*').eq('kind', 'audit').order('created_at', { ascending: false }).limit(50),
-      db.from('shift_checklist_completions').select('*'),
+      db.from('shift_checklist_completions').select('*').eq('date', today),
     ])
     setAudits(au || []); setCompletions(cm || []); setLoading(false)
   }
@@ -1486,7 +1493,7 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
 
   const setItem = async (audit: any, idx: number, next: { done: boolean; photo_url: string | null }) => {
     const items = (Array.isArray(audit.items) ? audit.items : []).map((x: any, i: number) => normItem(x, i))
-    const completion = completions.find(c => c.checklist_id === audit.id)
+    const completion = completions.find(c => c.checklist_id === audit.id && c.date === today)
     const curState = (Array.isArray(completion?.items_state) ? completion.items_state : []).map(normState)
     let nextState = items.map((_, i) => i === idx ? next : (curState[i] || { done: false, photo_url: null }))
     let allDone = nextState.every(s => s.done)
@@ -1508,6 +1515,43 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
     if (allDone) toast(tr('pe.openDone'))
   }
 
+  // Пуш целевой аудитории аудита (запуск сегодняшнего прогона).
+  const notifyAudience = (audit: any, title: string) => {
+    let targets: string[] = []
+    if (audit.target_scope === 'role') targets = staff.filter((s: any) => s.role === audit.role).map((s: any) => s.id)
+    else if (audit.target_scope === 'staff') targets = audit.assigned_staff_id ? [audit.assigned_staff_id] : []
+    else targets = staff.map((s: any) => s.id)
+    const notifyIds = targets.filter(tid => tid !== myId)
+    if (notifyIds.length) pushNotify({ type: 'audit', title: 'New audit', body: title, titleKey: 'notify.auditAssignedTitle', bodyKey: 'notify.auditAssignedBody', bodyParams: { name: myName || 'Manager', title }, audience: { staff_ids: notifyIds } })
+  }
+
+  /// Повторный запуск существующего шаблона (как iOS startAudit): прогон pending + пуш.
+  const startAudit = async (audit: any) => {
+    if (completions.some(c => c.checklist_id === audit.id && c.date === today)) return
+    await db.from('shift_checklist_completions').insert({ checklist_id: audit.id, date: today, status: 'pending', requested_by: myId || null })
+    notifyAudience(audit, audit.title || '')
+    toast(tr('pe.auditLaunched')); await load()
+  }
+
+  const removeAudit = async (audit: any) => {
+    if (!confirm(tr('pe.deleteAuditConfirm'))) return
+    await db.from('shift_checklist_completions').delete().eq('checklist_id', audit.id)
+    await db.from('shift_checklists').delete().eq('id', audit.id)
+    await load()
+  }
+
+  const editAudit = (audit: any) => {
+    const orig = (Array.isArray(audit.items) ? audit.items : []).map((x: any, i: number) => normItem(x, i))
+    setCreating({
+      id: audit.id, title: audit.title || '', items: orig.map((it: any) => it.label),
+      targetType: audit.target_scope || 'venue',
+      targetVal: audit.target_scope === 'role' ? (audit.role || '') : audit.target_scope === 'staff' ? (audit.assigned_staff_id || '') : '',
+      recurrence: audit.recurrence || 'none',
+      recurrenceWeekdays: audit.recurrence_weekdays || [], recurrenceDayOfMonth: audit.recurrence_day_of_month || 1,
+      origItems: orig,
+    })
+  }
+
   const launch = async () => {
     if (!creating) return
     const clean = creating.items.map(s => s.trim()).filter(Boolean)
@@ -1519,18 +1563,21 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
       recurrence: creating.recurrence,
       recurrence_weekdays: creating.recurrence === 'weekly' ? creating.recurrenceWeekdays : null,
       recurrence_day_of_month: creating.recurrence === 'monthly' ? creating.recurrenceDayOfMonth : null,
+      role: null, assigned_staff_id: null,
     }
     if (creating.targetType === 'role') payload.role = creating.targetVal
     if (creating.targetType === 'staff') payload.assigned_staff_id = creating.targetVal
+    if (creating.id) {
+      // Редактирование шаблона: photo_required сохраняем по индексу (в веб-форме флаг не правится).
+      payload.items = clean.map((label, i) => ({ id: String(i), label, photo_required: creating.origItems?.[i]?.photo_required || false }))
+      await db.from('shift_checklists').update(payload).eq('id', creating.id)
+      setSaving(false); setCreating(null); toast(tr('pe.save')); await load()
+      return
+    }
     const { data: audit } = await db.from('shift_checklists').insert(payload).select().single()
     if (audit) {
       await db.from('shift_checklist_completions').insert({ checklist_id: audit.id, date: today, status: 'pending', requested_by: myId || null })
-      let targets: string[] = []
-      if (creating.targetType === 'role') targets = staff.filter((s: any) => s.role === creating.targetVal).map((s: any) => s.id)
-      else if (creating.targetType === 'staff') targets = [creating.targetVal]
-      else targets = staff.map((s: any) => s.id)
-      const notifyIds = targets.filter(tid => tid !== myId)
-      if (notifyIds.length) pushNotify({ type: 'audit', title: 'New audit', body: creating.title.trim(), titleKey: 'notify.auditAssignedTitle', bodyKey: 'notify.auditAssignedBody', bodyParams: { name: myName || 'Manager', title: creating.title.trim() }, audience: { staff_ids: notifyIds } })
+      notifyAudience(audit, creating.title.trim())
     }
     setSaving(false); setCreating(null); toast(tr('pe.auditLaunched')); await load()
   }
@@ -1541,7 +1588,7 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
     <div>
       {!canFill && <div style={{ background: `${t.orange}14`, borderRadius: 12, padding: '12px 14px', fontSize: 13, color: t.orange, marginBottom: 14 }}>{tr('pe.needCheckInFirst')}</div>}
       {isManager && (
-        <button onClick={() => setCreating({ title: '', items: [''], targetType: 'role', targetVal: '', recurrence: 'none', recurrenceWeekdays: [], recurrenceDayOfMonth: 1 })} style={{ width: '100%', padding: '14px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', marginBottom: 16, boxShadow: `0 4px 16px ${accent}44` }}>
+        <button onClick={() => setCreating({ id: null, title: '', items: [''], targetType: 'role', targetVal: '', recurrence: 'none', recurrenceWeekdays: [], recurrenceDayOfMonth: 1 })} style={{ width: '100%', padding: '14px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', marginBottom: 16, boxShadow: `0 4px 16px ${accent}44` }}>
           {tr('pe.newAudit')}
         </button>
       )}
@@ -1550,7 +1597,7 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
         <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>{tr('pe.noAudits')}</div>
       ) : visible.map(audit => {
         const items = (Array.isArray(audit.items) ? audit.items : []).map((x: any, i: number) => normItem(x, i))
-        const completion = completions.find(c => c.checklist_id === audit.id)
+        const completion = completions.find(c => c.checklist_id === audit.id && c.date === today)
         const state = (Array.isArray(completion?.items_state) ? completion.items_state : []).map(normState)
         const targetLabel = audit.target_scope === 'role' ? tr(roleLabel(audit.role)) : audit.target_scope === 'staff' ? (staff.find((s: any) => s.id === audit.assigned_staff_id)?.name || '—') : tr('pe.auditTargetVenue')
         const recurLabel = recurrenceSummary(audit, tr)
@@ -1562,6 +1609,21 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
             restaurantId={restaurantId} completionId={completion?.id} staff={staff} myId={myId}
             accent={accent} t={t} toast={toast}
             onSetItem={(idx, next) => setItem(audit, idx, next)}
+            actions={isManager && (
+              <>
+                {!completion && (
+                  <button onClick={() => startAudit(audit)} title={tr('pe.runAudit')} style={{ background: 'none', border: 'none', color: accent, cursor: 'pointer', padding: 2, display: 'flex' }}>
+                    <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>
+                  </button>
+                )}
+                <button onClick={() => editAudit(audit)} title={tr('pe.editAudit')} style={{ background: 'none', border: 'none', color: t.text3, cursor: 'pointer', padding: 2, display: 'flex' }}>
+                  <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M17 3a2.8 2.8 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg>
+                </button>
+                <button onClick={() => removeAudit(audit)} title={tr('pe.deleteAuditConfirm')} style={{ background: 'none', border: 'none', color: t.text4, cursor: 'pointer', padding: 2, display: 'flex' }}>
+                  <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" /></svg>
+                </button>
+              </>
+            )}
           />
         )
       })}
@@ -1657,7 +1719,16 @@ function AuditStatsView({ accent, t }: { accent: string; t: any }) {
   const violationsByLabel = new Map<string, number>()
   const byStaff = new Map<string, { total: number; done: number }>()
 
-  for (const c of completions) {
+  // Что считать (ревью A2): status='done' ставится только когда отмечены ВСЕ пункты, поэтому
+  // «нарушение» = неотмеченный пункт в прогоне, работа над которым закончена по времени:
+  // done-прогоны + начатые (in_progress) за ПРОШЛЫЕ дни. Сегодняшние in_progress ещё
+  // заполняются, pending вообще не открывались — они идут отдельной метрикой «не пройдено»,
+  // а не в нарушения (иначе пустой прогон = 100% нарушений).
+  const todayKey = fmtDate(new Date())
+  const finished = completions.filter((c: any) => c.status === 'done' || (c.status === 'in_progress' && c.date < todayKey))
+  const unfinished = completions.filter((c: any) => c.status === 'pending' && c.date < todayKey).length
+
+  for (const c of finished) {
     const list = listById.get(c.checklist_id)
     if (!list) continue
     const items = (Array.isArray((list as any).items) ? (list as any).items : []).map((x: any, i: number) => normItem(x, i))
@@ -1686,6 +1757,7 @@ function AuditStatsView({ accent, t }: { accent: string; t: any }) {
       <div style={{ background: t.surface, borderRadius: 20, padding: '24px 20px', boxShadow: t.sh, textAlign: 'center', marginBottom: 16 }}>
         <div style={{ fontSize: 44, fontWeight: 800, color: accent }}>{rate}%</div>
         <div style={{ fontSize: 13, color: t.text3, marginTop: 4 }}>{tr('pe.completionRate')} · {tr('pe.last30Days')}</div>
+        {unfinished > 0 && <div style={{ fontSize: 12, fontWeight: 600, color: t.orange, marginTop: 6 }}>{tr('pe.unfinishedRuns', { n: unfinished })}</div>}
       </div>
 
       {topViolations.length > 0 && (
