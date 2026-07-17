@@ -1174,7 +1174,9 @@ function normItem(x: any, i: number): { id: string; label: string; photo_require
 function normState(x: any): { done: boolean; photo_url: string | null } {
   if (typeof x === 'boolean') return { done: x, photo_url: null }
   if (x == null) return { done: false, photo_url: null }
-  return { done: !!x.done, photo_url: x.photo_url ?? null }
+  // Спред первым: доп. поля (result/note — оценки аудита, ревью Б1) переживают мерж,
+  // а не стираются при каждой отметке.
+  return { ...x, done: !!x.done, photo_url: x.photo_url ?? null }
 }
 
 async function uploadAuditPhoto(restaurantId: string, folder: string, file: File): Promise<string | null> {

@@ -88,7 +88,8 @@
       "Bash(xcodebuild -project Mise.xcodeproj -scheme Mise -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' build)",
       "Bash(echo \"exit: $?\")",
       "Bash(xcodebuild -list -project Mise.xcodeproj)",
-      "Bash(xcodebuild -project Mise.xcodeproj -scheme Mise -destination 'generic/platform=iOS Simulator' -configuration Debug build CODE_SIGNING_ALLOWED=NO)"
+      "Bash(xcodebuild -project Mise.xcodeproj -scheme Mise -destination 'generic/platform=iOS Simulator' -configuration Debug build CODE_SIGNING_ALLOWED=NO)",
+      "WebSearch"
     ]
   }
 }

@@ -299,28 +299,43 @@ nonisolated struct ShiftChecklist: Codable, Identifiable, Sendable {
 nonisolated struct ChecklistItemState: Codable, Sendable {
     var done: Bool
     var photo_url: String?
+    // Оценка пункта аудита (ревью Б1, пишет веб): "pass" | "fail" | "na". Поля ОБЯЗАНЫ
+    // переживать iOS-тоггл (мы перезаписываем items_state целиком) — иначе оценки стираются.
+    var result: String?
+    var note: String?
 
-    init(done: Bool, photo_url: String? = nil) { self.done = done; self.photo_url = photo_url }
+    init(done: Bool, photo_url: String? = nil, result: String? = nil, note: String? = nil) {
+        self.done = done; self.photo_url = photo_url; self.result = result; self.note = note
+    }
 
-    private enum CodingKeys: String, CodingKey { case done, photo_url }
+    private enum CodingKeys: String, CodingKey { case done, photo_url, result, note }
 
     init(from decoder: Decoder) throws {
         if let sv = try? decoder.singleValueContainer(), let b = try? sv.decode(Bool.self) {
-            done = b; photo_url = nil
+            done = b; photo_url = nil; result = nil; note = nil
             return
         }
         let c = try decoder.container(keyedBy: CodingKeys.self)
         done = try c.decodeIfPresent(Bool.self, forKey: .done) ?? false
         photo_url = try c.decodeIfPresent(String.self, forKey: .photo_url)
+        result = try c.decodeIfPresent(String.self, forKey: .result)
+        note = try c.decodeIfPresent(String.self, forKey: .note)
     }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(done, forKey: .done)
         try c.encodeIfPresent(photo_url, forKey: .photo_url)
+        try c.encodeIfPresent(result, forKey: .result)
+        try c.encodeIfPresent(note, forKey: .note)
     }
 
-    var asDict: [String: Any] { ["done": done, "photo_url": photo_url ?? NSNull()] }
+    var asDict: [String: Any] {
+        var d: [String: Any] = ["done": done, "photo_url": photo_url ?? NSNull()]
+        if let result { d["result"] = result }
+        if let note { d["note"] = note }
+        return d
+    }
 }
 
 nonisolated struct ChecklistCompletion: Codable, Identifiable, Sendable {
