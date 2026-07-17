@@ -194,7 +194,10 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 11, fontWeight: 700, color: PRIO[task.priority]?.color(t) }}>{tr(PRIO[task.priority]?.label)}</span>
                         <span style={{ fontSize: 11, color: t.text3 }}>· {staffName(task.assigned_to)}</span>
-                        {task.due_date && <span style={{ fontSize: 11, color: t.orange }}>· {tr('pe.dueBy')} {dayLabel(task.due_date)}</span>}
+                        {task.due_date && (
+                          // Просрочка — красным и жирным (corrective action, ревью Б5).
+                          <span style={{ fontSize: 11, color: task.status !== 'done' && task.due_date < fmtDate(new Date()) ? t.red : t.orange, fontWeight: task.status !== 'done' && task.due_date < fmtDate(new Date()) ? 700 : 400 }}>· {tr('pe.dueBy')} {dayLabel(task.due_date)}</span>
+                        )}
                         {task.status !== 'done' && <button onClick={() => setStatus(task, task.status === 'todo' ? 'in_progress' : 'todo')} style={{ fontSize: 11, fontWeight: 600, color: accent, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>{task.status === 'todo' ? tr('pe.takeInWork') : tr('pe.return')}</button>}
                       </div>
                     </div>
@@ -1598,7 +1601,10 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
       )}
 
       {visible.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>{tr('pe.noAudits')}</div>
+        <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
+          <div style={{ fontWeight: 600, fontSize: 15, color: t.text2 }}>{tr('pe.noAudits')}</div>
+          {isManager && <div style={{ fontSize: 13, marginTop: 8, lineHeight: 1.5, maxWidth: 340, margin: '8px auto 0' }}>{tr('pe.noAuditsHint')}</div>}
+        </div>
       ) : visible.map(audit => {
         const items = (Array.isArray(audit.items) ? audit.items : []).map((x: any, i: number) => normItem(x, i))
         const completion = completions.find(c => c.checklist_id === audit.id && c.date === today)
