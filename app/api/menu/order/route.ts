@@ -11,7 +11,12 @@ export async function POST(req: NextRequest) {
   const rlKey = rateLimitKey(req, 'menu-order')
   if (!await checkRateLimit(rlKey, 30, 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
   const { slug, items, total, tip, order_type, table_number, type } = await req.json()
-  const isCall = type === 'waiter_call' // вызов официанта — без позиций
+  // Быстрые действия — вызов без позиций заказа, кодируются маркером в items
+  // (см. комментарий у menu_orders.insert ниже). 'waiter_call' — старое имя типа
+  // 'waiter', оставлено для обратной совместимости со старыми клиентами меню.
+  const CALL_TYPES: Record<string, string> = { waiter_call: 'waiter', coal_call: 'coal', water_call: 'water' }
+  const callKind = CALL_TYPES[type as string]
+  const isCall = !!callKind
   if (!slug || (!isCall && (!Array.isArray(items) || items.length === 0))) {
     return NextResponse.json({ error: 'Bad request' }, { status: 400 })
   }
@@ -45,11 +50,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Orders not available' }, { status: 403 })
   }
 
-  // Вызов официанта кодируется маркером в items — без изменения схемы menu_orders.
+  // Быстрые действия кодируются маркером в items — без изменения схемы menu_orders.
   const { data, error } = await admin.from('menu_orders').insert({
     restaurant_id: restaurantId,
     menu_id: menuId,
-    items: isCall ? [{ call: 'waiter' }] : items,
+    items: isCall ? [{ call: callKind }] : items,
     total: isCall ? 0 : (total || 0),
     tip: isCall ? 0 : (Number(tip) || 0),
     order_type: order_type === 'pickup' ? 'pickup' : 'dine_in',

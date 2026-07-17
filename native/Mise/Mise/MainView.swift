@@ -1,21 +1,21 @@
 import SwiftUI
 
 // Каталог модулей сьюта.
+// Сабтайтл НЕ хранится здесь — рендерится через t("mod.<id>.sub") на языке пользователя.
 struct MiseModule: Identifiable {
     let id: String
     let title: String
-    let subtitle: String
     let symbol: String
     let color: Color
 }
 
 let miseModules: [String: MiseModule] = [
-    "manager":   .init(id: "manager",   title: "Manager",   subtitle: "Смены и касса",        symbol: "creditcard.fill", color: BrandKit.manager),
-    "analytics": .init(id: "analytics", title: "Analytics", subtitle: "Выручка и аналитика",  symbol: "chart.bar.fill",  color: BrandKit.analytics),
-    "stash":     .init(id: "stash",     title: "Stash",     subtitle: "Склад и кальян",       symbol: "shippingbox.fill", color: BrandKit.stash),
-    "people":    .init(id: "people",    title: "People",    subtitle: "Команда и расписание", symbol: "person.2.fill",    color: BrandKit.people),
-    "bookings":  .init(id: "bookings",  title: "Bookings",  subtitle: "Брони столов",         symbol: "calendar.badge.clock", color: BrandKit.bookings),
-    "news":      .init(id: "news",      title: "News",      subtitle: "Лента и объявления",   symbol: "megaphone.fill",  color: BrandKit.news),
+    "manager":   .init(id: "manager",   title: "Manager",   symbol: "creditcard.fill", color: BrandKit.manager),
+    "analytics": .init(id: "analytics", title: "Analytics", symbol: "chart.bar.fill",  color: BrandKit.analytics),
+    "stash":     .init(id: "stash",     title: "Stash",     symbol: "shippingbox.fill", color: BrandKit.stash),
+    "people":    .init(id: "people",    title: "People",    symbol: "person.2.fill",    color: BrandKit.people),
+    "bookings":  .init(id: "bookings",  title: "Bookings",  symbol: "calendar.badge.clock", color: BrandKit.bookings),
+    "news":      .init(id: "news",      title: "News",      symbol: "megaphone.fill",  color: BrandKit.news),
 ]
 
 /// После входа: хаб со списком доступных приложений. Если приложение одно — сразу в него.
@@ -201,7 +201,11 @@ struct AppTabPage<Content: View>: View {
                         .id("top")
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .refreshable { await refresh?() }
+                .refreshable {
+                    // Обойти свежий кеш: иначе pull-to-refresh отдаёт те же данные (см. DB.clearCacheNow).
+                    if refresh != nil { await DB.clearCacheNow() }
+                    await refresh?()
+                }
                 .onChange(of: scrollResetKey) { _, _ in proxy.scrollTo("top", anchor: .top) }
             }
         }
@@ -316,7 +320,7 @@ struct NotificationSettingsView: View {
     @State private var lowStock = true
     @State private var voiceTasks = true
 
-    private var isManager: Bool { (app.staff?.isOwner ?? false) || app.staff?.role == "manager" }
+    private var isManager: Bool { (app.staff?.isOwner ?? false) || app.staff?.role == "manager" || app.staff?.role == "admin" }
     private var isOwner: Bool { app.staff?.isOwner ?? false }
 
     var body: some View {
@@ -390,6 +394,10 @@ struct NotificationSettingsView: View {
             "booking": booking, "news": news,
             "low_stock": lowStock, "voice_tasks": voiceTasks,
         ]
+        // Зеркало в UserDefaults — локальные читатели без похода в БД (Push.isEnabled:
+        // shift_reminder; StashView.checkLowStock: low_stock). Только Bool-значения:
+        // читатели кастят словарь как [String: Bool], строковый purchase_digest сломал бы каст.
+        UserDefaults.standard.set(prefs.filter { $0.value is Bool }, forKey: "mise_notif_prefs")
         Task {
             defer { saving = false }
             if let id = rowId {

@@ -187,6 +187,11 @@ let STRINGS: [String: [Lang: String]] = [
     "mod.analytics.sub": tr("Revenue & analytics", "Выручка и аналитика", "Ricavi e analisi", "Revenus et analyses", "Gəlir və analitika", "Gelir ve analiz", "Виручка та аналітика", "Кіріс және аналитика"),
     "mod.stash.sub":     tr("Stock & sessions", "Склад и сессии", "Magazzino e sessioni", "Stock et sessions", "Anbar və seanslar", "Stok ve seanslar", "Склад і сесії", "Қойма және сеанстар"),
     "mod.people.sub":    tr("Team & schedule", "Команда и расписание", "Team e turni", "Équipe et planning", "Komanda və qrafik", "Ekip ve program", "Команда та розклад", "Команда және кесте"),
+    "faceid.loginReason":  tr("Sign in to Mise", "Вход в Mise", "Accesso a Mise", "Connexion à Mise", "Mise-ə giriş", "Mise'e giriş", "Вхід у Mise", "Mise-ге кіру"),
+    "pe.iLeft":      tr("I'm leaving", "Я ушёл", "Sto uscendo", "Je pars", "Mən getdim", "Çıkıyorum", "Я пішов", "Мен кеттім"),
+    "pe.checkedOut": tr("Check-out recorded", "Уход отмечен", "Uscita registrata", "Départ enregistré", "Çıxış qeyd olundu", "Çıkış kaydedildi", "Вихід зафіксовано", "Кету тіркелді"),
+    "pe.leftAt":     tr("Left at {t}", "Ушёл в {t}", "Uscito alle {t}", "Parti à {t}", "{t}-də getdi", "{t}'de çıktı", "Пішов о {t}", "{t}-де кетті"),
+    "faceid.enableReason": tr("Enable Face ID sign-in", "Включить вход по Face ID", "Attiva l'accesso con Face ID", "Activer la connexion Face ID", "Face ID ilə girişi aktivləşdir", "Face ID ile girişi etkinleştir", "Увімкнути вхід за Face ID", "Face ID арқылы кіруді қосу"),
 
     // Вкладки Analytics
     "tab.period":   tr("Period", "Период", "Periodo", "Période", "Dövr", "Dönem", "Період", "Кезең"),
@@ -677,6 +682,8 @@ let STRINGS: [String: [Lang: String]] = [
     "pe.finished":       tr("Finished", "Завершённые", "Completati", "Terminées", "Bitmiş", "Tamamlanan", "Завершені", "Аяқталған"),
     "pe.noActive":       tr("No active orders", "Активных заказов нет", "Nessun ordine attivo", "Aucune commande active", "Aktiv sifariş yoxdur", "Aktif sipariş yok", "Активних замовлень немає", "Белсенді тапсырыс жоқ"),
     "pe.callWaiter":     tr("Waiter requested", "Зовут официанта", "Chiamano un cameriere", "Appel d’un serveur", "Ofisiant çağırırlar", "Garson çağrılıyor", "Кличуть офіціанта", "Даяшы шақыруда"),
+    "pe.callCoal":       tr("Coals requested", "Просят угли", "Chiedono carboni", "Charbons demandés", "Kömür istəyirlər", "Kömür isteniyor", "Просять вугілля", "Көмір сұрап жатыр"),
+    "pe.callWater":      tr("Water requested", "Просят воду", "Chiedono acqua", "Eau demandée", "Su istəyirlər", "Su isteniyor", "Просять воду", "Су сұрап жатыр"),
     "pe.tableN":         tr("Table {n}", "Стол {n}", "Tavolo {n}", "Table {n}", "Masa {n}", "Masa {n}", "Стіл {n}", "Үстел {n}"),
     "pe.coming":         tr("On my way", "Иду", "Arrivo", "J’arrive", "Gəlirəm", "Geliyorum", "Іду", "Барамын"),
     "pe.cooking":        tr("Cooking", "Готовим", "In preparazione", "En préparation", "Hazırlanır", "Hazırlanıyor", "Готуємо", "Дайындаудамыз"),

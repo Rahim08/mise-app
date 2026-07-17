@@ -290,8 +290,13 @@ final class PeopleModel {
         }
         let absences = (await absR) ?? [], cardAmounts = (await cardsR) ?? []
 
+        // ym+"-31" в 30-дневных месяцах — невалидная дата для колонки типа date (400 → авансы
+        // молча пропадали). Считаем реальный конец месяца.
+        let advCal = Calendar.current
+        let advStart = advCal.date(from: advCal.dateComponents([.year, .month], from: Date())) ?? Date()
+        let advEnd = advCal.date(byAdding: DateComponents(month: 1, day: -1), to: advStart) ?? advStart
         let advances = (try? await DB.from("salary_advances").select()
-            .gte("date", ym + "-01").lte("date", ym + "-31").list(SalaryAdvance.self)) ?? []
+            .gte("date", ym + "-01").lte("date", key(advEnd)).list(SalaryAdvance.self)) ?? []
 
         var list = employees.map { e -> SalRow in
             let absForEmp = absences.filter { $0.employee_id == e.id && $0.source != "auto" }
@@ -491,6 +496,24 @@ final class PeopleModel {
         }
     }
 
+    /// Чек-аут «Я ушёл» — порт веб-версии (app/people/page.tsx checkOut).
+    func checkOut() async {
+        guard let rec = todayRec, rec.check_out_at == nil else { return }
+        checking = true; defer { checking = false }
+        var payload: [String: Any] = ["check_out_at": ISO8601DateFormatter().string(from: Date())]
+        // Гео как в checkIn: при включённой геоявке фиксируем точку ухода (зону не проверяем —
+        // уход возможен и вне зоны).
+        if geo?.attendance_enabled == true, let coord = await LocationOneShot().current() {
+            payload["check_out_lat"] = coord.latitude
+            payload["check_out_lng"] = coord.longitude
+        }
+        do {
+            try await DB.from("attendance_records").update(payload).eq("id", rec.id).run()
+            flash(t("pe.checkedOut"))
+            await loadAttendance()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])) }
+    }
+
     /// Сбросить отложенную явку (при загрузке и возврате в foreground).
     func flushPendingCheckIn() async {
         guard let data = UserDefaults.standard.data(forKey: pendingCheckInKey),
@@ -651,29 +674,42 @@ final class PeopleModel {
         }
         state[idx].done = willBeDone
         if let photoURL { state[idx].photo_url = photoURL }
-        let allDone = state.allSatisfy { $0.done }
-        let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
-        let stateDicts = state.map { $0.asDict }
+        var allDone = state.allSatisfy { $0.done }
         let staffVal: Any = myId == "owner" || myId.isEmpty ? NSNull() : myId
         if let i = auditRuns.firstIndex(where: { $0.checklist_id == list.id && $0.date == todayKey }) {
             let cid = auditRuns[i].id
+            // Против lost update: свежая копия с сервера (мимо кеша), мержим ТОЛЬКО свой индекс —
+            // параллельные отметки коллег не затираем. Сеть упала → работаем со своей копией, уйдёт в очередь.
+            if let freshState = try? await DB.from("shift_checklist_completions").select().fresh().eq("id", cid).limit(1).list(ChecklistCompletion.self).first?.items_state {
+                var merged = freshState
+                while merged.count < max(itemsList.count, idx + 1) { merged.append(ChecklistItemState(done: false)) }
+                merged[idx] = state[idx]
+                state = merged
+                allDone = state.allSatisfy { $0.done }
+            }
+            let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
             auditRuns[i].items_state = state
             auditRuns[i].status = allDone ? "done" : "in_progress"
             do {
                 try await DB.from("shift_checklist_completions").update([
-                    "items_state": stateDicts, "completed_at": completedAt,
+                    "items_state": state.map { $0.asDict }, "completed_at": completedAt,
                     "status": allDone ? "done" : "in_progress", "staff_id": staffVal,
                 ] as [String: Any]).eq("id", cid).run()
             } catch { queuePendingChecklistToggle(completionId: cid, idx: idx, done: state[idx].done, photoURL: photoURL) }
         } else {
+            let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
             let attId: Any = attendance.first(where: { $0.staff_id == myId && $0.date == todayKey })?.id ?? NSNull()
             do {
                 try await DB.from("shift_checklist_completions").insert([
                     "restaurant_id": rid, "checklist_id": list.id, "shift_id": openShiftId ?? NSNull(), "date": todayKey,
-                    "staff_id": staffVal, "items_state": stateDicts, "completed_at": completedAt,
+                    "staff_id": staffVal, "items_state": state.map { $0.asDict }, "completed_at": completedAt,
                     "attendance_id": attId, "status": allDone ? "done" : "in_progress",
                 ] as [String: Any]).run()
-            } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+            } catch {
+                // Офлайн: прогона ещё нет — кладём отметку в очередь по (checklist_id, date), flush создаст строку.
+                queuePendingChecklistToggle(checklistId: list.id, date: todayKey, shiftId: openShiftId, idx: idx, done: state[idx].done, photoURL: photoURL)
+                return
+            }
             await loadAudits()
         }
         if allDone { flash(t("pe.checklistOpenDone")) }
@@ -752,15 +788,22 @@ final class PeopleModel {
         }
         state[idx].done = willBeDone
         if let photoURL { state[idx].photo_url = photoURL }
-        let allDone = state.allSatisfy { $0.done }
-        let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
-        let stateDicts = state.map { $0.asDict }
+        var allDone = state.allSatisfy { $0.done }
         if let i = completions.firstIndex(where: { $0.checklist_id == list.id }) {
             let cid = completions[i].id
+            // Против lost update: свежая копия с сервера (мимо кеша), мержим ТОЛЬКО свой индекс.
+            if let freshState = try? await DB.from("shift_checklist_completions").select().fresh().eq("id", cid).limit(1).list(ChecklistCompletion.self).first?.items_state {
+                var merged = freshState
+                while merged.count < max(itemsList.count, idx + 1) { merged.append(ChecklistItemState(done: false)) }
+                merged[idx] = state[idx]
+                state = merged
+                allDone = state.allSatisfy { $0.done }
+            }
+            let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
             completions[i].items_state = state
             do {
                 try await DB.from("shift_checklist_completions").update([
-                    "items_state": stateDicts, "completed_at": completedAt,
+                    "items_state": state.map { $0.asDict }, "completed_at": completedAt,
                     "status": allDone ? "done" : "in_progress",
                     "staff_id": myId == "owner" || myId.isEmpty ? NSNull() : myId,
                 ] as [String: Any]).eq("id", cid).run()
@@ -768,14 +811,19 @@ final class PeopleModel {
                 queuePendingChecklistToggle(completionId: cid, idx: idx, done: state[idx].done, photoURL: photoURL)
             }
         } else {
+            let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
             let attId: Any = attendance.first(where: { $0.staff_id == myId && $0.date == todayKey })?.id ?? NSNull()
             do {
                 try await DB.from("shift_checklist_completions").insert([
                     "restaurant_id": rid, "checklist_id": list.id, "shift_id": sid, "date": key(Date()),
                     "staff_id": myId == "owner" || myId.isEmpty ? NSNull() : myId,
-                    "items_state": stateDicts, "completed_at": completedAt, "attendance_id": attId, "status": allDone ? "done" : "in_progress",
+                    "items_state": state.map { $0.asDict }, "completed_at": completedAt, "attendance_id": attId, "status": allDone ? "done" : "in_progress",
                 ] as [String: Any]).run()
-            } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+            } catch {
+                // Офлайн: строки ещё нет — очередь по (checklist_id, date), flush создаст прогон.
+                queuePendingChecklistToggle(checklistId: list.id, date: key(Date()), shiftId: sid, idx: idx, done: state[idx].done, photoURL: photoURL)
+                return
+            }
             await loadChecklists()
         }
         if allDone { flash(clType == "open" ? t("pe.checklistOpenDone") : t("pe.checklistCloseDone")) }
@@ -783,7 +831,17 @@ final class PeopleModel {
 
     // MARK: оффлайн-очередь отметок чек-листа/аудита (по образцу pendingCheckIn)
 
-    private struct PendingChecklistToggle: Codable { let completionId: String; let idx: Int; let done: Bool; let photoURL: String? }
+    /// completionId != nil — отметка в существующем прогоне; иначе прогона ещё не было
+    /// (офлайн-INSERT): ищем/создаём по (checklistId, date) при flush.
+    private struct PendingChecklistToggle: Codable {
+        var completionId: String?
+        var checklistId: String?
+        var date: String?
+        var shiftId: String?
+        let idx: Int
+        let done: Bool
+        let photoURL: String?
+    }
     private var pendingChecklistKey: String { "mise_pending_checklist_\(rid)_\(myId)" }
 
     private func loadPendingChecklistQueue() -> [PendingChecklistToggle] {
@@ -792,9 +850,9 @@ final class PeopleModel {
         return queue
     }
 
-    private func queuePendingChecklistToggle(completionId: String, idx: Int, done: Bool, photoURL: String?) {
+    private func queuePendingChecklistToggle(completionId: String? = nil, checklistId: String? = nil, date: String? = nil, shiftId: String? = nil, idx: Int, done: Bool, photoURL: String?) {
         var queue = loadPendingChecklistQueue()
-        queue.append(.init(completionId: completionId, idx: idx, done: done, photoURL: photoURL))
+        queue.append(.init(completionId: completionId, checklistId: checklistId, date: date, shiftId: shiftId, idx: idx, done: done, photoURL: photoURL))
         if let data = try? JSONEncoder().encode(queue) { UserDefaults.standard.set(data, forKey: pendingChecklistKey) }
         flash(t("pe.checkInPending"))
     }
@@ -804,28 +862,57 @@ final class PeopleModel {
     func flushPendingChecklistQueue() async {
         let queue = loadPendingChecklistQueue()
         guard !queue.isEmpty else { return }
+        let staffVal: Any = myId == "owner" || myId.isEmpty ? NSNull() : myId
         var remaining: [PendingChecklistToggle] = []
         for item in queue {
-            guard let comp = try? await DB.from("shift_checklist_completions").select().eq("id", item.completionId).limit(1).list(ChecklistCompletion.self).first else {
-                remaining.append(item); continue
+            // Находим прогон: по id либо (checklist_id, date) — офлайн-INSERT строку так и не создал.
+            // Читаем мимо кеша: мерж по устаревшей копии = lost update.
+            var comp: ChecklistCompletion?
+            if let cid = item.completionId {
+                guard let found = try? await DB.from("shift_checklist_completions").select().fresh().eq("id", cid).limit(1).list(ChecklistCompletion.self).first else {
+                    remaining.append(item); continue
+                }
+                comp = found
+            } else if let clId = item.checklistId, let date = item.date {
+                do {
+                    comp = try await DB.from("shift_checklist_completions").select().fresh().eq("checklist_id", clId).eq("date", date).limit(1).list(ChecklistCompletion.self).first
+                } catch { remaining.append(item); continue } // сеть — попробуем позже
+            } else { continue } // битый элемент старого формата — выкидываем
+
+            if let comp {
+                var state = comp.items_state ?? []
+                while state.count <= item.idx { state.append(.init(done: false)) }
+                state[item.idx].done = item.done
+                if let p = item.photoURL { state[item.idx].photo_url = p }
+                let allDone = state.allSatisfy { $0.done }
+                do {
+                    try await DB.from("shift_checklist_completions").update([
+                        "items_state": state.map { $0.asDict },
+                        "completed_at": allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull(),
+                        "status": allDone ? "done" : "in_progress",
+                        "staff_id": staffVal,
+                    ] as [String: Any]).eq("id", comp.id).run()
+                } catch { remaining.append(item) }
+            } else {
+                // Прогона нет — создаём со своей отметкой; размер по шаблону, чтобы не резать чужие индексы.
+                let tplCount = (checklists + audits).first { $0.id == item.checklistId }?.itemDetails?.count ?? 0
+                var state = Array(repeating: ChecklistItemState(done: false), count: max(tplCount, item.idx + 1))
+                state[item.idx].done = item.done
+                if let p = item.photoURL { state[item.idx].photo_url = p }
+                let allDone = state.allSatisfy { $0.done }
+                do {
+                    try await DB.from("shift_checklist_completions").insert([
+                        "restaurant_id": rid, "checklist_id": item.checklistId ?? "", "shift_id": item.shiftId ?? NSNull(), "date": item.date ?? todayKey,
+                        "staff_id": staffVal, "items_state": state.map { $0.asDict },
+                        "completed_at": allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull(),
+                        "status": allDone ? "done" : "in_progress",
+                    ] as [String: Any]).run()
+                } catch { remaining.append(item) }
             }
-            var state = comp.items_state ?? []
-            while state.count <= item.idx { state.append(.init(done: false)) }
-            state[item.idx].done = item.done
-            if let p = item.photoURL { state[item.idx].photo_url = p }
-            let allDone = state.allSatisfy { $0.done }
-            do {
-                try await DB.from("shift_checklist_completions").update([
-                    "items_state": state.map { $0.asDict },
-                    "completed_at": allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull(),
-                    "status": allDone ? "done" : "in_progress",
-                    "staff_id": myId == "owner" || myId.isEmpty ? NSNull() : myId,
-                ] as [String: Any]).eq("id", item.completionId).run()
-            } catch { remaining.append(item) }
         }
         if remaining.isEmpty { UserDefaults.standard.removeObject(forKey: pendingChecklistKey) }
         else if let data = try? JSONEncoder().encode(remaining) { UserDefaults.standard.set(data, forKey: pendingChecklistKey) }
-        if remaining.count < queue.count { await loadChecklists() }
+        if remaining.count < queue.count { await loadChecklists(); await loadAudits() }
     }
 
     func saveChecklistTemplate(id: String?, role: String?, items: [ChecklistItem], kind: String = "shift", targetScope: String = "role", assignedStaffId: String? = nil, title: String? = nil, type: String? = nil, recurrence: String = "none", recurrenceWeekdays: [Int]? = nil, recurrenceDayOfMonth: Int? = nil) async {
@@ -1184,13 +1271,13 @@ final class PeopleModel {
     }
     private func seedOrders() {
         orders = [
-            .init(id: "o1", table_number: 4, status: "new", total: 29, created_at: "2026-06-15T17:40:00Z",
+            .init(id: "o1", table_number: "4", status: "new", total: 29, created_at: "2026-06-15T17:40:00Z",
                   items: [.init(name: "Хумус", qty: 1, price: 8, opts: nil, call: nil),
                           .init(name: "Шаурма", qty: 1, price: 12, opts: ["острая"], call: nil),
                           .init(name: "Чай", qty: 3, price: 3, opts: nil, call: nil)]),
-            .init(id: "o2", table_number: 7, status: "in_progress", total: 0, created_at: "2026-06-15T17:55:00Z",
+            .init(id: "o2", table_number: "7", status: "in_progress", total: 0, created_at: "2026-06-15T17:55:00Z",
                   items: [.init(name: nil, qty: nil, price: nil, opts: nil, call: "waiter")]),
-            .init(id: "o3", table_number: 2, status: "done", total: 16, created_at: "2026-06-15T16:10:00Z",
+            .init(id: "o3", table_number: "2", status: "done", total: 16, created_at: "2026-06-15T16:10:00Z",
                   items: [.init(name: "Фалафель", qty: 1, price: 9, opts: nil, call: nil),
                           .init(name: "Лимонад", qty: 1, price: 7, opts: nil, call: nil)]),
         ]
@@ -1220,7 +1307,7 @@ struct PeopleView: View {
             if m == nil {
                 let s = app.staff
                 let model = PeopleModel(rid: app.restaurant?.id ?? "", myId: s?.id ?? "",
-                                        myName: s?.name ?? "", isManager: (s?.isOwner ?? false) || s?.role == "manager",
+                                        myName: s?.name ?? "", isManager: (s?.isOwner ?? false) || s?.role == "manager" || s?.role == "admin",
                                         myRole: s?.role)
                 m = model
                 #if DEBUG
@@ -1880,6 +1967,24 @@ private struct AttendanceTab: View {
                     Text(t("pe.arrivedAt", ["t": clock(rec.check_in_at)])).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5))
                     if rec.status == "late", let l = rec.late_minutes, l > 0 {
                         Text(t("pe.lateMin", ["n": "\(l)"])).font(.system(size: 12, weight: .semibold)).foregroundStyle(BrandKit.stash)
+                    }
+                    if rec.check_out_at == nil {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            Task { await m.checkOut() }
+                        } label: {
+                            HStack {
+                                if m.checking { ProgressView() }
+                                else { Image(systemName: "figure.walk.departure"); Text(t("pe.iLeft")) }
+                            }
+                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(BrandKit.people)
+                            .frame(maxWidth: .infinity).padding(.vertical, 11)
+                            .background(BrandKit.people.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .padding(.top, 6)
+                        .disabled(m.checking)
+                    } else {
+                        Text(t("pe.leftAt", ["t": clock(rec.check_out_at)])).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5))
                     }
                 }
                 .frame(maxWidth: .infinity).padding(20)
@@ -3660,7 +3765,16 @@ private struct OrdersInbox: View {
 private struct OrderCard: View {
     @Bindable var m: PeopleModel
     let o: MenuOrder
-    private var isCall: Bool { o.items?.first?.call == "waiter" }
+    // Быстрые вызовы гостя: waiter | coal | water (маркер в items[0].call, см. /api/menu/order).
+    private var callKind: String? { o.items?.first?.call }
+    private var isCall: Bool { callKind != nil }
+    private var callTitle: String {
+        switch callKind {
+        case "coal": t("pe.callCoal")
+        case "water": t("pe.callWater")
+        default: t("pe.callWaiter")
+        }
+    }
     private var active: Bool { o.status == "new" || o.status == "in_progress" }
     @State private var showCancelConfirm = false
 
@@ -3700,7 +3814,7 @@ private struct OrderCard: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            if isCall { Text(t("pe.callWaiter")).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary) }
+            if isCall { Text(callTitle).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary) }
             if let tn = o.table_number {
                 Text(t("pe.tableN", ["n": "\(tn)"])).font(.system(size: 12, weight: .heavy)).foregroundStyle(.primary)
                     .padding(.horizontal, 8).padding(.vertical, 3)

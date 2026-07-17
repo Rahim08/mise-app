@@ -132,8 +132,9 @@ export async function dispatchNotification(admin: any, rid: string, input: Notif
   const invalid: string[] = []
   for (const r of allowed) {
     // Закуп: получатели в режиме «раз в день» push сейчас не получают (им шлёт дайджест cron);
-    // запись в журнал у них уже есть — увидят в колокольчике.
-    if (type === 'purchase' && prefsFor(r).purchase_digest === 'daily') continue
+    // запись в журнал у них уже есть — увидят в колокольчике. Сам дайджест (data.digest)
+    // адресован именно им — его не глушим.
+    if (type === 'purchase' && !data.digest && prefsFor(r).purchase_digest === 'daily') continue
     const recSubs = subsFor(r)
     if (!recSubs.length) continue
     // Группируем токены по языку устройства — одному получателю с 2 устройствами на

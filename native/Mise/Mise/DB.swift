@@ -15,6 +15,12 @@ enum DB {
 
     /// Очистить весь кеш.
     static func clearCache() { Task { await CacheStore.shared.clearAll() } }
+
+    /// Очистить кеш и ДОЖДАТЬСЯ очистки — для pull-to-refresh: свежий кеш (<TTL) иначе
+    /// возвращается вместо сети, и жест «обновить» ничего не обновлял (до 5 минут
+    /// межустройственной слепоты). Оффлайн-поддержка не страдает: после очистки
+    /// успешные SELECT-ы тут же перезаполняют кеш.
+    static func clearCacheNow() async { await CacheStore.shared.clearAll() }
 }
 
 // MARK: - In-memory cache (оффлайн-поддержка)
@@ -62,6 +68,7 @@ final class DBQuery: @unchecked Sendable {
     private var limitN: Int?
     private var returning: String?
     private var onConflict: String?
+    private var bypassCache = false
 
     init(_ table: String) { self.table = table }
 
@@ -86,6 +93,10 @@ final class DBQuery: @unchecked Sendable {
         orderArr.append(["col": c, "ascending": ascending]); return self
     }
     @discardableResult func limit(_ n: Int) -> DBQuery { limitN = n; return self }
+
+    /// Чтение мимо кеша (и без stale-fallback): для read-modify-write, где старые данные
+    /// приведут к lost update (мерж чек-листов). Успешный ответ кеш всё равно обновляет.
+    @discardableResult func fresh() -> DBQuery { bypassCache = true; return self }
 
     // MARK: - Выполнение
 
@@ -126,7 +137,7 @@ final class DBQuery: @unchecked Sendable {
 
         // Попытка получить из кеша до запроса (для оффлайна)
         var cachedStale: Data?
-        if let key = cacheKey {
+        if let key = cacheKey, !bypassCache {
             if let entry = await CacheStore.shared.get(key) {
                 if !entry.stale { return entry.data } // свежий кеш — возвращаем сразу
                 cachedStale = entry.data // запомнили на случай ошибки сети

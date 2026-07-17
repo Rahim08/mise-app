@@ -37,9 +37,14 @@ struct GoogleReviewsView: View {
 
     private var latest: GoogleRatingSnapshot? { m.snapshots.last }
 
-    private func stars(_ n: Int?) -> String {
+    // SF Symbols вместо текстовых глифов ★☆ (правило «без эмодзи/глифов в продукте»).
+    private func stars(_ n: Int?) -> some View {
         let f = max(0, min(5, n ?? 0))
-        return String(repeating: "★", count: f) + String(repeating: "☆", count: 5 - f)
+        return HStack(spacing: 1) {
+            ForEach(0..<5, id: \.self) { i in
+                Image(systemName: i < f ? "star.fill" : "star").font(.system(size: 11))
+            }
+        }
     }
 
     var body: some View {
@@ -128,7 +133,7 @@ struct GoogleReviewsView: View {
                                 Spacer()
                                 if let rt = r.relative_time { Text(rt).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4)) }
                             }
-                            Text(stars(r.rating)).font(.system(size: 13)).foregroundStyle(RV_ACCENT)
+                            stars(r.rating).foregroundStyle(RV_ACCENT)
                             if let txt = r.review_text, !txt.isEmpty {
                                 Text(txt).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.7))
                             }

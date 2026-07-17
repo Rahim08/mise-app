@@ -239,7 +239,6 @@ struct BookingsView: View {
     @State private var showEditor = false
     @State private var pendingDelete: Booking?
     @State private var showGuests = false
-    @State private var showReviews = false
     @State private var selectedRange: BookingRange = .today
     @State private var searchText = ""
     @State private var duplicating: Booking?
@@ -365,7 +364,6 @@ struct BookingsView: View {
                 }
                 .overlay(alignment: .bottomTrailing) {
                     VStack(spacing: 12) {
-                        reviewsButton
                         guestsButton(m)
                         addButton
                     }
@@ -401,9 +399,6 @@ struct BookingsView: View {
                         prefillVisits: prefillVisits,
                         prefillNoShows: prefillNoShows
                     )
-                }
-                .sheet(isPresented: $showReviews) {
-                    GoogleReviewsView()
                 }
                 .sheet(isPresented: $showGuests) {
                     GuestsView(m: m, onNewBooking: { name, phone, visits, noShows in
@@ -622,19 +617,6 @@ struct BookingsView: View {
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40)
-    }
-
-    private var reviewsButton: some View {
-        Button {
-            showReviews = true
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        } label: {
-            Image(systemName: "star.fill").font(.system(size: 18, weight: .semibold)).foregroundStyle(BK_ACCENT)
-                .frame(width: 46, height: 46)
-                .background(.ultraThinMaterial, in: Circle())
-                .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
-        }
-        .padding(.trailing, 20)
     }
 
     private func guestsButton(_ m: BookingsModel) -> some View {

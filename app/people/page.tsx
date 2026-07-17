@@ -499,9 +499,9 @@ function hoursOf(r: any) {
   if (!r.check_in_at || !r.check_out_at) return 0
   return Math.max(0, (new Date(r.check_out_at).getTime() - new Date(r.check_in_at).getTime()) / 3600000)
 }
-function fmtHours(h: number) {
+function fmtHours(h: number, tr: (k: string) => string) {
   const H = Math.floor(h); const M = Math.round((h - H) * 60)
-  return M ? `${H} ч ${M} м` : `${H} ч`
+  return M ? `${H} ${tr('pe.hUnit')} ${M} ${tr('pe.mUnit')}` : `${H} ${tr('pe.hUnit')}`
 }
 
 function distMeters(la1: number, lo1: number, la2: number, lo2: number) {
@@ -638,7 +638,7 @@ function AttendanceTab({ me, isManager, accent, t, toast, onOpenDiscipline }: { 
                   <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: i < staff.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
                     <div>
                       <div style={{ fontSize: 14, color: t.text, fontWeight: 500 }}>{s.name}</div>
-                      <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{recs.length} {tr('pe.shiftsWord')} · {fmtHours(hours)}</div>
+                      <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{recs.length} {tr('pe.shiftsWord')} · {fmtHours(hours, tr)}</div>
                     </div>
                     {lates.length > 0
                       ? <span style={{ fontSize: 11, fontWeight: 700, color: t.orange, background: `${t.orange}1a`, padding: '3px 9px', borderRadius: 8 }}>{lates.length} {tr('pe.lateShort')} · {lates.reduce((s2, r) => s2 + (r.late_minutes || 0), 0)} {tr('pe.minShort')}</span>
@@ -709,7 +709,7 @@ function AttendanceTab({ me, isManager, accent, t, toast, onOpenDiscipline }: { 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
               {[
                 { l: tr('pe.shifts'), v: String(recs.length), c: accent },
-                { l: tr('pe.hours'), v: fmtHours(hours), c: t.green },
+                { l: tr('pe.hours'), v: fmtHours(hours, tr), c: t.green },
                 { l: tr('pe.lates'), v: lates.length ? `${lates.length} · ${lates.reduce((s2, r) => s2 + (r.late_minutes || 0), 0)}м` : '0', c: lates.length ? t.orange : t.green },
               ].map(it => (
                 <div key={it.l} style={{ background: t.surface, borderRadius: 14, padding: '12px 10px', boxShadow: t.sh, textAlign: 'center' }}>
@@ -739,34 +739,42 @@ function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: boolean; 
   const { t: tr } = useI18n()
   const today = fmtDate(new Date())
   const ym = today.slice(0, 7)
-  const monthLabel = new Date().toLocaleDateString('ru-RU', { month: 'long' })
+  const monthLabel = new Date().toLocaleDateString(tr('dash.locale'), { month: 'long' })
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<any[]>([])
   const [open, setOpen] = useState<string | null>(null)
 
   const load = async () => {
+    // Канон расчёта = iOS (PeopleView.loadSalary, решение 2026-07-17):
+    // авансы вычитаются, карта строго помесячная (БЕЗ fallback на employees.card_amount),
+    // авто-прогулы (source='auto' — черновики крона) деньги не удерживают.
     const monthStart = ym + '-01'
-    const [{ data: emps }, { data: abs }, { data: cards }, { data: att }, { data: dir }] = await Promise.all([
-      db.from('employees').select('id, name, salary, deduct_per_absence, card_amount').eq('is_active', true).order('name'),
-      db.from('shift_absences').select('employee_id, date').gte('date', monthStart),
+    const monthEnd = fmtDate(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0))
+    const [{ data: emps }, { data: abs }, { data: cards }, { data: att }, { data: dir }, { data: advs }] = await Promise.all([
+      db.from('employees').select('id, name, salary, deduct_per_absence').eq('is_active', true).order('name'),
+      db.from('shift_absences').select('employee_id, date, source').gte('date', monthStart),
       db.from('monthly_card_amounts').select('employee_id, card_amount').eq('month', ym),
       db.from('attendance_records').select('staff_id, check_in_at, check_out_at, date').gte('date', monthStart),
       db.from('staff_directory').select('id, name').eq('is_active', true),
+      db.from('salary_advances').select('*').gte('date', monthStart).lte('date', monthEnd),
     ])
     const staffName: Record<string, string> = {}; (dir || []).forEach((s: any) => { staffName[s.id] = s.name })
     const hoursByName: Record<string, number> = {}
     ;(att || []).forEach((r: any) => { const n = staffName[r.staff_id]; if (n) hoursByName[n] = (hoursByName[n] || 0) + hoursOf(r) })
-    // Помесячная сумма на карту перекрывает фиксированную (employees.card_amount).
     const cardByEmp: Record<string, number> = {}; (cards || []).forEach((c: any) => { cardByEmp[c.employee_id] = Number(c.card_amount || 0) })
-    const absByEmp: Record<string, string[]> = {}; (abs || []).forEach((a: any) => { (absByEmp[a.employee_id] = absByEmp[a.employee_id] || []).push(a.date) })
+    const absByEmp: Record<string, string[]> = {}
+    ;(abs || []).forEach((a: any) => { if (a.source !== 'auto') (absByEmp[a.employee_id] = absByEmp[a.employee_id] || []).push(a.date) })
+    const advByEmp: Record<string, number> = {}
+    ;(advs || []).forEach((a: any) => { advByEmp[a.employee_id] = (advByEmp[a.employee_id] || 0) + Number(a.amount || 0) })
 
     let list = (emps || []).map((e: any) => {
       const salary = Number(e.salary || 0)
       const dates = (absByEmp[e.id] || []).sort()
       const deduct = dates.length * Number(e.deduct_per_absence || 0)
-      const card = e.id in cardByEmp ? cardByEmp[e.id] : Number(e.card_amount || 0)
+      const card = cardByEmp[e.id] ?? 0
+      const advance = advByEmp[e.id] || 0
       const total = Math.max(0, salary - deduct)
-      return { id: e.id, name: e.name, salary, dates, absences: dates.length, deduct, card, total, cash: Math.max(0, total - card), hours: hoursByName[e.name] || 0 }
+      return { id: e.id, name: e.name, salary, dates, absences: dates.length, deduct, card, advance, total, cash: Math.max(0, total - advance - card), hours: hoursByName[e.name] || 0 }
     })
     if (!isManager) list = list.filter((r: any) => r.name === me.name)
     setRows(list); setLoading(false)
@@ -789,10 +797,11 @@ function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: boolean; 
     <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 8 }}>
       {[
         { _l: tr('pe.salaryBase'), v: eur(r.salary), c: t.text, hide: false },
-        { _l: tr('pe.worked'), v: fmtHours(r.hours), c: t.text2, hide: r.hours <= 0 },
+        { _l: tr('pe.worked'), v: fmtHours(r.hours, tr), c: t.text2, hide: r.hours <= 0 },
         { _l: tr('pe.absencesN', { n: r.absences }), v: r.dates.map(absDate).join(', '), c: t.text2, small: true, hide: r.absences === 0 },
         { _l: tr('pe.absenceDeduct'), v: `−${eur(r.deduct)}`, c: t.red, hide: r.deduct === 0 },
         { _l: tr('pe.toCard'), v: eur(r.card), c: t.blue, hide: r.card === 0 },
+        { _l: tr('pe.advances'), v: `−${eur(r.advance)}`, c: t.orange, hide: !r.advance },
         { _l: tr('pe.inCash'), v: eur(r.cash), c: t.green, hide: false },
       ].filter((x: any) => !x.hide).map((x: any, i, arr) => (
         <div key={x._l} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 16px', borderBottom: i < arr.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
@@ -1080,7 +1089,7 @@ function OrdersInbox({ currency, accent, t, toast }: { currency: string; accent:
                   </div>
                   {(o.status === 'new' || o.status === 'in_progress')
                     ? <button onClick={() => setStatus(o, 'done')} style={{ ...btnB2(t), background: accent, color: '#fff' }}>{tr('pe.coming')}</button>
-                    : <span style={{ fontSize: 11, fontWeight: 700, color: t.green }}>✓</span>}
+                    : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={t.green} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>}
                 </div>
               </div>
             )
@@ -1262,7 +1271,7 @@ function ChecklistCard({ title, items, state, canFill, restaurantId, completionI
                 <div onClick={() => canFill && !needsPhoto && toggle(i)} style={{ flex: 1, cursor: canFill && !needsPhoto ? 'pointer' : 'default', minWidth: 0 }}>
                   <span style={{ fontSize: 15, color: t.text, textDecoration: s.done ? 'line-through' : 'none', opacity: s.done ? 0.55 : 1 }}>{it.label}</span>
                   {uploading === i && <span style={{ display: 'block', fontSize: 11, color: t.text3 }}>{tr('pe.uploadingPhoto')}</span>}
-                  {s.photo_url && <a href={s.photo_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ display: 'block', fontSize: 11, color: accent }}>{tr('pe.photoRequired')} ✓</a>}
+                  {s.photo_url && <a href={s.photo_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ display: 'block', fontSize: 11, color: accent }}>{tr('pe.photoRequired')} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><path d="M20 6L9 17l-5-5" /></svg></a>}
                 </div>
                 <button onClick={() => { setReporting(reporting === i ? null : i); setAssignee(''); setReportFile(null) }} title={tr('pe.reportViolation')} style={{ background: 'none', border: 'none', color: reporting === i ? t.red : t.text4, cursor: 'pointer', padding: 4, display: 'flex', flexShrink: 0 }}>
                   <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><path d="M4 22V15" /></svg>
@@ -1322,9 +1331,15 @@ function ShiftChecklistsView({ isManager, myId, myRole, canFill, openShiftId, st
     const items = (Array.isArray(list.items) ? list.items : []).map((x: any, i: number) => normItem(x, i))
     const completion = completions.find(c => c.checklist_id === list.id)
     const curState = (Array.isArray(completion?.items_state) ? completion.items_state : []).map(normState)
-    const nextState = items.map((_, i) => i === idx ? next : (curState[i] || { done: false, photo_url: null }))
-    const allDone = nextState.every(s => s.done)
+    let nextState = items.map((_, i) => i === idx ? next : (curState[i] || { done: false, photo_url: null }))
+    let allDone = nextState.every(s => s.done)
     if (completion?.id) {
+      // Против lost update: перечитываем свежую строку и мержим ТОЛЬКО свой индекс —
+      // параллельные отметки коллег не затираем.
+      const { data: freshRows } = await db.from('shift_checklist_completions').select('items_state').eq('id', completion.id)
+      const freshState = (Array.isArray(freshRows?.[0]?.items_state) ? freshRows[0].items_state : curState).map(normState)
+      nextState = items.map((_, i) => i === idx ? next : (freshState[i] || { done: false, photo_url: null }))
+      allDone = nextState.every(s => s.done)
       setCompletions(cs => cs.map(c => c.id === completion.id ? { ...c, items_state: nextState } : c))
       await db.from('shift_checklist_completions').update({ items_state: nextState, status: allDone ? 'done' : 'in_progress', staff_id: myId || null, completed_at: allDone ? new Date().toISOString() : null }).eq('id', completion.id)
     } else {
@@ -1473,9 +1488,14 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
     const items = (Array.isArray(audit.items) ? audit.items : []).map((x: any, i: number) => normItem(x, i))
     const completion = completions.find(c => c.checklist_id === audit.id)
     const curState = (Array.isArray(completion?.items_state) ? completion.items_state : []).map(normState)
-    const nextState = items.map((_, i) => i === idx ? next : (curState[i] || { done: false, photo_url: null }))
-    const allDone = nextState.every(s => s.done)
+    let nextState = items.map((_, i) => i === idx ? next : (curState[i] || { done: false, photo_url: null }))
+    let allDone = nextState.every(s => s.done)
     if (completion?.id) {
+      // Против lost update: свежая строка с сервера, мержим ТОЛЬКО свой индекс.
+      const { data: freshRows } = await db.from('shift_checklist_completions').select('items_state').eq('id', completion.id)
+      const freshState = (Array.isArray(freshRows?.[0]?.items_state) ? freshRows[0].items_state : curState).map(normState)
+      nextState = items.map((_, i) => i === idx ? next : (freshState[i] || { done: false, photo_url: null }))
+      allDone = nextState.every(s => s.done)
       setCompletions(cs => cs.map(c => c.id === completion.id ? { ...c, items_state: nextState } : c))
       await db.from('shift_checklist_completions').update({ items_state: nextState, status: allDone ? 'done' : 'in_progress', staff_id: myId || null, completed_at: allDone ? new Date().toISOString() : null }).eq('id', completion.id)
     } else {
@@ -2261,8 +2281,10 @@ function DisciplineTab({ me, accent, t, toast }: { me: any; accent: string; t: a
   }
 
   const saveGrace = async (v: number) => {
+    const prev = grace
     setGrace(v)
-    await db.from('restaurant_settings').update({ late_grace_min: v })
+    const { error } = await db.from('restaurant_settings').update({ late_grace_min: v })
+    if (error) setGrace(prev) // 403/сеть — откат, не делаем вид что сохранилось
   }
 
   const punctColor = (p: number | null) => p == null ? t.text3 : p >= 95 ? t.green : p >= 80 ? t.orange : t.red
@@ -2458,7 +2480,7 @@ export function PeopleApp({ restaurantId, embedded = false }: { restaurantId: st
   const contentMaxWidth = embedded ? 1100 : 640
   const accent = t.dark ? '#5e5ce6' : '#5856d6'
   const me = embedded ? { is_owner: true } as ReturnType<typeof getMe> : getMe(restaurantId)
-  const isManager = !!me.is_owner || me.role === 'manager'
+  const isManager = !!me.is_owner || me.role === 'manager' || me.role === 'admin'
   const [tab, setTab] = useState<string>('shifts')
   const [toast, setToast] = useState('')
   const [showNotif, setShowNotif] = useState(false)

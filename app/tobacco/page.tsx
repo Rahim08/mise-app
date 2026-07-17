@@ -383,7 +383,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
       const raw = localStorage.getItem('mise_staff_' + restaurantId)
       if (raw) { const s = JSON.parse(raw); role = s.is_owner ? 'owner' : (s.role || 'staff') }
     } catch {}
-    setCanSeeMoney(role === 'owner' || role === 'manager')
+    setCanSeeMoney(role === 'owner' || role === 'manager' || role === 'admin')
   }, [restaurantId])
 
   const loadAll = async (rid: string) => {
@@ -633,7 +633,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
                     <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
                   </svg>
                   {search && (
-                    <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: t.fill, border: 'none', borderRadius: '50%', width: 20, height: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text3, fontSize: 12 }}>✕</button>
+                    <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: t.fill, border: 'none', borderRadius: '50%', width: 20, height: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text3, fontSize: 12 }}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg></button>
                   )}
                 </div>
                 {lowItems.length > 0 && (
@@ -1093,7 +1093,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
                         </div>
                       )}
                       {diff === 0 && row.actual_g !== '' && (
-                        <div style={{ fontSize: 20, color: t.green, minWidth: 60, textAlign: 'right' }}>✓</div>
+                        <div style={{ color: t.green, minWidth: 60, textAlign: 'right' }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg></div>
                       )}
                     </div>
                   </div>

@@ -28,6 +28,8 @@ interface MenuRow {
   position: number
   theme: 'light' | 'dark' | 'auto'
   layout: 'list' | 'grid'
+  design: string
+  card_style: 'shadow' | 'outline' | 'glass'
   accent_color: string
   font_heading: string | null
   font_body: string | null
@@ -42,6 +44,7 @@ interface MenuRow {
   allow_tips: boolean
   upsell_category_id: string | null
   language: string
+  quick_actions: boolean
 }
 
 interface Category {
@@ -76,10 +79,24 @@ interface MenuItem {
   combo_items: { item_id: string; qty: number }[] | null
   recommended_ids: string[] | null
   position: number
+  intensity: number | null
+  stock_left: number | null
 }
 
 const ACCENT_PRESETS = ['#007aff', '#34c759', '#ff9500', '#ff3b30', '#af52de', '#00c7be', '#ff6b35', '#ff2d55']
 const THEMES = [{ id: 'light', label: 'me.themeLight' }, { id: 'dark', label: 'me.themeDark' }, { id: 'auto', label: 'me.themeAuto' }]
+
+// Структурные дизайны меню (Design Lab, одобрено). 'classic' — текущая вёрстка с табами
+// категорий, единственный где применимы layout (список/сетка) и card_style.
+const DESIGNS = [
+  { id: 'classic', labelKey: 'me.designClassic', descKey: 'me.designClassicD', hasLayout: true, hasCardStyle: true },
+  { id: 'apple', labelKey: 'me.designApple', descKey: 'me.designAppleD', hasLayout: false, hasCardStyle: true },
+  { id: 'elite', labelKey: 'me.designElite', descKey: 'me.designEliteD', hasLayout: false, hasCardStyle: false },
+  { id: 'market', labelKey: 'me.designMarket', descKey: 'me.designMarketD', hasLayout: false, hasCardStyle: true },
+  { id: 'lounge', labelKey: 'me.designLounge', descKey: 'me.designLoungeD', hasLayout: false, hasCardStyle: true },
+  { id: 'ledger', labelKey: 'me.designLedger', descKey: 'me.designLedgerD', hasLayout: false, hasCardStyle: false },
+] as const
+const CARD_STYLES = [{ id: 'shadow', labelKey: 'me.cardShadow' }, { id: 'outline', labelKey: 'me.cardOutline' }, { id: 'glass', labelKey: 'me.cardGlass' }] as const
 
 function blankMenu(rid: string): MenuRow {
   return {
@@ -88,6 +105,7 @@ function blankMenu(rid: string): MenuRow {
     theme_preset: 'minimal', radius: 18, cover_url: null,
     show_photos: true, show_calories: false, show_allergens: false,
     allow_orders: false, allow_pay_at_table: false, allow_tips: false, upsell_category_id: null, language: 'ru',
+    quick_actions: true, design: 'classic', card_style: 'shadow',
   }
 }
 
@@ -153,8 +171,15 @@ export default function MenuEditor() {
   const [newCatName, setNewCatName] = useState('')
   const [slugError, setSlugError] = useState('')
 
+  // AI-импорт меню файлом
+  const [showImport, setShowImport] = useState(false)
+  const [importBusy, setImportBusy] = useState(false)
+  const [importError, setImportError] = useState('')
+  const [importResult, setImportResult] = useState<{ categories: { name: string; items: { name: string; price: number | null; description: string }[] }[] } | null>(null)
+  const importFileRef = useRef<HTMLInputElement>(null)
+
   // Item form state
-  const [itemForm, setItemForm] = useState({ name: '', description: '', price: '', image_url: '', calories: '', allergens: '', is_available: true, is_visible: true })
+  const [itemForm, setItemForm] = useState({ name: '', description: '', price: '', image_url: '', calories: '', allergens: '', is_available: true, is_visible: true, intensity: '', stock_left: '' })
   const [mods, setMods] = useState<{ name: string; options: { name: string; price: string }[] }[]>([])
   const [itemTags, setItemTags] = useState<string[]>([])
   const [itemType, setItemType] = useState<'dish' | 'combo'>('dish')
@@ -345,6 +370,66 @@ export default function MenuEditor() {
     setNewCatName(''); setShowAddCat(false)
   }
 
+  // ── AI-импорт меню файлом ──
+  const runImport = async (file: File) => {
+    setImportBusy(true); setImportError(''); setImportResult(null)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch('/api/menu/import', { method: 'POST', body: form })
+      const data = await res.json()
+      if (!res.ok) {
+        const map: Record<string, string> = {
+          photo_not_supported: tr('me.importPhotoUnsupported'),
+          unsupported_format: tr('me.importBadFormat'),
+          file_too_large: tr('me.importTooLarge'),
+          nothing_recognized: tr('me.importNothing'),
+          ai_pro_only: tr('me.importProOnly'),
+        }
+        setImportError(map[data.error] || tr('me.importFailed'))
+        return
+      }
+      setImportResult(data)
+    } catch { setImportError(tr('me.importFailed')) }
+    finally { setImportBusy(false) }
+  }
+
+  // Каждая импортированная позиция создаётся скрытой (is_visible: false) — гости её не
+  // видят, пока владелец не проверит и не включит вручную через обычный список позиций.
+  const applyImport = async () => {
+    if (!importResult || !activeMenuId) return
+    setImportBusy(true)
+    try {
+      let localCats = categories
+      let localItems = items
+      for (const cat of importResult.categories) {
+        let catRow = localCats.find(c => c.name.trim().toLowerCase() === cat.name.trim().toLowerCase())
+        if (!catRow) {
+          const pos = localCats.length
+          const { data } = await db.from('menu_categories').insert({ restaurant_id: restaurantId, menu_id: activeMenuId, name: cat.name, position: pos, is_visible: true }).select().single()
+          if (!data) continue
+          catRow = data; localCats = [...localCats, data]
+        }
+        let pos = localItems.filter(i => i.category_id === catRow!.id).length
+        for (const it of cat.items) {
+          // Дедуп по (категория, имя): повторный клик «Применить» или дубль в выгрузке
+          // не плодит копии позиции (аудит-находка 26).
+          const dup = localItems.some(i => i.category_id === catRow!.id && String(i.name).trim().toLowerCase() === String(it.name).trim().toLowerCase())
+          if (dup) continue
+          const { data } = await db.from('menu_items').insert({
+            restaurant_id: restaurantId, menu_id: activeMenuId, category_id: catRow!.id,
+            name: it.name, description: it.description || null, price: it.price,
+            is_visible: false, is_available: true, position: pos++,
+          }).select().single()
+          if (data) localItems = [...localItems, data]
+        }
+      }
+      setCategories(localCats); setItems(localItems)
+      showToast(tr('me.importApplied'))
+      setShowImport(false); setImportResult(null)
+    } finally { setImportBusy(false) }
+  }
+
   const toggleCatVisibility = async (catId: string) => {
     const cat = categories.find(c => c.id === catId); if (!cat) return
     await db.from('menu_categories').update({ is_visible: !cat.is_visible }).eq('id', catId)
@@ -383,7 +468,7 @@ export default function MenuEditor() {
   // ── Item CRUD ──
   const openAddItem = () => {
     setEditItem(null)
-    setItemForm({ name: '', description: '', price: '', image_url: '', calories: '', allergens: '', is_available: true, is_visible: true })
+    setItemForm({ name: '', description: '', price: '', image_url: '', calories: '', allergens: '', is_available: true, is_visible: true, intensity: '', stock_left: '' })
     setMods([]); setItemTags([]); setItemType('dish'); setComboItems([]); setRecommended([])
     setSchedOn(false); setSched({ days: [], from: '', to: '' }); setI18nName({}); setI18nDesc({}); setShowTrans(false)
     setShowAddItem(true)
@@ -396,6 +481,7 @@ export default function MenuEditor() {
       image_url: item.image_url || '', calories: item.calories ? String(item.calories) : '',
       allergens: item.allergens ? item.allergens.join(', ') : '',
       is_available: item.is_available, is_visible: item.is_visible,
+      intensity: item.intensity ? String(item.intensity) : '', stock_left: item.stock_left != null ? String(item.stock_left) : '',
     })
     setMods((item.modifiers || []).map(g => ({ name: g.name, options: g.options.map(o => ({ name: o.name, price: String(o.price || 0) })) })))
     setItemTags(item.tags || [])
@@ -448,6 +534,8 @@ export default function MenuEditor() {
       image_url: itemForm.image_url.trim() || null,
       calories: parseInt(itemForm.calories) || null,
       allergens: itemForm.allergens ? itemForm.allergens.split(',').map(a => a.trim()).filter(Boolean) : null,
+      intensity: itemForm.intensity ? Math.min(5, Math.max(1, parseInt(itemForm.intensity))) : null,
+      stock_left: itemForm.stock_left.trim() !== '' ? Math.max(0, parseInt(itemForm.stock_left)) : null,
       tags: itemTags.length ? itemTags : null,
       type: itemType,
       combo_items: itemType === 'combo' && comboItems.length ? comboItems : null,
@@ -612,6 +700,10 @@ export default function MenuEditor() {
                   <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 12 12"><path d="M6 1v10M1 6h10" /></svg>
                   {tr('me.category')}
                 </button>
+                <button onClick={() => { setImportError(''); setImportResult(null); setShowImport(true) }} disabled={!activeMenuId} style={{ flexShrink: 0, padding: '8px 16px', borderRadius: 20, border: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: activeMenuId ? 'pointer' : 'not-allowed', background: `${t.purple}18`, color: t.purple, display: 'flex', alignItems: 'center', gap: 6, opacity: activeMenuId ? 1 : 0.5 }}>
+                  <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><path d="M12 16V4M12 4l-4 4M12 4l4 4" /><path d="M4 16v3a2 2 0 002 2h12a2 2 0 002-2v-3" /></svg>
+                  {tr('me.importFile')}
+                </button>
               </div>
 
               {selectedCat && (() => {
@@ -727,6 +819,20 @@ export default function MenuEditor() {
                 {settings.slug && !slugError && <div style={{ fontSize: 12, color: t.green, marginTop: 6 }}>{appHost}/menu/{settings.slug}</div>}
               </div>
 
+              {/* Design — структурный выбор, определяет какой из 6 макетов рендерится гостю */}
+              <div style={SECTION_LABEL(t)}>{tr('me.design')}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                {DESIGNS.map(d => {
+                  const on = (settings.design || 'classic') === d.id
+                  return (
+                    <button key={d.id} onClick={() => setSettings(s => ({ ...s, design: d.id }))} style={{ textAlign: 'left', background: t.surface, borderRadius: 14, padding: '12px 14px', boxShadow: t.sh, border: `2px solid ${on ? t.purple : 'transparent'}`, cursor: 'pointer', fontFamily: 'inherit' }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: on ? t.purple : t.text }}>{tr(d.labelKey)}</div>
+                      <div style={{ fontSize: 11.5, color: t.text3, marginTop: 3, lineHeight: 1.35 }}>{tr(d.descKey)}</div>
+                    </button>
+                  )
+                })}
+              </div>
+
               {/* Presets */}
               <div style={SECTION_LABEL(t)}>{tr('me.presets')}</div>
               <div style={{ display: 'flex', gap: 8, marginBottom: 12, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
@@ -771,22 +877,41 @@ export default function MenuEditor() {
                 ))}
               </div>
 
-              {/* Layout */}
-              <div style={SECTION_LABEL(t)}>{tr('me.layout')}</div>
-              <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-                {([
-                  { id: 'list', label: tr('me.list'), icon: <><rect x="3" y="5" width="18" height="4" rx="1.5" /><rect x="3" y="13" width="18" height="4" rx="1.5" /></> },
-                  { id: 'grid', label: tr('me.grid'), icon: <><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" /></> },
-                ] as const).map(opt => {
-                  const on = settings.layout === opt.id
-                  return (
-                    <button key={opt.id} onClick={() => setSettings(s => ({ ...s, layout: opt.id }))} style={{ flex: 1, background: t.surface, borderRadius: 16, padding: '18px 12px', boxShadow: t.sh, border: `2px solid ${on ? t.purple : 'transparent'}`, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                      <svg width="26" height="26" fill={on ? t.purple : t.text3} viewBox="0 0 24 24">{opt.icon}</svg>
-                      <span style={{ fontSize: 14, fontWeight: 600, color: on ? t.purple : t.text }}>{opt.label}</span>
-                    </button>
-                  )
-                })}
-              </div>
+              {/* Layout — только для «Классики»: у остальных дизайнов своя фиксированная композиция */}
+              {(settings.design || 'classic') === 'classic' && (
+                <>
+                  <div style={SECTION_LABEL(t)}>{tr('me.layout')}</div>
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+                    {([
+                      { id: 'list', label: tr('me.list'), icon: <><rect x="3" y="5" width="18" height="4" rx="1.5" /><rect x="3" y="13" width="18" height="4" rx="1.5" /></> },
+                      { id: 'grid', label: tr('me.grid'), icon: <><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" /></> },
+                    ] as const).map(opt => {
+                      const on = settings.layout === opt.id
+                      return (
+                        <button key={opt.id} onClick={() => setSettings(s => ({ ...s, layout: opt.id }))} style={{ flex: 1, background: t.surface, borderRadius: 16, padding: '18px 12px', boxShadow: t.sh, border: `2px solid ${on ? t.purple : 'transparent'}`, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                          <svg width="26" height="26" fill={on ? t.purple : t.text3} viewBox="0 0 24 24">{opt.icon}</svg>
+                          <span style={{ fontSize: 14, fontWeight: 600, color: on ? t.purple : t.text }}>{opt.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* Card style — тень/контур/стекло, только для дизайнов с карточками */}
+              {DESIGNS.find(d => d.id === (settings.design || 'classic'))?.hasCardStyle && (
+                <>
+                  <div style={SECTION_LABEL(t)}>{tr('me.cardStyle')}</div>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                    {CARD_STYLES.map(cs => {
+                      const on = (settings.card_style || 'shadow') === cs.id
+                      return (
+                        <button key={cs.id} onClick={() => setSettings(s => ({ ...s, card_style: cs.id }))} style={{ flex: 1, padding: '12px 8px', borderRadius: 12, background: on ? `${t.purple}12` : t.surface, border: `1.5px solid ${on ? t.purple : t.sep2}`, color: on ? t.purple : t.text, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, boxShadow: t.sh }}>{tr(cs.labelKey)}</button>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
 
               {/* Accent */}
               <div style={SECTION_LABEL(t)}>{tr('me.accent')}</div>
@@ -819,6 +944,7 @@ export default function MenuEditor() {
                   { key: 'allow_orders', label: tr('me.optOrders'), desc: tr('me.optOrdersD') },
                   { key: 'allow_pay_at_table', label: tr('me.optPay'), desc: tr('me.optPayD'), needsOrders: true },
                   { key: 'allow_tips', label: tr('me.allowTips'), desc: tr('me.allowTipsD'), needsOrders: true },
+                  { key: 'quick_actions', label: tr('me.optQuickActions'), desc: tr('me.optQuickActionsD') },
                 ].map((opt: any, i, arr) => {
                   const disabled = opt.needsOrders && !settings.allow_orders
                   return (
@@ -958,6 +1084,72 @@ export default function MenuEditor() {
         </div>
       )}
 
+      {/* IMPORT MENU MODAL — dropzone → AI-парсинг → превью → применить черновиком */}
+      {showImport && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => !importBusy && setShowImport(false)}>
+          <div style={{ background: t.bg, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '88vh', overflowY: 'auto', padding: '0 16px 32px', animation: 'slideUp .3s ease' }} onClick={e => e.stopPropagation()}>
+            <div style={{ width: 40, height: 4, background: t.fill, borderRadius: 2, margin: '14px auto 16px' }} />
+            <div style={{ fontWeight: 700, fontSize: 18, color: t.text, marginBottom: 4 }}>{tr('me.importFile')}</div>
+            <div style={{ fontSize: 12.5, color: t.text3, marginBottom: 16, lineHeight: 1.5 }}>{tr('me.importHint')}</div>
+
+            {!importResult && (
+              <div style={{ background: t.surface, borderRadius: 16, padding: '28px 16px', textAlign: 'center', border: `1.5px dashed ${t.sep2}`, marginBottom: 12 }}>
+                {importBusy ? (
+                  <>
+                    <div style={{ width: 26, height: 26, margin: '0 auto 12px', borderRadius: '50%', border: `2.5px solid ${t.sep2}`, borderTopColor: t.purple, animation: 'meSpin .8s linear infinite' }} />
+                    <div style={{ fontSize: 13, color: t.text2 }}>{tr('me.importParsing')}</div>
+                    <style>{`@keyframes meSpin{to{transform:rotate(360deg)}}`}</style>
+                  </>
+                ) : (
+                  <>
+                    <svg width="26" height="26" fill="none" stroke={t.purple} strokeWidth="1.7" viewBox="0 0 24 24" style={{ margin: '0 auto 12px' }}><path d="M12 16V4M12 4l-4 4M12 4l4 4" /><path d="M4 16v3a2 2 0 002 2h12a2 2 0 002-2v-3" /></svg>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: t.text, marginBottom: 4 }}>{tr('me.importDrop')}</div>
+                    <div style={{ fontSize: 11.5, color: t.text3, marginBottom: 14 }}>.pdf · .xlsx/.xls/.csv</div>
+                    <button onClick={() => importFileRef.current?.click()} style={{ padding: '9px 18px', borderRadius: 999, background: t.purple, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: 650, cursor: 'pointer' }}>{tr('me.importPick')}</button>
+                    <input ref={importFileRef} type="file" accept=".pdf,.xlsx,.xls,.csv" hidden onChange={e => { const f = e.target.files?.[0]; if (f) runImport(f) }} />
+                  </>
+                )}
+              </div>
+            )}
+
+            {importError && <div style={{ fontSize: 13, color: t.red, background: `${t.red}14`, padding: '10px 14px', borderRadius: 12, marginBottom: 12 }}>{importError}</div>}
+
+            {importResult && (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+                  <div style={{ background: t.surface, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: t.text }}>{importResult.categories.length}</div>
+                    <div style={{ fontSize: 10.5, color: t.text3 }}>{tr('me.importCats')}</div>
+                  </div>
+                  <div style={{ background: t.surface, borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: t.text }}>{importResult.categories.reduce((s, c) => s + c.items.length, 0)}</div>
+                    <div style={{ fontSize: 10.5, color: t.text3 }}>{tr('me.importItems')}</div>
+                  </div>
+                </div>
+                <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 14, maxHeight: 320, overflowY: 'auto' }}>
+                  {importResult.categories.map((cat, ci) => (
+                    <div key={ci}>
+                      <div style={{ padding: '9px 14px', fontSize: 11, fontWeight: 700, color: t.purple, textTransform: 'uppercase', letterSpacing: 0.4, background: `${t.purple}0c` }}>{cat.name}</div>
+                      {cat.items.map((it, ii) => (
+                        <div key={ii} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '8px 14px', borderTop: `0.5px solid ${t.sep2}`, fontSize: 13 }}>
+                          <span style={{ color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</span>
+                          <span style={{ color: it.price != null ? t.text2 : t.orange, flexShrink: 0 }}>{it.price != null ? `${it.price}${currency}` : tr('me.importNoPrice')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11.5, color: t.text3, marginBottom: 12, lineHeight: 1.4 }}>{tr('me.importDraftNote')}</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => { setImportResult(null); setImportError('') }} disabled={importBusy} style={{ flex: 1, padding: '14px', borderRadius: 14, background: t.fill, color: t.text, border: 'none', fontFamily: 'inherit', fontSize: 14.5, fontWeight: 600, cursor: 'pointer' }}>{tr('me.importAnother')}</button>
+                  <button onClick={applyImport} disabled={importBusy} style={{ flex: 1, padding: '14px', borderRadius: 14, background: t.purple, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 14.5, fontWeight: 700, cursor: 'pointer' }}>{importBusy ? tr('me.importApplying') : tr('me.importApply')}</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ADD/EDIT ITEM MODAL */}
       {showAddItem && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setShowAddItem(false)}>
@@ -990,9 +1182,21 @@ export default function MenuEditor() {
                 { key: 'price', placeholder: tr('me.fPrice', { c: currency }), type: 'number' },
                 { key: 'calories', placeholder: tr('me.fCalories'), type: 'number' },
                 { key: 'allergens', placeholder: tr('me.fAllergens') },
+                { key: 'stock_left', placeholder: tr('me.fStockLeft'), type: 'number' },
               ].map(field => (
                 <input key={field.key} value={(itemForm as any)[field.key]} onChange={e => setItemForm(f => ({ ...f, [field.key]: e.target.value }))} placeholder={field.placeholder} type={field.type || 'text'} style={{ width: '100%', padding: '14px 16px', borderRadius: 14, border: `1px solid ${t.sep2}`, fontSize: 16, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none' }} />
               ))}
+
+              {/* Strength/intensity — только для позиций где это осмысленно (кальяны и т.п.), необязательное поле */}
+              <div style={{ background: t.surface, borderRadius: 14, padding: '12px 14px' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: t.text, marginBottom: 10 }}>{tr('me.fIntensity')}</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => setItemForm(f => ({ ...f, intensity: '' }))} style={{ padding: '7px 12px', borderRadius: 999, border: `1.5px solid ${!itemForm.intensity ? t.purple : t.sep2}`, background: !itemForm.intensity ? t.purple : 'transparent', color: !itemForm.intensity ? '#fff' : t.text2, fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{tr('me.none')}</button>
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <button key={n} onClick={() => setItemForm(f => ({ ...f, intensity: String(n) }))} style={{ width: 34, height: 34, borderRadius: '50%', border: `1.5px solid ${itemForm.intensity === String(n) ? t.purple : t.sep2}`, background: itemForm.intensity === String(n) ? t.purple : 'transparent', color: itemForm.intensity === String(n) ? '#fff' : t.text2, fontFamily: 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{n}</button>
+                  ))}
+                </div>
+              </div>
 
               {/* Diet tags */}
               <div style={{ background: t.surface, borderRadius: 14, padding: '12px 14px' }}>

@@ -1,7 +1,7 @@
 'use client'
 // Уведомления: одна лента — заказы, вызовы официанта, события подписки, остатки табака.
 // Перенесено из NotificationsTab старого dashboard/page.tsx.
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import { db } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
 import { Card, Container, SectionTitle } from '@/components/ui'
@@ -79,20 +79,27 @@ export default function NotificationsPage() {
       ) : rows.length === 0 ? null : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {rows.map(o => {
-            const isCall = Array.isArray(o.items) && o.items[0]?.call === 'waiter'
+            const callKind: string | null = Array.isArray(o.items) ? (o.items[0]?.call ?? null) : null
+            const isCall = !!callKind
             const st = orderStatus[o.status] || orderStatus.new
             const count = isCall ? 0 : (Array.isArray(o.items) ? o.items.reduce((s: number, i: any) => s + (i.qty || 1), 0) : 0)
+            const CALL_ICON: Record<string, ReactElement> = {
+              waiter: <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><path d="M18 8.4a6 6 0 10-12 0c0 6.6-2.7 8.6-2.7 8.6h17.4S18 15 18 8.4"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg>,
+              coal: <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><circle cx="12" cy="16" r="3"/></svg>,
+              water: <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><path d="M12 3s6 7 6 11a6 6 0 01-12 0c0-4 6-11 6-11z"/></svg>,
+            }
+            const CALL_LABEL: Record<string, string> = { waiter: tr('dash.waiterCall'), coal: tr('dash.coalCall'), water: tr('dash.waterCall') }
             return (
               <Card key={o.id} style={{ padding: '12px 16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ width: 34, height: 34, borderRadius: 10, background: isCall ? 'var(--warn-soft)' : 'rgba(255,45,85,.12)', color: isCall ? 'var(--warn)' : 'var(--pink)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     {isCall
-                      ? <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><path d="M18 8.4a6 6 0 10-12 0c0 6.6-2.7 8.6-2.7 8.6h17.4S18 15 18 8.4"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg>
+                      ? (CALL_ICON[callKind!] ?? CALL_ICON.waiter)
                       : <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>
-                      {isCall ? tr('dash.waiterCall') : tr('dash.orderNItems', { n: count })}{o.table_number ? ` · ${tr('dash.tableWord')} ${o.table_number}` : ''}
+                      {isCall ? (CALL_LABEL[callKind!] ?? tr('dash.waiterCall')) : tr('dash.orderNItems', { n: count })}{o.table_number ? ` · ${tr('dash.tableWord')} ${o.table_number}` : ''}
                     </div>
                     <div style={{ fontSize: '.75rem', color: 'var(--tx2)', marginTop: 1 }}>{timeAgo(o.created_at)}</div>
                   </div>

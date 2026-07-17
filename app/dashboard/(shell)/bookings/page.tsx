@@ -224,7 +224,17 @@ export default function BookingsPage() {
 
   const latestSnapshot = gSnapshots && gSnapshots.length ? gSnapshots[gSnapshots.length - 1] : null
   const ratingTrend = useMemo(() => (gSnapshots || []).map(s => s.rating || 0).filter(v => v > 0), [gSnapshots])
-  const stars = (n: number) => { const f = Math.max(0, Math.min(5, Math.round(n))); return '★'.repeat(f) + '☆'.repeat(5 - f) }
+  // SVG-звёзды вместо текстовых глифов (без эмодзи/глифов в продукте).
+  const stars = (n: number) => {
+    const f = Math.max(0, Math.min(5, Math.round(n)))
+    return (
+      <span style={{ display: 'inline-flex', gap: 2 }}>
+        {[0, 1, 2, 3, 4].map(i => (
+          <svg key={i} width="12" height="12" viewBox="0 0 24 24" fill={i < f ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"><path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8-6.2-3.2-6.2 3.2L7 14.2l-5-4.9 6.9-1z" /></svg>
+        ))}
+      </span>
+    )
+  }
 
   const guestColumns: TableColumn<Guest>[] = [
     { key: 'name', label: tr('bk.name'), sortable: true, render: g => <span style={{ fontWeight: 600, color: 'var(--tx)' }}>{g.name}</span> },

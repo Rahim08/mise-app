@@ -139,6 +139,14 @@ final class AnalyticsModel {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX"); return f
     }()
     func key(_ d: Date) -> String { df.string(from: d) }
+    /// Последний день месяца "yyyy-MM" как "yyyy-MM-dd" — "-31" в 30-дневных месяцах
+    /// невалидная дата для колонки типа date (400 → авансы молча пропадали).
+    func monthEndKey(_ ym: String) -> String {
+        guard let start = df.date(from: ym + "-01"),
+              let end = Calendar.current.date(byAdding: DateComponents(month: 1, day: -1), to: start)
+        else { return ym + "-28" }
+        return key(end)
+    }
 
     func load() async {
         #if DEBUG
@@ -461,7 +469,7 @@ final class AnalyticsModel {
         // 3. Reload advances list.
         let ym = ymKey
         if let adv = try? await DB.from("salary_advances").select()
-            .gte("date", ym + "-01").lte("date", ym + "-31").list(SalaryAdvance.self) { advances = adv }
+            .gte("date", ym + "-01").lte("date", monthEndKey(ym)).list(SalaryAdvance.self) { advances = adv }
     }
 
     func deleteAdvance(_ a: SalaryAdvance) async {
@@ -1509,11 +1517,11 @@ private struct KassaTab: View {
             } else {
                 VStack(spacing: 0) {
                     HStack {
-                        Text(t("an.date")).frame(width: 44, alignment: .leading)
+                        Text(t("an.date")).frame(width: 32, alignment: .leading)
                         Text(t("mg.inkass")).frame(maxWidth: .infinity, alignment: .trailing)
                         Text(t("an.expense")).frame(maxWidth: .infinity, alignment: .trailing)
-                        Spacer().frame(width: 36)
-                        Text(t("an.inkNet")).frame(width: 60, alignment: .trailing)
+                        Spacer().frame(width: 26)
+                        Text(t("an.inkNet")).frame(width: 84, alignment: .trailing)
                     }
                     .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.35))
                     .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
@@ -1522,10 +1530,12 @@ private struct KassaTab: View {
                         let ink = m.inkDetails[s.id]
                         let hasReason = ink?.reason?.isEmpty == false
                         HStack {
-                            Text(dd(s.date)).frame(width: 44, alignment: .leading).foregroundStyle(.primary.opacity(0.5))
-                            Text(cur(s.inkassation ?? 0)).frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.stash)
+                            Text(dd(s.date)).frame(width: 32, alignment: .leading).foregroundStyle(.primary.opacity(0.5))
+                            Text(cur(s.inkassation ?? 0)).frame(maxWidth: .infinity, alignment: .trailing)
+                                .foregroundStyle(BrandKit.stash).lineLimit(1).minimumScaleFactor(0.75)
                             Text((ink?.expense ?? 0) > 0 ? "−" + cur(ink?.expense ?? 0) : "—")
                                 .frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.menu)
+                                .lineLimit(1).minimumScaleFactor(0.75)
                             Button {
                                 reasonPopoverShiftID = (reasonPopoverShiftID == s.id) ? nil : s.id
                             } label: {
@@ -1535,7 +1545,7 @@ private struct KassaTab: View {
                             }
                             .buttonStyle(.plain)
                             .contentShape(Rectangle())
-                            .frame(width: 36, alignment: .center)
+                            .frame(width: 26, alignment: .center)
                             .disabled(!hasReason)
                             .popover(isPresented: Binding(
                                 get: { reasonPopoverShiftID == s.id },
@@ -1550,7 +1560,8 @@ private struct KassaTab: View {
                                     .presentationCompactAdaptation(.popover)
                             }
                             Text(cur(ink?.total ?? (s.inkassation ?? 0)))
-                                .frame(width: 60, alignment: .trailing).fontWeight(.semibold)
+                                .frame(width: 84, alignment: .trailing).fontWeight(.semibold)
+                                .lineLimit(1).minimumScaleFactor(0.7)
                         }
                         .font(.system(size: 12)).padding(.vertical, 9).padding(.horizontal, 14)
                         if i < m.shiftsWithInk.count - 1 { Divider().overlay(Color.primary.opacity(0.07)) }

@@ -647,6 +647,8 @@ const STRINGS: Record<string, Row> = {
   'pe.myMonth':      { en: 'My month', ru: 'Мой месяц', it: 'Il mio mese', fr: 'Mon mois', az: 'Mənim ayım', tr: 'Ayım', uk: 'Мій місяць', kk: 'Менің айым' },
   'pe.shifts':       { en: 'Shifts', ru: 'Смен', it: 'Turni', fr: 'Services', az: 'Növbə', tr: 'Vardiya', uk: 'Змін', kk: 'Ауысым' },
   'pe.hours':        { en: 'Hours', ru: 'Часов', it: 'Ore', fr: 'Heures', az: 'Saat', tr: 'Saat', uk: 'Годин', kk: 'Сағат' },
+  'pe.hUnit':        { en: 'h', ru: 'ч', it: 'h', fr: 'h', az: 's', tr: 'sa', uk: 'год', kk: 'сағ' },
+  'pe.mUnit':        { en: 'min', ru: 'м', it: 'min', fr: 'min', az: 'dəq', tr: 'dk', uk: 'хв', kk: 'мин' },
   'pe.lates':        { en: 'Lates', ru: 'Опозданий', it: 'Ritardi', fr: 'Retards', az: 'Gecikmə', tr: 'Gecikme', uk: 'Запізнень', kk: 'Кешігу' },
   'pe.history':      { en: 'History', ru: 'История', it: 'Storico', fr: 'Historique', az: 'Tarixçə', tr: 'Geçmiş', uk: 'Історія', kk: 'Тарих' },
   'pe.lateBadge':    { en: 'late {n}m', ru: 'опоздание {n}м', it: 'ritardo {n}m', fr: 'retard {n}m', az: 'gecikmə {n}d', tr: 'gecikme {n}d', uk: 'запізнення {n}х', kk: 'кешігу {n}м' },
@@ -659,6 +661,7 @@ const STRINGS: Record<string, Row> = {
   'pe.absenceDeduct':{ en: 'Absence deduction', ru: 'Вычет за пропуски', it: 'Detrazione assenze', fr: 'Retenue absences', az: 'Buraxılma tutulması', tr: 'Devamsızlık kesintisi', uk: 'Відрахування за пропуски', kk: 'Жіберу үшін ұстау' },
   'pe.toCard':       { en: 'To card', ru: 'На карту', it: 'Su carta', fr: 'Sur carte', az: 'Karta', tr: 'Karta', uk: 'На картку', kk: 'Картаға' },
   'pe.inCash':       { en: 'In cash', ru: 'Наличными', it: 'In contanti', fr: 'En espèces', az: 'Nağd', tr: 'Nakit', uk: 'Готівкою', kk: 'Қолма-қол' },
+  'pe.advances':     { en: 'Advances', ru: 'Авансы', it: 'Anticipi', fr: 'Avances', az: 'Avanslar', tr: 'Avanslar', uk: 'Аванси', kk: 'Аванстар' },
   'pe.totalPayout':  { en: 'Total payout', ru: 'Итого к выплате', it: 'Totale da pagare', fr: 'Total à verser', az: 'Ödəniləcək cəmi', tr: 'Ödenecek toplam', uk: 'Разом до виплати', kk: 'Төленетін барлығы' },
   'pe.salary':       { en: 'Salary', ru: 'Зарплата', it: 'Stipendio', fr: 'Salaire', az: 'Maaş', tr: 'Maaş', uk: 'Зарплата', kk: 'Жалақы' },
   'pe.toPayout':     { en: 'To pay', ru: 'К выплате', it: 'Da pagare', fr: 'À verser', az: 'Ödəniləcək', tr: 'Ödenecek', uk: 'До виплати', kk: 'Төленеді' },
@@ -841,6 +844,8 @@ const STRINGS: Record<string, Row> = {
 
   // ── Dashboard (dash.*) ──
   'dash.navOverview':{ en: 'Overview', ru: 'Обзор', it: 'Panoramica', fr: 'Aperçu', az: 'İcmal', tr: 'Genel', uk: 'Огляд', kk: 'Шолу' },
+  'dash.navMore':    { en: 'More', ru: 'Ещё', it: 'Altro', fr: 'Plus', az: 'Daha çox', tr: 'Daha fazla', uk: 'Ще', kk: 'Тағы' },
+  'dash.timezone':   { en: 'Time zone', ru: 'Часовой пояс', it: 'Fuso orario', fr: 'Fuseau horaire', az: 'Saat qurşağı', tr: 'Saat dilimi', uk: 'Часовий пояс', kk: 'Уақыт белдеуі' },
   'dash.secModules': { en: 'Modules', ru: 'Модули', it: 'Moduli', fr: 'Modules', az: 'Modullar', tr: 'Modüller', uk: 'Модулі', kk: 'Модульдер' },
   'dash.secService': { en: 'Service', ru: 'Сервис', it: 'Servizio', fr: 'Service', az: 'Xidmət', tr: 'Servis', uk: 'Сервіс', kk: 'Қызмет' },
   'dash.intMonth':   { en: 'Monthly', ru: 'Месяц', it: 'Mensile', fr: 'Mensuel', az: 'Aylıq', tr: 'Aylık', uk: 'Місяць', kk: 'Ай сайын' },

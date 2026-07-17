@@ -172,7 +172,9 @@ nonisolated struct OrderItem: Codable, Sendable {
 
 nonisolated struct MenuOrder: Codable, Identifiable, Sendable {
     let id: String
-    let table_number: Int?
+    // В БД menu_orders.table_number — text (веб шлёт строку из ?table=).
+    // Int? не коэрсит "5" → Lossy-декодер обнулял ВСЮ строку заказа → заказ пропадал из iOS.
+    let table_number: String?
     var status: String?
     let total: Double?
     let created_at: String?

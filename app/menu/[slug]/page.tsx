@@ -7,16 +7,21 @@ import {
   pickText, fontStack, googleFontsHref, itemAvailableNow,
   type I18nContent, type Schedule,
 } from '@/lib/menu'
+import { AltMenuBody } from './altLayouts'
+import { supabase } from '@/lib/supabase'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 // ── TYPES ─────────────────────────────────────────────────────────────────────
 
-interface MenuSettings {
+export interface MenuSettings {
   id: string
   restaurant_id: string
   slug: string
   is_published: boolean
   theme: 'light' | 'dark' | 'auto'
   layout?: 'list' | 'grid'
+  design?: string
+  card_style?: 'shadow' | 'outline' | 'glass'
   accent_color: string
   font_heading?: string | null
   font_body?: string | null
@@ -30,9 +35,10 @@ interface MenuSettings {
   show_calories: boolean
   upsell_category_id?: string | null
   language: string
+  quick_actions?: boolean
 }
 
-interface Category {
+export interface Category {
   id: string
   name: string
   description: string | null
@@ -42,7 +48,7 @@ interface Category {
   is_visible: boolean
 }
 
-interface MenuItem {
+export interface MenuItem {
   id: string
   category_id: string
   name: string
@@ -61,9 +67,37 @@ interface MenuItem {
   combo_items?: { item_id: string; qty: number }[] | null
   recommended_ids?: string[] | null
   position: number
+  intensity?: number | null
+  stock_left?: number | null
 }
 
-interface Restaurant { id: string; name: string; logo_url: string | null; currency: string | null }
+export interface Restaurant { id: string; name: string; logo_url: string | null; currency: string | null }
+
+export interface AltLayoutCtx {
+  settings: MenuSettings
+  restaurant: Restaurant
+  categories: Category[]
+  filteredItems: (catId: string) => MenuItem[]
+  nm: (x: { name: string; i18n?: I18nContent | null }) => string
+  dsc: (x: { description: string | null; i18n?: I18nContent | null }) => string
+  money: (v: number) => string
+  accent: string
+  radius: number
+  cardStyle: 'shadow' | 'outline' | 'glass'
+  headFont: string
+  bodyFont: string
+  T: { bg: string; surface: string; surface2: string; text: string; text2: string; text3: string; sep: string; fill: string; hbg: string; sh: string }
+  t: (key: string, vars?: Record<string, string | number>) => string
+  cartQty: (id: string) => number
+  addToCart: (item: MenuItem, opts?: { name: string; price: number }[]) => void
+  favs: string[]
+  toggleFav: (id: string) => void
+  openDetail: (item: MenuItem) => void
+  trendingIds: string[]
+  orderable: (item: MenuItem) => boolean
+  soldOutToday: (item: MenuItem) => boolean
+  tagPills: (item: MenuItem) => { id: string; labelKey: string; color: string }[]
+}
 
 interface CartItem { item: MenuItem; qty: number; opts?: { name: string; price: number }[] }
 
@@ -100,7 +134,9 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
   const [tableN, setTableN] = useState<string | null>(null)
   const [bill, setBill] = useState<{ items: any[]; total: number; at: number }[]>([])
   const [showBill, setShowBill] = useState(false)
-  const [waiterCalled, setWaiterCalled] = useState(false)
+  const [waiterCalled, setWaiterCalled] = useState<string | null>(null)
+  const [trendingIds, setTrendingIds] = useState<string[]>([])
+  const [showQuiz, setShowQuiz] = useState(false)
   // Content language (dish names/descriptions). Defaults to the guest phone locale.
   const [contentLang, setContentLang] = useState<string>('en')
   const [showLang, setShowLang] = useState(false)
@@ -120,6 +156,11 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
   const scrollRef = useRef<HTMLDivElement>(null)
   const sid = useRef<string>('')
   const viewSent = useRef(false)
+  // Общая корзина стола (Realtime broadcast, last-write-wins). Активна автоматически,
+  // когда в ссылке есть ?table= — отдельный тумблер не нужен, это ортогонально allow_orders.
+  const tableChannel = useRef<RealtimeChannel | null>(null)
+  const applyingRemoteCart = useRef(false)
+  const [tableGuests, setTableGuests] = useState(1)
 
   // localized resolvers
   const nm = (x: { name: string; i18n?: I18nContent | null }) => pickText(x.name, x.i18n, 'name', contentLang)
@@ -174,9 +215,22 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
     })
   }
 
-  const callWaiter = async () => {
-    setWaiterCalled(true); setTimeout(() => setWaiterCalled(false), 60000)
-    await fetch('/api/menu/order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, type: 'waiter_call', table_number: tableN }) })
+  const sendQuickAction = async (kind: 'waiter' | 'coal' | 'water') => {
+    setWaiterCalled(kind); setTimeout(() => setWaiterCalled(null), 60000)
+    await fetch('/api/menu/order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, type: `${kind}_call`, table_number: tableN }) })
+  }
+
+  // Повторить последний заказ стола — берём позиции из сохранённого счёта, докидываем
+  // в корзину те, что всё ещё есть в меню и доступны (акции/сток могли измениться).
+  const reorderLast = () => {
+    const last = bill[bill.length - 1]
+    if (!last) return
+    for (const it of last.items) {
+      const menuItem = items.find(x => x.id === it.id)
+      if (!menuItem || !menuItem.is_available) continue
+      for (let n = 0; n < (it.qty || 1); n++) addToCart(menuItem)
+    }
+    setShowBill(false); setShowCart(true)
   }
 
   useEffect(() => {
@@ -186,12 +240,44 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
     else setIsDark(window.matchMedia('(prefers-color-scheme: dark)').matches)
   }, [settings])
 
+  // Общая корзина стола — Realtime broadcast, last-write-wins (приемлемо для этого UX:
+  // конфликт возможен только если два гостя редактируют корзину в один и тот же момент).
+  const itemsRef = useRef<MenuItem[]>([])
+  useEffect(() => { itemsRef.current = items }, [items])
+  const clientId = useRef(Math.random().toString(36).slice(2))
+
+  useEffect(() => {
+    if (!tableN || !settings?.allow_orders) return
+    const ch = supabase.channel(`mise-table:${slug}:${tableN}`)
+    ch.on('broadcast', { event: 'cart' }, ({ payload }) => {
+      if (payload?.sender === clientId.current) return
+      const restored: CartItem[] = (payload?.cart || [])
+        .map((c: any) => { const it = itemsRef.current.find(x => x.id === c.id); return it ? { item: it, qty: c.qty, opts: c.opts } : null })
+        .filter(Boolean) as CartItem[]
+      applyingRemoteCart.current = true
+      setCart(restored)
+    })
+    ch.on('presence', { event: 'sync' }, () => {
+      setTableGuests(Math.max(1, Object.keys(ch.presenceState()).length))
+    })
+    ch.subscribe(status => { if (status === 'SUBSCRIBED') ch.track({ at: Date.now() }) })
+    tableChannel.current = ch
+    return () => { supabase.removeChannel(ch); tableChannel.current = null; setTableGuests(1) }
+  }, [slug, tableN, settings?.allow_orders])
+
+  useEffect(() => {
+    if (applyingRemoteCart.current) { applyingRemoteCart.current = false; return }
+    if (!tableChannel.current) return
+    tableChannel.current.send({ type: 'broadcast', event: 'cart', payload: { sender: clientId.current, cart: cart.map(c => ({ id: c.item.id, qty: c.qty, opts: c.opts })) } })
+  }, [cart])
+
   const loadMenu = async () => {
     const res = await fetch(`/api/menu/${slug}`)
     if (!res.ok) { setNotFound(true); setLoading(false); return }
-    const { settings: s, restaurant: rest, categories: cats, items: its } = await res.json()
+    const { settings: s, restaurant: rest, categories: cats, items: its, trending_ids } = await res.json()
     if (!s) { setNotFound(true); setLoading(false); return }
     setSettings(s); setRestaurant(rest); setCategories(cats || []); setItems(its || [])
+    setTrendingIds(trending_ids || [])
     if (cats && cats.length > 0) setActiveCategory(cats[0].id)
     setLoading(false)
     if (!viewSent.current) { viewSent.current = true; track('view') }
@@ -285,6 +371,15 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
     sh: isDark ? '0 2px 16px rgba(0,0,0,0.6)' : '0 1px 3px rgba(0,0,0,0.08),0 4px 20px rgba(0,0,0,0.06)',
   }
 
+  // Стиль карточки — тень (дефолт) / контур / стекло. Применяется к карточкам товаров
+  // в сетке и к контейнеру списка ниже (только «Классика», у остальных дизайнов — свой).
+  const cardStyle = settings?.card_style || 'shadow'
+  const cardShadow: React.CSSProperties = cardStyle === 'outline'
+    ? { border: `1px solid ${T.sep}`, boxShadow: 'none' }
+    : cardStyle === 'glass'
+    ? { border: `1px solid ${T.sep}`, boxShadow: T.sh, backdropFilter: 'blur(20px) saturate(170%)', WebkitBackdropFilter: 'blur(20px) saturate(170%)' }
+    : { border: 'none', boxShadow: T.sh }
+
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ width: 30, height: 30, border: '2.5px solid rgba(255,255,255,0.14)', borderTopColor: 'rgba(255,255,255,0.85)', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
@@ -303,6 +398,37 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
   const visibleCats = categories.filter(c => filteredItems(c.id).length > 0 || (!search && !filterCount))
   const tagPills = (i: MenuItem) => (i.tags || []).map(tg => TAG_BY_ID[tg]).filter(Boolean)
 
+  // Featured rail — из существующих tags (chef/popular), без отдельного поля.
+  // Только когда нет активного поиска/фильтра, иначе дублирует выдачу.
+  const featuredItems = (!search && !filterCount)
+    ? items.filter(i => i.is_available && itemAvailableNow(i.schedule, now) && ((i.tags || []).includes('chef') || (i.tags || []).includes('popular'))).slice(0, 8)
+    : []
+
+  const soldOutToday = (i: MenuItem) => i.stock_left != null && i.stock_left <= 0
+  const orderable = (i: MenuItem) => i.is_available && !soldOutToday(i)
+
+  const IntensityBars = ({ n }: { n: number }) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }} aria-label={`${n}/5`}>
+      {[1, 2, 3, 4, 5].map(i => <span key={i} style={{ width: 3, height: 10, borderRadius: 1, background: i <= n ? accent : T.fill }} />)}
+    </span>
+  )
+
+  // Rule-based подбор — без вызова /api/ai (текстовая LLM там не стоит того ради 2 вопросов).
+  // Правила простые и объяснимые: chill → мягче/популярнее, bold → выше крепость.
+  const pickForMood = (mood: 'chill' | 'social' | 'bold'): MenuItem | null => {
+    const pool = items.filter(i => orderable(i) && itemAvailableNow(i.schedule, now))
+    if (pool.length === 0) return null
+    const score = (i: MenuItem) => {
+      const tags = i.tags || []
+      let s = 0
+      if (mood === 'chill') s = (i.intensity != null ? (5 - i.intensity) : 3) + (tags.includes('popular') ? 2 : 0)
+      else if (mood === 'social') s = (tags.includes('popular') ? 4 : 0) + (tags.includes('chef') ? 2 : 0)
+      else s = (i.intensity ?? 0) * 2 + (tags.includes('new') ? 1 : 0)
+      return s
+    }
+    return pool.reduce((best, i) => (score(i) > score(best) ? i : best), pool[0])
+  }
+
   // upsell suggestions for the cart
   const cartIds = new Set(cart.map(c => c.item.id))
   const recIds = new Set<string>()
@@ -317,6 +443,15 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
       {badge ? <span style={{ position: 'absolute', top: -2, right: -2, minWidth: 16, height: 16, padding: '0 4px', borderRadius: 8, background: accent, color: '#fff', fontSize: 10, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{badge}</span> : null}
     </button>
   )
+
+  // Пять альтернативных структур (Design Lab) — включаются per-menu через settings.design.
+  // 'classic'/пусто — текущая вёрстка ниже (табы категорий, list/grid2/grid3/cards).
+  const altDesign = settings.design && settings.design !== 'classic' ? settings.design : null
+  const altCtx: AltLayoutCtx = {
+    settings, restaurant, categories, filteredItems, nm, dsc, money, accent, radius,
+    cardStyle: settings.card_style || 'shadow', headFont, bodyFont, T, t,
+    cartQty, addToCart, favs, toggleFav, openDetail, trendingIds, orderable, soldOutToday, tagPills,
+  }
 
   return (
     <div style={{ height: '100vh', overflow: 'hidden', background: T.bg, fontFamily: bodyFont, WebkitFontSmoothing: 'antialiased', color: T.text }}>
@@ -333,9 +468,14 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
       <div style={{ position: 'fixed', top: 'calc(8px + env(safe-area-inset-top,0px))', right: 12, zIndex: 260, display: 'flex', gap: 8 }}>
         <CircleBtn onClick={() => setShowSearch(s => !s)}><svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg></CircleBtn>
         {availTags.length > 0 && <CircleBtn onClick={() => setShowFilters(true)} badge={filterCount}><svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4" /></svg></CircleBtn>}
+        {settings.allow_orders && items.length >= 2 && <CircleBtn onClick={() => setShowQuiz(true)}><svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" /><circle cx="12" cy="12" r="3.2" /></svg></CircleBtn>}
         <CircleBtn onClick={() => setShowLang(true)}><svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18" /></svg></CircleBtn>
       </div>
 
+      {altDesign ? (
+        <AltMenuBody design={altDesign} ctx={altCtx} tableN={tableN} />
+      ) : (
+      <>
       {/* COVER + HEADER */}
       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 200 }}>
         {settings.cover_url ? (
@@ -380,6 +520,24 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
           setActiveCategory(current)
         }}>
         <div style={{ padding: '20px 16px 40px', maxWidth: 640, margin: '0 auto', animation: 'fadeUp .25s ease' }}>
+          {featuredItems.length > 0 && (
+            <div style={{ marginBottom: 28 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: T.text2, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>{t('menu.featured')}</div>
+              <div style={{ display: 'flex', gap: 10, overflowX: 'auto', scrollbarWidth: 'none', margin: '0 -16px', padding: '0 16px 4px' }}>
+                {featuredItems.map(item => (
+                  <button key={item.id} onClick={() => openDetail(item)} style={{ flexShrink: 0, width: 168, height: 200, borderRadius: radius, position: 'relative', overflow: 'hidden', border: 'none', cursor: 'pointer', textAlign: 'left', padding: 0, fontFamily: 'inherit', background: item.image_url ? `center/cover url(${item.image_url})` : `linear-gradient(155deg, ${accent}33, ${T.surface2})` }}>
+                    {trendingIds.includes(item.id) && (
+                      <span style={{ position: 'absolute', top: 10, right: 10, display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 800, color: '#fff', background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(6px)', padding: '3px 8px', borderRadius: 8, textTransform: 'uppercase' }}>{t('menu.trending')}</span>
+                    )}
+                    <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '30px 12px 12px', background: 'linear-gradient(to top, rgba(0,0,0,0.75), transparent)' }}>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: '#fff', lineHeight: 1.2, fontFamily: headFont }}>{nm(item)}</div>
+                      {item.price != null && <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', opacity: 0.9, marginTop: 4 }}>{money(item.price)}</div>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {visibleCats.map(cat => {
             const catItems = filteredItems(cat.id)
             if (catItems.length === 0) return null
@@ -395,7 +553,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
                     {catItems.map(item => {
                       const qty = cartQty(item.id)
                       return (
-                        <div key={item.id} onClick={() => openDetail(item)} style={{ background: T.surface, borderRadius: radius, overflow: 'hidden', boxShadow: T.sh, opacity: item.is_available ? 1 : 0.45, display: 'flex', flexDirection: 'column', cursor: 'pointer' }}>
+                        <div key={item.id} onClick={() => openDetail(item)} style={{ background: T.surface, borderRadius: radius, overflow: 'hidden', ...cardShadow, opacity: orderable(item) ? 1 : 0.45, display: 'flex', flexDirection: 'column', cursor: 'pointer' }}>
                           {settings.show_photos && (
                             <div style={{ width: '100%', aspectRatio: '1 / 1', background: T.fill, flexShrink: 0, position: 'relative' }}>
                               {item.image_url ? <img src={item.image_url} alt={nm(item)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="28" height="28" fill="none" stroke={T.text3} strokeWidth="1.5" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg></div>}
@@ -407,14 +565,21 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
                           <div style={{ padding: '12px 12px 13px', flex: 1, display: 'flex', flexDirection: 'column' }}>
                             <div style={{ fontWeight: 600, fontSize: 15, color: T.text, marginBottom: 3, lineHeight: 1.25 }}>{nm(item)}</div>
                             {dsc(item) && <div style={{ fontSize: 12, color: T.text2, lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{dsc(item)}</div>}
-                            {tagPills(item).length > 0 && <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>{tagPills(item).map(d => <span key={d.id} style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: d.color, padding: '2px 7px', borderRadius: 6 }}>{t(d.labelKey)}</span>)}</div>}
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
+                              {item.intensity != null && <IntensityBars n={item.intensity} />}
+                              {trendingIds.includes(item.id) && <span style={{ fontSize: 10, fontWeight: 700, color: accent, border: `1px solid ${accent}`, padding: '1px 6px', borderRadius: 6 }}>{t('menu.trending')}</span>}
+                              {tagPills(item).map(d => <span key={d.id} style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: d.color, padding: '2px 7px', borderRadius: 6 }}>{t(d.labelKey)}</span>)}
+                            </div>
                             <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 10 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                                 {item.price != null && <div style={{ fontWeight: 700, fontSize: 16, color: accent }}>{money(item.price)}</div>}
                                 {settings.show_calories && item.calories && <div style={{ fontSize: 11, color: T.text3, background: T.fill, padding: '2px 6px', borderRadius: 7 }}>{item.calories} {t('menu.kcal')}</div>}
+                                {orderable(item) && item.stock_left != null && item.stock_left > 0 && <div style={{ fontSize: 11, color: '#ff9500', background: 'rgba(255,149,0,0.12)', padding: '2px 6px', borderRadius: 7 }}>{t('menu.stockLeft', { n: item.stock_left })}</div>}
                               </div>
                               {!item.is_available
                                 ? <div style={{ fontSize: 11, color: '#ff3b30', background: 'rgba(255,59,48,0.1)', padding: '2px 8px', borderRadius: 8 }}>{t('menu.unavailable')}</div>
+                                : soldOutToday(item)
+                                ? <div style={{ fontSize: 11, color: '#ff3b30', background: 'rgba(255,59,48,0.1)', padding: '2px 8px', borderRadius: 8 }}>{t('menu.soldOutToday')}</div>
                                 : settings.allow_orders && (qty === 0
                                   ? <button onClick={e => { e.stopPropagation(); addToCart(item) }} style={{ width: 34, height: 34, borderRadius: '50%', background: accent, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 2px 10px ${accent}44`, flexShrink: 0 }}><svg width="15" height="15" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 16 16"><path d="M8 1v14M1 8h14" /></svg></button>
                                   : <div onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
@@ -429,12 +594,12 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
                     })}
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, background: T.surface, borderRadius: radius, overflow: 'hidden', marginBottom: 32, boxShadow: T.sh }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, background: T.surface, borderRadius: radius, overflow: 'hidden', marginBottom: 32, ...cardShadow }}>
                     {catItems.map((item, i) => {
                       const qty = cartQty(item.id)
                       const isLast = i === catItems.length - 1
                       return (
-                        <div key={item.id} onClick={() => openDetail(item)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderBottom: isLast ? 'none' : `0.5px solid ${T.sep}`, opacity: item.is_available ? 1 : 0.45, cursor: 'pointer' }}>
+                        <div key={item.id} onClick={() => openDetail(item)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderBottom: isLast ? 'none' : `0.5px solid ${T.sep}`, opacity: orderable(item) ? 1 : 0.45, cursor: 'pointer' }}>
                           {settings.show_photos && (
                             <div style={{ width: 72, height: 72, borderRadius: 14, overflow: 'hidden', flexShrink: 0, background: T.fill }}>
                               {item.image_url ? <img src={item.image_url} alt={nm(item)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="24" height="24" fill="none" stroke={T.text3} strokeWidth="1.5" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg></div>}
@@ -445,12 +610,16 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
                             {dsc(item) && <div style={{ fontSize: 13, color: T.text2, lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{dsc(item)}</div>}
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
                               {item.price != null && <div style={{ fontWeight: 700, fontSize: 16, color: accent }}>{money(item.price)}</div>}
+                              {item.intensity != null && <IntensityBars n={item.intensity} />}
                               {settings.show_calories && item.calories && <div style={{ fontSize: 12, color: T.text3, background: T.fill, padding: '2px 8px', borderRadius: 8 }}>{item.calories} {t('menu.kcal')}</div>}
+                              {trendingIds.includes(item.id) && <span style={{ fontSize: 10, fontWeight: 700, color: accent, border: `1px solid ${accent}`, padding: '1px 6px', borderRadius: 6 }}>{t('menu.trending')}</span>}
+                              {orderable(item) && item.stock_left != null && item.stock_left > 0 && <div style={{ fontSize: 12, color: '#ff9500', background: 'rgba(255,149,0,0.12)', padding: '2px 8px', borderRadius: 8 }}>{t('menu.stockLeft', { n: item.stock_left })}</div>}
                               {tagPills(item).map(d => <span key={d.id} style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: d.color, padding: '2px 7px', borderRadius: 6 }}>{t(d.labelKey)}</span>)}
                               {!item.is_available && <div style={{ fontSize: 12, color: '#ff3b30', background: 'rgba(255,59,48,0.1)', padding: '2px 8px', borderRadius: 8 }}>{t('menu.unavailable')}</div>}
+                              {item.is_available && soldOutToday(item) && <div style={{ fontSize: 12, color: '#ff3b30', background: 'rgba(255,59,48,0.1)', padding: '2px 8px', borderRadius: 8 }}>{t('menu.soldOutToday')}</div>}
                             </div>
                           </div>
-                          {settings.allow_orders && item.is_available && (
+                          {settings.allow_orders && orderable(item) && (
                             <div onClick={e => e.stopPropagation()} style={{ flexShrink: 0 }}>
                               {qty === 0
                                 ? <button onClick={() => addToCart(item)} style={{ width: 36, height: 36, borderRadius: '50%', background: accent, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 2px 10px ${accent}44` }}><svg width="16" height="16" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 16 16"><path d="M8 1v14M1 8h14" /></svg></button>
@@ -484,6 +653,8 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
           </div>
         </div>
       </div>
+      </>
+      )}
 
       {/* ITEM DETAIL SHEET */}
       {detail && (() => {
@@ -503,9 +674,18 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
                   </button>
                 </div>
                 {dsc(item) && <div style={{ fontSize: 15, color: T.text2, lineHeight: 1.5, marginTop: 8 }}>{dsc(item)}</div>}
+                {item.intensity != null && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+                    <span style={{ fontSize: 12, color: T.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{t('menu.intensity')}</span>
+                    <IntensityBars n={item.intensity} />
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
+                  {trendingIds.includes(item.id) && <span style={{ fontSize: 12, fontWeight: 700, color: accent, border: `1.5px solid ${accent}`, padding: '3px 9px', borderRadius: 8 }}>{t('menu.trending')}</span>}
                   {tagPills(item).map(d => <span key={d.id} style={{ fontSize: 12, fontWeight: 700, color: '#fff', background: d.color, padding: '4px 10px', borderRadius: 8 }}>{t(d.labelKey)}</span>)}
                   {settings.show_calories && item.calories && <span style={{ fontSize: 12, color: T.text2, background: T.fill, padding: '4px 10px', borderRadius: 8 }}>{item.calories} {t('menu.kcal')}</span>}
+                  {orderable(item) && item.stock_left != null && item.stock_left > 0 && <span style={{ fontSize: 12, color: '#ff9500', background: 'rgba(255,149,0,0.12)', padding: '4px 10px', borderRadius: 8 }}>{t('menu.stockLeft', { n: item.stock_left })}</span>}
+                  {item.is_available && soldOutToday(item) && <span style={{ fontSize: 12, color: '#ff3b30', background: 'rgba(255,59,48,0.1)', padding: '4px 10px', borderRadius: 8 }}>{t('menu.soldOutToday')}</span>}
                 </div>
                 {settings.show_allergens && item.allergens && item.allergens.length > 0 && <div style={{ fontSize: 13, color: T.text3, marginTop: 10 }}>{item.allergens.join(', ')}</div>}
                 {comboList.length > 0 && (
@@ -535,7 +715,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
               )}
 
               <div style={{ padding: '8px 16px 4px' }}>
-                {settings.allow_orders && item.is_available ? (
+                {settings.allow_orders && orderable(item) ? (
                   <button onClick={() => { const opts = (item.modifiers || []).map((g, gi) => g.options[detailSel[gi] || 0]).filter(Boolean); addToCart(item, opts.length ? opts : undefined); setDetail(null) }} style={{ width: '100%', padding: '16px', borderRadius: 16, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 20px ${accent}55` }}>{t('menu.addToOrder')}{item.price != null ? ` · ${money((item.price || 0) + optsPrice)}` : ''}</button>
                 ) : item.price != null ? (
                   <div style={{ textAlign: 'center', fontSize: 20, fontWeight: 800, color: T.text, padding: '8px' }}>{money(item.price)}</div>
@@ -588,6 +768,28 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
         </div>
       )}
 
+      {/* AI QUIZ SHEET — rule-based, 2 tap → recommendation */}
+      {showQuiz && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 510, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setShowQuiz(false)}>
+          <div style={{ background: T.surface, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, paddingBottom: 'calc(20px + env(safe-area-inset-bottom,0px))', animation: 'slideUp .3s ease' }} onClick={e => e.stopPropagation()}>
+            <div style={{ width: 40, height: 4, background: T.fill, borderRadius: 2, margin: '14px auto 0' }} />
+            <div style={{ fontWeight: 700, fontSize: 18, textAlign: 'center', padding: '14px 20px 4px', fontFamily: headFont, color: T.text }}>{t('menu.quizTitle')}</div>
+            <div style={{ padding: '10px 20px 4px' }}>
+              {([['chill', t('menu.quizChill'), t('menu.quizChillD')], ['social', t('menu.quizSocial'), t('menu.quizSocialD')], ['bold', t('menu.quizBold'), t('menu.quizBoldD')]] as const).map(([mood, label, desc]) => (
+                <button key={mood} onClick={() => {
+                  const pick = pickForMood(mood)
+                  setShowQuiz(false)
+                  if (pick) setTimeout(() => openDetail(pick), 250)
+                }} style={{ width: '100%', textAlign: 'left', padding: '14px 16px', borderRadius: 14, border: `1px solid ${T.sep}`, background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', marginBottom: 8 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: T.text }}>{label}</div>
+                  <div style={{ fontSize: 12.5, color: T.text2, marginTop: 2 }}>{desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* BILL BUTTON */}
       {settings.allow_orders && bill.length > 0 && (
         <button onClick={() => setShowBill(true)} style={{ position: 'fixed', right: 16, bottom: cartCount > 0 ? 96 : 24, zIndex: 290, width: 52, height: 52, borderRadius: '50%', border: 'none', background: T.surface, boxShadow: '0 4px 20px rgba(0,0,0,0.25)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: accent }}>
@@ -613,7 +815,22 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
             </div>
             <div style={{ padding: '12px 16px 20px', borderTop: `0.5px solid ${T.sep}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}><span style={{ fontSize: 16, color: T.text2 }}>{t('menu.totalTable')}</span><span style={{ fontSize: 20, fontWeight: 800, color: T.text }}>{money(bill.reduce((s, o) => s + (o.total || 0), 0))}</span></div>
-              <button onClick={callWaiter} disabled={waiterCalled} style={{ width: '100%', padding: '16px', borderRadius: 16, background: waiterCalled ? T.fill : accent, color: waiterCalled ? T.text2 : '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: waiterCalled ? 'default' : 'pointer', boxShadow: waiterCalled ? 'none' : `0 4px 20px ${accent}55` }}>{waiterCalled ? t('menu.waiterComing') : t('menu.callWaiter')}</button>
+              {settings.allow_orders && bill.length > 0 && (
+                <button onClick={reorderLast} style={{ width: '100%', padding: '13px', borderRadius: 14, background: 'transparent', border: `1.5px solid ${T.sep}`, color: T.text, fontFamily: 'inherit', fontSize: 14.5, fontWeight: 600, cursor: 'pointer', marginBottom: 10 }}>{t('menu.reorderLast')}</button>
+              )}
+              {settings.quick_actions === false ? (
+                <button onClick={() => sendQuickAction('waiter')} disabled={!!waiterCalled} style={{ width: '100%', padding: '16px', borderRadius: 16, background: waiterCalled ? T.fill : accent, color: waiterCalled ? T.text2 : '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: waiterCalled ? 'default' : 'pointer', boxShadow: waiterCalled ? 'none' : `0 4px 20px ${accent}55` }}>{waiterCalled ? t('menu.waiterComing') : t('menu.callWaiter')}</button>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                  {([['waiter', t('menu.qaWaiter'), <svg key="w" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="12" cy="7" r="3" /><path d="M5 21v-3a7 7 0 0114 0v3" /></svg>],
+                    ['coal', t('menu.qaCoal'), <svg key="c" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="8" cy="9" r="3" /><circle cx="16" cy="9" r="3" /><circle cx="12" cy="16" r="3" /></svg>],
+                    ['water', t('menu.qaWater'), <svg key="a" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 3s6 7 6 11a6 6 0 01-12 0c0-4 6-11 6-11z" /></svg>]] as const).map(([kind, label, icon]) => (
+                    <button key={kind} onClick={() => sendQuickAction(kind)} disabled={waiterCalled === kind} style={{ padding: '12px 4px', borderRadius: 14, background: waiterCalled === kind ? T.fill : T.surface2, border: 'none', color: waiterCalled === kind ? T.text3 : accent, fontFamily: 'inherit', fontSize: 12, fontWeight: 600, cursor: waiterCalled === kind ? 'default' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                      {icon}<span>{waiterCalled === kind ? t('menu.waiterComing') : label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -627,6 +844,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
             <span>{t('menu.cart')}{tableN ? ` · ${t('menu.table')} ${tableN}` : ''}</span>
             <span style={{ fontWeight: 700 }}>{money(cartTotal)}</span>
           </button>
+          {tableGuests > 1 && <div style={{ textAlign: 'center', fontSize: 11.5, color: T.text3, marginTop: 6 }}>{t('menu.sharedCart', { n: tableGuests })}</div>}
         </div>
       )}
 

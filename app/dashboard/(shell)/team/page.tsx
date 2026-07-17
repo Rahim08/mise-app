@@ -134,7 +134,9 @@ export default function TeamPage() {
       <div style={{ borderTop: 'var(--hairline)', margin: '8px 0 14px', paddingTop: 14 }}>
         <div style={{ fontSize: '.72rem', fontWeight: 600, color: 'var(--tx2)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>{tr('dash.appAccess')}</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-          {APPS.map(app => (
+          {/* 'menu' сотрудникам не выдаётся: шлюз /api/db не знает такой AppId (доступ бы
+              не работал), а /dashboard/menu — owner-роут. Решение пользователя 2026-07-17. */}
+          {APPS.filter(app => app.id !== 'menu').map(app => (
             <label key={app.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '9px 12px', borderRadius: 10, background: form.apps.includes(app.id) ? app.color + '10' : 'var(--fill2)', border: `1px solid ${form.apps.includes(app.id) ? app.color : 'transparent'}`, transition: 'all var(--dur-fast) var(--ease)' }}>
               <input type="checkbox" checked={form.apps.includes(app.id)} onChange={() => toggleApp(app.id)} style={{ width: 16, height: 16, accentColor: app.color }} />
               <div>

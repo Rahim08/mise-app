@@ -41,6 +41,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   // с SSR-HTML и роняет гидрацию (сервер false, клиент true).
   const [showSplash, setShowSplash] = useState(false)
   const [sideCollapsed, setSideCollapsed] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   useEffect(() => {
     if (!sessionStorage.getItem('mise_splash_shown')) setShowSplash(true)
     if (localStorage.getItem('mise_dash_side_collapsed') === '1') setSideCollapsed(true)
@@ -51,14 +52,21 @@ function Shell({ children }: { children: React.ReactNode }) {
     return next
   })
 
-  // Бейдж уведомлений: новые заказы, появившиеся после последнего открытия ленты
+  // Бейдж уведомлений: новые заказы после последнего открытия ленты + low-stock табака
+  // (постоянное состояние склада — не гейтится «просмотрено», лента его тоже показывает).
   const [unseen, setUnseen] = useState(0)
   useEffect(() => {
     if (!restaurant?.id) return
     const check = async () => {
       const seen = +(localStorage.getItem('mise_notif_seen') || 0)
-      const { data } = await db.from('menu_orders').select('id, created_at, status').eq('status', 'new').limit(50)
-      setUnseen((data || []).filter((o: any) => new Date(o.created_at).getTime() > seen).length)
+      const [{ data }, { data: stock }] = await Promise.all([
+        db.from('menu_orders').select('id, created_at, status').eq('status', 'new').limit(50),
+        db.from('tobacco_stock').select('quantity_g, min_quantity_g'),
+      ])
+      const newOrders = (data || []).filter((o: any) => new Date(o.created_at).getTime() > seen).length
+      // Порог как в ленте уведомлений (notifications/page.tsx): min_quantity_g ?? 100.
+      const low = (stock || []).filter((s: any) => Number(s.quantity_g || 0) <= Number(s.min_quantity_g ?? 100)).length
+      setUnseen(newOrders + low)
     }
     check()
     const iv = setInterval(check, 60000)
@@ -152,10 +160,13 @@ function Shell({ children }: { children: React.ReactNode }) {
           @keyframes dashPulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
           .dash-fade { animation: dashIn .16s ease-out; }
           .dash-side { display: none; }
+          /* Mobile: контент не подлезает под нижний таб-бар */
+          .dash-content { padding-bottom: calc(70px + env(safe-area-inset-bottom)); }
+          @keyframes dashSheetIn { from { transform: translateY(100%); } to { transform: none; } }
           @media (min-width: 900px) {
             .dash-side { display: flex; }
-            .dash-mobilebar, .dash-pills { display: none !important; }
-            .dash-content { margin-left: var(--dash-side-w, 232px); transition: margin-left .28s var(--ease); will-change: margin-left; }
+            .dash-mobilebar, .dash-bottombar, .dash-moresheet { display: none !important; }
+            .dash-content { margin-left: var(--dash-side-w, 232px); transition: margin-left .28s var(--ease); will-change: margin-left; padding-bottom: 0; }
           }
         `}</style>
 
@@ -243,35 +254,79 @@ function Shell({ children }: { children: React.ReactNode }) {
           {/* Ширину контента задаёт каждая страница сама через <Container size="normal|wide|full">
               (components/ui) — раньше здесь был фикс 880px на всё, отсюда «телефон на десктопе». */}
           <div style={{ padding: '20px 24px' }}>
-            {/* Пилюли (mobile) */}
-            <div className="dash-pills" style={{ display: 'flex', gap: 4, marginBottom: 20, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'none' }}>
-              {[...NAV_MODULES, ...NAV_SERVICE].map(item => {
-                const on = isCurrent(item.href)
-                const locked = isLocked((item as any).module)
-                const label = item.label.startsWith('dash.') ? tr(item.label) : item.label
-                return (
-                  <button key={item.id} onClick={() => go(item)} className="ui-press" style={{
-                    display: 'flex', alignItems: 'center', gap: 7,
-                    padding: '7px 15px', borderRadius: 10, border: 'none', fontFamily: 'inherit',
-                    fontSize: '.8rem', fontWeight: on ? 700 : 500,
-                    cursor: 'pointer', whiteSpace: 'nowrap',
-                    background: on ? 'var(--tx)' : 'var(--surface)',
-                    color: on ? 'var(--tabon)' : locked ? 'var(--tx3)' : 'var(--tx2)',
-                    boxShadow: on ? 'none' : '0 1px 3px rgba(0,0,0,.06)',
-                  }}>
-                    <TabIcon id={locked ? 'lock' : item.id} />
-                    {label}
-                  </button>
-                )
-              })}
-            </div>
-
             {/* key={pathname} перезапускает анимацию проявления при каждом переходе */}
             <main key={pathname} className="dash-fade">
               {children}
             </main>
           </div>
         </div>
+
+        {/* Нижний таб-бар (mobile): 4 главных раздела + «Ещё» (остальное в шите).
+            Заменил горизонтальные пилюли из 12 пунктов (аудит-находка 24). */}
+        {(() => {
+          const mainIds = ['overview', 'shifts', 'menu', 'bookings']
+          const mainItems = mainIds.map(id => NAV_MODULES.find(m => m.id === id)!).filter(Boolean)
+          const moreItems = [
+            ...NAV_MODULES.filter(m => !mainIds.includes(m.id)),
+            ...NAV_SERVICE,
+            { id: 'account', label: 'dash.account', href: '/dashboard/account' },
+          ]
+          const labelOf = (item: { label: string }) => item.label.startsWith('dash.') ? tr(item.label) : item.label
+          const moreActive = moreItems.some(m => isCurrent(m.href))
+          const tab = (on: boolean, locked: boolean): React.CSSProperties => ({
+            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+            padding: '5px 0 3px', border: 'none', background: 'none', fontFamily: 'inherit', cursor: 'pointer',
+            fontSize: '.6rem', fontWeight: on ? 700 : 500,
+            color: on ? 'var(--tx)' : locked ? 'var(--tx3)' : 'var(--tx2)',
+          })
+          return (
+            <>
+              <nav className="dash-bottombar" style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 120, display: 'flex', background: 'var(--glass-bg)', backdropFilter: 'var(--glass-blur)', WebkitBackdropFilter: 'var(--glass-blur)', borderTop: 'var(--hairline)', padding: '4px 4px calc(4px + env(safe-area-inset-bottom))' }}>
+                {mainItems.map(item => {
+                  const locked = isLocked(item.module)
+                  return (
+                    <button key={item.id} onClick={() => go(item)} style={tab(isCurrent(item.href), locked)}>
+                      <TabIcon id={locked ? 'lock' : item.id} size={19} />
+                      {labelOf(item)}
+                    </button>
+                  )
+                })}
+                <button onClick={() => setMoreOpen(true)} style={tab(moreActive, false)}>
+                  <TabIcon id="more" size={19} />
+                  {tr('dash.navMore')}
+                </button>
+              </nav>
+              {moreOpen && (
+                <div className="dash-moresheet" onClick={() => setMoreOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 130, background: 'rgba(0,0,0,.42)' }}>
+                  <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', left: 0, right: 0, bottom: 0, background: 'var(--surface)', borderRadius: '20px 20px 0 0', padding: '10px 16px calc(20px + env(safe-area-inset-bottom))', animation: 'dashSheetIn .24s cubic-bezier(.32,.72,0,1)' }}>
+                    <div style={{ width: 38, height: 4, borderRadius: 2, background: 'var(--fill)', margin: '0 auto 14px' }} />
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                      {moreItems.map(item => {
+                        const locked = isLocked((item as any).module)
+                        const on = isCurrent(item.href)
+                        return (
+                          <button key={item.id} onClick={() => { setMoreOpen(false); go(item) }} className="ui-press" style={{
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                            padding: '12px 4px 10px', borderRadius: 14, border: 'none', fontFamily: 'inherit', cursor: 'pointer',
+                            fontSize: '.66rem', fontWeight: on ? 700 : 500,
+                            background: on ? 'var(--fill)' : 'transparent',
+                            color: locked ? 'var(--tx3)' : 'var(--tx)', position: 'relative',
+                          }}>
+                            <span style={{ position: 'relative', display: 'flex' }}>
+                              <TabIcon id={locked ? 'lock' : item.id} size={20} />
+                              {item.id === 'notifications' && unseen > 0 && <span style={{ position: 'absolute', top: -3, right: -5, width: 8, height: 8, borderRadius: '50%', background: 'var(--danger)' }} />}
+                            </span>
+                            {labelOf(item)}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )
+        })()}
       </div>
     </>
   )

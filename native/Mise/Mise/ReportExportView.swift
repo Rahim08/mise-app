@@ -280,20 +280,125 @@ final class ReportModel {
 
     // MARK: - PDF
 
+    /// Снапшот для рендера PDF вне main thread: все локализованные строки и суммы
+    /// (t() и Money.s — @MainActor) считаются здесь, на MainActor; рендер получает
+    /// только готовые значения. Поля неизменяемые → @unchecked Sendable безопасен.
+    struct PDFSnapshot: @unchecked Sendable {
+        struct Table { let cols: [(String, CGFloat)]; let rows: [[String]]; let totals: [String]? }
+        let venueName, reportTitle, generatedLine, periodLabel: String
+        let byDayLabel, incomeLabel, expenseLabel, noData: String
+        let secCash, secSales, secStaff: String
+        let topFlavorsLabel, freePortionsLine, topGuestsTitle, staffTitle, expenseByCatLabel: String
+        let kpi: [(label: String, value: String, color: UIColor, delta: Double?)]
+        let chartBuckets: [(label: String, income: Double, expense: Double)]
+        let miniStats: [(String, String)]
+        let cashTable: Table
+        let flavorBars: [(name: String, value: Double, formatted: String)]
+        let guestsTable: Table
+        let staffTable: Table
+        let expenseBars: [(name: String, value: Double, formatted: String)]
+    }
+
+    func pdfSnapshot(venueName: String) -> PDFSnapshot {
+        let genDf = DateFormatter(); genDf.dateFormat = "dd.MM.yyyy"; genDf.locale = appLocale()
+        let incomeDelta: Double? = isMonthMode && prevIncome > 0 ? (totalIncome - prevIncome) / prevIncome * 100 : nil
+        let expenseDelta: Double? = isMonthMode && prevExpense > 0 ? (totalExpense - prevExpense) / prevExpense * 100 : nil
+        let green = UIColor(red: 0.20, green: 0.72, blue: 0.38, alpha: 1)
+        let red = UIColor(red: 0.92, green: 0.26, blue: 0.24, alpha: 1)
+        let brand = UIColor(red: 0.32, green: 0.33, blue: 0.88, alpha: 1)
+
+        let cashTable: PDFSnapshot.Table
+        if isMonthMode {
+            cashTable = .init(
+                cols: [(t("an.csvDate"), 95), (t("an.csvOpening"), 80), (t("an.csvIncome"), 80),
+                       (t("an.csvExpense"), 80), (t("an.csvInkass"), 80), (t("an.csvClosing"), 100)],
+                rows: filledShiftsDisplay.map {
+                    [$0.date, Money.s($0.opening_balance ?? 0), Money.s($0.income ?? 0), Money.s($0.total_expense ?? 0), Money.s($0.inkassation ?? 0), Money.s($0.closing_balance ?? 0)]
+                },
+                totals: [t("an.csvTotal"), "", Money.s(totalIncome), Money.s(totalExpense), Money.s(totalInkass), ""])
+        } else {
+            cashTable = .init(
+                cols: [(t("rp.periodMonth"), 155), (t("an.csvIncome"), 120), (t("an.csvExpense"), 120), (t("an.csvInkass"), 120)],
+                rows: monthlyAgg.map { [$0.label, Money.s($0.income), Money.s($0.expense), Money.s($0.inkass)] },
+                totals: [t("an.csvTotal"), Money.s(totalIncome), Money.s(totalExpense), Money.s(totalInkass)])
+        }
+
+        let staffTitle: String
+        let staffTable: PDFSnapshot.Table
+        if isMonthMode {
+            staffTitle = t("rp.payroll")
+            staffTable = .init(
+                cols: [(t("rp.colEmployee"), 110), (t("rp.colSalary"), 65), (t("rp.colAbsences"), 55),
+                       (t("rp.colDeduct"), 65), (t("pe.cardShort").capitalized, 55), (t("rp.colCash"), 75), (t("an.csvTotal"), 90)],
+                rows: payroll.map { [$0.name, Money.s($0.salary), "\($0.absN)", Money.s($0.deduct), Money.s($0.card), Money.s($0.cash), Money.s($0.total)] },
+                totals: [
+                    t("an.csvTotal"), Money.s(payroll.reduce(0) { $0 + $1.salary }), "",
+                    Money.s(payroll.reduce(0) { $0 + $1.deduct }), Money.s(payroll.reduce(0) { $0 + $1.card }),
+                    Money.s(payroll.reduce(0) { $0 + $1.cash }), Money.s(payroll.reduce(0) { $0 + $1.total }),
+                ])
+        } else {
+            staffTitle = t("rp.colAbsences")
+            staffTable = .init(
+                cols: [(t("rp.colEmployee"), 300), (t("rp.colAbsences"), 100), (t("rp.colDeduct"), 115)],
+                rows: employees.map { emp -> [String] in
+                    let n = absences.filter { $0.employee_id == emp.id }.count
+                    return [emp.name, "\(n)", Money.s(Double(n) * (emp.deduct_per_absence ?? 0))]
+                },
+                totals: nil)
+        }
+
+        return PDFSnapshot(
+            venueName: venueName,
+            reportTitle: t("rp.title"),
+            generatedLine: t("an.pdfGenerated") + " " + genDf.string(from: Date()),
+            periodLabel: periodLabel,
+            byDayLabel: t("an.byDay"), incomeLabel: t("an.income"), expenseLabel: t("an.expense"), noData: t("rp.noData"),
+            secCash: t("rp.secCash"), secSales: t("rp.secSales"), secStaff: t("rp.secStaff"),
+            topFlavorsLabel: t("rp.topFlavors"),
+            freePortionsLine: t("rp.freePortions") + ": \(Int(freePortions.rounded()))",
+            topGuestsTitle: t("rp.topGuests") + " (\(t("rp.last12mo")))",
+            staffTitle: staffTitle,
+            expenseByCatLabel: t("rp.expenseByCat"),
+            kpi: [
+                (t("an.income"), Money.s(totalIncome), green, incomeDelta),
+                (t("an.expense"), Money.s(totalExpense), red, expenseDelta),
+                (t("rp.netProfit"), Money.s(netProfit), netProfit >= 0 ? green : red, nil),
+                (t("an.avgPerDay"), Money.s(avgPerDay.rounded()), brand, nil),
+            ],
+            chartBuckets: isMonthMode
+                ? calendarDays.map { ($0.label, $0.income, $0.expense) }
+                : monthlyAgg.map { ($0.label, $0.income, $0.expense) },
+            miniStats: [
+                (t("mg.inkass"), Money.s(totalInkass)),
+                (t("rp.filledShifts"), "\(filledShifts.count)"),
+                (t("rp.topGuests"), "\(topGuests.count)"),
+            ],
+            cashTable: cashTable,
+            flavorBars: Array(topFlavors.prefix(8)).map { (name: $0.name, value: $0.revenue, formatted: Money.s($0.revenue)) },
+            guestsTable: .init(
+                cols: [(t("rp.colGuest"), 235), (t("rp.colVisits"), 90), (t("rp.colLast"), 190)],
+                rows: topGuests.map { [$0.displayName, "\($0.visitCount)", $0.lastVisitDate ?? "—"] },
+                totals: nil),
+            staffTable: staffTable,
+            expenseBars: Array(catTotals.prefix(8)).map { (name: $0.0, value: $0.1, formatted: Money.s($0.1)) })
+    }
+
     /// Многостраничный отчёт: обложка-хиро с брендовым градиентом + KPI + тренд
     /// по всем дням месяца, затем непрерывный поток разделов (касса, продажи,
     /// гости, персонал, расходы) — разрыв страницы только когда блок реально
     /// не помещается, а не «раздел = страница». Палитра нарочно сдержанная:
     /// один брендовый акцент + зелёный/красный только для дохода/расхода —
     /// без «светофора» из цвета на каждый раздел.
-    func buildPDF(venueName: String) -> Data {
+    ///
+    /// nonisolated + снапшот: генерация страниц тяжёлая, на main она замораживала UI
+    /// (аудит-находка 19) — вызывается из Task.detached, все данные приходят готовыми.
+    nonisolated static func renderPDF(_ s: PDFSnapshot) -> Data {
         let pageW: CGFloat = 595, pageH: CGFloat = 842, margin: CGFloat = 40
         let ink = UIColor(red: 0.11, green: 0.11, blue: 0.13, alpha: 1)
         let green = UIColor(red: 0.20, green: 0.72, blue: 0.38, alpha: 1)
         let red = UIColor(red: 0.92, green: 0.26, blue: 0.24, alpha: 1)
         let brand = UIColor(red: 0.32, green: 0.33, blue: 0.88, alpha: 1)
         let tableW = pageW - margin * 2
-        let genDf = DateFormatter(); genDf.dateFormat = "dd.MM.yyyy"; genDf.locale = appLocale()
 
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageW, height: pageH))
         // UIGraphicsPDFRenderer не привязан к окну — без явного оверрайда
@@ -458,128 +563,68 @@ final class ReportModel {
                 cg.restoreGState()
             }
             text("mise", margin, 22, size: 23, weight: .heavy, color: .white)
-            text(t("rp.title"), margin, 52, size: 19, weight: .bold, color: .white)
-            text(venueName, margin, 78, size: 12, weight: .medium, color: UIColor.white.withAlphaComponent(0.85))
-            text(t("an.pdfGenerated") + " " + genDf.string(from: Date()), pageW - margin, 22, size: 9.5, color: UIColor.white.withAlphaComponent(0.75), width: 220, align: .right)
-            text(periodLabel, pageW - margin, 76, size: 13, weight: .semibold, color: .white, width: 220, align: .right)
+            text(s.reportTitle, margin, 52, size: 19, weight: .bold, color: .white)
+            text(s.venueName, margin, 78, size: 12, weight: .medium, color: UIColor.white.withAlphaComponent(0.85))
+            text(s.generatedLine, pageW - margin, 22, size: 9.5, color: UIColor.white.withAlphaComponent(0.75), width: 220, align: .right)
+            text(s.periodLabel, pageW - margin, 76, size: 13, weight: .semibold, color: .white, width: 220, align: .right)
             y = heroH + 24
 
-            let incomeDelta: Double? = isMonthMode && prevIncome > 0 ? (totalIncome - prevIncome) / prevIncome * 100 : nil
-            let expenseDelta: Double? = isMonthMode && prevExpense > 0 ? (totalExpense - prevExpense) / prevExpense * 100 : nil
-            kpiCards([
-                (t("an.income"), Money.s(totalIncome), green, incomeDelta),
-                (t("an.expense"), Money.s(totalExpense), red, expenseDelta),
-                (t("rp.netProfit"), Money.s(netProfit), netProfit >= 0 ? green : red, nil),
-                (t("an.avgPerDay"), Money.s(avgPerDay.rounded()), brand, nil),
-            ])
+            kpiCards(s.kpi)
 
-            text(t("an.byDay"), margin, y, size: 11, weight: .semibold, color: ink)
+            text(s.byDayLabel, margin, y, size: 11, weight: .semibold, color: ink)
             let legendX = margin + tableW - 150
             green.setFill(); UIRectFill(CGRect(x: legendX, y: y + 2, width: 7, height: 7))
-            text(t("an.income"), legendX + 11, y, size: 8.5, color: .secondaryLabel)
+            text(s.incomeLabel, legendX + 11, y, size: 8.5, color: .secondaryLabel)
             red.setFill(); UIRectFill(CGRect(x: legendX + 75, y: y + 2, width: 7, height: 7))
-            text(t("an.expense"), legendX + 86, y, size: 8.5, color: .secondaryLabel)
+            text(s.expenseLabel, legendX + 86, y, size: 8.5, color: .secondaryLabel)
             y += 18
             // Полная календарная ось (все дни месяца, не только заполненные смены) —
             // иначе 2-3 смены в месяце дают пару баров на пустой странице.
-            let chartBuckets: [(label: String, income: Double, expense: Double)] = isMonthMode
-                ? calendarDays.map { ($0.label, $0.income, $0.expense) }
-                : monthlyAgg.map { ($0.label, $0.income, $0.expense) }
-            drawFlowChart(chartBuckets, h: 160)
+            drawFlowChart(s.chartBuckets, h: 160)
 
             // Компактная строка доп. показателей — занимает нижнюю часть обложки
             // содержательно, а не пустым полем.
-            let miniStats: [(String, String)] = [
-                (t("mg.inkass"), Money.s(totalInkass)),
-                (t("rp.filledShifts"), "\(filledShifts.count)"),
-                (t("rp.topGuests"), "\(topGuests.count)"),
-            ]
-            let miniW = tableW / CGFloat(miniStats.count)
+            let miniW = tableW / CGFloat(s.miniStats.count)
             hline(y)
             y += 12
-            for (i, s) in miniStats.enumerated() {
+            for (i, m) in s.miniStats.enumerated() {
                 let sx = margin + CGFloat(i) * miniW
-                text(s.0.uppercased(), sx, y, size: 7.5, weight: .semibold, color: .secondaryLabel, width: miniW - 10)
-                text(s.1, sx, y + 12, size: 13, weight: .bold, color: ink, width: miniW - 10, mono: true)
+                text(m.0.uppercased(), sx, y, size: 7.5, weight: .semibold, color: .secondaryLabel, width: miniW - 10)
+                text(m.1, sx, y + 12, size: 13, weight: .bold, color: ink, width: miniW - 10, mono: true)
             }
             y += 40
 
             // ── Разделы одним потоком: разрыв страницы только по нехватке места ──
             ctx.beginPage(); y = margin
 
-            sectionHeader(t("rp.secCash"))
-            if isMonthMode {
-                let cols: [(String, CGFloat)] = [
-                    (t("an.csvDate"), 95), (t("an.csvOpening"), 80), (t("an.csvIncome"), 80),
-                    (t("an.csvExpense"), 80), (t("an.csvInkass"), 80), (t("an.csvClosing"), 100),
-                ]
-                let rows = filledShiftsDisplay.map {
-                    [$0.date, Money.s($0.opening_balance ?? 0), Money.s($0.income ?? 0), Money.s($0.total_expense ?? 0), Money.s($0.inkassation ?? 0), Money.s($0.closing_balance ?? 0)]
-                }
-                if rows.isEmpty { text(t("rp.noData"), margin, y + 6, size: 12, color: .secondaryLabel); y += 30 }
-                else {
-                    let totals = [t("an.csvTotal"), "", Money.s(totalIncome), Money.s(totalExpense), Money.s(totalInkass), ""]
-                    drawTable(cols: cols, rows: rows, totals: totals, accent: brand)
-                }
+            sectionHeader(s.secCash)
+            if s.cashTable.rows.isEmpty { text(s.noData, margin, y + 6, size: 12, color: .secondaryLabel); y += 30 }
+            else { drawTable(cols: s.cashTable.cols, rows: s.cashTable.rows, totals: s.cashTable.totals, accent: brand) }
+
+            sectionHeader(s.secSales)
+            text(s.topFlavorsLabel, margin, y, size: 10.5, weight: .semibold, color: .secondaryLabel)
+            text(s.freePortionsLine, margin + tableW - 170, y, size: 9, color: .secondaryLabel, width: 170, align: .right)
+            y += 16
+            if s.flavorBars.isEmpty { text(s.noData, margin, y, size: 11, color: .secondaryLabel); y += 24 }
+            else { drawHBars(s.flavorBars, color: brand) }
+
+            text(s.topGuestsTitle, margin, y, size: 10.5, weight: .semibold, color: .secondaryLabel)
+            y += 16
+            if s.guestsTable.rows.isEmpty {
+                text(s.noData, margin, y, size: 11, color: .secondaryLabel); y += 24
             } else {
-                let cols: [(String, CGFloat)] = [(t("rp.periodMonth"), 155), (t("an.csvIncome"), 120), (t("an.csvExpense"), 120), (t("an.csvInkass"), 120)]
-                let rows = monthlyAgg.map { [$0.label, Money.s($0.income), Money.s($0.expense), Money.s($0.inkass)] }
-                if rows.isEmpty { text(t("rp.noData"), margin, y + 6, size: 12, color: .secondaryLabel); y += 30 }
-                else {
-                    let totals = [t("an.csvTotal"), Money.s(totalIncome), Money.s(totalExpense), Money.s(totalInkass)]
-                    drawTable(cols: cols, rows: rows, totals: totals, accent: brand)
-                }
+                drawTable(cols: s.guestsTable.cols, rows: s.guestsTable.rows, accent: brand)
             }
 
-            sectionHeader(t("rp.secSales"))
-            text(t("rp.topFlavors"), margin, y, size: 10.5, weight: .semibold, color: .secondaryLabel)
-            text(t("rp.freePortions") + ": \(Int(freePortions.rounded()))", margin + tableW - 170, y, size: 9, color: .secondaryLabel, width: 170, align: .right)
-            y += 16
-            if topFlavors.isEmpty { text(t("rp.noData"), margin, y, size: 11, color: .secondaryLabel); y += 24 }
-            else { drawHBars(Array(topFlavors.prefix(8)).map { (name: $0.name, value: $0.revenue, formatted: Money.s($0.revenue)) }, color: brand) }
+            sectionHeader(s.secStaff)
+            text(s.staffTitle, margin, y, size: 10.5, weight: .semibold, color: .secondaryLabel); y += 16
+            if s.staffTable.rows.isEmpty { text(s.noData, margin, y, size: 11, color: .secondaryLabel); y += 24 }
+            else { drawTable(cols: s.staffTable.cols, rows: s.staffTable.rows, totals: s.staffTable.totals, accent: brand) }
 
-            text(t("rp.topGuests") + " (\(t("rp.last12mo")))", margin, y, size: 10.5, weight: .semibold, color: .secondaryLabel)
+            text(s.expenseByCatLabel, margin, y, size: 10.5, weight: .semibold, color: .secondaryLabel)
             y += 16
-            if topGuests.isEmpty {
-                text(t("rp.noData"), margin, y, size: 11, color: .secondaryLabel); y += 24
-            } else {
-                let cols: [(String, CGFloat)] = [(t("rp.colGuest"), 235), (t("rp.colVisits"), 90), (t("rp.colLast"), 190)]
-                let rows = topGuests.map { [$0.displayName, "\($0.visitCount)", $0.lastVisitDate ?? "—"] }
-                drawTable(cols: cols, rows: rows, accent: brand)
-            }
-
-            sectionHeader(t("rp.secStaff"))
-            if isMonthMode {
-                text(t("rp.payroll"), margin, y, size: 10.5, weight: .semibold, color: .secondaryLabel); y += 16
-                if payroll.isEmpty { text(t("rp.noData"), margin, y, size: 11, color: .secondaryLabel); y += 24 }
-                else {
-                    let cols: [(String, CGFloat)] = [
-                        (t("rp.colEmployee"), 110), (t("rp.colSalary"), 65), (t("rp.colAbsences"), 55),
-                        (t("rp.colDeduct"), 65), (t("pe.cardShort").capitalized, 55), (t("rp.colCash"), 75), (t("an.csvTotal"), 90),
-                    ]
-                    let rows = payroll.map { [$0.name, Money.s($0.salary), "\($0.absN)", Money.s($0.deduct), Money.s($0.card), Money.s($0.cash), Money.s($0.total)] }
-                    let totals = [
-                        t("an.csvTotal"), Money.s(payroll.reduce(0) { $0 + $1.salary }), "",
-                        Money.s(payroll.reduce(0) { $0 + $1.deduct }), Money.s(payroll.reduce(0) { $0 + $1.card }),
-                        Money.s(payroll.reduce(0) { $0 + $1.cash }), Money.s(payroll.reduce(0) { $0 + $1.total }),
-                    ]
-                    drawTable(cols: cols, rows: rows, totals: totals, accent: brand)
-                }
-            } else {
-                text(t("rp.colAbsences"), margin, y, size: 10.5, weight: .semibold, color: .secondaryLabel); y += 16
-                let cols: [(String, CGFloat)] = [(t("rp.colEmployee"), 300), (t("rp.colAbsences"), 100), (t("rp.colDeduct"), 115)]
-                let rows = employees.map { emp -> [String] in
-                    let n = absences.filter { $0.employee_id == emp.id }.count
-                    return [emp.name, "\(n)", Money.s(Double(n) * (emp.deduct_per_absence ?? 0))]
-                }
-                if rows.isEmpty { text(t("rp.noData"), margin, y, size: 11, color: .secondaryLabel); y += 24 }
-                else { drawTable(cols: cols, rows: rows, accent: brand) }
-            }
-
-            text(t("rp.expenseByCat"), margin, y, size: 10.5, weight: .semibold, color: .secondaryLabel)
-            y += 16
-            if catTotals.isEmpty { text(t("rp.noData"), margin, y, size: 11, color: .secondaryLabel) }
-            else { drawHBars(Array(catTotals.prefix(8)).map { (name: $0.0, value: $0.1, formatted: Money.s($0.1)) }, color: red) }
+            if s.expenseBars.isEmpty { text(s.noData, margin, y, size: 11, color: .secondaryLabel) }
+            else { drawHBars(s.expenseBars, color: red) }
         }
         }
         return pdf
@@ -621,7 +666,9 @@ struct ReportExportView: View {
             m.periodMode = periodMode
             m.currentDate = currentDate
             await m.load()
-            let data = m.buildPDF(venueName: app.restaurant?.name ?? "")
+            // Рендер вне main: страницы рисуются долго, на main это замораживало UI.
+            let snap = m.pdfSnapshot(venueName: app.restaurant?.name ?? "")
+            let data = await Task.detached(priority: .userInitiated) { ReportModel.renderPDF(snap) }.value
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("mise-report-\(Int(Date().timeIntervalSince1970)).pdf")
             if (try? data.write(to: url)) != nil {
                 // Как в ExportMenuButton: даём Task осесть, иначе share-лист не откроется.

@@ -227,7 +227,7 @@ function AnalyticsSettingsCard() {
 function GeoSettingsCard() {
   const { t: tr } = useI18n()
   const [row, setRow] = useState<any>(null)
-  const [f, setF] = useState({ attendance_enabled: false, latitude: '', longitude: '', geo_radius_m: '150', reminder_mode: 'hours_before', reminder_hours: '12', reminder_time: '18:00' })
+  const [f, setF] = useState({ attendance_enabled: false, latitude: '', longitude: '', geo_radius_m: '150', reminder_mode: 'hours_before', reminder_hours: '12', reminder_time: '18:00', timezone: 'UTC' })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [locating, setLocating] = useState(false)
@@ -245,6 +245,8 @@ function GeoSettingsCard() {
           reminder_mode: r.reminder_mode || 'hours_before',
           reminder_hours: String(r.reminder_hours ?? 12),
           reminder_time: (r.reminder_time || '18:00').slice(0, 5),
+          // До миграции restaurant-timezone-2026-07.sql колонки нет — дефолт с устройства владельца.
+          timezone: r.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
         })
       }
     })
@@ -271,6 +273,7 @@ function GeoSettingsCard() {
       reminder_mode: f.reminder_mode,
       reminder_hours: parseInt(f.reminder_hours) || 12,
       reminder_time: f.reminder_time || '18:00',
+      timezone: f.timezone || 'UTC',
     }
     const res = row?.id
       ? await db.from('restaurant_settings').update(payload).eq('id', row.id)
@@ -307,6 +310,9 @@ function GeoSettingsCard() {
       {f.reminder_mode === 'hours_before'
         ? <Field label={tr('dash.hoursBefore')} value={f.reminder_hours} onChange={(v: string) => setF({ ...f, reminder_hours: v })} type="number" placeholder="12" />
         : <Field label={tr('dash.timeEve')} value={f.reminder_time} onChange={(v: string) => setF({ ...f, reminder_time: v })} type="time" />}
+      {/* Таймзона точки: cron считает «сегодня/завтра/HH:MM» в ней (напоминания, авто-прогулы, аудиты). */}
+      <Field label={tr('dash.timezone')} value={f.timezone} onChange={(v: string) => setF({ ...f, timezone: v })} select
+        options={(typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : ['UTC']).map((z: string) => ({ value: z, label: z }))} />
 
       <Btn onClick={save} disabled={saving}>{saving ? tr('dash.saving') : saved ? tr('dash.savedCheck') : tr('dash.save')}</Btn>
     </Card>

@@ -11,11 +11,43 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendTrialEndingEmail } from '@/lib/email'
-import { sendPush } from '@/lib/apns'
 import { dispatchNotification } from '@/lib/notify'
 
 export const dynamic = 'force-dynamic'
 import { fmtDate } from '@/lib/format'
+
+// Аудит-находка 7: «сегодня/сейчас» считаем в таймзоне ресторана
+// (restaurant_settings.timezone, IANA, дефолт UTC). Колонка может отсутствовать до
+// миграции restaurant-timezone-2026-07.sql — loadTimezones терпит это (нет ключа → UTC).
+function localParts(now: Date, tz?: string | null): { dateKey: string; hm: string; dow: number; dom: number } {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23', weekday: 'short',
+    }).formatToParts(now)
+    const g = (t: string) => parts.find(p => p.type === t)?.value || ''
+    const dowMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+    return { dateKey: `${g('year')}-${g('month')}-${g('day')}`, hm: `${g('hour')}:${g('minute')}`, dow: dowMap[g('weekday')] ?? now.getUTCDay(), dom: parseInt(g('day'), 10) }
+  } catch {
+    // Кривая tz в БД не должна ронять cron — падаем в UTC.
+    return { dateKey: fmtDate(now), hm: `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`, dow: now.getUTCDay(), dom: now.getUTCDate() }
+  }
+}
+
+function nextDayKey(dateKey: string): string {
+  const d = new Date(`${dateKey}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
+async function loadTimezones(admin: any): Promise<Record<string, string>> {
+  try {
+    const { data } = await admin.from('restaurant_settings').select('*')
+    const map: Record<string, string> = {}
+    ;(data || []).forEach((s: any) => { if (s.timezone) map[s.restaurant_id] = s.timezone })
+    return map
+  } catch { return {} }
+}
 
 // Email owners whose trial ends within 3 days, once per day per restaurant.
 // Fully guarded — any failure here must not affect shift reminders. No-op until
@@ -46,12 +78,15 @@ async function sendTrialReminders(admin: any, now: Date): Promise<number> {
       const email = u?.user?.email
       if (!email) continue
       const res = await sendTrialEndingEmail(email, daysLeft)
-      // Record the attempt even when skipped (no key) to avoid re-querying every run.
-      await admin.from('notifications').insert({
-        restaurant_id: r.id, type: 'trial_ending',
-        title: 'Окончание пробного периода', body: `Триал заканчивается через ${daysLeft} дн.`,
-        data: { days_left: daysLeft, email_ok: !!res.ok }, sent_at: now.toISOString(),
-      })
+      // Журнал+пуш владельцу на его языке; запись даже при пропущенном email (нет ключа) —
+      // чтобы не перезапрашивать каждый прогон (дедуп выше читает эти строки).
+      await dispatchNotification(admin, r.id, {
+        type: 'trial_ending',
+        title: 'Trial ending', body: `Trial ends in ${daysLeft} d.`,
+        titleKey: 'notify.trialEndingTitle', bodyKey: 'notify.trialEndingBody', bodyParams: { n: daysLeft },
+        data: { days_left: daysLeft, email_ok: !!res.ok },
+        audience: { owner: true },
+      }).catch(() => {})
       if (res.ok) sent++
     }
     return sent
@@ -80,65 +115,49 @@ async function expireTrials(admin: any, now: Date): Promise<number> {
 // и нет гео-чек-ина, ставим черновик shift_absences (source='auto'). Менеджер увидит «X»
 // при закрытии смены и подтвердит/снимет. Server-side, без фоновой геолокации → батарея не тратится.
 // Полностью обёрнуто; no-op до применения миграции attendance-automation.sql.
-async function autoMarkNoShows(admin: any, now: Date): Promise<number> {
+async function autoMarkNoShows(admin: any, now: Date, tzMap: Record<string, string>): Promise<number> {
   try {
     const today = fmtDate(now)
-    const { data: settings } = await admin.from('restaurant_settings').select('restaurant_id, attendance_enabled, no_show_grace_hours')
+    const tomorrow = fmtDate(new Date(now.getTime() + 86400000))
+    const { data: settings } = await admin.from('restaurant_settings').select('*')
     const cfg: Record<string, any> = {}; (settings || []).forEach((s: any) => { cfg[s.restaurant_id] = s })
 
+    // Местное «сегодня» точки восточнее UTC может быть уже utc-завтра → берём оба дня и фильтруем по tz.
     const { data: scheds } = await admin.from('staff_schedules')
       .select('restaurant_id, staff_id, date, shift_start')
-      .eq('published', true).eq('date', today).not('shift_start', 'is', null)
+      .eq('published', true).in('date', [today, tomorrow]).not('shift_start', 'is', null)
     if (!scheds?.length) return 0
 
     const staffIds = [...new Set(scheds.map((s: any) => s.staff_id))]
     const { data: staffRows } = await admin.from('staff').select('id, employee_id').in('id', staffIds)
     const empOf: Record<string, string> = {}; (staffRows || []).forEach((s: any) => { if (s.employee_id) empOf[s.id] = s.employee_id })
 
-    const { data: att } = await admin.from('attendance_records').select('staff_id').eq('date', today)
-    const checkedIn = new Set((att || []).map((a: any) => a.staff_id))
-    const { data: existAbs } = await admin.from('shift_absences').select('employee_id').eq('date', today)
-    const hasAbs = new Set((existAbs || []).map((a: any) => a.employee_id))
+    const { data: att } = await admin.from('attendance_records').select('staff_id, date').in('date', [today, tomorrow])
+    const checkedIn = new Set((att || []).map((a: any) => `${a.staff_id}|${a.date}`))
+    const { data: existAbs } = await admin.from('shift_absences').select('employee_id, date').in('date', [today, tomorrow])
+    const hasAbs = new Set((existAbs || []).map((a: any) => `${a.employee_id}|${a.date}`))
 
     const inserts: any[] = []
     for (const sc of scheds) {
       const c = cfg[sc.restaurant_id]
       if (!c?.attendance_enabled) continue            // геоконтроль выключен у этой точки
-      if (checkedIn.has(sc.staff_id)) continue          // отметился — не прогул
+      const lp = localParts(now, tzMap[sc.restaurant_id])
+      if (sc.date !== lp.dateKey) continue              // смена не «сегодня» по местному времени
+      if (checkedIn.has(`${sc.staff_id}|${sc.date}`)) continue // отметился — не прогул
       const empId = empOf[sc.staff_id]
-      if (!empId || hasAbs.has(empId)) continue         // нет связи staff↔employee или прогул уже есть
+      if (!empId || hasAbs.has(`${empId}|${sc.date}`)) continue // нет связи staff↔employee или прогул уже есть
       const grace = Number(c.no_show_grace_hours ?? 3)
       const [h, m] = String(sc.shift_start).split(':').map(Number)
-      const start = new Date(now); start.setHours(h || 0, m || 0, 0, 0)
-      if (now.getTime() < start.getTime() + grace * 3600000) continue // grace ещё не истёк
-      inserts.push({ restaurant_id: sc.restaurant_id, employee_id: empId, date: today, source: 'auto', auto_reason: 'no_show' })
-      hasAbs.add(empId)
+      const [nh, nm] = lp.hm.split(':').map(Number)
+      if (nh * 60 + nm < (h || 0) * 60 + (m || 0) + grace * 60) continue // grace ещё не истёк (местное время)
+      inserts.push({ restaurant_id: sc.restaurant_id, employee_id: empId, date: sc.date, source: 'auto', auto_reason: 'no_show' })
+      hasAbs.add(`${empId}|${sc.date}`)
     }
     if (inserts.length) await admin.from('shift_absences').insert(inserts)
     return inserts.length
   } catch {
     return 0
   }
-}
-
-// Push для только что созданных напоминаний о сменах (с учётом pref shift_reminder).
-async function pushShiftReminders(admin: any, inserts: any[]): Promise<number> {
-  try {
-    const staffIds = [...new Set(inserts.map(i => i.staff_id).filter(Boolean))]
-    if (!staffIds.length) return 0
-    const { data: prefs } = await admin.from('notification_prefs').select('staff_id, prefs').in('staff_id', staffIds)
-    const prefMap: Record<string, any> = {}; (prefs || []).forEach((p: any) => { prefMap[p.staff_id] = p.prefs || {} })
-    const { data: subs } = await admin.from('push_subscriptions').select('staff_id, device_token').in('staff_id', staffIds).not('device_token', 'is', null)
-    const subMap: Record<string, string[]> = {}; (subs || []).forEach((s: any) => { (subMap[s.staff_id] ||= []).push(s.device_token) })
-    let sent = 0
-    for (const i of inserts) {
-      if (!i.staff_id || prefMap[i.staff_id]?.shift_reminder === false) continue
-      const tokens = subMap[i.staff_id]; if (!tokens?.length) continue
-      const r = await sendPush(tokens, { title: i.title, body: i.body, data: i.data })
-      sent += r.sent
-    }
-    return sent
-  } catch { return 0 }
 }
 
 // Дневной дайджест закупа — только тем, у кого включён режим purchase_digest='daily'.
@@ -166,18 +185,20 @@ async function sendPurchaseDigest(admin: any, now: Date): Promise<number> {
       })
       if (!recipients.length) continue
 
-      const title = 'Закуп за день'
-      const body = `${count} позиц. к закупке`
-      const nowIso = now.toISOString()
-      await admin.from('notifications').insert(recipients.map(r => ({ restaurant_id: rid, staff_id: r.staff_id, to_owner: r.to_owner, type: 'purchase', title, body, sent_at: nowIso })))
-
-      const { data: subs } = await admin.from('push_subscriptions').select('staff_id, to_owner, device_token').eq('restaurant_id', rid).not('device_token', 'is', null)
-      for (const r of recipients) {
-        const tokens = (subs || []).filter((s: any) => r.to_owner ? s.to_owner : s.staff_id === r.staff_id).map((s: any) => s.device_token)
-        if (!tokens.length) continue
-        const res = await sendPush(tokens, { title, body })
-        sent += res.sent
-      }
+      // Локализованный дайджест на языке устройства получателя; data.digest — чтобы
+      // dispatchNotification не глушил push у purchase_digest='daily' (это и есть их дайджест).
+      const res = await dispatchNotification(admin, rid, {
+        type: 'purchase',
+        title: 'Purchase', body: `${count} items`,
+        titleKey: 'notify.purchaseTitle', titleParams: { category: 'general' },
+        bodyKey: 'notify.purchasePositionsBody', bodyParams: { who: '', n: count },
+        data: { digest: true },
+        audience: {
+          owner: recipients.some(r => r.to_owner),
+          staff_ids: recipients.filter(r => r.staff_id).map(r => r.staff_id!),
+        },
+      }).catch(() => ({ inserted: 0, push: 0 }))
+      sent += res.push
     }
     return sent
   } catch { return 0 }
@@ -188,12 +209,8 @@ async function sendPurchaseDigest(admin: any, now: Date): Promise<number> {
 // daily срабатывает каждый день, weekly — если сегодняшний день недели в recurrence_weekdays,
 // monthly — если сегодняшнее число месяца === recurrence_day_of_month. Дедуп —
 // recurrence_last_run != сегодня (обновляем сразу после создания прогона).
-async function runScheduledAudits(admin: any, now: Date): Promise<number> {
+async function runScheduledAudits(admin: any, now: Date, tzMap: Record<string, string>): Promise<number> {
   try {
-    const today = fmtDate(now)
-    const dow = now.getUTCDay()          // 0=вс..6=сб
-    const dom = now.getUTCDate()         // 1..31
-
     const { data: templates } = await admin.from('shift_checklists')
       .select('id, restaurant_id, title, items, role, target_scope, assigned_staff_id, recurrence, recurrence_weekdays, recurrence_day_of_month, recurrence_last_run')
       .eq('kind', 'audit').neq('recurrence', 'none')
@@ -201,11 +218,14 @@ async function runScheduledAudits(admin: any, now: Date): Promise<number> {
 
     let created = 0
     for (const tpl of templates) {
+      // «Сегодня»/день недели/число месяца — в таймзоне точки.
+      const lp = localParts(now, tzMap[tpl.restaurant_id])
+      const today = lp.dateKey
       if (tpl.recurrence_last_run === today) continue // уже заведён сегодня
       const matches =
         tpl.recurrence === 'daily' ||
-        (tpl.recurrence === 'weekly' && Array.isArray(tpl.recurrence_weekdays) && tpl.recurrence_weekdays.includes(dow)) ||
-        (tpl.recurrence === 'monthly' && tpl.recurrence_day_of_month === dom)
+        (tpl.recurrence === 'weekly' && Array.isArray(tpl.recurrence_weekdays) && tpl.recurrence_weekdays.includes(lp.dow)) ||
+        (tpl.recurrence === 'monthly' && tpl.recurrence_day_of_month === lp.dom)
       if (!matches) continue
 
       // Доп. страховка от задвоения: recurrence_last_run обновляется отдельным запросом от
@@ -251,10 +271,11 @@ async function runScheduledAudits(admin: any, now: Date): Promise<number> {
 // Напоминание менеджеру: чек-лист закрытия смены не пройден, а смена за сегодня уже открыта
 // (значит рабочий день идёт/подходит к концу). Один раз в день на точку, дедуп через
 // notifications.type='audit_close_reminder'.
-async function remindOpenCloseChecklist(admin: any, now: Date): Promise<number> {
+async function remindOpenCloseChecklist(admin: any, now: Date, tzMap: Record<string, string>): Promise<number> {
   try {
     const today = fmtDate(now)
-    const { data: shifts } = await admin.from('shifts').select('id, restaurant_id').eq('date', today)
+    const tomorrow = fmtDate(new Date(now.getTime() + 86400000))
+    const { data: shifts } = await admin.from('shifts').select('id, restaurant_id, date').in('date', [today, tomorrow])
     if (!shifts?.length) return 0
 
     const { data: sentRows } = await admin.from('notifications')
@@ -265,15 +286,16 @@ async function remindOpenCloseChecklist(admin: any, now: Date): Promise<number> 
     const closeIdsByRest: Record<string, string[]> = {}
     ;(closeLists || []).forEach((l: any) => { (closeIdsByRest[l.restaurant_id] ||= []).push(l.id) })
 
-    const { data: completions } = await admin.from('shift_checklist_completions').select('checklist_id, status').eq('date', today)
-    const doneIds = new Set((completions || []).filter((c: any) => c.status === 'done').map((c: any) => c.checklist_id))
+    const { data: completions } = await admin.from('shift_checklist_completions').select('checklist_id, status, date').in('date', [today, tomorrow])
+    const doneIds = new Set((completions || []).filter((c: any) => c.status === 'done').map((c: any) => `${c.checklist_id}|${c.date}`))
 
     let sent = 0
     for (const sh of shifts) {
       if (alreadySent.has(sh.restaurant_id)) continue
+      if (sh.date !== localParts(now, tzMap[sh.restaurant_id]).dateKey) continue // смена не «сегодня» по местному времени
       const closeIds = closeIdsByRest[sh.restaurant_id]
       if (!closeIds?.length) continue // нет чек-листа закрытия — нечего напоминать
-      const allDone = closeIds.every(id => doneIds.has(id))
+      const allDone = closeIds.every(id => doneIds.has(`${id}|${sh.date}`))
       if (allDone) continue
 
       await dispatchNotification(admin, sh.restaurant_id, {
@@ -299,17 +321,20 @@ export async function GET(req: NextRequest) {
   const now = new Date()
   const today = fmtDate(now)
   const tomorrow = fmtDate(new Date(now.getTime() + 86400000))
+  const dayAfter = fmtDate(new Date(now.getTime() + 2 * 86400000))
+  const tzMap = await loadTimezones(admin)
 
+  // Местное «завтра» точки может быть utc-послезавтра (tz восточнее UTC) → берём 3 дня, фильтруем по tz.
   const { data: schedules } = await admin
     .from('staff_schedules').select('id, restaurant_id, staff_id, date, shift_start, shift_end')
-    .eq('published', true).in('date', [today, tomorrow])
+    .eq('published', true).in('date', [today, tomorrow, dayAfter])
   if (!schedules?.length) {
     const trialEmails = await sendTrialReminders(admin, now)
     const trialsExpired = await expireTrials(admin, now)
-    const noShows = await autoMarkNoShows(admin, now)
+    const noShows = await autoMarkNoShows(admin, now, tzMap)
     const purchaseDigest = await sendPurchaseDigest(admin, now)
-    const scheduledAudits = await runScheduledAudits(admin, now)
-    const closeReminders = await remindOpenCloseChecklist(admin, now)
+    const scheduledAudits = await runScheduledAudits(admin, now, tzMap)
+    const closeReminders = await remindOpenCloseChecklist(admin, now, tzMap)
     return NextResponse.json({ ok: true, sent: 0, trialEmails, trialsExpired, noShows, purchaseDigest, scheduledAudits, closeReminders })
   }
 
@@ -319,38 +344,34 @@ export async function GET(req: NextRequest) {
     .select('data').eq('type', 'shift_reminder').gte('created_at', since)
   const alreadySent = new Set((sentRows || []).map((n: any) => n.data?.schedule_id).filter(Boolean))
 
-  const inserts: any[] = []
-
+  // Журнал + push на языке устройства получателя (dispatchNotification уважает
+  // pref shift_reminder и пишет notifications.data.schedule_id для дедупа выше).
+  let reminded = 0
+  let pushed = 0
   for (const sc of schedules) {
     if (alreadySent.has(sc.id)) continue
-    // Один запуск в день → напоминаем накануне обо всех завтрашних сменах.
-    if (sc.date !== tomorrow) continue
+    // Один запуск в день → напоминаем накануне обо всех завтрашних (по tz точки) сменах.
+    if (sc.date !== nextDayKey(localParts(now, tzMap[sc.restaurant_id]).dateKey)) continue
 
-    const when = sc.date === today ? 'сегодня' : 'завтра'
-    const time = sc.shift_start ? ` в ${String(sc.shift_start).slice(0, 5)}` : ''
-    inserts.push({
-      restaurant_id: sc.restaurant_id,
-      staff_id: sc.staff_id,
+    const time = sc.shift_start ? String(sc.shift_start).slice(0, 5) : ''
+    const res = await dispatchNotification(admin, sc.restaurant_id, {
       type: 'shift_reminder',
-      title: 'Напоминание о смене',
-      body: `Ваша смена ${when}${time}`,
+      title: 'Shift reminder', body: time ? `Your shift is tomorrow at ${time}` : 'Your shift is tomorrow',
+      titleKey: 'notify.shiftReminderTitle',
+      bodyKey: time ? 'notify.shiftReminderBodyTime' : 'notify.shiftReminderBody',
+      bodyParams: time ? { time } : undefined,
       data: { schedule_id: sc.id },
-      sent_at: now.toISOString(),
-    })
-  }
-
-  let pushed = 0
-  if (inserts.length) {
-    const { error } = await admin.from('notifications').insert(inserts)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    pushed = await pushShiftReminders(admin, inserts)
+      audience: { staff_ids: [sc.staff_id] },
+    }).catch(() => ({ inserted: 0, push: 0 }))
+    reminded += res.inserted
+    pushed += res.push
   }
 
   const trialEmails = await sendTrialReminders(admin, now)
   const trialsExpired = await expireTrials(admin, now)
-  const noShows = await autoMarkNoShows(admin, now)
+  const noShows = await autoMarkNoShows(admin, now, tzMap)
   const purchaseDigest = await sendPurchaseDigest(admin, now)
-  const scheduledAudits = await runScheduledAudits(admin, now)
-  const closeReminders = await remindOpenCloseChecklist(admin, now)
-  return NextResponse.json({ ok: true, sent: inserts.length, pushed, trialEmails, trialsExpired, noShows, purchaseDigest, scheduledAudits, closeReminders })
+  const scheduledAudits = await runScheduledAudits(admin, now, tzMap)
+  const closeReminders = await remindOpenCloseChecklist(admin, now, tzMap)
+  return NextResponse.json({ ok: true, sent: reminded, pushed, trialEmails, trialsExpired, noShows, purchaseDigest, scheduledAudits, closeReminders })
 }

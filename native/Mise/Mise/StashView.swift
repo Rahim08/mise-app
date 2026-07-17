@@ -321,6 +321,11 @@ final class StashModel {
     }
 
     func saveMovement(_ rows: [MovRow], reason: String) async -> Bool {
+        // Гвард от двойного тапа Save: .disabled(m.saving) обновляется на следующий кадр,
+        // быстрый двойной тап успевает создать два Task ещё до перерисовки — тогда без
+        // этой проверки уходят два одинаковых батча движений (склад не дублируется
+        // только по счастливой случайности non-atomic update, но лента — дублируется).
+        guard !saving else { return false }
         // Тримим ввод, чтобы лишние пробелы не плодили дубли на складе.
         var filled = rows
             .map { MovRow(brand: $0.brand.trimmingCharacters(in: .whitespaces), flavor: $0.flavor.trimmingCharacters(in: .whitespaces), grams: $0.grams) }
@@ -422,6 +427,7 @@ final class StashModel {
     /// Списание «с заведения»: только вес, без бренда/вкуса. Уменьшает общий объём зала (venueBase),
     /// склад не трогает. Маркер — пустые brand/flavor у движения writeoff.
     func saveVenueWriteoff(grams gramsStr: String, reason: String) async -> Bool {
+        guard !saving else { return false }
         let qty = Double(gramsStr.filter { $0.isNumber || $0 == "." }) ?? 0
         if qty <= 0 { flash(t("st.fillRow")); return false }
         if reason.trimmingCharacters(in: .whitespaces).isEmpty { flash(t("st.writeoffReason")); return false }
@@ -460,7 +466,7 @@ final class StashModel {
 
     /// Удаление перемещения (батча) с откатом остатка.
     func deleteMovementBatch(_ items: [Movement]) async {
-        guard !items.isEmpty else { return }
+        guard !items.isEmpty, !saving else { return }
         saving = true; defer { saving = false }
         await revertAndDelete(items)
         await loadWarehouse()
@@ -469,13 +475,17 @@ final class StashModel {
     }
 
     /// Редактирование: откатываем старый батч и пишем новый (для складских позиций).
+    /// saveMovement сам гвардит и держит `saving` — здесь предварительная проверка лишь
+    /// отсекает двойной тап до revertAndDelete (сам saveMovement выставит saving заново).
     func replaceMovementBatch(_ old: [Movement], rows: [MovRow], reason: String) async -> Bool {
+        guard !saving else { return false }
         await revertAndDelete(old)
         return await saveMovement(rows, reason: reason)
     }
 
     /// Редактирование списания «с заведения»: откат старого + новый вес.
     func replaceVenueWriteoff(_ old: [Movement], grams gramsStr: String, reason: String) async -> Bool {
+        guard !saving else { return false }
         await revertAndDelete(old)
         await loadShift()   // venueBase должен учесть удаление старого списания до проверки лимита
         return await saveVenueWriteoff(grams: gramsStr, reason: reason)

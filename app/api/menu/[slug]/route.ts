@@ -29,11 +29,25 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ slu
   const restaurantId = settings.restaurant_id
   const catQ = admin.from('menu_categories').select('*').eq('is_visible', true).order('position')
   const itemQ = admin.from('menu_items').select('*').eq('is_visible', true).order('position')
-  const [rest, cats, items] = await Promise.all([
+  // Trending badge: items with the most add_to_cart/order events today. Aggregated in JS
+  // (Supabase JS client has no GROUP BY) — row count is bounded, fine for this volume.
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
+  const trendQ = admin.from('menu_events').select('item_id')
+    .eq('restaurant_id', restaurantId).in('type', ['order', 'add_to_cart'])
+    .not('item_id', 'is', null).gte('created_at', todayStart.toISOString()).limit(3000)
+  const [rest, cats, items, trend] = await Promise.all([
     admin.from('restaurants').select('id, name, logo_url, currency, subscription_plan, subscription_status, comp_apps').eq('id', restaurantId).single(),
     menuId ? catQ.eq('menu_id', menuId) : catQ.eq('restaurant_id', restaurantId),
     menuId ? itemQ.eq('menu_id', menuId) : itemQ.eq('restaurant_id', restaurantId),
+    menuId ? trendQ.eq('menu_id', menuId) : trendQ,
   ])
+  const trendCounts = new Map<string, number>()
+  for (const row of trend.data || []) {
+    const id = (row as any).item_id as string
+    trendCounts.set(id, (trendCounts.get(id) || 0) + 1)
+  }
+  // Только реально заметные всплески — не шумим бейджем на 1-2 случайных клика.
+  const trendingIds = [...trendCounts.entries()].filter(([, n]) => n >= 3).map(([id]) => id)
 
   // QR-меню — с тарифа Business (или выдано супер-админом через comp_apps) + активная подписка
   const r: any = rest.data
@@ -48,5 +62,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ slu
     restaurant: safeRest,
     categories: cats.data || [],
     items: items.data || [],
+    trending_ids: trendingIds,
   })
 }

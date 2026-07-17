@@ -81,6 +81,7 @@ struct GuestsView: View {
     @State private var editingGuest: GuestProfile?
     @State private var deleteTarget: GuestProfile?
     @State private var errorMsg: String?
+    @State private var showReviews = false
 
     // Как canEdit(_:) в BookingsView, но для гостя целиком: массовая правка/удаление
     // разрешены только должностным лицам или если ВСЕ брони гостя создал текущий сотрудник.
@@ -105,26 +106,27 @@ struct GuestsView: View {
         NavigationStack {
             ZStack {
                 Color.miseBg.ignoresSafeArea()
-                if m.allBookings.isEmpty {
-                    emptyState
-                } else {
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            // Поиск
-                            HStack(spacing: 8) {
-                                Image(systemName: "magnifyingglass").font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4))
-                                TextField(t("bk.searchPh"), text: $searchText).font(.system(size: 15))
-                                if !searchText.isEmpty {
-                                    Button { searchText = "" } label: {
-                                        Image(systemName: "xmark.circle.fill").foregroundStyle(.primary.opacity(0.4))
-                                    }
+                ScrollView {
+                    VStack(spacing: 0) {
+                        // Поиск
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass").font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4))
+                            TextField(t("bk.searchPh"), text: $searchText).font(.system(size: 15))
+                            if !searchText.isEmpty {
+                                Button { searchText = "" } label: {
+                                    Image(systemName: "xmark.circle.fill").foregroundStyle(.primary.opacity(0.4))
                                 }
                             }
-                            .padding(.horizontal, 12).padding(.vertical, 8)
-                            .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .padding(.horizontal, 16).padding(.vertical, 10)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .padding(.horizontal, 16).padding(.vertical, 10)
 
-                            LazyVStack(spacing: 10) {
+                        LazyVStack(spacing: 10) {
+                            ReviewsEntryRow { showReviews = true }
+                            if m.allBookings.isEmpty {
+                                emptyState
+                            } else {
                                 ForEach(filtered) { guest in
                                     GuestRow(guest: guest) {
                                         selectedGuest = guest
@@ -141,9 +143,9 @@ struct GuestsView: View {
                                     }
                                 }
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 24)
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 24)
                     }
                 }
                 if let errorMsg {
@@ -165,13 +167,22 @@ struct GuestsView: View {
                     Button(t("done")) { dismiss() }
                 }
             }
+            .sheet(isPresented: $showReviews) {
+                GoogleReviewsView()
+            }
             .sheet(item: $selectedGuest) { g in
-                GuestDetailView(guest: g, rid: m.rid, onNewBooking: { name, phone, visits, noShows in
+                GuestDetailView(guest: g, rid: m.rid, canEdit: canEditGuest(g), onNewBooking: { name, phone, visits, noShows in
                     // Закрываем карточку гостя, затем родитель закрывает список и открывает редактор.
                     selectedGuest = nil
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         onNewBooking(name, phone, visits, noShows)
                     }
+                }, onEdit: {
+                    selectedGuest = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { editingGuest = g }
+                }, onDelete: {
+                    selectedGuest = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { deleteTarget = g }
                 })
             }
             .sheet(item: $editingGuest) { g in
@@ -236,6 +247,29 @@ struct GuestsView: View {
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 60)
+    }
+}
+
+// MARK: - ReviewsEntryRow — вход в Google-отзывы, первая строка списка клиентов
+
+private struct ReviewsEntryRow: View {
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(GS_ACCENT.opacity(0.18)).frame(width: 44, height: 44)
+                    Image(systemName: "star.fill").font(.system(size: 17, weight: .semibold)).foregroundStyle(GS_ACCENT)
+                }
+                Text(t("bk.rvTitle")).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.2))
+            }
+            .padding(14)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -318,12 +352,17 @@ private nonisolated struct GuestNote: Codable, Sendable { let note: String? }
 struct GuestDetailView: View {
     let guest: GuestProfile
     let rid: String
+    var canEdit: Bool = true
     var onNewBooking: (String?, String?, Int, Int) -> Void = { _, _, _, _ in }
+    var onEdit: () -> Void = {}
+    var onDelete: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
 
     @State private var note = ""
     @State private var noteLoaded = false
     @State private var showPhoneMenu = false
+    @State private var noteSavedFlash = false
+    @State private var confirmDelete = false
 
     private var sortedBookings: [Booking] {
         guest.bookings.sorted { ($0.booking_date ?? "") > ($1.booking_date ?? "") }
@@ -371,9 +410,25 @@ struct GuestDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.miseBg, for: .navigationBar)
             .toolbar {
+                if canEdit {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu {
+                            Button { dismiss(); onEdit() } label: { Label(t("edit"), systemImage: "pencil") }
+                            Button(role: .destructive) { confirmDelete = true } label: { Label(t("delete"), systemImage: "trash") }
+                        } label: {
+                            Image(systemName: "ellipsis.circle").foregroundStyle(GS_ACCENT)
+                        }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(t("done")) { dismiss() }
                 }
+            }
+            .alert(t("gs.deleteGuest"), isPresented: $confirmDelete) {
+                Button(t("cancel"), role: .cancel) {}
+                Button(t("delete"), role: .destructive) { dismiss(); onDelete() }
+            } message: {
+                Text(t("gs.deleteGuestConfirm", ["name": guest.displayName]))
             }
         }
         .task { if !noteLoaded { await loadNote() } }
@@ -397,7 +452,20 @@ struct GuestDetailView: View {
                     .font(.system(size: 22, weight: .bold)).foregroundStyle(GS_ACCENT)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(guest.displayName).font(.system(size: 18, weight: .bold)).foregroundStyle(.primary)
+                HStack(spacing: 6) {
+                    Text(guest.displayName).font(.system(size: 18, weight: .bold)).foregroundStyle(.primary)
+                    if guest.visitCount >= 5 {
+                        Text(t("gs.regularBadge"))
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(GS_ACCENT, in: Capsule())
+                    }
+                }
+                if guest.noShowCount > 0 {
+                    Text(t("gs.noShows", ["n": "\(guest.noShowCount)"]))
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(BrandKit.accent)
+                }
                 if let ph = guest.phone, !ph.isEmpty {
                     Button { showPhoneMenu = true } label: {
                         HStack(spacing: 4) {
@@ -494,10 +562,15 @@ struct GuestDetailView: View {
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .onSubmit { saveNote() }
             HStack {
+                if noteSavedFlash {
+                    Label(t("gs.noteSaved"), systemImage: "checkmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(.green)
+                        .transition(.opacity)
+                }
                 Spacer()
                 Button(t("bk.save")) { saveNote() }
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(GS_ACCENT)
             }
+            .animation(.easeInOut(duration: 0.2), value: noteSavedFlash)
         }
     }
 
@@ -513,6 +586,9 @@ struct GuestDetailView: View {
         Task {
             try? await DB.from("guest_notes")
                 .upsert(["guest_key": guest.id, "note": text], onConflict: "restaurant_id,guest_key").run()
+            noteSavedFlash = true
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            noteSavedFlash = false
         }
     }
 

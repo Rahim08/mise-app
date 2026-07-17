@@ -443,6 +443,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [employees, setEmployees] = useState<any[]>([])
   const [cardAmounts, setCardAmounts] = useState<any[]>([])
   const [absences, setAbsences] = useState<any[]>([])
+  const [advances, setAdvances] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showMonthPicker, setShowMonthPicker] = useState(false)
   const [showAI, setShowAI] = useState(false)
@@ -496,14 +497,16 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     const prevStart = fmtDate(new Date(date.getFullYear(), date.getMonth() - 1, 1))
     const prevEnd = fmtDate(new Date(date.getFullYear(), date.getMonth(), 0))
 
-    const [s1, s2, s3, s4, s5, s6] = await Promise.all([
+    const [s1, s2, s3, s4, s5, s6, s7] = await Promise.all([
       db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd).order('date'),
       db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', prevStart).lte('date', prevEnd).order('date'),
       db.from('employees').select('*').eq('restaurant_id', rid).eq('is_active', true).order('name'),
       db.from('monthly_card_amounts').select('*').eq('restaurant_id', rid).eq('month', fmtDate(date).slice(0, 7)),
       db.from('shift_absences').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd),
       db.from('hookah_sales').select('*').gte('date', monthStart).lte('date', monthEnd).order('date'),
+      db.from('salary_advances').select('*').gte('date', monthStart).lte('date', monthEnd),
     ])
+    setAdvances(s7.data || [])
     setHookahRows(s6.data || [])
 
     const shiftList = s1.data || []
@@ -673,11 +676,12 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     doc.save(`smena_${dayStr}.pdf`)
   }
 
-  // Сумма на карту за выбранный месяц: помесячная перекрывает фиксированную (employees.card_amount).
+  // Сумма на карту за выбранный месяц: строго из monthly_card_amounts (канон = iOS, без fallback на employees.card_amount).
   const cardOf = (emp: any) => {
     const m = cardAmounts.find((c: any) => c.employee_id === emp.id)
-    return m ? Number(m.card_amount || 0) : Number(emp.card_amount || 0)
+    return m ? Number(m.card_amount || 0) : 0
   }
+  const advanceOf = (emp: any) => advances.filter((a: any) => a.employee_id === emp.id).reduce((s: number, a: any) => s + Number(a.amount || 0), 0)
 
   const exportSalary = () => {
     const rows: (string | number)[][] = [[tr('an.csvEmployee'), tr('an.csvSalary'), tr('an.csvAbsences'), tr('an.csvDeduct'), tr('an.csvCard'), tr('an.csvCashPay'), tr('an.csvTotal')]]
@@ -685,8 +689,9 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       const abs = absences.filter((a: any) => a.employee_id === emp.id).length
       const deduct = abs * emp.deduct_per_absence
       const card = cardOf(emp)
-      const cash = emp.salary - deduct - card
-      rows.push([emp.name, (emp.salary || 0).toFixed(2), abs, deduct.toFixed(2), card.toFixed(2), cash.toFixed(2), (cash + card).toFixed(2)])
+      const total = Math.max(0, (emp.salary || 0) - deduct)
+      const cash = Math.max(0, total - advanceOf(emp) - card)
+      rows.push([emp.name, (emp.salary || 0).toFixed(2), abs, deduct.toFixed(2), card.toFixed(2), cash.toFixed(2), total.toFixed(2)])
     })
     downloadCSV(`zarplaty_${monthTag}.csv`, rows)
   }
@@ -699,8 +704,9 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       const abs = absences.filter((a: any) => a.employee_id === emp.id).length
       const deduct = abs * emp.deduct_per_absence
       const card = cardOf(emp)
-      const cash = emp.salary - deduct - card
-      return [emp.name, pdfCur + fv(emp.salary || 0), String(abs), pdfCur + fv(deduct), pdfCur + fv(card), pdfCur + fv(cash), pdfCur + fv(cash + card)]
+      const total = Math.max(0, (emp.salary || 0) - deduct)
+      const cash = Math.max(0, total - advanceOf(emp) - card)
+      return [emp.name, pdfCur + fv(emp.salary || 0), String(abs), pdfCur + fv(deduct), pdfCur + fv(card), pdfCur + fv(cash), pdfCur + fv(total)]
     })
     pdfTable(doc, `Зарплаты — ${monthTitle}`, headers, rows, colX)
     doc.save(`zarplaty_${monthTag}.pdf`)
@@ -1030,7 +1036,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     const totCard = employees.reduce((s: number, e: any) => s + cardOf(e), 0)
     const totCash = employees.reduce((s: number, emp: any) => {
       const abs = absences.filter((a: any) => a.employee_id === emp.id).length
-      return s + (emp.salary - abs * emp.deduct_per_absence - cardOf(emp))
+      const total = Math.max(0, (emp.salary || 0) - abs * emp.deduct_per_absence)
+      return s + Math.max(0, total - advanceOf(emp) - cardOf(emp))
     }, 0)
 
     return (
@@ -1061,7 +1068,9 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
             const abs = absences.filter((a: any) => a.employee_id === emp.id).length
             const deduct = abs * emp.deduct_per_absence
             const card = cardOf(emp)
-            const cash = emp.salary - deduct - card
+            const advance = advanceOf(emp)
+            const total = Math.max(0, (emp.salary || 0) - deduct)
+            const cash = Math.max(0, total - advance - card)
 
             const open = expSalary === emp.id
 
@@ -1076,7 +1085,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: t.blue }}>{currency}{fv(cash + card)}</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: t.blue }}>{currency}{fv(total)}</div>
                     <svg width="9" height="15" fill="none" stroke={t.text3} strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 10 18" style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .25s ease', flexShrink: 0 }}><path d="M2 1l7 8-7 8" /></svg>
                   </div>
                 </button>
@@ -1084,7 +1093,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
                 <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .28s cubic-bezier(.32,.72,0,1)' }}>
                   <div style={{ overflow: 'hidden' }}>
                     <div style={{ padding: '0 16px 14px' }}>
-                      <div style={{ fontSize: 12, color: t.text3, marginBottom: 8 }}>{tr('an.salaryLabel')}: {currency}{fv(emp.salary)}{deduct > 0 ? ` · ${tr('an.deductWord')} −${currency}${fv(deduct)}` : ''}</div>
+                      <div style={{ fontSize: 12, color: t.text3, marginBottom: 8 }}>{tr('an.salaryLabel')}: {currency}{fv(emp.salary)}{deduct > 0 ? ` · ${tr('an.deductWord')} −${currency}${fv(deduct)}` : ''}{advance > 0 ? ` · ${tr('pe.advances')} −${currency}${fv(advance)}` : ''}</div>
                       {abs > 0 && <div style={{ marginBottom: 8, height: 3, background: t.fill2, borderRadius: 2, overflow: 'hidden' }}>
                         <div style={{ height: '100%', width: `${Math.min(abs / 22 * 100, 100).toFixed(1)}%`, background: t.red, borderRadius: 2 }} />
                       </div>}

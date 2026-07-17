@@ -299,7 +299,7 @@ private struct PermissionsView: View {
     private func allow() async {
         busy = true
         switch step {
-        case 0: _ = await Biometrics.authenticate(reason: "Включить вход по Face ID")
+        case 0: _ = await Biometrics.authenticate(reason: t("faceid.enableReason"))
         case 1: _ = await Notifications.request()
         default: await locationRequester.request()
         }

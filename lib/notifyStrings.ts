@@ -39,6 +39,13 @@ export const NOTIFY_STRINGS: Record<string, Row> = {
   'notify.catHousehold': { en: 'Household', ru: 'Хозтовары', it: 'Casalinghi', fr: 'Ménage', az: 'Təsərrüfat', tr: 'Ev', uk: 'Господарські', kk: 'Шаруашылық' },
   'notify.catGeneral':   { en: 'General', ru: 'Общее', it: 'Generale', fr: 'Général', az: 'Ümumi', tr: 'Genel', uk: 'Загальне', kk: 'Жалпы' },
 
+  // Cron: напоминание о завтрашней смене + окончание триала (аудит-находка 4).
+  'notify.shiftReminderTitle':    { en: 'Shift reminder', ru: 'Напоминание о смене', it: 'Promemoria turno', fr: 'Rappel de service', az: 'Növbə xatırlatması', tr: 'Vardiya hatırlatması', uk: 'Нагадування про зміну', kk: 'Ауысым туралы еске салу' },
+  'notify.shiftReminderBody':     { en: 'Your shift is tomorrow', ru: 'Ваша смена завтра', it: 'Il tuo turno è domani', fr: 'Votre service est demain', az: 'Növbəniz sabahdır', tr: 'Vardiyanız yarın', uk: 'Ваша зміна завтра', kk: 'Ауысымыңыз ертең' },
+  'notify.shiftReminderBodyTime': { en: 'Your shift is tomorrow at {time}', ru: 'Ваша смена завтра в {time}', it: 'Il tuo turno è domani alle {time}', fr: 'Votre service est demain à {time}', az: 'Növbəniz sabah saat {time}', tr: 'Vardiyanız yarın saat {time}', uk: 'Ваша зміна завтра о {time}', kk: 'Ауысымыңыз ертең сағат {time}' },
+  'notify.trialEndingTitle': { en: 'Trial ending', ru: 'Окончание пробного периода', it: 'La prova sta per finire', fr: 'Fin de la période d’essai', az: 'Sınaq müddəti bitir', tr: 'Deneme süresi bitiyor', uk: 'Закінчення пробного періоду', kk: 'Сынақ мерзімі аяқталады' },
+  'notify.trialEndingBody':  { en: 'Trial ends in {n} d.', ru: 'Триал заканчивается через {n} дн.', it: 'La prova termina tra {n} g.', fr: 'L’essai se termine dans {n} j.', az: 'Sınaq {n} gündən sonra bitir', tr: 'Deneme {n} gün içinde bitiyor', uk: 'Пробний період закінчується через {n} дн.', kk: 'Сынақ {n} күннен кейін аяқталады' },
+
   'notify.bookingTitle': { en: 'New booking', ru: 'Новая бронь', it: 'Nuova prenotazione', fr: 'Nouvelle réservation', az: 'Yeni rezerv', tr: 'Yeni rezervasyon', uk: 'Нове бронювання', kk: 'Жаңа брондау' },
   'notify.bookingTable': { en: 'Table', ru: 'Стол', it: 'Tavolo', fr: 'Table', az: 'Masa', tr: 'Masa', uk: 'Стіл', kk: 'Үстел' },
   'notify.lowStockTitle': { en: 'Low stock alert', ru: 'Товар заканчивается', it: 'Scorte in esaurimento', fr: 'Stock bas', az: 'Stok azalması', tr: 'Stok uyarısı', uk: 'Сповіщення про запаси', kk: 'Қор азаю ескертуі' },

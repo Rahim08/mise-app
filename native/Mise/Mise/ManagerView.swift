@@ -282,14 +282,22 @@ final class ManagerModel {
         }
     }
 
+    // Как в persistExpenses: СНАЧАЛА вставить новую строку, удалить старые по id — ПОТОМ.
+    // Обрыв сети между delete и insert стирал инкассацию смены (Analytics читает
+    // inkassations.total → неверный нетто). Дубль при упавшем delete подчистится
+    // следующим успешным сохранением (старые id уже собраны).
     private func persistInkassation(shiftId: String, _ c: Calc) async throws {
-        try await DB.from("inkassations").delete().eq("shift_id", shiftId).run()
+        struct InkRow: Codable, Sendable { let id: String }
+        let old = try await DB.from("inkassations").select("id").eq("shift_id", shiftId).list(InkRow.self)
         if c.ink > 0 || !inkExpense.isEmpty || !inkReason.isEmpty || c.salary > 0 || !inkSalaryNote.isEmpty {
             try await DB.from("inkassations").insert([
                 "shift_id": shiftId, "restaurant_id": rid, "date": key(currentDate),
                 "amount": c.ink, "expense": num(inkExpense), "reason": inkReason,
                 "salary": c.salary, "salary_note": inkSalaryNote, "total": c.inkNet,
             ]).run()
+        }
+        if !old.isEmpty {
+            try await DB.from("inkassations").delete().in("id", old.map(\.id)).run()
         }
     }
 
@@ -483,7 +491,10 @@ private struct ManagerBody: View {
                     .offset(y: m.loading ? 18 : 0)
                     .animation(.spring(duration: 0.45, bounce: 0.1), value: m.loading)
                 }
-                .refreshable { await m.loadDay(m.currentDate) }
+                .refreshable {
+                    await DB.clearCacheNow() // pull-to-refresh должен идти в сеть, не в кеш
+                    await m.loadDay(m.currentDate)
+                }
             }
             // Spotlight-эффект под ИИ-чатом: слегка размываем реальный контент модуля,
             // а не показываем матовую панель поверх (см. AIButton.swift AIChat).

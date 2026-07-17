@@ -39,13 +39,13 @@ final class AppModel {
     /// Видит ли вошедший деньги/выручку (владелец и менеджер — да; кальянщик/официант — нет).
     var canSeeMoney: Bool {
         guard let s = staff else { return true }
-        return s.isOwner || s.role == "manager"
+        return s.isOwner || s.role == "manager" || s.role == "admin"
     }
 
     /// Должностное лицо (владелец/управляющий): может редактировать любые брони, ставить цели KPI.
     var isOfficial: Bool {
         guard let s = staff else { return false }
-        return s.isOwner || s.role == "manager"
+        return s.isOwner || s.role == "manager" || s.role == "admin"
     }
 
     private let d = UserDefaults.standard
@@ -78,7 +78,7 @@ final class AppModel {
                 let m = ReportModel(rid: "demo")
                 if ProcessInfo.processInfo.environment["MISE_DEMO_REPORT_PERIOD"] == "all" { m.periodMode = "all" }
                 await m.load()
-                let data = m.buildPDF(venueName: restaurant?.name ?? "")
+                let data = ReportModel.renderPDF(m.pdfSnapshot(venueName: restaurant?.name ?? ""))
                 if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
                     try? data.write(to: docs.appendingPathComponent("demo-report.pdf"))
                 }
@@ -101,7 +101,7 @@ final class AppModel {
             isReauth = true
             // По решению: Face ID при каждом запуске; отказ/недоступно → PIN.
             if Biometrics.available {
-                let ok = await Biometrics.authenticate(reason: "Вход в Mise")
+                let ok = await Biometrics.authenticate(reason: t("faceid.loginReason"))
                 phase = ok ? .authed : .pin
             } else {
                 phase = .pin

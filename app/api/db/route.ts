@@ -19,7 +19,7 @@ type AppId = 'manager' | 'analytics' | 'stash' | 'people'
 // Empty array = owner only. `scope` is the column used to restrict rows to the restaurant.
 const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> = {
   restaurants:          { read: ['manager', 'analytics', 'stash', 'people'], write: [], scope: 'id' },
-  restaurant_settings:  { read: ['manager', 'analytics', 'people'], write: [] },
+  restaurant_settings:  { read: ['manager', 'analytics', 'people', 'stash'], write: [] },
   staff:                { read: [], write: [] },
   employees:            { read: ['manager', 'analytics', 'people'], write: [] }, // people: свой расчёт зарплаты
   expense_categories:   { read: ['manager', 'analytics'], write: [] },
@@ -79,7 +79,7 @@ const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', '
 // Лимиты и состав модулей считает entitlements() из lib/plans.ts (тариф + addon_modules +
 // extra_seats + comp_apps/staff_limit супер-админа). Enforced server-side so the UI gate
 // can't be bypassed by calling the gateway directly.
-async function checkStaffPlanLimit(admin: any, rid: string, values: any, filters: any[]): Promise<string | null> {
+async function checkStaffPlanLimit(admin: any, rid: string, op: string, values: any, filters: any[]): Promise<string | null> {
   const rows = Array.isArray(values) ? values : [values]
   const grantsApps = rows.some(v => Array.isArray(v?.apps) && v.apps.length > 0)
   if (!grantsApps) return null
@@ -99,7 +99,17 @@ async function checkStaffPlanLimit(admin: any, rid: string, values: any, filters
 
   const { data: staff } = await admin.from('staff').select('id, apps').eq('restaurant_id', rid).eq('is_active', true)
   // Rows being updated are not "new" grants — exclude them from the current count.
-  const updatedIds = new Set((filters || []).filter((f: any) => f.col === 'id' && f.op === 'eq').map((f: any) => f.val))
+  // Update может прийти с любым фильтром (не только id eq) — считаем реально затронутые
+  // строки тем же фильтром, иначе они задваиваются (аудит-находка 30).
+  const updatedIds = new Set<string>()
+  if (op === 'update') {
+    let q = admin.from('staff').select('id').eq('restaurant_id', rid)
+    for (const f of (filters || [])) {
+      if (FILTER_OPS.has(f.op) && typeof q[f.op] === 'function') q = q[f.op](f.col, f.val)
+    }
+    const { data: affected } = await q
+    ;(affected || []).forEach((s: any) => updatedIds.add(s.id))
+  }
   const withAccess = (staff || []).filter((s: any) => Array.isArray(s.apps) && s.apps.length > 0 && !updatedIds.has(s.id)).length
   const newGrants = rows.filter(v => Array.isArray(v?.apps) && v.apps.length > 0).length
   if (withAccess + newGrants > maxStaff) return `Лимит тарифа: до ${maxStaff} сотрудников с доступом`
@@ -123,7 +133,13 @@ export async function POST(req: NextRequest) {
   if (!policy) return NextResponse.json({ error: 'Unknown table' }, { status: 400 })
 
   const isWrite = op === 'insert' || op === 'update' || op === 'delete' || op === 'upsert'
-  if (!authorized(caller, isWrite ? policy.write : policy.read)) {
+  // Узкое исключение: менеджер (people-доступ) может менять порог опоздания в «Дисциплине»,
+  // не открывая write на всю restaurant_settings (там гео/деньги — owner-only).
+  const graceOnlyUpdate = table === 'restaurant_settings' && op === 'update'
+    && values && typeof values === 'object' && !Array.isArray(values)
+    && Object.keys(values).length > 0 && Object.keys(values).every(k => k === 'late_grace_min')
+    && authorized(caller, ['people'])
+  if (!graceOnlyUpdate && !authorized(caller, isWrite ? policy.write : policy.read)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -131,7 +147,7 @@ export async function POST(req: NextRequest) {
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
   if (table === 'staff' && (op === 'insert' || op === 'update' || op === 'upsert')) {
-    const limitErr = await checkStaffPlanLimit(admin, caller.rid, values, filters)
+    const limitErr = await checkStaffPlanLimit(admin, caller.rid, op, values, filters)
     if (limitErr) return NextResponse.json({ error: limitErr, code: 'plan_limit' }, { status: 403 })
   }
 
@@ -164,7 +180,13 @@ export async function POST(req: NextRequest) {
       if (returning) q = q.select()
       if (returning === 'single') q = q.single()
     } else if (op === 'update') {
-      q = admin.from(table).update(values).eq(scope, caller.rid)
+      // Скоуп-колонку менять нельзя: иначе update может «перекинуть» строку в чужой ресторан.
+      let safeValues = values
+      if (safeValues && typeof safeValues === 'object' && !Array.isArray(safeValues)) {
+        safeValues = { ...safeValues }
+        delete safeValues[scope]
+      }
+      q = admin.from(table).update(safeValues).eq(scope, caller.rid)
       q = applyFilters(q)
       if (returning) q = q.select()
       if (returning === 'single') q = q.single()

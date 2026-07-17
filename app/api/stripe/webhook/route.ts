@@ -43,6 +43,14 @@ export async function POST(req: NextRequest) {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
 
+    // Дедуп ретраев Stripe: каждое событие обрабатываем один раз (PK по event_id).
+    // До применения миграции stripe-events-2026-07.sql таблицы нет — тогда работаем без дедупа, вебхук не роняем.
+    const { error: dupErr } = await supabase.from('stripe_events').insert({ event_id: event.id })
+    if (dupErr) {
+      if (dupErr.code === '23505') return NextResponse.json({ received: true })
+      console.error('[stripe-webhook] stripe_events insert failed (no dedup):', dupErr.message)
+    }
+
     const obj = event.data.object as any
 
     // Ошибка записи = 500 → Stripe ретраит и показывает сбой в Webhooks-логе.
