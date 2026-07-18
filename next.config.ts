@@ -39,13 +39,9 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  // APNs-ключ читается из файла в рантайме (lib/apns.ts). Путь динамический, поэтому
-  // трассировщик Next его сам не включит — указываем явно, чтобы .p8 попал в функции
-  // отправки push (/api/notify и cron-напоминания). Альтернатива — env APNS_AUTH_KEY.
-  outputFileTracingIncludes: {
-    "/api/notify": ["./AuthKey_W6HCZSDZ6W.p8"],
-    "/api/cron/reminders": ["./AuthKey_W6HCZSDZ6W.p8"],
-  },
+  // APNs-ключ прод берёт из env APNS_AUTH_KEY (Vercel). Файл-фолбэк в lib/apns.ts —
+  // только для локальной отладки пушей; .p8 в git нет и в бандл никогда не попадал,
+  // поэтому outputFileTracingIncludes для него удалён (2026-07-18).
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
