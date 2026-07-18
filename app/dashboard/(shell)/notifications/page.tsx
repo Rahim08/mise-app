@@ -4,7 +4,7 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { db } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
-import { renderNotify, renderCategory } from '@/lib/notifyStrings'
+import { renderNotify, renderCategory, renderSegments } from '@/lib/notifyStrings'
 import { Card, Container, SectionTitle } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
 import { timeAgo } from '@/components/dash/shared'
@@ -47,7 +47,11 @@ export default function NotificationsPage() {
       : n.title_params
     return renderNotify(locale, n.title_key, params || undefined)
   }
-  const renderBody = (n: any) => n.body_key ? renderNotify(locale, n.body_key, n.body_params || undefined) : n.body
+  // '_segments' — составное тело (в т.ч. секьюрный дайджест кассы, ревью Г3):
+  // лейблы переводятся, суммы — готовые строки.
+  const renderBody = (n: any) => n.body_key === '_segments' && Array.isArray(n.body_params?.segments)
+    ? renderSegments(locale, n.body_params.segments)
+    : n.body_key ? renderNotify(locale, n.body_key, n.body_params || undefined) : n.body
 
   const stockName = (s: any) => s.flavor_name || [s.brand, s.flavor].filter(Boolean).join(' ') || tr('dash.tobacco')
 

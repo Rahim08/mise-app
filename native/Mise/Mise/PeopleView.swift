@@ -17,6 +17,12 @@ private let STATUS_ORDER = ["todo", "in_progress", "done"]
 @MainActor private func statusLabel(_ s: String) -> String { t("pe.st." + (s == "in_progress" ? "inprogress" : s)) }
 @MainActor private func prioLabel(_ p: String?) -> String { t("pe.prio." + (p ?? "medium")) }
 private func prioColor(_ p: String?) -> Color { ["high": BrandKit.menu, "medium": BrandKit.stash, "low": Color.primary.opacity(0.4)][p ?? "medium"] ?? BrandKit.stash }
+/// "yyyy-MM-dd" → "dd.MM" для бейджа срока задачи (ревью Б5/P3).
+private func dueLabel(_ due: String) -> String {
+    let parts = due.split(separator: "-")
+    guard parts.count == 3 else { return due }
+    return "\(parts[2]).\(parts[1])"
+}
 
 // MARK: - Модель People (логика app/people/page.tsx)
 
@@ -126,7 +132,8 @@ final class PeopleModel {
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedTasks(); return }
         #endif
-        async let tkR = try? DB.from("staff_tasks").select().order("created_at", ascending: false).list(StaffTask.self)
+        // Лимит на растущую таблицу (ревью Д1) — как на вебе.
+        async let tkR = try? DB.from("staff_tasks").select().order("created_at", ascending: false).limit(200).list(StaffTask.self)
         async let dR = try? DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)
         let tkO = await tkR, dO = await dR
         if let tk = tkO { tasks = tk } else if !tasks.isEmpty { flash(t("refreshFailed")) }
@@ -551,7 +558,8 @@ final class PeopleModel {
         let cal = Calendar.current
         let from = key(cal.date(byAdding: .day, value: -14, to: Date()) ?? Date())
         let to = key(cal.date(byAdding: .day, value: 60, to: Date()) ?? Date())
-        if let s = try? await DB.from("shift_swap_requests").select().order("created_at", ascending: false).list(SwapRequest.self) {
+        // Лимит на растущую таблицу (ревью Д1).
+        if let s = try? await DB.from("shift_swap_requests").select().order("created_at", ascending: false).limit(200).list(SwapRequest.self) {
             swaps = s
         } else if !swaps.isEmpty { flash(t("refreshFailed")) }
         if dir.isEmpty, let d = try? await DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self) { dir = d }
@@ -666,14 +674,54 @@ final class PeopleModel {
     func toggleAuditItem(_ list: ShiftChecklist, _ idx: Int, photoURL: String? = nil) async {
         guard await requireGeoCheckIn() else { return }
         let itemsList = list.itemDetails ?? []
-        var state = auditRun(list)?.items_state ?? Array(repeating: ChecklistItemState(done: false), count: itemsList.count)
-        while state.count < itemsList.count { state.append(ChecklistItemState(done: false)) }
-        let willBeDone = !state[idx].done
+        var state = auditRun(list)?.items_state ?? []
+        while state.count <= idx { state.append(ChecklistItemState(done: false)) }
+        var item = state[idx]
+        let willBeDone = !item.done
         if willBeDone, idx < itemsList.count, itemsList[idx].photo_required, photoURL == nil {
             flash(t("pe.photoRequired")); return
         }
-        state[idx].done = willBeDone
-        if let photoURL { state[idx].photo_url = photoURL }
+        item.done = willBeDone
+        if let photoURL { item.photo_url = photoURL }
+        await persistAuditItem(list, idx, item)
+    }
+
+    /// Оценка пункта аудита (ревью Б1): result = "pass" | "fail" | "na" | nil (снять оценку).
+    /// done ставится при любой оценке — «пункт проверен», прогон завершается как раньше.
+    func gradeAuditItem(_ list: ShiftChecklist, _ idx: Int, result: String?, photoURL: String? = nil) async {
+        guard await requireGeoCheckIn() else { return }
+        let itemsList = list.itemDetails ?? []
+        var state = auditRun(list)?.items_state ?? []
+        while state.count <= idx { state.append(ChecklistItemState(done: false)) }
+        var item = state[idx]
+        // Подстраховка: UI сам открывает камеру для pass с обязательным фото.
+        if result == "pass", idx < itemsList.count, itemsList[idx].photo_required, photoURL == nil, item.photo_url == nil {
+            flash(t("pe.photoRequired")); return
+        }
+        item.result = result
+        item.done = result != nil
+        if let photoURL { item.photo_url = photoURL }
+        await persistAuditItem(list, idx, item)
+    }
+
+    /// Комментарий к пункту аудита (ревью Б2).
+    func setAuditItemNote(_ list: ShiftChecklist, _ idx: Int, note: String?) async {
+        guard await requireGeoCheckIn() else { return }
+        var state = auditRun(list)?.items_state ?? []
+        while state.count <= idx { state.append(ChecklistItemState(done: false)) }
+        var item = state[idx]
+        let clean = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        item.note = clean?.isEmpty == false ? clean : nil
+        await persistAuditItem(list, idx, item)
+    }
+
+    /// Общая запись пункта аудита (toggle/grade/note): мерж со свежей копией, update/insert,
+    /// офлайн-очередь. newItem кладётся ЦЕЛИКОМ в свой индекс — чужие индексы не трогаем.
+    private func persistAuditItem(_ list: ShiftChecklist, _ idx: Int, _ newItem: ChecklistItemState) async {
+        let itemsList = list.itemDetails ?? []
+        var state = auditRun(list)?.items_state ?? Array(repeating: ChecklistItemState(done: false), count: itemsList.count)
+        while state.count < max(itemsList.count, idx + 1) { state.append(ChecklistItemState(done: false)) }
+        state[idx] = newItem
         var allDone = state.allSatisfy { $0.done }
         let staffVal: Any = myId == "owner" || myId.isEmpty ? NSNull() : myId
         if let i = auditRuns.firstIndex(where: { $0.checklist_id == list.id && $0.date == todayKey }) {
@@ -683,7 +731,7 @@ final class PeopleModel {
             if let freshState = try? await DB.from("shift_checklist_completions").select().fresh().eq("id", cid).limit(1).list(ChecklistCompletion.self).first?.items_state {
                 var merged = freshState
                 while merged.count < max(itemsList.count, idx + 1) { merged.append(ChecklistItemState(done: false)) }
-                merged[idx] = state[idx]
+                merged[idx] = newItem
                 state = merged
                 allDone = state.allSatisfy { $0.done }
             }
@@ -695,7 +743,7 @@ final class PeopleModel {
                     "items_state": state.map { $0.asDict }, "completed_at": completedAt,
                     "status": allDone ? "done" : "in_progress", "staff_id": staffVal,
                 ] as [String: Any]).eq("id", cid).run()
-            } catch { queuePendingChecklistToggle(completionId: cid, idx: idx, done: state[idx].done, photoURL: photoURL) }
+            } catch { queuePendingChecklistToggle(completionId: cid, idx: idx, done: newItem.done, photoURL: newItem.photo_url, newState: newItem) }
         } else {
             let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
             let attId: Any = attendance.first(where: { $0.staff_id == myId && $0.date == todayKey })?.id ?? NSNull()
@@ -707,7 +755,7 @@ final class PeopleModel {
                 ] as [String: Any]).run()
             } catch {
                 // Офлайн: прогона ещё нет — кладём отметку в очередь по (checklist_id, date), flush создаст строку.
-                queuePendingChecklistToggle(checklistId: list.id, date: todayKey, shiftId: openShiftId, idx: idx, done: state[idx].done, photoURL: photoURL)
+                queuePendingChecklistToggle(checklistId: list.id, date: todayKey, shiftId: openShiftId, idx: idx, done: newItem.done, photoURL: newItem.photo_url, newState: newItem)
                 return
             }
             await loadAudits()
@@ -829,6 +877,36 @@ final class PeopleModel {
         if allDone { flash(clType == "open" ? t("pe.checklistOpenDone") : t("pe.checklistCloseDone")) }
     }
 
+    // MARK: журнал уведомлений (ревью Г2)
+
+    var notifs: [AppNotification] = []
+    var notifsLoaded = false
+    var notifsUnread = 0
+
+    /// Журнал получателя: staff — свои записи, владелец — to_owner.
+    func loadNotifications() async {
+        var q = DB.from("notifications").select()
+        if myId == "owner" || myId.isEmpty { q = q.eq("to_owner", true) }
+        else { q = q.eq("staff_id", myId) }
+        if let rows = try? await q.order("created_at", ascending: false).limit(50).list(AppNotification.self) {
+            notifs = rows
+            notifsUnread = rows.filter { $0.read_at == nil }.count
+        } else if !notifs.isEmpty {
+            flash(t("refreshFailed"))
+        }
+        notifsLoaded = true
+    }
+
+    /// Открыл журнал — всё прочитано (как веб-колокольчик).
+    func markNotificationsRead() async {
+        let unread = notifs.filter { $0.read_at == nil }.map(\.id)
+        guard !unread.isEmpty else { return }
+        let now = ISO8601DateFormatter().string(from: Date())
+        for i in notifs.indices where notifs[i].read_at == nil { notifs[i].read_at = now }
+        notifsUnread = 0
+        try? await DB.from("notifications").update(["read_at": now]).in("id", unread).run()
+    }
+
     // MARK: оффлайн-очередь отметок чек-листа/аудита (по образцу pendingCheckIn)
 
     /// completionId != nil — отметка в существующем прогоне; иначе прогона ещё не было
@@ -841,6 +919,9 @@ final class PeopleModel {
         let idx: Int
         let done: Bool
         let photoURL: String?
+        // Полное состояние пункта (оценки Б1/Б2: result/note). Есть — при flush кладётся
+        // целиком; nil (старые элементы очереди) — применяются done/photoURL как раньше.
+        var newState: ChecklistItemState? = nil
     }
     private var pendingChecklistKey: String { "mise_pending_checklist_\(rid)_\(myId)" }
 
@@ -850,9 +931,9 @@ final class PeopleModel {
         return queue
     }
 
-    private func queuePendingChecklistToggle(completionId: String? = nil, checklistId: String? = nil, date: String? = nil, shiftId: String? = nil, idx: Int, done: Bool, photoURL: String?) {
+    private func queuePendingChecklistToggle(completionId: String? = nil, checklistId: String? = nil, date: String? = nil, shiftId: String? = nil, idx: Int, done: Bool, photoURL: String?, newState: ChecklistItemState? = nil) {
         var queue = loadPendingChecklistQueue()
-        queue.append(.init(completionId: completionId, checklistId: checklistId, date: date, shiftId: shiftId, idx: idx, done: done, photoURL: photoURL))
+        queue.append(.init(completionId: completionId, checklistId: checklistId, date: date, shiftId: shiftId, idx: idx, done: done, photoURL: photoURL, newState: newState))
         if let data = try? JSONEncoder().encode(queue) { UserDefaults.standard.set(data, forKey: pendingChecklistKey) }
         flash(t("pe.checkInPending"))
     }
@@ -882,8 +963,11 @@ final class PeopleModel {
             if let comp {
                 var state = comp.items_state ?? []
                 while state.count <= item.idx { state.append(.init(done: false)) }
-                state[item.idx].done = item.done
-                if let p = item.photoURL { state[item.idx].photo_url = p }
+                if let ns = item.newState { state[item.idx] = ns }
+                else {
+                    state[item.idx].done = item.done
+                    if let p = item.photoURL { state[item.idx].photo_url = p }
+                }
                 let allDone = state.allSatisfy { $0.done }
                 do {
                     try await DB.from("shift_checklist_completions").update([
@@ -897,8 +981,11 @@ final class PeopleModel {
                 // Прогона нет — создаём со своей отметкой; размер по шаблону, чтобы не резать чужие индексы.
                 let tplCount = (checklists + audits).first { $0.id == item.checklistId }?.itemDetails?.count ?? 0
                 var state = Array(repeating: ChecklistItemState(done: false), count: max(tplCount, item.idx + 1))
-                state[item.idx].done = item.done
-                if let p = item.photoURL { state[item.idx].photo_url = p }
+                if let ns = item.newState { state[item.idx] = ns }
+                else {
+                    state[item.idx].done = item.done
+                    if let p = item.photoURL { state[item.idx].photo_url = p }
+                }
                 let allDone = state.allSatisfy { $0.done }
                 do {
                     try await DB.from("shift_checklist_completions").insert([
@@ -1520,6 +1607,15 @@ private struct TasksTab: View {
                 HStack(spacing: 8) {
                     Text(prioLabel(task.priority)).font(.system(size: 11, weight: .bold)).foregroundStyle(prioColor(task.priority))
                     Text("· \(m.staffName(task.assigned_to))").font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
+                    // Срок задачи (ревью Б5/P3): просрочка — красным, как на вебе.
+                    if let due = task.due_date, !due.isEmpty {
+                        let overdue = !done && due < m.todayKey
+                        HStack(spacing: 3) {
+                            Image(systemName: "calendar").font(.system(size: 9, weight: .bold))
+                            Text(dueLabel(due)).font(.system(size: 11, weight: overdue ? .bold : .semibold))
+                        }
+                        .foregroundStyle(overdue ? BrandKit.menu : Color.primary.opacity(0.4))
+                    }
                     if !done {
                         Button { Task { await m.setStatus(task, task.status == "todo" ? "in_progress" : "todo") } } label: {
                             Text(task.status == "todo" ? t("pe.toWork") : t("pe.return"))
@@ -1912,18 +2008,94 @@ private struct PeopleSalaryTab: View {
 
 private struct ShiftsHubTab: View {
     @Bindable var m: PeopleModel
+    @State private var showNotifs = false
     var body: some View {
-        Picker("", selection: $m.shiftsView) {
-            Text(t("tab.shifts")).tag("shifts")
-            if m.isManager { Text(t("pe.discipline")).tag("discipline") }
-            Text(t("pe.swaps")).tag("swaps")
-        }.pickerStyle(.segmented)
+        HStack(spacing: 10) {
+            Picker("", selection: $m.shiftsView) {
+                Text(t("tab.shifts")).tag("shifts")
+                if m.isManager { Text(t("pe.discipline")).tag("discipline") }
+                Text(t("pe.swaps")).tag("swaps")
+            }.pickerStyle(.segmented)
+            // Журнал уведомлений (ревью Г2): пуш смахнул — информация больше не теряется.
+            Button { showNotifs = true } label: {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "bell").font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary.opacity(0.65))
+                    if m.notifsUnread > 0 {
+                        Circle().fill(BrandKit.menu).frame(width: 8, height: 8).offset(x: 3, y: -2)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .task { if !m.notifsLoaded { await m.loadNotifications() } }
+        .sheet(isPresented: $showNotifs) { NotificationsSheet(m: m) }
 
         switch m.shiftsView {
         case "swaps": SwapsTab(m: m)
         case "discipline": DisciplineTab(m: m)
         default: CombinedShifts(m: m)
         }
+    }
+}
+
+/// Журнал уведомлений (ревью Г2): notifications с перерендером title_key/body_key на языке
+/// зрителя (NotifyStrings.swift) — тот же механизм, что веб-колокольчик. Открытие = прочитано.
+private struct NotificationsSheet: View {
+    @Bindable var m: PeopleModel
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.miseBg.ignoresSafeArea()
+                if !m.notifsLoaded {
+                    RowListSkeleton(rows: 4)
+                } else if m.notifs.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "bell").font(.system(size: 34)).foregroundStyle(PEOPLE_ACCENT.opacity(0.5))
+                        Text(t("pe.noNotifs")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4))
+                    }
+                } else {
+                    ScrollView {
+                        VStack(spacing: 8) {
+                            ForEach(m.notifs) { n in row(n) }
+                        }
+                        .padding(16)
+                    }
+                }
+            }
+            .navigationTitle(t("pe.notifications"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
+        }
+        .task {
+            if !m.notifsLoaded { await m.loadNotifications() }
+            await m.markNotificationsRead()
+        }
+    }
+
+    private func row(_ n: AppNotification) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Circle().fill(n.read_at == nil ? PEOPLE_ACCENT : Color.clear).frame(width: 8, height: 8).padding(.top, 5)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(notifTitle(n)).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+                if let body = notifBody(n), !body.isEmpty {
+                    Text(body).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.55))
+                }
+                Text(notifDate(n.created_at)).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.35))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func notifDate(_ iso: String?) -> String {
+        guard let iso else { return "" }
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let f2 = ISO8601DateFormatter()
+        guard let d = f.date(from: iso) ?? f2.date(from: iso) else { return "" }
+        let out = DateFormatter(); out.locale = appLocale(); out.dateFormat = "dd.MM · HH:mm"
+        return out.string(from: d)
     }
 }
 
@@ -2938,6 +3110,7 @@ private struct ChecklistsTab: View {
     @Bindable var m: PeopleModel
     @State private var edit: ChecklistEdit?
     @State private var showHistory = false
+    @State private var auditHistoryOf: ShiftChecklist?
     @State private var subTab = "shift" // shift | audits | stats
 
     struct ChecklistEdit: Identifiable {
@@ -2969,6 +3142,7 @@ private struct ChecklistsTab: View {
         .task(id: subTab) { if subTab == "audits" && !m.auditsLoaded { await m.loadAudits() } }
         .sheet(item: $edit) { e in ChecklistEditSheet(m: m, edit: e) }
         .sheet(isPresented: $showHistory) { ChecklistHistorySheet(m: m) }
+        .sheet(item: $auditHistoryOf) { a in AuditHistorySheet(m: m, list: a) }
     }
 
     private var shiftSection: some View {
@@ -3048,6 +3222,9 @@ private struct ChecklistsTab: View {
                                     Button { Task { await m.startAudit(templateId: a.id) } } label: {
                                         Image(systemName: "paperplane.fill").font(.system(size: 13)).foregroundStyle(PEOPLE_ACCENT)
                                     }
+                                    Button { auditHistoryOf = a } label: {
+                                        Image(systemName: "clock.arrow.circlepath").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.45))
+                                    }
                                     Button {
                                         edit = ChecklistEdit(listId: a.id, role: a.role, items: (a.itemDetails?.isEmpty == false) ? a.itemDetails! : [ChecklistItem(label: "")],
                                                               kind: "audit", targetScope: a.target_scope ?? "venue", assignedStaffId: a.assigned_staff_id, title: a.title ?? "",
@@ -3061,7 +3238,9 @@ private struct ChecklistsTab: View {
                             if let run {
                                 ChecklistRunCard(m: m, list: a, run: run, showManagerControls: false,
                                                   onToggle: { i, photo in await m.toggleAuditItem(a, i, photoURL: photo) },
-                                                  onEdit: {}, onDelete: {})
+                                                  onEdit: {}, onDelete: {}, grading: true,
+                                                  onGrade: { i, r, photo in await m.gradeAuditItem(a, i, result: r, photoURL: photo) },
+                                                  onNote: { i, text in await m.setAuditItemNote(a, i, note: text) })
                             } else {
                                 Text(t("pe.noRunYet")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
                             }
@@ -3102,13 +3281,20 @@ private struct ChecklistRunCard: View {
     let onToggle: (Int, String?) async -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+    // Оценки Б1/Б2 (разовые аудиты): ✓/✗/N/A + комментарий вместо бинарной галки.
+    var grading: Bool = false
+    var onGrade: ((Int, String?, String?) async -> Void)? = nil  // (idx, result | nil = снять, photoURL)
+    var onNote: ((Int, String?) async -> Void)? = nil
 
     @State private var showCamera = false
     @State private var pendingIndex: Int?
+    @State private var pendingResult: String?
     @State private var uploading = false
     @State private var report: ReportTarget?
+    @State private var noteTarget: NoteTarget?
 
     struct ReportTarget: Identifiable { var id = UUID(); var index: Int; var label: String }
+    struct NoteTarget: Identifiable { var id = UUID(); var index: Int; var text: String }
 
     var body: some View {
         let items = list.itemDetails ?? []
@@ -3131,8 +3317,12 @@ private struct ChecklistRunCard: View {
             .padding(.bottom, 8)
             VStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.offset) { i, item in
-                    let on = i < state.count && state[i].done
-                    HStack(spacing: 8) {
+                    let st: ChecklistItemState? = i < state.count ? state[i] : nil
+                    if grading {
+                        gradingRow(i, item, st)
+                    } else {
+                        let on = st?.done == true
+                        HStack(spacing: 8) {
                         Button {
                             guard !uploading else { return }
                             if item.photo_required && !on { pendingIndex = i; showCamera = true }
@@ -3155,8 +3345,9 @@ private struct ChecklistRunCard: View {
                         Button { report = ReportTarget(index: i, label: item.label) } label: {
                             Image(systemName: "exclamationmark.bubble").font(.system(size: 13)).foregroundStyle(BrandKit.menu.opacity(0.6))
                         }
+                        }
+                        .padding(.vertical, 12).padding(.horizontal, 14)
                     }
-                    .padding(.vertical, 12).padding(.horizontal, 14)
                     if i < items.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 48) }
                 }
             }
@@ -3166,13 +3357,16 @@ private struct ChecklistRunCard: View {
         .sheet(isPresented: $showCamera) {
             CameraCaptureView { image in
                 showCamera = false
-                guard let idx = pendingIndex, let image else { return }
+                guard let idx = pendingIndex, let image else { pendingResult = nil; return }
+                let result = pendingResult
+                pendingResult = nil
                 uploading = true
                 Task {
                     defer { uploading = false }
                     let itemId = idx < items.count ? items[idx].id : "\(idx)"
                     if let url = await uploadAuditPhoto(image: image, restaurantId: m.rid, completionId: run?.id ?? list.id, itemId: itemId) {
-                        await onToggle(idx, url)
+                        if let result, let onGrade { await onGrade(idx, result, url) }
+                        else { await onToggle(idx, url) }
                     } else {
                         m.flash(t("saveFailed", ["err": "upload"]))
                     }
@@ -3181,6 +3375,377 @@ private struct ChecklistRunCard: View {
         }
         .sheet(item: $report) { target in
             ReportProblemSheet(m: m, list: list, run: run, itemIndex: target.index, itemLabel: target.label)
+        }
+        .sheet(item: $noteTarget) { target in
+            ItemNoteSheet(initial: target.text) { text in
+                Task { await onNote?(target.index, text) }
+            }
+        }
+    }
+
+    /// Строка пункта в grading-режиме: исход ✓ / ✗ / N/A + комментарий (ревью Б1/Б2).
+    /// Старые записи без result: done трактуем как pass.
+    @ViewBuilder
+    private func gradingRow(_ i: Int, _ item: ChecklistItem, _ st: ChecklistItemState?) -> some View {
+        let eff = st?.result ?? (st?.done == true ? "pass" : nil)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(item.label).font(.system(size: 15)).foregroundStyle(.primary.opacity(eff == "pass" ? 0.55 : 1))
+                if item.photo_required {
+                    Image(systemName: "camera.fill").font(.system(size: 10)).foregroundStyle(.primary.opacity(0.3))
+                }
+                Spacer()
+                Button { report = ReportTarget(index: i, label: item.label) } label: {
+                    Image(systemName: "exclamationmark.bubble").font(.system(size: 13)).foregroundStyle(BrandKit.menu.opacity(0.6))
+                }
+            }
+            HStack(spacing: 8) {
+                gradePill(on: eff == "pass", color: BrandKit.analytics) {
+                    Image(systemName: "checkmark").font(.system(size: 12, weight: .bold))
+                } action: {
+                    guard !uploading else { return }
+                    if eff == "pass" { Task { await onGrade?(i, nil, nil) } }
+                    else if item.photo_required && st?.photo_url == nil { pendingIndex = i; pendingResult = "pass"; showCamera = true }
+                    else { Task { await onGrade?(i, "pass", nil) } }
+                }
+                gradePill(on: eff == "fail", color: BrandKit.menu) {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .bold))
+                } action: {
+                    if eff == "fail" { Task { await onGrade?(i, nil, nil) } }
+                    else {
+                        Task { await onGrade?(i, "fail", nil) }
+                        // Фейл сразу предлагает завести задачу-нарушение (паттерн SafetyCulture).
+                        report = ReportTarget(index: i, label: item.label)
+                    }
+                }
+                gradePill(on: eff == "na", color: Color.primary.opacity(0.45)) {
+                    Text("N/A").font(.system(size: 12, weight: .bold))
+                } action: {
+                    Task { await onGrade?(i, eff == "na" ? nil : "na", nil) }
+                }
+                Spacer()
+                Button { noteTarget = NoteTarget(index: i, text: st?.note ?? "") } label: {
+                    Image(systemName: "text.bubble")
+                        .font(.system(size: 13))
+                        .foregroundStyle((st?.note?.isEmpty == false) ? PEOPLE_ACCENT : Color.primary.opacity(0.3))
+                }
+            }
+            if uploading && pendingIndex == i {
+                ProgressView().controlSize(.small)
+            }
+            if let note = st?.note, !note.isEmpty {
+                Text(note).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
+            }
+        }
+        .padding(.vertical, 12).padding(.horizontal, 14)
+    }
+
+    private func gradePill(on: Bool, color: Color, @ViewBuilder label: () -> some View, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            label()
+                .foregroundStyle(on ? Color.white : Color.primary.opacity(0.45))
+                .frame(minWidth: 34)
+                .padding(.vertical, 6).padding(.horizontal, 8)
+                .background(on ? AnyShapeStyle(color) : AnyShapeStyle(Color.primary.opacity(0.08)), in: RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Комментарий к пункту аудита (ревью Б2): маленький шит с TextEditor.
+private struct ItemNoteSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let initial: String
+    let onSave: (String?) -> Void
+    @State private var text = ""
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.miseBg.ignoresSafeArea()
+                TextEditor(text: $text)
+                    .scrollContentBackground(.hidden)
+                    .padding(12)
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                    .padding(16)
+                    .frame(maxHeight: 180, alignment: .top)
+                    .frame(maxHeight: .infinity, alignment: .top)
+            }
+            .navigationTitle(t("pe.itemNote"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(t("cancel")) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(t("save")) { onSave(text); dismiss() }.fontWeight(.semibold)
+                }
+            }
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
+        }
+        .presentationDetents([.height(280)])
+        .onAppear { text = initial }
+    }
+}
+
+/// Счёт прогона (ревью Б3/Б4): N/A вне знаменателя, pass = выполнено;
+/// legacy-записи без result — done = pass.
+nonisolated private func auditRunScore(_ items: [ChecklistItem], _ state: [ChecklistItemState]) -> (pass: Int, total: Int) {
+    var pass = 0, total = 0
+    for i in items.indices {
+        let st: ChecklistItemState? = i < state.count ? state[i] : nil
+        let eff = st?.result ?? (st?.done == true ? "pass" : nil)
+        if eff == "na" { continue }
+        total += 1
+        if eff == "pass" { pass += 1 }
+    }
+    return (pass, total)
+}
+
+/// История прогонов аудита за 30 дней (ревью Б4) — вход в отчёт прогона (Б3).
+/// Данные уже в m.auditRuns (loadAudits тянет 30 дней) — без отдельного запроса.
+private struct AuditHistorySheet: View {
+    @Bindable var m: PeopleModel
+    let list: ShiftChecklist
+    @State private var openRun: ChecklistCompletion?
+
+    private var runs: [ChecklistCompletion] {
+        m.auditRuns.filter { $0.checklist_id == list.id }.sorted { ($0.date ?? "") > ($1.date ?? "") }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.miseBg.ignoresSafeArea()
+                if runs.isEmpty {
+                    Text(t("pe.auditHistoryEmpty")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4))
+                } else {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(runs) { run in
+                                let score = auditRunScore(list.itemDetails ?? [], run.items_state ?? [])
+                                let pct = score.total > 0 ? Int((Double(score.pass) / Double(score.total) * 100).rounded()) : 0
+                                Button { openRun = run } label: {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(run.date ?? "—").font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
+                                            Text(m.staffName(run.staff_id)).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
+                                        }
+                                        Spacer()
+                                        if run.status == "pending" {
+                                            Text(t("pe.notChecked")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.4))
+                                        } else {
+                                            Text("\(pct)%").font(.system(size: 14, weight: .bold))
+                                                .foregroundStyle(pct >= 80 ? BrandKit.analytics : pct >= 50 ? BrandKit.stash : BrandKit.menu)
+                                        }
+                                    }
+                                    .padding(.vertical, 12).padding(.horizontal, 16)
+                                }
+                                .buttonStyle(.plain)
+                                Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 16)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle(t("pe.auditHistory"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
+        }
+        .sheet(item: $openRun) { run in AuditRunReportView(m: m, list: list, run: run) }
+    }
+}
+
+// Снапшот PDF-отчёта прогона: строки локализуются на MainActor, фото качаются заранее —
+// рендер (тяжёлый) уходит в Task.detached, как renderPDF бизнес-отчёта.
+nonisolated private struct AuditPdfRow: @unchecked Sendable {
+    let tag: String; let kind: String?; let label: String; let note: String?
+}
+nonisolated private struct AuditPdfSnapshot: @unchecked Sendable {
+    let title, meta, scoreLine: String
+    let rows: [AuditPdfRow]
+    let photos: [Int: UIImage]
+}
+
+nonisolated private func renderAuditPdf(_ s: AuditPdfSnapshot) -> Data {
+    let pageW: CGFloat = 595, pageH: CGFloat = 842, margin: CGFloat = 40
+    let contentW = pageW - margin * 2
+    let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: pageW, height: pageH))
+    var pdf = Data()
+    // Светлая палитра принудительно — как в renderPDF (тёмная тема делала PDF нечитаемым).
+    UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+        pdf = renderer.pdfData { ctx in
+            ctx.beginPage()
+            var y: CGFloat = margin
+
+            @discardableResult
+            func draw(_ str: String, x: CGFloat, atY: CGFloat, size: CGFloat, weight: UIFont.Weight = .regular, color: UIColor = .black, width: CGFloat) -> CGFloat {
+                let p = NSMutableParagraphStyle(); p.lineBreakMode = .byWordWrapping
+                let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: size, weight: weight), .foregroundColor: color, .paragraphStyle: p]
+                let h = ceil((str as NSString).boundingRect(with: CGSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin], attributes: attrs, context: nil).height)
+                (str as NSString).draw(in: CGRect(x: x, y: atY, width: width, height: h), withAttributes: attrs)
+                return h
+            }
+
+            y += draw(s.title, x: margin, atY: y, size: 17, weight: .bold, width: contentW) + 6
+            y += draw(s.meta, x: margin, atY: y, size: 10, color: .darkGray, width: contentW) + 2
+            y += draw(s.scoreLine, x: margin, atY: y, size: 10, color: .darkGray, width: contentW) + 10
+            UIColor.lightGray.setStroke()
+            let sep = UIBezierPath(); sep.move(to: CGPoint(x: margin, y: y)); sep.addLine(to: CGPoint(x: pageW - margin, y: y)); sep.lineWidth = 0.5; sep.stroke()
+            y += 14
+
+            for (i, row) in s.rows.enumerated() {
+                if y > pageH - 80 { ctx.beginPage(); y = margin }
+                let tagColor: UIColor = row.kind == "fail" ? UIColor(red: 0.8, green: 0.16, blue: 0.16, alpha: 1)
+                    : row.kind == "pass" ? UIColor(red: 0.12, green: 0.55, blue: 0.27, alpha: 1) : .gray
+                draw(row.tag, x: margin, atY: y, size: 10, weight: .bold, color: tagColor, width: 88)
+                let labelH = draw(row.label, x: margin + 95, atY: y, size: 11, width: contentW - 95)
+                y += max(labelH, 13) + 3
+                if let note = row.note, !note.isEmpty {
+                    if y > pageH - 60 { ctx.beginPage(); y = margin }
+                    y += draw(note, x: margin + 95, atY: y, size: 9, color: .darkGray, width: contentW - 95) + 3
+                }
+                if let img = s.photos[i] {
+                    let h: CGFloat = 90
+                    let w = img.size.height > 0 ? min(140, h * img.size.width / img.size.height) : h
+                    if y + h > pageH - margin { ctx.beginPage(); y = margin }
+                    img.draw(in: CGRect(x: margin + 95, y: y, width: w, height: h))
+                    y += h + 6
+                }
+                y += 7
+            }
+        }
+    }
+    return pdf
+}
+
+private struct AuditShareSheet: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+private struct AuditPdfPayload: Identifiable { let id = UUID(); let url: URL }
+
+/// Отчёт по прогону (ревью Б3): пункты со статусами, комментарии, фото + экспорт PDF.
+private struct AuditRunReportView: View {
+    @Bindable var m: PeopleModel
+    let list: ShiftChecklist
+    let run: ChecklistCompletion
+    @State private var generating = false
+    @State private var payload: AuditPdfPayload?
+
+    var body: some View {
+        let items = list.itemDetails ?? []
+        let state = run.items_state ?? []
+        let score = auditRunScore(items, state)
+        let pct = score.total > 0 ? Int((Double(score.pass) / Double(score.total) * 100).rounded()) : 0
+        NavigationStack {
+            ZStack {
+                Color.miseBg.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        VStack(spacing: 4) {
+                            Text("\(pct)%").font(.system(size: 34, weight: .bold))
+                                .foregroundStyle(pct >= 80 ? BrandKit.analytics : pct >= 50 ? BrandKit.stash : BrandKit.menu)
+                            Text("\(run.date ?? "—") · \(m.staffName(run.staff_id)) · \(score.pass)/\(score.total)")
+                                .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(16).background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+
+                        VStack(spacing: 0) {
+                            ForEach(Array(items.enumerated()), id: \.offset) { i, item in
+                                let st: ChecklistItemState? = i < state.count ? state[i] : nil
+                                let eff = st?.result ?? (st?.done == true ? "pass" : nil)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        resultTag(eff)
+                                        Text(item.label).font(.system(size: 14)).foregroundStyle(.primary)
+                                        Spacer(minLength: 0)
+                                    }
+                                    if let note = st?.note, !note.isEmpty {
+                                        Text(note).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
+                                    }
+                                    if let photo = st?.photo_url, let url = URL(string: photo) {
+                                        AsyncImage(url: url) { img in img.resizable().scaledToFill() } placeholder: { Color.primary.opacity(0.08) }
+                                            .frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 10))
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 12).padding(.horizontal, 14)
+                                if i < items.count - 1 { Divider().overlay(Color.primary.opacity(0.07)) }
+                            }
+                        }
+                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle(list.title?.isEmpty == false ? list.title! : t("pe.auditReport"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { export() } label: {
+                        if generating { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "square.and.arrow.up") }
+                    }
+                    .disabled(generating)
+                }
+            }
+            .toolbarBackground(Color.miseBg, for: .navigationBar)
+        }
+        .sheet(item: $payload) { p in AuditShareSheet(url: p.url) }
+    }
+
+    private func resultTag(_ eff: String?) -> some View {
+        let (label, color): (String, Color) = eff == "pass" ? ("OK", BrandKit.analytics)
+            : eff == "fail" ? (t("pe.resultFail"), BrandKit.menu)
+            : eff == "na" ? ("N/A", Color.primary.opacity(0.45))
+            : (t("pe.notChecked"), Color.primary.opacity(0.45))
+        return Text(label).font(.system(size: 10, weight: .bold)).foregroundStyle(color)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func export() {
+        guard !generating else { return }
+        generating = true
+        let items = list.itemDetails ?? []
+        let state = run.items_state ?? []
+        let score = auditRunScore(items, state)
+        let pct = score.total > 0 ? Int((Double(score.pass) / Double(score.total) * 100).rounded()) : 0
+        var rows: [AuditPdfRow] = []
+        var photoURLs: [Int: URL] = [:]
+        for (i, item) in items.enumerated() {
+            let st: ChecklistItemState? = i < state.count ? state[i] : nil
+            let eff = st?.result ?? (st?.done == true ? "pass" : nil)
+            let tag = eff == "pass" ? "OK" : eff == "fail" ? t("pe.resultFail") : eff == "na" ? "N/A" : t("pe.notChecked")
+            rows.append(AuditPdfRow(tag: tag, kind: eff, label: item.label, note: st?.note))
+            if let p = st?.photo_url, let u = URL(string: p) { photoURLs[i] = u }
+        }
+        let snap0 = (
+            title: list.title?.isEmpty == false ? list.title! : t("pe.auditReport"),
+            meta: "\(run.date ?? "") · \(m.staffName(run.staff_id))",
+            scoreLine: "\(t("pe.statsCompletionRate")): \(pct)% (\(score.pass)/\(score.total))"
+        )
+        Task {
+            var photos: [Int: UIImage] = [:]
+            for (i, u) in photoURLs {
+                if let (data, _) = try? await URLSession.shared.data(from: u), let img = UIImage(data: data) { photos[i] = img }
+            }
+            let snap = AuditPdfSnapshot(title: snap0.title, meta: snap0.meta, scoreLine: snap0.scoreLine, rows: rows, photos: photos)
+            let data = await Task.detached(priority: .userInitiated) { renderAuditPdf(snap) }.value
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("mise-audit-\(Int(Date().timeIntervalSince1970)).pdf")
+            if (try? data.write(to: url)) != nil {
+                // Как в ReportExportView: даём Task осесть, иначе share-лист не открывается.
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                payload = AuditPdfPayload(url: url)
+            } else {
+                m.flash(t("saveFailed", ["err": "pdf"]))
+            }
+            generating = false
         }
     }
 }
@@ -3381,9 +3946,14 @@ private struct StatisticsSection: View {
             let state = c.items_state ?? []
             let staffLabel = m.staffName(c.staff_id)
             for i in items.indices {
+                // Оценки Б1: N/A выпадает из знаменателя, pass = выполнено, fail = нет;
+                // старые записи без result — по done (бинарная модель).
+                let st: ChecklistItemState? = i < state.count ? state[i] : nil
+                let eff = st?.result ?? (st?.done == true ? "pass" : nil)
+                if eff == "na" { continue }
                 total += 1
                 staffTotal[staffLabel, default: 0] += 1
-                if i < state.count && state[i].done {
+                if eff == "pass" {
                     done += 1
                     staffDone[staffLabel, default: 0] += 1
                 }

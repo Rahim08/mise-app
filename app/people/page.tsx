@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { notify as pushNotify } from '@/lib/notifyClient'
-import { renderNotify, renderCategory } from '@/lib/notifyStrings'
+import { renderNotify, renderCategory, renderSegments } from '@/lib/notifyStrings'
 import { useTheme } from '@/hooks/useTheme'
 import { AuthGate } from '@/components/AuthGate'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
@@ -99,7 +99,8 @@ function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; m
     setLoading(true)
     const [{ data: tk }, { data: rp }, { data: dir }] = await Promise.all([
       db.from('staff_tasks').select('*').order('created_at', { ascending: false }).limit(200),
-      db.from('staff_reports').select('*').order('created_at', { ascending: false }),
+      // Лимиты на растущие таблицы (ревью Д1): свежие 200 достаточно для рабочего списка.
+      db.from('staff_reports').select('*').order('created_at', { ascending: false }).limit(200),
       db.from('staff_directory').select('*').eq('is_active', true).order('name'),
     ])
     setTasks(tk || []); setReports(rp || []); setStaff(dir || []); setLoading(false)
@@ -340,7 +341,8 @@ function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManager: boo
     const today = fmtDate(new Date())
     const from = fmtDate(addDays(new Date(), -14)); const to = fmtDate(addDays(new Date(), 60))
     const [{ data: rq }, { data: st }, { data: sc }] = await Promise.all([
-      db.from('shift_swap_requests').select('*').order('created_at', { ascending: false }),
+      // Лимит на растущую таблицу (ревью Д1).
+      db.from('shift_swap_requests').select('*').order('created_at', { ascending: false }).limit(200),
       db.from('staff_directory').select('*').eq('is_active', true).order('name'),
       db.from('staff_schedules').select('*').gte('date', from).lte('date', to),
     ])
@@ -913,7 +915,11 @@ function NotificationsTab({ myId, accent, t }: { myId: string; accent: string; t
       : n.title_params
     return renderNotify(locale, n.title_key, params || undefined)
   }
-  const renderBody = (n: any) => n.body_key ? renderNotify(locale, n.body_key, n.body_params || undefined) : n.body
+  // '_segments' — составное тело (в т.ч. секьюрный дайджест кассы, ревью Г3):
+  // лейблы переводятся, суммы — готовые строки.
+  const renderBody = (n: any) => n.body_key === '_segments' && Array.isArray(n.body_params?.segments)
+    ? renderSegments(locale, n.body_params.segments)
+    : n.body_key ? renderNotify(locale, n.body_key, n.body_params || undefined) : n.body
 
   useEffect(() => {
     db.from('notifications').select('*').eq('staff_id', myId).order('created_at', { ascending: false }).limit(50)
@@ -1174,7 +1180,15 @@ function normItem(x: any, i: number): { id: string; label: string; photo_require
   if (typeof x === 'string') return { id: String(i), label: x, photo_required: false }
   return { id: x?.id ?? String(i), label: x?.label ?? '', photo_required: !!x?.photo_required }
 }
-function normState(x: any): { done: boolean; photo_url: string | null } {
+// Оценка пункта аудита (ревью Б1/Б2): result пишется только в grading-режиме (разовые
+// аудиты), done остаётся для обратной совместимости (result != null ⇒ done = true —
+// «пункт проверен», прогон завершается как раньше). note — комментарий проверяющего.
+type ItemState = { done: boolean; photo_url: string | null; result?: 'pass' | 'fail' | 'na' | null; note?: string | null }
+// Старые записи без result: done трактуем как pass (бинарная модель), пусто — не проверен.
+function effResult(s: ItemState | undefined): 'pass' | 'fail' | 'na' | null {
+  return s?.result ?? (s?.done ? 'pass' : null)
+}
+function normState(x: any): ItemState {
   if (typeof x === 'boolean') return { done: x, photo_url: null }
   if (x == null) return { done: false, photo_url: null }
   // Спред первым: доп. поля (result/note — оценки аудита, ревью Б1) переживают мерж,
@@ -1225,17 +1239,22 @@ async function reportViolation(opts: {
 }
 
 // Карточка пунктов — общая для «Смены» и разовых «Аудитов».
-function ChecklistCard({ title, items, state, canFill, restaurantId, completionId, staff, myId, accent, t, toast, onSetItem, actions }: {
-  title: React.ReactNode; items: { id: string; label: string; photo_required: boolean }[]; state: { done: boolean; photo_url: string | null }[]
+// grading (ревью Б1/Б2): вместо бинарной галки — исход ✓/✗/N/A + комментарий к пункту
+// (модель SafetyCulture/iAuditor). Включается только для разовых аудитов.
+function ChecklistCard({ title, items, state, canFill, restaurantId, completionId, staff, myId, accent, t, toast, onSetItem, actions, grading }: {
+  title: React.ReactNode; items: { id: string; label: string; photo_required: boolean }[]; state: ItemState[]
   canFill: boolean; restaurantId: string; completionId?: string; staff: any[]; myId: string; accent: string; t: any; toast: (m: string) => void
-  onSetItem: (idx: number, next: { done: boolean; photo_url: string | null }) => void
+  onSetItem: (idx: number, next: ItemState) => void
   actions?: React.ReactNode
+  grading?: boolean
 }) {
   const { t: tr } = useI18n()
   const [reporting, setReporting] = useState<number | null>(null)
   const [assignee, setAssignee] = useState('')
   const [reportFile, setReportFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState<number | null>(null)
+  const [noteOpen, setNoteOpen] = useState<number | null>(null)
+  const [noteDraft, setNoteDraft] = useState('')
   const doneCount = items.filter((_, i) => state[i]?.done).length
 
   const toggle = async (i: number, file?: File) => {
@@ -1247,11 +1266,43 @@ function ChecklistCard({ title, items, state, canFill, restaurantId, completionI
       const url = await uploadAuditPhoto(restaurantId, completionId || 'pending', file)
       setUploading(null)
       if (!url) return
-      onSetItem(i, { done: true, photo_url: url })
+      onSetItem(i, { ...cur, done: true, photo_url: url })
       return
     }
-    onSetItem(i, { done: !cur.done, photo_url: cur.photo_url })
+    onSetItem(i, { ...cur, done: !cur.done, photo_url: cur.photo_url })
   }
+
+  // Оценка исхода: повторный тап по той же оценке снимает её; pass с обязательным фото
+  // требует снимок (как бинарная галка); fail сразу открывает форму «нарушение → задача».
+  const grade = async (i: number, r: 'pass' | 'fail' | 'na', file?: File) => {
+    if (!canFill) { toast(tr('pe.needCheckInFirst')); return }
+    const it = items[i]; const cur = state[i] || { done: false, photo_url: null }
+    if (effResult(cur) === r) { onSetItem(i, { ...cur, done: false, result: null }); return }
+    if (r === 'pass' && it.photo_required && !cur.photo_url) {
+      if (!file) return
+      setUploading(i)
+      const url = await uploadAuditPhoto(restaurantId, completionId || 'pending', file)
+      setUploading(null)
+      if (!url) return
+      onSetItem(i, { ...cur, done: true, result: 'pass', photo_url: url })
+      return
+    }
+    onSetItem(i, { ...cur, done: true, result: r })
+    if (r === 'fail') { setReporting(i); setAssignee(''); setReportFile(null) }
+  }
+
+  const saveNote = (i: number) => {
+    const cur = state[i] || { done: false, photo_url: null }
+    const clean = noteDraft.trim()
+    if (clean !== (cur.note || '')) onSetItem(i, { ...cur, note: clean || null })
+    setNoteOpen(null)
+  }
+
+  const pill = (on: boolean, color: string): React.CSSProperties => ({
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '6px 14px',
+    borderRadius: 9, border: 'none', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+    cursor: canFill ? 'pointer' : 'default', background: on ? color : t.fill, color: on ? '#fff' : t.text3,
+  })
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -1266,6 +1317,66 @@ function ChecklistCard({ title, items, state, canFill, restaurantId, completionI
         {items.map((it, i) => {
           const s = state[i] || { done: false, photo_url: null }
           const needsPhoto = it.photo_required && !s.done && !s.photo_url
+          if (grading) {
+            const eff = effResult(s)
+            const passNeedsPhoto = it.photo_required && !s.photo_url && eff !== 'pass'
+            return (
+              <div key={it.id} style={{ borderBottom: i < items.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                <div style={{ padding: '12px 16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 15, color: t.text, opacity: eff === 'pass' ? 0.55 : 1 }}>{it.label}</span>
+                      {uploading === i && <span style={{ display: 'block', fontSize: 11, color: t.text3 }}>{tr('pe.uploadingPhoto')}</span>}
+                      {s.photo_url && <a href={s.photo_url} target="_blank" rel="noreferrer" style={{ display: 'block', fontSize: 11, color: accent }}>{tr('pe.photoRequired')} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><path d="M20 6L9 17l-5-5" /></svg></a>}
+                      {!!s.note && noteOpen !== i && <div style={{ fontSize: 12, color: t.text3, marginTop: 3, whiteSpace: 'pre-wrap' }}>{s.note}</div>}
+                    </div>
+                    <button onClick={() => { setReporting(reporting === i ? null : i); setAssignee(''); setReportFile(null) }} title={tr('pe.reportViolation')} style={{ background: 'none', border: 'none', color: reporting === i ? t.red : t.text4, cursor: 'pointer', padding: 4, display: 'flex', flexShrink: 0 }}>
+                      <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><path d="M4 22V15" /></svg>
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+                    {passNeedsPhoto && canFill ? (
+                      <label style={pill(false, t.green)}>
+                        <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) grade(i, 'pass', f); e.target.value = '' }} />
+                        <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" /></svg>
+                        <svg width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" /><circle cx="12" cy="13" r="4" /></svg>
+                      </label>
+                    ) : (
+                      <button onClick={() => grade(i, 'pass')} disabled={!canFill} style={pill(eff === 'pass', t.green)}>
+                        <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" /></svg>
+                      </button>
+                    )}
+                    <button onClick={() => grade(i, 'fail')} disabled={!canFill} style={pill(eff === 'fail', t.red)}>
+                      <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                    </button>
+                    <button onClick={() => grade(i, 'na')} disabled={!canFill} style={pill(eff === 'na', t.text3)}>N/A</button>
+                    <button onClick={() => { if (noteOpen === i) { saveNote(i) } else { setNoteOpen(i); setNoteDraft(s.note || '') } }} disabled={!canFill} title={tr('pe.itemNote')} style={{ background: 'none', border: 'none', color: (noteOpen === i || s.note) ? accent : t.text4, cursor: canFill ? 'pointer' : 'default', padding: 4, display: 'flex', marginLeft: 'auto' }}>
+                      <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+                    </button>
+                  </div>
+                  {noteOpen === i && (
+                    <textarea value={noteDraft} onChange={e => setNoteDraft(e.target.value)} onBlur={() => saveNote(i)} autoFocus
+                      placeholder={tr('pe.itemNote')} rows={2}
+                      style={{ ...inp(t), marginBottom: 0, marginTop: 10, width: '100%', resize: 'vertical', fontFamily: 'inherit' }} />
+                  )}
+                </div>
+                {reporting === i && (
+                  <div style={{ padding: '0 16px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <select value={assignee} onChange={e => setAssignee(e.target.value)} style={{ ...inp(t), marginBottom: 0 }}>
+                      <option value="">{tr('pe.auditTarget')}</option>
+                      {CHECKLIST_ROLES.filter(r => r.val).map(r => <option key={r.val} value={`role:${r.val}`}>{tr(r.label)}</option>)}
+                      {staff.map((s2: any) => <option key={s2.id} value={s2.id}>{s2.name}</option>)}
+                    </select>
+                    <label style={{ ...btnB2(t), textAlign: 'center', cursor: 'pointer', display: 'block' }}>
+                      {reportFile ? reportFile.name : tr('pe.addPhoto')}
+                      <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={e => setReportFile(e.target.files?.[0] || null)} />
+                    </label>
+                    <button onClick={async () => { await reportViolation({ restaurantId, myId, label: it.label, completionId, assignee, staff, photoFile: reportFile, toast, tr }); setReporting(null); setReportFile(null) }} disabled={!assignee} style={{ width: '100%', padding: '10px', borderRadius: 12, border: 'none', background: t.red, color: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 700, cursor: assignee ? 'pointer' : 'default', opacity: assignee ? 1 : 0.5 }}>{tr('pe.reportViolation')}</button>
+                  </div>
+                )}
+              </div>
+            )
+          }
           return (
             <div key={it.id} style={{ borderBottom: i < items.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px' }}>
@@ -1480,6 +1591,8 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
     origItems?: { label: string; photo_required: boolean }[]
   } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [historyOf, setHistoryOf] = useState<any | null>(null)
+  const [reportOf, setReportOf] = useState<{ audit: any; completion: any } | null>(null)
 
   const load = async () => {
     // Только сегодняшние прогоны (как iOS todayAuditRuns): иначе отметка попадала в
@@ -1498,7 +1611,7 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
     (a.target_scope === 'staff' && a.assigned_staff_id === myId)
   )
 
-  const setItem = async (audit: any, idx: number, next: { done: boolean; photo_url: string | null }) => {
+  const setItem = async (audit: any, idx: number, next: ItemState) => {
     const items = (Array.isArray(audit.items) ? audit.items : []).map((x: any, i: number) => normItem(x, i))
     const completion = completions.find(c => c.checklist_id === audit.id && c.date === today)
     const curState = (Array.isArray(completion?.items_state) ? completion.items_state : []).map(normState)
@@ -1615,7 +1728,7 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
           <ChecklistCard
             key={audit.id}
             title={<>{audit.title || '—'} <span style={{ opacity: 0.6, fontWeight: 500 }}>· {targetLabel}{recurLabel ? ` · ${recurLabel}` : ''}</span></>}
-            items={items} state={state} canFill={canFill}
+            items={items} state={state} canFill={canFill} grading
             restaurantId={restaurantId} completionId={completion?.id} staff={staff} myId={myId}
             accent={accent} t={t} toast={toast}
             onSetItem={(idx, next) => setItem(audit, idx, next)}
@@ -1626,6 +1739,9 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
                     <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>
                   </button>
                 )}
+                <button onClick={() => setHistoryOf(audit)} title={tr('pe.auditHistory')} style={{ background: 'none', border: 'none', color: t.text3, cursor: 'pointer', padding: 2, display: 'flex' }}>
+                  <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                </button>
                 <button onClick={() => editAudit(audit)} title={tr('pe.editAudit')} style={{ background: 'none', border: 'none', color: t.text3, cursor: 'pointer', padding: 2, display: 'flex' }}>
                   <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M17 3a2.8 2.8 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg>
                 </button>
@@ -1699,7 +1815,186 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
           </div>
         </Sheet>
       )}
+
+      {historyOf != null && (
+        <AuditHistorySheet audit={historyOf} staff={staff} accent={accent} t={t}
+          onClose={() => setHistoryOf(null)}
+          onOpenRun={c => { setReportOf({ audit: historyOf, completion: c }); setHistoryOf(null) }} />
+      )}
+      {reportOf != null && (
+        <AuditReportSheet audit={reportOf.audit} completion={reportOf.completion} staff={staff} accent={accent} t={t}
+          onClose={() => setReportOf(null)} />
+      )}
     </div>
+  )
+}
+
+// Счёт прогона (ревью Б3/Б4): N/A вне знаменателя; fail и «не проверено» = не выполнено.
+function runScore(items: any[], state: ItemState[]): { pass: number; total: number } {
+  let pass = 0, total = 0
+  items.forEach((_, i) => {
+    const eff = effResult(state[i])
+    if (eff === 'na') return
+    total++
+    if (eff === 'pass') pass++
+  })
+  return { pass, total }
+}
+
+// PDF-отчёт прогона (ревью Б3): шапка, пункты со статусами, комментарии, фото.
+// Та же инфраструктура, что в Analytics (jsPDF + PT Sans для кириллицы).
+async function exportAuditRunPdf(opts: { audit: any; completion: any; staffName: string; targetLabel: string; tr: (k: string, v?: Record<string, string | number>) => string }) {
+  const { audit, completion, staffName, targetLabel, tr } = opts
+  const { jsPDF } = await import('jspdf')
+  const { ptSansBase64 } = await import('@/lib/ptSansFont')
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+  doc.addFileToVFS('PTSans.ttf', ptSansBase64)
+  doc.addFont('PTSans.ttf', 'PTSans', 'normal')
+  doc.setFont('PTSans')
+  const items = (Array.isArray(audit.items) ? audit.items : []).map((x: any, i: number) => normItem(x, i))
+  const state = (Array.isArray(completion.items_state) ? completion.items_state : []).map(normState)
+  const { pass, total } = runScore(items, state)
+  let y = 46
+  doc.setFontSize(17); doc.text(audit.title || tr('pe.auditReport'), 40, y); y += 22
+  doc.setFontSize(10); doc.setTextColor(110)
+  doc.text(`${completion.date || ''} · ${staffName} · ${targetLabel}`, 40, y); y += 14
+  doc.text(`${tr('pe.completionRate')}: ${total > 0 ? Math.round((pass / total) * 100) : 0}% (${pass}/${total})`, 40, y); y += 10
+  doc.setDrawColor(200); doc.line(40, y, 555, y); y += 20
+  for (let i = 0; i < items.length; i++) {
+    const s = state[i]; const eff = effResult(s)
+    if (y > 770) { doc.addPage(); y = 46 }
+    const tag = eff === 'pass' ? 'OK' : eff === 'fail' ? tr('pe.resultFail') : eff === 'na' ? 'N/A' : tr('pe.notChecked')
+    doc.setFontSize(11)
+    if (eff === 'fail') doc.setTextColor(200, 40, 40)
+    else if (eff === 'pass') doc.setTextColor(30, 140, 70)
+    else doc.setTextColor(120)
+    doc.text(tag, 40, y)
+    doc.setTextColor(20)
+    const lines = doc.splitTextToSize(items[i].label, 400)
+    doc.text(lines, 135, y); y += lines.length * 14
+    if (s?.note) {
+      if (y > 780) { doc.addPage(); y = 46 }
+      doc.setFontSize(9); doc.setTextColor(110)
+      const nl = doc.splitTextToSize(s.note, 400)
+      doc.text(nl, 135, y); y += nl.length * 12
+      doc.setTextColor(20)
+    }
+    if (s?.photo_url) {
+      // Фото пунктов — публичные URL Supabase Storage; не загрузилось (CORS/сеть) — URL строкой.
+      try {
+        const blob = await (await fetch(s.photo_url)).blob()
+        const dataUrl: string = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej; r.readAsDataURL(blob) })
+        if (y > 690) { doc.addPage(); y = 46 }
+        doc.addImage(dataUrl, dataUrl.includes('image/png') ? 'PNG' : 'JPEG', 135, y, 90, 90, undefined, 'FAST'); y += 100
+      } catch {
+        doc.setFontSize(8); doc.setTextColor(110); doc.text(String(s.photo_url), 135, y); y += 12; doc.setTextColor(20)
+      }
+    }
+    y += 8
+  }
+  doc.save(`audit-${(audit.title || 'report').replace(/[^0-9A-Za-zЀ-ӿ-]+/g, '_')}-${completion.date || ''}.pdf`)
+}
+
+// История прогонов аудита за 30 дней (ревью Б4) — вход в отчёт Б3.
+function AuditHistorySheet({ audit, staff, accent, t, onClose, onOpenRun }: {
+  audit: any; staff: any[]; accent: string; t: any; onClose: () => void; onOpenRun: (completion: any) => void
+}) {
+  const { t: tr } = useI18n()
+  const [runs, setRuns] = useState<any[] | null>(null)
+  useEffect(() => {
+    const since = fmtDate(new Date(Date.now() - 30 * 86400000))
+    db.from('shift_checklist_completions').select('*').eq('checklist_id', audit.id)
+      .gte('date', since).order('date', { ascending: false }).limit(100)
+      .then(({ data }: any) => setRuns(data || []))
+  }, [audit.id])
+  const items = (Array.isArray(audit.items) ? audit.items : []).map((x: any, i: number) => normItem(x, i))
+  return (
+    <Sheet onClose={onClose} t={t}>
+      <div style={{ padding: '14px 20px 32px' }}>
+        <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 4 }}>{audit.title || '—'}</div>
+        <div style={{ fontSize: 12, color: t.text3, textAlign: 'center', marginBottom: 16 }}>{tr('pe.auditHistory')} · {tr('pe.last30Days')}</div>
+        {runs === null ? (
+          <div style={{ textAlign: 'center', padding: 30, color: t.text3 }}>{tr('pe.loading')}</div>
+        ) : runs.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 30, color: t.text3, fontSize: 14 }}>{tr('pe.auditHistoryEmpty')}</div>
+        ) : (
+          <div style={{ background: t.fill, borderRadius: 16, overflow: 'hidden' }}>
+            {runs.map((c, i) => {
+              const state = (Array.isArray(c.items_state) ? c.items_state : []).map(normState)
+              const { pass, total } = runScore(items, state)
+              const pct = total > 0 ? Math.round((pass / total) * 100) : 0
+              const pending = c.status === 'pending'
+              const who = staff.find((s: any) => s.id === c.staff_id)?.name || '—'
+              return (
+                <button key={c.id} onClick={() => onOpenRun(c)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', padding: '13px 16px', background: 'none', border: 'none', borderBottom: i < runs.length - 1 ? `0.5px solid ${t.sep2}` : 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: t.text }}>{c.date}</span>
+                    <span style={{ display: 'block', fontSize: 12, color: t.text3 }}>{who}</span>
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 700, flexShrink: 0, color: pending ? t.text3 : pct >= 80 ? t.green : pct >= 50 ? t.orange : t.red }}>
+                    {pending ? tr('pe.notChecked') : `${pct}%`}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </Sheet>
+  )
+}
+
+// Отчёт по прогону (ревью Б3): пункты со статусами, комментарии, фото + экспорт PDF.
+function AuditReportSheet({ audit, completion, staff, accent, t, onClose }: {
+  audit: any; completion: any; staff: any[]; accent: string; t: any; onClose: () => void
+}) {
+  const { t: tr } = useI18n()
+  const [exporting, setExporting] = useState(false)
+  const items = (Array.isArray(audit.items) ? audit.items : []).map((x: any, i: number) => normItem(x, i))
+  const state = (Array.isArray(completion.items_state) ? completion.items_state : []).map(normState)
+  const { pass, total } = runScore(items, state)
+  const pct = total > 0 ? Math.round((pass / total) * 100) : 0
+  const staffName = staff.find((s: any) => s.id === completion.staff_id)?.name || '—'
+  const targetLabel = audit.target_scope === 'role' ? tr(roleLabel(audit.role)) : audit.target_scope === 'staff' ? (staff.find((s: any) => s.id === audit.assigned_staff_id)?.name || '—') : tr('pe.auditTargetVenue')
+  const tagOf = (eff: ReturnType<typeof effResult>) => eff === 'pass'
+    ? { label: 'OK', color: t.green } : eff === 'fail'
+    ? { label: tr('pe.resultFail'), color: t.red } : eff === 'na'
+    ? { label: 'N/A', color: t.text3 } : { label: tr('pe.notChecked'), color: t.text3 }
+  return (
+    <Sheet onClose={onClose} t={t}>
+      <div style={{ padding: '14px 20px 32px' }}>
+        <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 4 }}>{audit.title || tr('pe.auditReport')}</div>
+        <div style={{ fontSize: 12, color: t.text3, textAlign: 'center', marginBottom: 14 }}>{completion.date} · {staffName} · {targetLabel}</div>
+        <div style={{ background: t.fill, borderRadius: 14, padding: '14px', textAlign: 'center', marginBottom: 14 }}>
+          <span style={{ fontSize: 30, fontWeight: 800, color: pct >= 80 ? t.green : pct >= 50 ? t.orange : t.red }}>{pct}%</span>
+          <span style={{ fontSize: 13, color: t.text3, marginLeft: 8 }}>{pass}/{total}</span>
+        </div>
+        <div style={{ background: t.fill, borderRadius: 16, overflow: 'hidden', marginBottom: 16 }}>
+          {items.map((it, i) => {
+            const s = state[i]
+            const tag = tagOf(effResult(s))
+            return (
+              <div key={it.id} style={{ padding: '12px 16px', borderBottom: i < items.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: tag.color, background: `${tag.color}1a`, padding: '3px 8px', borderRadius: 7, flexShrink: 0, whiteSpace: 'nowrap' }}>{tag.label}</span>
+                  <span style={{ fontSize: 14, color: t.text, minWidth: 0 }}>{it.label}</span>
+                </div>
+                {!!s?.note && <div style={{ fontSize: 12, color: t.text3, marginTop: 5, whiteSpace: 'pre-wrap' }}>{s.note}</div>}
+                {!!s?.photo_url && (
+                  <a href={s.photo_url} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 7 }}>
+                    <img src={s.photo_url} alt="" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 10 }} />
+                  </a>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        <button disabled={exporting} onClick={async () => { setExporting(true); try { await exportAuditRunPdf({ audit, completion, staffName, targetLabel, tr }) } finally { setExporting(false) } }}
+          style={{ width: '100%', padding: '14px', borderRadius: 14, border: 'none', background: accent, color: '#fff', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', opacity: exporting ? 0.6 : 1, boxShadow: `0 4px 16px ${accent}44` }}>
+          {exporting ? '...' : `PDF · ${tr('pe.auditReport')}`}
+        </button>
+      </div>
+    </Sheet>
   )
 }
 
@@ -1743,17 +2038,18 @@ function AuditStatsView({ accent, t }: { accent: string; t: any }) {
     if (!list) continue
     const items = (Array.isArray((list as any).items) ? (list as any).items : []).map((x: any, i: number) => normItem(x, i))
     const state = (Array.isArray(c.items_state) ? c.items_state : []).map(normState)
+    // Оценки Б1: N/A выпадает из знаменателя, fail = нарушение, pass = выполнено;
+    // старые записи без result — по done (бинарная модель).
+    const staffCur = c.staff_id ? (byStaff.get(c.staff_id) || { total: 0, done: 0 }) : null
     items.forEach((it: any, i: number) => {
+      const eff = effResult(state[i])
+      if (eff === 'na') return
       totalItems++
-      const done = !!state[i]?.done
-      if (done) doneItems++
+      if (staffCur) staffCur.total++
+      if (eff === 'pass') { doneItems++; if (staffCur) staffCur.done++ }
       else violationsByLabel.set(it.label, (violationsByLabel.get(it.label) || 0) + 1)
     })
-    if (c.staff_id) {
-      const cur = byStaff.get(c.staff_id) || { total: 0, done: 0 }
-      cur.total += items.length; cur.done += items.filter((_: any, i: number) => state[i]?.done).length
-      byStaff.set(c.staff_id, cur)
-    }
+    if (c.staff_id && staffCur) byStaff.set(c.staff_id, staffCur)
   }
 
   const rate = totalItems > 0 ? Math.round((doneItems / totalItems) * 100) : 0

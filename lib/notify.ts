@@ -105,19 +105,22 @@ export async function dispatchNotification(admin: any, rid: string, input: Notif
 
   // 3. Журнал уведомлений. title/body — EN-рендер (если задан *Key/сегменты) или литерал-фолбэк —
   // на случай, если запись читает старый клиент/cron/дебаг. *_key/*_params позволяют
-  // веб-колокольчику (NotificationsTab) перерендерить текст на языке ЗРИТЕЛЯ при показе,
-  // а не отправителя (секьюрные сегменты в этот механизм пока не заведены — сумма кассы
-  // в журнале хранится EN-рендером, без live-перевода на клиенте).
+  // клиентам (веб-колокольчик, iOS-журнал) перерендерить текст на языке ЗРИТЕЛЯ при показе.
+  // Сегменты (в т.ч. секьюрные суммы кассы, ревью Г3) едут в журнал конвенцией
+  // body_key='_segments' + body_params={segments} — jsonb, миграция не нужна; лейблы
+  // переводятся при показе, суммы остаются отформатированными строками.
   const now = new Date().toISOString()
   const enTitle = titleKey ? renderNotify('en', titleKey, resolveParams('en', titleParams)) : title
   const rows = allowed.map(r => {
-    const usesTemplate = !isSecure(r) && !!bodyKey
+    const segs = isSecure(r) ? (secureBodySegments ?? null) : (bodySegments ?? null)
+    const usesTemplate = !isSecure(r) && !!bodyKey && !segs
     return {
       restaurant_id: rid, staff_id: r.staff_id, to_owner: r.to_owner,
       type, title: enTitle, body: bodyFor(r, 'en'),
       data, sent_at: now,
       title_key: titleKey ?? null, title_params: titleParams ?? null,
-      body_key: usesTemplate ? bodyKey! : null, body_params: usesTemplate ? (bodyParams ?? null) : null,
+      body_key: segs ? '_segments' : (usesTemplate ? bodyKey! : null),
+      body_params: segs ? { segments: segs } : (usesTemplate ? (bodyParams ?? null) : null),
     }
   })
   await admin.from('notifications').insert(rows)
