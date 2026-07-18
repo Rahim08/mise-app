@@ -937,6 +937,7 @@ function NotificationsTab({ myId, accent, t }: { myId: string; accent: string; t
         <svg width="34" height="34" fill="none" stroke={accent} strokeWidth="1.6" viewBox="0 0 24 24"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9" /></svg>
       </div>
       <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.noNotifs')}</div>
+      <div style={{ fontSize: 13, marginTop: 4 }}>{tr('pe.noNotifsHint')}</div>
     </div>
   )
 
@@ -2824,6 +2825,7 @@ function DisciplineTab({ me, accent, t, toast }: { me: any; accent: string; t: a
       {records.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
           <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.disEmpty')}</div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>{tr('pe.disEmptyHint')}</div>
         </div>
       ) : (
         <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>

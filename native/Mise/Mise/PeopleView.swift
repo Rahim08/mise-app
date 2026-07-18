@@ -1530,7 +1530,11 @@ private struct TasksTab: View {
             }
         }
         if m.visibleTasks.isEmpty {
-            Text(t("pe.noTasks")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)
+            VStack(spacing: 4) {
+                Text(t("pe.noTasks")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4))
+                Text(t("pe.assignTaskHint")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3)).multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity).padding(.top, 50)
         } else {
             ForEach(["todo", "in_progress"], id: \.self) { st in
                 let group = m.tasks(st)
@@ -1741,8 +1745,12 @@ private struct ReportsTab: View {
                         .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
                 }
                 if m.visibleReports.isEmpty {
-                    Text(m.isManager ? t("pe.noReports") : t("pe.noReportsMine"))
-                        .font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
+                    VStack(spacing: 4) {
+                        Text(m.isManager ? t("pe.noReports") : t("pe.noReportsMine"))
+                            .font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4))
+                        Text(t("pe.reportHint")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3)).multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity).padding(.top, 40)
                 } else {
                     ForEach(m.visibleReports) { r in card(r) }
                 }
@@ -2053,6 +2061,7 @@ private struct NotificationsSheet: View {
                     VStack(spacing: 12) {
                         Image(systemName: "bell").font(.system(size: 34)).foregroundStyle(PEOPLE_ACCENT.opacity(0.5))
                         Text(t("pe.noNotifs")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4))
+                        Text(t("pe.noNotifsHint")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3)).multilineTextAlignment(.center).padding(.horizontal, 30)
                     }
                 } else {
                     ScrollView {
@@ -2310,7 +2319,11 @@ private struct DisciplineTab: View {
             }
 
             if m.discRecords.isEmpty {
-                Text(t("pe.disEmpty")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).frame(maxWidth: .infinity).padding(.top, 50)
+                VStack(spacing: 4) {
+                    Text(t("pe.disEmpty")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4))
+                    Text(t("pe.disEmptyHint")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3)).multilineTextAlignment(.center).padding(.horizontal, 30)
+                }
+                .frame(maxWidth: .infinity).padding(.top, 50)
             } else {
                 let ranked = m.dir.map { (s: $0, st: m.discStat($0.id)) }
                     .sorted { ($0.st.late, $0.st.totalMin) > ($1.st.late, $1.st.totalMin) }
@@ -4489,7 +4502,11 @@ private struct StopTab: View {
         if !m.menuLoaded {
             RowListSkeleton(rows: 3)
         } else if m.menu.isEmpty {
-            Text(t("pe.menuEmpty")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)
+            VStack(spacing: 4) {
+                Text(t("pe.menuEmpty")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4))
+                Text(t("pe.itemsAddedInDash")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3)).multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity).padding(.top, 50)
         } else {
             HStack {
                 Text(t("pe.stopList")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
