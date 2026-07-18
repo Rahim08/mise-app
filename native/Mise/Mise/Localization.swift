@@ -625,6 +625,7 @@ let STRINGS: [String: [Lang: String]] = [
     "pe.reportProblem":  tr("Report a problem", "Сообщить о проблеме", "Segnala un problema", "Signaler un problème", "Problem barədə bildirin", "Sorun bildir", "Повідомити про проблему", "Мәселе туралы хабарлау"),
     "pe.photoRequired":  tr("Photo required", "Требуется фото", "Foto richiesta", "Photo requise", "Foto tələb olunur", "Fotoğraf gerekli", "Потрібне фото", "Фото қажет"),
     "pe.itemNote":       tr("Comment", "Комментарий", "Commento", "Commentaire", "Şərh", "Yorum", "Коментар", "Пікір"),
+    "pe.auditDone":      tr("Audit complete", "Аудит завершён", "Audit completato", "Audit terminé", "Audit tamamlandı", "Denetim tamamlandı", "Аудит завершено", "Аудит аяқталды"),
     "pe.auditHistory":   tr("History", "История", "Cronologia", "Historique", "Tarixçə", "Geçmiş", "Історія", "Тарих"),
     "pe.auditHistoryEmpty": tr("No runs in the last 30 days", "Нет прогонов за 30 дней", "Nessuna esecuzione negli ultimi 30 giorni", "Aucune exécution sur 30 jours", "Son 30 gündə keçid yoxdur", "Son 30 günde çalıştırma yok", "Немає проходжень за 30 днів", "Соңғы 30 күнде өту жоқ"),
     "pe.auditReport":    tr("Report", "Отчёт", "Report", "Rapport", "Hesabat", "Rapor", "Звіт", "Есеп"),

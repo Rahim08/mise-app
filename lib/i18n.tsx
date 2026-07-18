@@ -739,6 +739,7 @@ const STRINGS: Record<string, Row> = {
   'pe.auditLaunched':{ en: 'Audit assigned', ru: 'Проверка назначена', it: 'Audit assegnato', fr: 'Audit assigné', az: 'Audit təyin edildi', tr: 'Denetim atandı', uk: 'Перевірку призначено', kk: 'Тексеру тағайындалды' },
   'pe.noAudits':     { en: 'No spot checks yet', ru: 'Разовых проверок пока нет', it: 'Nessun audit ancora', fr: 'Aucun audit pour l’instant', az: 'Hələ audit yoxdur', tr: 'Henüz denetim yok', uk: 'Разових перевірок ще немає', kk: 'Әзірге бір реттік тексеру жоқ' },
   'pe.itemNote': { en: 'Comment', ru: 'Комментарий', it: 'Commento', fr: 'Commentaire', az: 'Şərh', tr: 'Yorum', uk: 'Коментар', kk: 'Пікір' },
+  'pe.auditDone': { en: 'Audit complete', ru: 'Аудит завершён', it: 'Audit completato', fr: 'Audit terminé', az: 'Audit tamamlandı', tr: 'Denetim tamamlandı', uk: 'Аудит завершено', kk: 'Аудит аяқталды' },
   'pe.auditHistory': { en: 'History', ru: 'История', it: 'Cronologia', fr: 'Historique', az: 'Tarixçə', tr: 'Geçmiş', uk: 'Історія', kk: 'Тарих' },
   'pe.auditHistoryEmpty': { en: 'No runs in the last 30 days', ru: 'Нет прогонов за 30 дней', it: 'Nessuna esecuzione negli ultimi 30 giorni', fr: 'Aucune exécution sur 30 jours', az: 'Son 30 gündə keçid yoxdur', tr: 'Son 30 günde çalıştırma yok', uk: 'Немає проходжень за 30 днів', kk: 'Соңғы 30 күнде өту жоқ' },
   'pe.auditReport': { en: 'Report', ru: 'Отчёт', it: 'Report', fr: 'Rapport', az: 'Hesabat', tr: 'Rapor', uk: 'Звіт', kk: 'Есеп' },

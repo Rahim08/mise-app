@@ -760,7 +760,7 @@ final class PeopleModel {
             }
             await loadAudits()
         }
-        if allDone { flash(t("pe.checklistOpenDone")) }
+        if allDone { flash(t("pe.auditDone")) }
     }
 
     /// Менеджер запускает разовую проверку по существующему шаблону: заводит прогон
@@ -3300,12 +3300,24 @@ private struct ChecklistRunCard: View {
         let items = list.itemDetails ?? []
         let state = run?.items_state ?? []
         let done = items.indices.filter { $0 < state.count && state[$0].done }.count
+        // Нарушения в заголовке (grading): зелёный «ГОТОВО» при провалах вводит в заблуждение.
+        let fails = grading ? items.indices.filter { i in
+            guard i < state.count else { return false }
+            return (state[i].result ?? (state[i].done ? "pass" : nil)) == "fail"
+        }.count : 0
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("\(roleTitle(list.role)) · \(done)/\(items.count)")
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(list.role != nil ? PEOPLE_ACCENT : .white.opacity(0.45)).kerning(0.5)
                 Spacer()
-                if done == items.count && !items.isEmpty {
+                if fails > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
+                        Text("\(fails)")
+                    }
+                    .font(.system(size: 11, weight: .bold)).foregroundStyle(BrandKit.menu)
+                    .padding(.horizontal, 8).padding(.vertical, 2).background(BrandKit.menu.opacity(0.16), in: Capsule())
+                } else if done == items.count && !items.isEmpty {
                     Text(t("pe.readyCaps")).font(.system(size: 11, weight: .bold)).foregroundStyle(BrandKit.analytics)
                         .padding(.horizontal, 8).padding(.vertical, 2).background(BrandKit.analytics.opacity(0.16), in: Capsule())
                 }
@@ -3879,6 +3891,9 @@ private struct ReportProblemSheet: View {
 private struct StatisticsSection: View {
     @Bindable var m: PeopleModel
     @State private var loaded = false
+    // Раздельная статистика (audit | shift): рутина открытия/закрытия размывала «%
+    // выполнения» аудитов. Топ нарушений (из задач) — только в сегменте аудитов.
+    @State private var kind = "audit"
     @State private var completionPct = 0
     @State private var topViolations: [(String, Int)] = []
     @State private var staffRating: [(String, Int)] = []
@@ -3887,9 +3902,27 @@ private struct StatisticsSection: View {
         Group {
             if !loaded {
                 RowListSkeleton(rows: 3)
-            } else if completionPct == 0 && topViolations.isEmpty && staffRating.isEmpty {
-                Text(t("pe.statsNoData")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
             } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    Picker("", selection: $kind) {
+                        Text(t("pe.audits")).tag("audit")
+                        Text(t("pe.shiftTab")).tag("shift")
+                    }
+                    .pickerStyle(.segmented)
+                    if completionPct == 0 && topViolations.isEmpty && staffRating.isEmpty {
+                        Text(t("pe.statsNoData")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4))
+                            .frame(maxWidth: .infinity).padding(.top, 40)
+                    } else {
+                        statsContent
+                    }
+                }
+            }
+        }
+        .task { await load() }
+        .onChange(of: kind) { recompute() }
+    }
+
+    private var statsContent: some View {
                 VStack(alignment: .leading, spacing: 16) {
                     statCard(title: t("pe.statsCompletionRate")) {
                         Text("\(completionPct)%").font(.system(size: 32, weight: .bold)).foregroundStyle(PEOPLE_ACCENT)
@@ -3921,9 +3954,6 @@ private struct StatisticsSection: View {
                         }
                     }
                 }
-            }
-        }
-        .task { await load() }
     }
 
     private func statCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -3938,11 +3968,17 @@ private struct StatisticsSection: View {
     private func load() async {
         if !m.clHistoryLoaded { await m.loadChecklistHistory() }
         if !m.tasksLoaded { await m.loadTasks() }
+        recompute()
+        loaded = true
+    }
+
+    private func recompute() {
         var total = 0, done = 0
         var violationCounts: [String: Int] = [:]
         var staffTotal: [String: Int] = [:], staffDone: [String: Int] = [:]
         for c in m.clHistory {
             guard let cl = m.checklistTitle(c.checklist_id), let items = cl.itemDetails else { continue }
+            guard (cl.kind ?? "shift") == kind else { continue }
             let state = c.items_state ?? []
             let staffLabel = m.staffName(c.staff_id)
             for i in items.indices {
@@ -3959,8 +3995,11 @@ private struct StatisticsSection: View {
                 }
             }
         }
-        for tsk in m.tasks where tsk.source_item_label != nil {
-            violationCounts[tsk.source_item_label!, default: 0] += 1
+        // Задачи-нарушения не несут kind чек-листа — показываем топ только в сегменте аудитов.
+        if kind == "audit" {
+            for tsk in m.tasks where tsk.source_item_label != nil {
+                violationCounts[tsk.source_item_label!, default: 0] += 1
+            }
         }
         completionPct = total > 0 ? Int((Double(done) / Double(total) * 100).rounded()) : 0
         topViolations = violationCounts.sorted { $0.value > $1.value }.prefix(5).map { ($0.key, $0.value) }
@@ -3969,7 +4008,6 @@ private struct StatisticsSection: View {
             let pct = Int((Double(staffDone[name] ?? 0) / Double(tot) * 100).rounded())
             return (name, pct)
         }.sorted { $0.1 > $1.1 }
-        loaded = true
     }
 }
 

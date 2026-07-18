@@ -1256,6 +1256,8 @@ function ChecklistCard({ title, items, state, canFill, restaurantId, completionI
   const [noteOpen, setNoteOpen] = useState<number | null>(null)
   const [noteDraft, setNoteDraft] = useState('')
   const doneCount = items.filter((_, i) => state[i]?.done).length
+  // Нарушения в заголовке: зелёный «ГОТОВО» при провалах вводит в заблуждение.
+  const failCount = grading ? items.filter((_, i) => effResult(state[i]) === 'fail').length : 0
 
   const toggle = async (i: number, file?: File) => {
     if (!canFill) { toast(tr('pe.needCheckInFirst')); return }
@@ -1310,7 +1312,13 @@ function ChecklistCard({ title, items, state, canFill, restaurantId, completionI
         <span style={{ fontSize: 12, fontWeight: 700, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{title} · {doneCount}/{items.length}</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           {actions}
-          {doneCount === items.length && items.length > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: t.green, background: `${t.green}1a`, padding: '3px 9px', borderRadius: 8 }}>{tr('pe.doneCaps')}</span>}
+          {failCount > 0 ? (
+            <span title={tr('pe.resultFail')} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: t.red, background: `${t.red}1a`, padding: '3px 9px', borderRadius: 8 }}>
+              <svg width="9" height="9" fill="none" stroke="currentColor" strokeWidth="3.2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" /></svg>{failCount}
+            </span>
+          ) : doneCount === items.length && items.length > 0 && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: t.green, background: `${t.green}1a`, padding: '3px 9px', borderRadius: 8 }}>{tr('pe.doneCaps')}</span>
+          )}
         </span>
       </div>
       <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
@@ -1632,7 +1640,7 @@ function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFill, rest
       }).select().single()
       if (data) setCompletions(cs => [...cs, data])
     }
-    if (allDone) toast(tr('pe.openDone'))
+    if (allDone) toast(tr('pe.auditDone'))
   }
 
   // Пуш целевой аудитории аудита (запуск сегодняшнего прогона).
@@ -2004,6 +2012,8 @@ function AuditStatsView({ accent, t }: { accent: string; t: any }) {
   const [lists, setLists] = useState<any[]>([])
   const [completions, setCompletions] = useState<any[]>([])
   const [staff, setStaff] = useState<any[]>([])
+  // Раздельная статистика: рутина открытия/закрытия смены размывала «% выполнения» аудитов.
+  const [kind, setKind] = useState<'audit' | 'shift'>('audit')
 
   useEffect(() => {
     const since = fmtDate(new Date(Date.now() - 30 * 86400000))
@@ -2030,8 +2040,12 @@ function AuditStatsView({ accent, t }: { accent: string; t: any }) {
   // заполняются, pending вообще не открывались — они идут отдельной метрикой «не пройдено»,
   // а не в нарушения (иначе пустой прогон = 100% нарушений).
   const todayKey = fmtDate(new Date())
-  const finished = completions.filter((c: any) => c.status === 'done' || (c.status === 'in_progress' && c.date < todayKey))
-  const unfinished = completions.filter((c: any) => c.status === 'pending' && c.date < todayKey).length
+  const ofKind = (c: any) => {
+    const l: any = listById.get(c.checklist_id)
+    return !!l && ((l.kind || 'shift') === kind)
+  }
+  const finished = completions.filter((c: any) => ofKind(c) && (c.status === 'done' || (c.status === 'in_progress' && c.date < todayKey)))
+  const unfinished = completions.filter((c: any) => ofKind(c) && c.status === 'pending' && c.date < todayKey).length
 
   for (const c of finished) {
     const list = listById.get(c.checklist_id)
@@ -2060,6 +2074,15 @@ function AuditStatsView({ accent, t }: { accent: string; t: any }) {
 
   return (
     <div>
+      <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 14, gap: 2 }}>
+        {([['audit', tr('dash.audits')], ['shift', tr('pe.shiftChecklists')]] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setKind(id)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 12.5, fontWeight: kind === id ? 700 : 500, cursor: 'pointer', background: kind === id ? t.surface : 'transparent', color: kind === id ? accent : t.text3, boxShadow: kind === id ? t.sh2 : 'none' }}>{label}</button>
+        ))}
+      </div>
+      {totalItems === 0 && unfinished === 0 ? (
+        <div style={{ textAlign: 'center', padding: '40px 20px', color: t.text3 }}>{tr('pe.noStatsYet')}</div>
+      ) : (
+      <>
       <div style={{ background: t.surface, borderRadius: 20, padding: '24px 20px', boxShadow: t.sh, textAlign: 'center', marginBottom: 16 }}>
         <div style={{ fontSize: 44, fontWeight: 800, color: accent }}>{rate}%</div>
         <div style={{ fontSize: 13, color: t.text3, marginTop: 4 }}>{tr('pe.completionRate')} · {tr('pe.last30Days')}</div>
@@ -2092,6 +2115,8 @@ function AuditStatsView({ accent, t }: { accent: string; t: any }) {
             ))}
           </div>
         </>
+      )}
+      </>
       )}
     </div>
   )
