@@ -18,7 +18,7 @@
 | Manager | `/manager` | `ManagerView.swift` |
 | Analytics | `/analytics` | `AnalyticsView.swift` |
 | Stash (склад) | `/tobacco` | `StashView.swift` |
-| People | `/people` | `PeopleView.swift` |
+| People | `/people` (распилен: `page.tsx` + `tabs-*.tsx`, `audits.tsx`, `shared.tsx`) | `PeopleView.swift` + `People*.swift` (8 файлов) |
 | Menu (QR) | `/menu/[slug]` + `/dashboard/menu` | веб |
 | Dashboard | `/dashboard` | — |
 
@@ -52,14 +52,16 @@
 - RLS включён
 - iOS: `DB.swift` → `/api/db` (авторизация через staff-cookie)
 
-## Текущий фокус (Sprint 1)
+## Текущий фокус
 
-1. Баги iOS: OnboardingView (бегущие слова после logout), PeopleView (кнопка «Я здесь»), градиент «e» (не зациклен)
-2. Dashboard redesign
-3. AI-аналитика (восстановить)
-4. Логотипы — унификация везде
+Sprint 1 закрыт (проверено 2026-07-18): баги iOS починены (бегущие слова/градиент «e» — фикс в `Brand.swift` FlowingGradientText; «Я здесь» у сотрудника есть, у менеджера нет по дизайну), dashboard-shell готов, AI-аналитика в интерфейсе (гейт Pro), логотипы унифицированы (Wordmark везде).
+
+Открыто:
+1. Ручное (юзер): смоук мобильного таб-бара дашборда (В1), пересборка iOS после распила People, тест-checkout биллинга → прогон `scripts/stripe-setup.mjs` с sk_live
+2. Б6 — скоринг аудитов с весами (по запросу клиентов)
+3. Sprint 2: кастомизация Mise Menu, скриншоты/локализация App Store
 
 ## Деплой
 
 - `git push` в `main` = автодеплой в прод (Vercel)
-- iOS: ветка `native-v2`, Xcode → Run на устройстве
+- iOS: `native/Mise/` живёт в `main` (ветка `native-v2` — устаревшая), Xcode → Run на устройстве
