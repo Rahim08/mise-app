@@ -58,10 +58,11 @@ nonisolated struct AppNotification: Codable, Identifiable, Sendable {
 
 // Ключ → [en, ru, it, fr, az, tr, uk, kk].
 private let NOTIFY: [String: [String]] = [
+    // Тело кассовых пушей несёт дату смены (не дубль заголовка), {date} = dd.MM.
     "notify.cashOpenTitle":  ["Cash opened", "Касса открыта", "Cassa aperta", "Caisse ouverte", "Kassa açıldı", "Kasa açıldı", "Касу відкрито", "Касса ашылды"],
-    "notify.cashOpenBody":   ["Shift opened", "Смена открыта", "Turno aperto", "Service ouvert", "Növbə açıldı", "Vardiya açıldı", "Зміну відкрито", "Ауысым ашылды"],
+    "notify.cashOpenBody":   ["Shift for {date}", "Смена за {date}", "Turno del {date}", "Service du {date}", "{date} növbəsi", "{date} vardiyası", "Зміна за {date}", "{date} ауысымы"],
     "notify.cashCloseTitle": ["Cash closed", "Касса закрыта", "Cassa chiusa", "Caisse fermée", "Kassa bağlandı", "Kasa kapandı", "Касу закрито", "Касса жабылды"],
-    "notify.cashCloseBody":  ["Shift closed", "Смена закрыта", "Turno chiuso", "Service clôturé", "Növbə bağlandı", "Vardiya kapandı", "Зміну закрито", "Ауысым жабылды"],
+    "notify.cashCloseBody":  ["Shift for {date}", "Смена за {date}", "Turno del {date}", "Service du {date}", "{date} növbəsi", "{date} vardiyası", "Зміна за {date}", "{date} ауысымы"],
 
     "notify.newTaskTitle":   ["New task", "Новая задача", "Nuova attività", "Nouvelle tâche", "Yeni tapşırıq", "Yeni görev", "Нове завдання", "Жаңа тапсырма"],
 
@@ -93,7 +94,7 @@ private let NOTIFY: [String: [String]] = [
     "notify.shiftReminderBody":     ["Your shift is tomorrow", "Ваша смена завтра", "Il tuo turno è domani", "Votre service est demain", "Növbəniz sabahdır", "Vardiyanız yarın", "Ваша зміна завтра", "Ауысымыңыз ертең"],
     "notify.shiftReminderBodyTime": ["Your shift is tomorrow at {time}", "Ваша смена завтра в {time}", "Il tuo turno è domani alle {time}", "Votre service est demain à {time}", "Növbəniz sabah saat {time}", "Vardiyanız yarın saat {time}", "Ваша зміна завтра о {time}", "Ауысымыңыз ертең сағат {time}"],
     "notify.trialEndingTitle": ["Trial ending", "Окончание пробного периода", "La prova sta per finire", "Fin de la période d’essai", "Sınaq müddəti bitir", "Deneme süresi bitiyor", "Закінчення пробного періоду", "Сынақ мерзімі аяқталады"],
-    "notify.trialEndingBody":  ["Trial ends in {n} days", "Пробный период заканчивается через {n} дн.", "La prova termina tra {n} g.", "L’essai se termine dans {n} j.", "Sınaq {n} gündən sonra bitir", "Deneme {n} gün içinde bitiyor", "Пробний період закінчується через {n} дн.", "Сынақ {n} күннен кейін аяқталады"],
+    "notify.trialEndingBody":  ["{n} days left", "Осталось {n} дн.", "Mancano {n} giorni", "Plus que {n} jours", "{n} gün qaldı", "{n} gün kaldı", "Залишилось {n} дн.", "{n} күн қалды"],
 
     "notify.bookingTitle": ["New booking", "Новая бронь", "Nuova prenotazione", "Nouvelle réservation", "Yeni rezervasiya", "Yeni rezervasyon", "Нове бронювання", "Жаңа брондау"],
     "notify.bookingTable": ["Table", "Стол", "Tavolo", "Table", "Masa", "Masa", "Стіл", "Үстел"],
@@ -112,7 +113,7 @@ private let NOTIFY: [String: [String]] = [
     "notify.violationTitle":     ["Audit violation", "Нарушение по аудиту", "Violazione audit", "Violation d’audit", "Audit pozuntusu", "Denetim ihlali", "Порушення аудиту", "Аудит бұзушылығы"],
     "notify.violationBody":      ["{item} — needs fixing", "{item} — нужно исправить", "{item} — da correggere", "{item} — à corriger", "{item} — düzəldilməlidir", "{item} — düzeltilmeli", "{item} — потрібно виправити", "{item} — түзету қажет"],
     "notify.closeChecklistReminderTitle": ["Closing checklist not done", "Чек-лист закрытия не пройден", "Checklist di chiusura non completata", "Checklist de clôture non terminée", "Bağlanış çek-listi tamamlanmayıb", "Kapanış kontrol listesi tamamlanmadı", "Чек-лист закриття не пройдено", "Жабылу тексеру тізімі толтырылмаған"],
-    "notify.closeChecklistReminderBody":  ["Not all items are checked yet", "Не все пункты отмечены", "Non tutti i punti sono stati spuntati", "Tous les éléments ne sont pas cochés", "Bütün bəndlər qeyd olunmayıb", "Tüm maddeler işaretlenmedi", "Не всі пункти відмічено", "Барлық тармақтар белгіленбеген"],
+    "notify.closeChecklistReminderBody":  ["Check off the remaining items before closing", "Отметьте оставшиеся пункты до закрытия", "Spunta i punti rimanenti prima della chiusura", "Cochez les éléments restants avant la clôture", "Bağlanmazdan əvvəl qalan bəndləri qeyd edin", "Kapanıştan önce kalan maddeleri işaretleyin", "Відмітьте решту пунктів до закриття", "Жабу алдында қалған тармақтарды белгілеңіз"],
 ]
 
 private let NOTIFY_LANG_ORDER = ["en", "ru", "it", "fr", "az", "tr", "uk", "kk"]

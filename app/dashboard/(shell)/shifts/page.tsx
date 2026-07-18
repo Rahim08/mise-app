@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { notify as pushNotify } from '@/lib/notifyClient'
 import { useI18n } from '@/lib/i18n'
-import { fmtDate, fv, displayDate } from '@/lib/format'
+import { fmtDate, fv, displayDate, dd } from '@/lib/format'
 import { Card, Btn, Badge, EmptyState, Spinner, SectionTitle, Container, Table, type TableColumn, inputStyle } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
 
@@ -156,7 +156,7 @@ export default function ShiftsPage() {
       if (sh) {
         setShift({ ...sh, opening_balance: openingBalance })
         await loadAbsencesByDate(fmtDate(currentDate))
-        pushNotify({ type: 'cash_open', title: tr('mg.pushCashOpen'), body: tr('mg.pushShiftOpened'), titleKey: 'notify.cashOpenTitle', bodyKey: 'notify.cashOpenBody', audience: { managers: true } })
+        pushNotify({ type: 'cash_open', title: tr('mg.pushCashOpen'), body: tr('mg.pushShiftOpened'), titleKey: 'notify.cashOpenTitle', bodyKey: 'notify.cashOpenBody', bodyParams: { date: dd(fmtDate(currentDate)) }, audience: { managers: true } })
         await loadHistory()
       } else if (error?.code === '23505') {
         await loadDay(currentDate)
@@ -231,7 +231,7 @@ export default function ShiftsPage() {
     const c = calc()
     pushNotify({
       type: 'cash_close', title: tr('mg.pushCashClosed'), body: tr('mg.pushShiftClosed'),
-      titleKey: 'notify.cashCloseTitle', bodyKey: 'notify.cashCloseBody',
+      titleKey: 'notify.cashCloseTitle', bodyKey: 'notify.cashCloseBody', bodyParams: { date: dd(fmtDate(currentDate)) },
       secureBody: `${tr('mg.sumRevenue')} €${fv(c.inc)} · ${tr('mg.cellBalance')} €${fv(c.balance)}`,
       secureBodySegments: [{ key: 'notify.dRevenue', value: `€${fv(c.inc)}` }, { key: 'notify.dBalance', value: `€${fv(c.balance)}` }],
       audience: { managers: true },

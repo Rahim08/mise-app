@@ -45,6 +45,12 @@ final class ManagerModel {
         return f
     }()
     func key(_ d: Date) -> String { dfKey.string(from: d) }
+    private let dfDayMonth: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "dd.MM"; f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+    // {date} для тела кассовых пушей (notify.cashOpenBody/cashCloseBody) — dd.MM.
+    func dayMonth(_ d: Date) -> String { dfDayMonth.string(from: d) }
     private func activity(_ s: Shift) -> Double { (s.income ?? 0) + (s.total_expense ?? 0) + (s.inkassation ?? 0) }
 
     /// Отмена задачи в любом виде (CancellationError, URLError.cancelled, Task.isCancelled).
@@ -226,7 +232,8 @@ final class ManagerModel {
             await loadAbsences(key(currentDate))
             flash(t("mg.shiftOpened"))
             await Notify.send(type: "cash_open", title: t("mg.pushCashOpen"), body: t("mg.pushShiftOpened"),
-                              audience: ["managers": true], titleKey: "notify.cashOpenTitle", bodyKey: "notify.cashOpenBody")
+                              audience: ["managers": true], titleKey: "notify.cashOpenTitle", bodyKey: "notify.cashOpenBody",
+                              bodyParams: ["date": dayMonth(currentDate)])
             // Запланировать напоминание о закрытии смены
             if ShiftReminder.isEnabled() { ShiftReminder.schedule() }
         } catch {
@@ -361,6 +368,7 @@ final class ManagerModel {
             await Notify.send(type: "cash_close", title: t("mg.pushCashClosed"), body: t("mg.pushShiftClosed"),
                               audience: ["managers": true],
                               titleKey: "notify.cashCloseTitle", bodyKey: "notify.cashCloseBody",
+                              bodyParams: ["date": dayMonth(currentDate)],
                               secureBody: digest, secureBodySegments: segs)
         } catch {
             flash(t("saveFailed", ["err": error.localizedDescription]))

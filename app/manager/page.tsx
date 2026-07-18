@@ -11,7 +11,7 @@ import { AuthGate } from '@/components/AuthGate'
 import { AppLoading } from '@/components/AppLoading'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n } from '@/lib/i18n'
-import { fmtDate, fv, displayDate } from '@/lib/format'
+import { fmtDate, fv, displayDate, dd } from '@/lib/format'
 
 // ── ICONS ─────────────────────────────────────────────────────────────────────
 
@@ -180,7 +180,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
         setShift({ ...sh, opening_balance: openingBalance })
         await loadAbsencesByDate(restaurantId, fmtDate(currentDate)) // подтянуть авто-прогулы дня
         showToast(tr('mg.shiftOpened'))
-        pushNotify({ type: 'cash_open', title: tr('mg.pushCashOpen'), body: tr('mg.pushShiftOpened'), titleKey: 'notify.cashOpenTitle', bodyKey: 'notify.cashOpenBody', audience: { managers: true } })
+        pushNotify({ type: 'cash_open', title: tr('mg.pushCashOpen'), body: tr('mg.pushShiftOpened'), titleKey: 'notify.cashOpenTitle', bodyKey: 'notify.cashOpenBody', bodyParams: { date: dd(fmtDate(currentDate)) }, audience: { managers: true } })
       } else if (error?.code === '23505') {
         // Shift already exists — reload it
         await loadDay(restaurantId, currentDate, employees, categories)
@@ -272,7 +272,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     const c = calc()
     pushNotify({
       type: 'cash_close', title: tr('mg.pushCashClosed'), body: tr('mg.pushShiftClosed'),
-      titleKey: 'notify.cashCloseTitle', bodyKey: 'notify.cashCloseBody',
+      titleKey: 'notify.cashCloseTitle', bodyKey: 'notify.cashCloseBody', bodyParams: { date: dd(fmtDate(currentDate)) },
       secureBody: `${tr('mg.sumRevenue')} €${fv(c.inc)} · ${tr('mg.cellBalance')} €${fv(c.balance)}`,
       secureBodySegments: [
         { key: 'notify.dRevenue', value: `€${fv(c.inc)}` },

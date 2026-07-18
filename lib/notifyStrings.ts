@@ -10,10 +10,12 @@ export type NotifyLocale = 'en' | 'ru' | 'it' | 'fr' | 'az' | 'tr' | 'uk' | 'kk'
 type Row = Partial<Record<NotifyLocale, string>>
 
 export const NOTIFY_STRINGS: Record<string, Row> = {
+  // Тело кассовых пушей несёт дату смены (не дубль заголовка «Касса открыта/Смена открыта»);
+  // {date} = dd.MM — важно при открытии/закрытии задним числом. Пустой {date} схлопывается trim'ом.
   'notify.cashOpenTitle':  { en: 'Cash opened', ru: 'Касса открыта', it: 'Cassa aperta', fr: 'Caisse ouverte', az: 'Kassa açıldı', tr: 'Kasa açıldı', uk: 'Касу відкрито', kk: 'Касса ашылды' },
-  'notify.cashOpenBody':   { en: 'Shift opened', ru: 'Смена открыта', it: 'Turno aperto', fr: 'Service ouvert', az: 'Növbə açıldı', tr: 'Vardiya açıldı', uk: 'Зміну відкрито', kk: 'Ауысым ашылды' },
+  'notify.cashOpenBody':   { en: 'Shift for {date}', ru: 'Смена за {date}', it: 'Turno del {date}', fr: 'Service du {date}', az: '{date} növbəsi', tr: '{date} vardiyası', uk: 'Зміна за {date}', kk: '{date} ауысымы' },
   'notify.cashCloseTitle': { en: 'Cash closed', ru: 'Касса закрыта', it: 'Cassa chiusa', fr: 'Caisse fermée', az: 'Kassa bağlandı', tr: 'Kasa kapandı', uk: 'Касу закрито', kk: 'Касса жабылды' },
-  'notify.cashCloseBody':  { en: 'Shift closed', ru: 'Смена закрыта', it: 'Turno chiuso', fr: 'Service clôturé', az: 'Növbə bağlandı', tr: 'Vardiya kapandı', uk: 'Зміну закрито', kk: 'Ауысым жабылды' },
+  'notify.cashCloseBody':  { en: 'Shift for {date}', ru: 'Смена за {date}', it: 'Turno del {date}', fr: 'Service du {date}', az: '{date} növbəsi', tr: '{date} vardiyası', uk: 'Зміна за {date}', kk: '{date} ауысымы' },
 
   'notify.newTaskTitle':   { en: 'New task', ru: 'Новая задача', it: 'Nuova attività', fr: 'Nouvelle tâche', az: 'Yeni tapşırıq', tr: 'Yeni görev', uk: 'Нове завдання', kk: 'Жаңа тапсырма' },
 
@@ -46,7 +48,7 @@ export const NOTIFY_STRINGS: Record<string, Row> = {
   'notify.shiftReminderBody':     { en: 'Your shift is tomorrow', ru: 'Ваша смена завтра', it: 'Il tuo turno è domani', fr: 'Votre service est demain', az: 'Növbəniz sabahdır', tr: 'Vardiyanız yarın', uk: 'Ваша зміна завтра', kk: 'Ауысымыңыз ертең' },
   'notify.shiftReminderBodyTime': { en: 'Your shift is tomorrow at {time}', ru: 'Ваша смена завтра в {time}', it: 'Il tuo turno è domani alle {time}', fr: 'Votre service est demain à {time}', az: 'Növbəniz sabah saat {time}', tr: 'Vardiyanız yarın saat {time}', uk: 'Ваша зміна завтра о {time}', kk: 'Ауысымыңыз ертең сағат {time}' },
   'notify.trialEndingTitle': { en: 'Trial ending', ru: 'Окончание пробного периода', it: 'La prova sta per finire', fr: 'Fin de la période d’essai', az: 'Sınaq müddəti bitir', tr: 'Deneme süresi bitiyor', uk: 'Закінчення пробного періоду', kk: 'Сынақ мерзімі аяқталады' },
-  'notify.trialEndingBody':  { en: 'Trial ends in {n} days', ru: 'Пробный период заканчивается через {n} дн.', it: 'La prova termina tra {n} g.', fr: 'L’essai se termine dans {n} j.', az: 'Sınaq {n} gündən sonra bitir', tr: 'Deneme {n} gün içinde bitiyor', uk: 'Пробний період закінчується через {n} дн.', kk: 'Сынақ {n} күннен кейін аяқталады' },
+  'notify.trialEndingBody':  { en: '{n} days left', ru: 'Осталось {n} дн.', it: 'Mancano {n} giorni', fr: 'Plus que {n} jours', az: '{n} gün qaldı', tr: '{n} gün kaldı', uk: 'Залишилось {n} дн.', kk: '{n} күн қалды' },
 
   'notify.bookingTitle': { en: 'New booking', ru: 'Новая бронь', it: 'Nuova prenotazione', fr: 'Nouvelle réservation', az: 'Yeni rezervasiya', tr: 'Yeni rezervasyon', uk: 'Нове бронювання', kk: 'Жаңа брондау' },
   'notify.bookingTable': { en: 'Table', ru: 'Стол', it: 'Tavolo', fr: 'Table', az: 'Masa', tr: 'Masa', uk: 'Стіл', kk: 'Үстел' },
@@ -67,7 +69,7 @@ export const NOTIFY_STRINGS: Record<string, Row> = {
   'notify.violationTitle':     { en: 'Audit violation', ru: 'Нарушение по аудиту', it: 'Violazione audit', fr: 'Violation d’audit', az: 'Audit pozuntusu', tr: 'Denetim ihlali', uk: 'Порушення аудиту', kk: 'Аудит бұзушылығы' },
   'notify.violationBody':      { en: '{item} — needs fixing', ru: '{item} — нужно исправить', it: '{item} — da correggere', fr: '{item} — à corriger', az: '{item} — düzəldilməlidir', tr: '{item} — düzeltilmeli', uk: '{item} — потрібно виправити', kk: '{item} — түзету қажет' },
   'notify.closeChecklistReminderTitle': { en: 'Closing checklist not done', ru: 'Чек-лист закрытия не пройден', it: 'Checklist di chiusura non completata', fr: 'Checklist de clôture non terminée', az: 'Bağlanış çek-listi tamamlanmayıb', tr: 'Kapanış kontrol listesi tamamlanmadı', uk: 'Чек-лист закриття не пройдено', kk: 'Жабылу тексеру тізімі толтырылмаған' },
-  'notify.closeChecklistReminderBody':  { en: 'Not all items are checked yet', ru: 'Не все пункты отмечены', it: 'Non tutti i punti sono stati spuntati', fr: 'Tous les éléments ne sont pas cochés', az: 'Bütün bəndlər qeyd olunmayıb', tr: 'Tüm maddeler işaretlenmedi', uk: 'Не всі пункти відмічено', kk: 'Барлық тармақтар белгіленбеген' },
+  'notify.closeChecklistReminderBody':  { en: 'Check off the remaining items before closing', ru: 'Отметьте оставшиеся пункты до закрытия', it: 'Spunta i punti rimanenti prima della chiusura', fr: 'Cochez les éléments restants avant la clôture', az: 'Bağlanmazdan əvvəl qalan bəndləri qeyd edin', tr: 'Kapanıştan önce kalan maddeleri işaretleyin', uk: 'Відмітьте решту пунктів до закриття', kk: 'Жабу алдында қалған тармақтарды белгілеңіз' },
 }
 
 const CAT_KEYS: Record<string, string> = {

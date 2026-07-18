@@ -82,7 +82,7 @@ async function sendTrialReminders(admin: any, now: Date): Promise<number> {
       // чтобы не перезапрашивать каждый прогон (дедуп выше читает эти строки).
       await dispatchNotification(admin, r.id, {
         type: 'trial_ending',
-        title: 'Trial ending', body: `Trial ends in ${daysLeft} d.`,
+        title: 'Trial ending', body: `${daysLeft} days left`,
         titleKey: 'notify.trialEndingTitle', bodyKey: 'notify.trialEndingBody', bodyParams: { n: daysLeft },
         data: { days_left: daysLeft, email_ok: !!res.ok },
         audience: { owner: true },
@@ -299,7 +299,7 @@ async function remindOpenCloseChecklist(admin: any, now: Date, tzMap: Record<str
       if (allDone) continue
 
       await dispatchNotification(admin, sh.restaurant_id, {
-        type: 'audit_close_reminder', title: 'Closing checklist not done', body: 'Not all items are checked yet',
+        type: 'audit_close_reminder', title: 'Closing checklist not done', body: 'Check off the remaining items before closing',
         titleKey: 'notify.closeChecklistReminderTitle', bodyKey: 'notify.closeChecklistReminderBody',
         audience: { managers: true },
       }).catch(() => {})
