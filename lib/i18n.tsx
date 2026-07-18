@@ -1072,6 +1072,7 @@ const STRINGS: Record<string, Row> = {
   'dash.cash':       { en: 'Cash', ru: 'Наличные', it: 'Contanti', fr: 'Espèces', az: 'Nağd', tr: 'Nakit', uk: 'Готівка', kk: 'Қолма-қол' },
   'dash.card':       { en: 'Card', ru: 'Безнал', it: 'Carta', fr: 'Carte', az: 'Kart', tr: 'Kart', uk: 'Безготівка', kk: 'Картамен' },
   'dash.hookahs':    { en: 'Hookahs', ru: 'Кальяны', it: 'Narghilè', fr: 'Chichas', az: 'Qəlyanlar', tr: 'Nargileler', uk: 'Кальяни', kk: 'Кальяндар' },
+  'dash.audits':     { en: 'Audits', ru: 'Аудиты', it: 'Audit', fr: 'Audits', az: 'Auditlər', tr: 'Denetimler', uk: 'Аудити', kk: 'Аудиттер' },
   'dash.menuOrders': { en: 'Menu orders', ru: 'Заказы меню', it: 'Ordini menu', fr: 'Commandes menu', az: 'Menyu sifarişləri', tr: 'Menü siparişleri', uk: 'Замовлення меню', kk: 'Мәзір тапсырыстары' },
   'dash.whereToStart':{ en: 'Where to start', ru: 'С чего начать', it: 'Da dove iniziare', fr: 'Par où commencer', az: 'Haradan başlamalı', tr: 'Nereden başlamalı', uk: 'З чого почати', kk: 'Неден бастау керек' },
   'dash.ofWord':     { en: 'of', ru: 'из', it: 'di', fr: 'sur', az: '/', tr: '/', uk: 'з', kk: '/' },

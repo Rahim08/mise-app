@@ -41,6 +41,9 @@ export default function OverviewPage() {
   const [orders, setOrders] = useState({ total: 0, fresh: 0 })
   const [setup, setSetup] = useState({ hasStaff: false, hasShift: false })
   const [trends, setTrends] = useState<{ cash: number[]; card: number[]; hookah: number[] }>({ cash: [], card: [], hookah: [] })
+  // Аудиты за 30 дней (ревью В3): владелец видит % выполнения и топ нарушений
+  // прямо в Обзоре, не залезая в People → Зал → Чек-листы.
+  const [audits, setAudits] = useState<{ rate: number; top: [string, number][] } | null>(null)
 
   useEffect(() => {
     if (!restaurant?.id) return
@@ -51,7 +54,8 @@ export default function OverviewPage() {
       // 14-дневное окно для sparkline-трендов в StatTile (glance-виджет, не полноценная аналитика — та живёт в Analytics).
       const days14 = Array.from({ length: 14 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - (13 - i)); return fmtDay(d) })
       const rangeStart = days14[0]
-      const [shiftRes, hookahRes, ordersRes, staffRes, anyShiftRes, histShiftsRes, histHookahRes] = await Promise.all([
+      const auditsSince = fmtDay(new Date(Date.now() - 30 * 86400000))
+      const [shiftRes, hookahRes, ordersRes, staffRes, anyShiftRes, histShiftsRes, histHookahRes, clRes, cmRes] = await Promise.all([
         db.from('shifts').select('*').eq('restaurant_id', restaurant.id).eq('date', today).order('opened_at', { ascending: false }).limit(1),
         appOk('stash') ? db.from('hookah_sales').select('quantity, price, is_free, date').eq('date', today) : Promise.resolve({ data: [] }),
         appOk('menu') ? db.from('menu_orders').select('id, status, created_at').gte('created_at', dayStartISO) : Promise.resolve({ data: [] }),
@@ -59,6 +63,8 @@ export default function OverviewPage() {
         db.from('shifts').select('id').eq('restaurant_id', restaurant.id).limit(1),
         db.from('shifts').select('date, income, income_card').eq('restaurant_id', restaurant.id).gte('date', rangeStart).lte('date', today),
         appOk('stash') ? db.from('hookah_sales').select('date, quantity, price, is_free').gte('date', rangeStart).lte('date', today) : Promise.resolve({ data: [] }),
+        appOk('people') ? db.from('shift_checklists').select('id, items') : Promise.resolve({ data: [] }),
+        appOk('people') ? db.from('shift_checklist_completions').select('checklist_id, items_state, status, date').gte('date', auditsSince) : Promise.resolve({ data: [] }),
       ])
       if (gone) return
       setSetup({ hasStaff: (staffRes.data || []).length > 0, hasShift: (anyShiftRes.data || []).length > 0 })
@@ -86,6 +92,34 @@ export default function OverviewPage() {
         card: days14.map(d => cardByDate[d] || 0),
         hookah: days14.map(d => hookahByDate[d] || 0),
       })
+
+      // Аудиты (В3): та же логика, что AuditStatsView в People — считаем только
+      // завершённые прогоны (done + начатые за прошлые дни), N/A вне знаменателя,
+      // fail = нарушение, legacy done = pass. Карточка не показывается, пока данных нет.
+      const listItems = new Map<string, any[]>((clRes.data || []).map((l: any) => [
+        l.id,
+        (Array.isArray(l.items) ? l.items : []).map((x: any) => typeof x === 'string' ? { label: x } : { label: x?.label ?? '' }),
+      ]))
+      let auTotal = 0, auPass = 0
+      const auViolations = new Map<string, number>()
+      const finished = (cmRes.data || []).filter((c: any) => c.status === 'done' || (c.status === 'in_progress' && c.date < today))
+      for (const c of finished) {
+        const items = listItems.get(c.checklist_id)
+        if (!items) continue
+        const state = Array.isArray(c.items_state) ? c.items_state : []
+        items.forEach((it: any, i: number) => {
+          const s = typeof state[i] === 'boolean' ? { done: state[i] } : (state[i] || {})
+          const eff = s.result ?? (s.done ? 'pass' : null)
+          if (eff === 'na') return
+          auTotal++
+          if (eff === 'pass') auPass++
+          else auViolations.set(it.label, (auViolations.get(it.label) || 0) + 1)
+        })
+      }
+      setAudits(auTotal > 0 ? {
+        rate: Math.round((auPass / auTotal) * 100),
+        top: Array.from(auViolations.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3),
+      } : null)
       setLoading(false)
     })()
     return () => { gone = true }
@@ -193,6 +227,26 @@ export default function OverviewPage() {
                 <svg width="14" height="12" fill="none" stroke="var(--ok)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 12 10"><path d="M1 5l3.5 3.5L11 1" /></svg>
                 {tr('dash.allGood')}
               </div>
+            </Card>
+          )}
+
+          {/* Аудиты за 30 дней (ревью В3): glance-карточка, клик ведёт в People */}
+          {audits && (
+            <Card onClick={() => router.push('/dashboard/people')} style={{ marginTop: 10, padding: '14px 16px', cursor: 'pointer' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>{tr('dash.audits')} · {tr('pe.last30Days')}</div>
+                <div style={{ fontSize: '1rem', fontWeight: 800, color: audits.rate >= 80 ? 'var(--ok)' : audits.rate >= 50 ? 'var(--warn)' : 'var(--danger)' }}>{audits.rate}%</div>
+              </div>
+              {audits.top.length > 0 && (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {audits.top.map(([label, n]) => (
+                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: '.78rem', color: 'var(--tx2)' }}>
+                      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+                      <span style={{ fontWeight: 700, color: 'var(--danger)', flexShrink: 0 }}>{n}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Card>
           )}
         </>
