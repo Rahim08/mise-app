@@ -7,7 +7,7 @@ private func grams(_ g: Double) -> String {
     let f = NumberFormatter(); f.numberStyle = .decimal; f.groupingSeparator = " "; f.maximumFractionDigits = 0
     return (f.string(from: NSNumber(value: g)) ?? "0") + " г"
 }
-private func eur(_ v: Double) -> String { Money.s(v) }
+// eur() — общий модульный хелпер в PeopleView.swift (после распила Д2 стал internal).
 private func i(_ s: String) -> Int { Int(s.filter(\.isNumber)) ?? 0 }
 
 // MARK: - Модель Stash (логика — app/tobacco/page.tsx)
