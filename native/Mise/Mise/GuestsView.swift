@@ -148,6 +148,7 @@ struct GuestsView: View {
                         .padding(.bottom, 24)
                     }
                 }
+                .refreshable { await m.loadAllBookings(force: true) }
                 if let errorMsg {
                     Text(errorMsg)
                         .font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)

@@ -110,8 +110,10 @@ final class BookingsModel {
     }
 
     /// Загрузить все брони для CRM гостей (~12 месяцев назад).
-    func loadAllBookings() async {
-        guard !allBookingsLoaded else { return }
+    /// force: игнорировать флаг «уже загружено» — для pull-to-refresh (брони с других
+    /// устройств не попадают в этот кеш иначе до перезапуска приложения).
+    func loadAllBookings(force: Bool = false) async {
+        guard !allBookingsLoaded || force else { return }
         let cal = Calendar.current
         let from = cal.date(byAdding: .month, value: -12, to: Date()) ?? Date()
         if let rows = try? await DB.from("bookings").select()
@@ -149,9 +151,15 @@ final class BookingsModel {
         var values: [String: Any] = [
             "booking_date": b.booking_date ?? key(currentDate),
         ]
-        // status NOT NULL DEFAULT 'new' в БД — не шлём NULL явно, иначе insert/update падает.
-        // Новая бронь создаётся БЕЗ статуса (пусть БД поставит default) — статус ставится свайпом.
-        if let status = b.status { values["status"] = status }
+        // status NOT NULL DEFAULT 'new' в БД. Новая бронь создаётся БЕЗ статуса (пусть БД
+        // поставит default) — статус ставится свайпом. При РЕДАКТИРОВАНИИ статус шлём всегда,
+        // включая явный сброс на «нет статуса» из пикера (nil → "new", это одно и то же для БД) —
+        // иначе выбор «Нет статуса» в редакторе молча не сохранялся.
+        if isNew {
+            if let status = b.status { values["status"] = status }
+        } else {
+            values["status"] = b.status ?? "new"
+        }
         values["booking_time"] = b.booking_time ?? NSNull()
         values["guest_name"] = b.guest_name ?? NSNull()
         values["guests_count"] = b.guests_count ?? NSNull()
@@ -213,18 +221,33 @@ final class BookingsModel {
     }
 
     func delete(_ b: Booking) async {
-        try? await DB.from("bookings").delete().eq("id", b.id).run()
+        do {
+            try await DB.from("bookings").delete().eq("id", b.id).run()
+        } catch {
+            flash(t("bk.saveFailed"))
+            return
+        }
         await load()
         await loadMonth()
         allBookingsLoaded = false
     }
 
-    /// Свайп-отметка статуса (пришёл/опаздывает) — мгновенно локально, затем на сервер.
+    /// Свайп-отметка статуса (пришёл/опаздывает) — мгновенно локально (в обоих списках —
+    /// «сегодня» и текущий диапазон, иначе на вкладках Завтра/Неделя статус визуально не
+    /// меняется), затем на сервер; при сбое — откат + тост, а не тихое рассинхронивание.
     func setStatus(_ b: Booking, to status: String) async {
+        let prevStatus = b.status
         if let i = bookings.firstIndex(where: { $0.id == b.id }) { bookings[i].status = status }
-        try? await DB.from("bookings").update([
-            "status": status, "updated_at": ISO8601DateFormatter().string(from: Date()),
-        ]).eq("id", b.id).run()
+        if let i = rangeBookings.firstIndex(where: { $0.id == b.id }) { rangeBookings[i].status = status }
+        do {
+            try await DB.from("bookings").update([
+                "status": status, "updated_at": ISO8601DateFormatter().string(from: Date()),
+            ]).eq("id", b.id).run()
+        } catch {
+            if let i = bookings.firstIndex(where: { $0.id == b.id }) { bookings[i].status = prevStatus }
+            if let i = rangeBookings.firstIndex(where: { $0.id == b.id }) { rangeBookings[i].status = prevStatus }
+            flash(t("bk.saveFailed"))
+        }
     }
 }
 
@@ -241,13 +264,30 @@ struct GuestProfile: Identifiable {
     var bookings: [Booking]
 }
 
+// MARK: - Цель редактора брони (identity для .sheet(item:))
+//
+// Раньше редактор открывался через ДВА отдельных @State (editing + showEditor) — .sheet(isPresented:)
+// не переоткрывает/не обновляет контент, если true уже установлено (или два State применяются не
+// атомарно) → тап иногда не открывал ничего или открывал пустую «новую» бронь вместо нужной.
+// .sheet(item:) с Identifiable-целью пересоздаёт шит при каждой смене цели — гонки нет.
+private enum BookingEditorTarget: Identifiable {
+    case create(name: String?, phone: String?, visits: Int, noShows: Int)
+    case edit(Booking)
+
+    var id: String {
+        switch self {
+        case .create: return "new"
+        case .edit(let b): return b.id
+        }
+    }
+}
+
 // MARK: Экран
 
 struct BookingsView: View {
     @Environment(AppModel.self) private var app
     @State private var m: BookingsModel?
-    @State private var editing: Booking?
-    @State private var showEditor = false
+    @State private var editorTarget: BookingEditorTarget?
     @State private var pendingDelete: Booking?
     @State private var showGuests = false
     @State private var selectedRange: BookingRange = .today
@@ -255,10 +295,6 @@ struct BookingsView: View {
     @State private var duplicating: Booking?
     @State private var duplicateDate = Date()
     @State private var showDuplicateDialog = false
-    @State private var prefillName: String?     // префилл для «Новая бронь» из карточки гостя
-    @State private var prefillPhone: String?
-    @State private var prefillVisits = 0
-    @State private var prefillNoShows = 0
 
     private func canEdit(_ b: Booking) -> Bool {
         app.isOfficial || (b.created_by != nil && b.created_by == app.staff?.id)
@@ -393,32 +429,43 @@ struct BookingsView: View {
                                     isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                                     titleVisibility: .visible) {
                     Button(t("bk.delete"), role: .destructive) {
-                        if let b = pendingDelete { Task { await m.delete(b) } }; pendingDelete = nil
+                        if let b = pendingDelete { deleteAndSync(b, m: m) }; pendingDelete = nil
                     }
                     Button(t("cancel"), role: .cancel) { pendingDelete = nil }
                 }
-                .sheet(isPresented: $showEditor) {
-                    BookingEditor(
-                        booking: editing,
-                        defaultDate: m.key(m.currentDate),
-                        canDelete: editing != nil && (editing.map(canEdit) ?? false),
-                        onSave: { b, isNew in Task { await m.save(b, isNew: isNew) } },
-                        onDelete: { b in Task { await m.delete(b) } },
-                        author: (app.staff?.id ?? "owner", app.staff?.name ?? t("role.owner")),
-                        prefillName: prefillName,
-                        prefillPhone: prefillPhone,
-                        prefillVisits: prefillVisits,
-                        prefillNoShows: prefillNoShows
-                    )
+                .sheet(item: $editorTarget) { target in
+                    switch target {
+                    case .edit(let b):
+                        BookingEditor(
+                            booking: b,
+                            defaultDate: m.key(m.currentDate),
+                            canDelete: canEdit(b),
+                            onSave: { nb, isNew in saveAndSync(nb, isNew: isNew, m: m) },
+                            onDelete: { nb in deleteAndSync(nb, m: m) },
+                            author: (app.staff?.id ?? "owner", app.staff?.name ?? t("role.owner"))
+                        )
+                    case .create(let name, let phone, let visits, let noShows):
+                        BookingEditor(
+                            booking: nil,
+                            defaultDate: m.key(m.currentDate),
+                            canDelete: false,
+                            onSave: { nb, isNew in saveAndSync(nb, isNew: isNew, m: m) },
+                            onDelete: { _ in },
+                            author: (app.staff?.id ?? "owner", app.staff?.name ?? t("role.owner")),
+                            prefillName: name,
+                            prefillPhone: phone,
+                            prefillVisits: visits,
+                            prefillNoShows: noShows
+                        )
+                    }
                 }
                 .sheet(isPresented: $showGuests) {
                     GuestsView(m: m, onNewBooking: { name, phone, visits, noShows in
                         // Закрываем шит гостей и открываем редактор с префиллом.
                         showGuests = false
-                        prefillName = name; prefillPhone = phone
-                        prefillVisits = visits; prefillNoShows = noShows
-                        editing = nil
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showEditor = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            editorTarget = .create(name: name, phone: phone, visits: visits, noShows: noShows)
+                        }
                     })
                 }
                 .confirmationDialog(t("bk.duplicateTitle"), isPresented: $showDuplicateDialog, titleVisibility: .visible) {
@@ -438,7 +485,7 @@ struct BookingsView: View {
                                 created_by: app.staff?.id ?? b.created_by,
                                 created_by_name: app.staff?.name ?? b.created_by_name
                             )
-                            Task { await m.save(copy, isNew: true) }
+                            saveAndSync(copy, isNew: true, m: m)
                         }
                     }
                     Button(t("cancel"), role: .cancel) {}
@@ -466,6 +513,22 @@ struct BookingsView: View {
         }
         .onChange(of: selectedRange) { _, _ in
             if let m { Task { await refreshRange(m) } }
+        }
+    }
+
+    // save()/delete() всегда обновляют только «сегодня» — если открыта Завтра/Неделя,
+    // без этого правка/удаление брони не видны на экране до ручного pull-to-refresh.
+    private func saveAndSync(_ b: Booking, isNew: Bool, m: BookingsModel) {
+        Task {
+            await m.save(b, isNew: isNew)
+            if selectedRange != .today { await refreshRange(m) }
+        }
+    }
+
+    private func deleteAndSync(_ b: Booking, m: BookingsModel) {
+        Task {
+            await m.delete(b)
+            if selectedRange != .today { await refreshRange(m) }
         }
     }
 
@@ -508,11 +571,10 @@ struct BookingsView: View {
                 SwipeAction(label: t("bk.delete"), systemImage: "trash.fill", tint: BrandKit.menu) {
                     pendingDelete = b
                 },
-            ] : []
+            ] : [],
+            onTap: canEdit(b) ? { editorTarget = .edit(b) } : nil
         ) {
-            BookingCard(b: b, editable: canEdit(b), pastVisits: visits) {
-                if canEdit(b) { editing = b; showEditor = true }
-            }
+            BookingCard(b: b, editable: canEdit(b), pastVisits: visits)
         }
         .contextMenu {
             if canEdit(b) {
@@ -524,12 +586,12 @@ struct BookingsView: View {
                     Label(t("bk.duplicate"), systemImage: "doc.on.doc")
                 }
                 Button {
-                    editing = b; showEditor = true
+                    editorTarget = .edit(b)
                 } label: {
                     Label(t("edit"), systemImage: "pencil")
                 }
                 Button(role: .destructive) {
-                    Task { await m.delete(b) }
+                    deleteAndSync(b, m: m)
                 } label: {
                     Label(t("bk.delete"), systemImage: "trash")
                 }
@@ -646,8 +708,7 @@ struct BookingsView: View {
 
     private var addButton: some View {
         Button {
-            editing = nil; prefillName = nil; prefillPhone = nil
-            prefillVisits = 0; prefillNoShows = 0; showEditor = true
+            editorTarget = .create(name: nil, phone: nil, visits: 0, noShows: 0)
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         } label: {
             Image(systemName: "plus").font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
@@ -773,7 +834,6 @@ private struct BookingCard: View {
     let b: Booking
     let editable: Bool
     let pastVisits: Int
-    let onTap: () -> Void
 
     @State private var showPhoneMenu = false
 
@@ -781,8 +841,9 @@ private struct BookingCard: View {
     private var st: BkStatus? { (b.status?.isEmpty == false) ? BkStatus(rawValue: b.status!) : nil }
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
+        // Тап по ряду обрабатывает SwipeActionRow (onTap) — здесь просто контент,
+        // не Button (голый .gesture на драге в SwipeActionRow иначе крадёт тап).
+        HStack(spacing: 12) {
                 VStack(spacing: 2) {
                     Text(b.booking_time ?? "—").font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
                     if let n = b.guests_count {
@@ -862,12 +923,10 @@ private struct BookingCard: View {
                     }
                 }
             }
-            .padding(14)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .opacity(st == .cancelled ? 0.55 : 1)
-        }
-        .buttonStyle(.plain)
-        .disabled(!editable)
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .opacity(st == .cancelled ? 0.55 : 1)
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func label(_ icon: String, _ text: String) -> some View {
@@ -914,7 +973,6 @@ private struct BookingEditor: View {
                     Section(t("bk.secGuest")) {
                         field(t("bk.name"), text: $name)
                         field(t("bk.phone"), text: $phone).keyboardType(.phonePad)
-                        field(t("bk.guests"), text: $guests).keyboardType(.numberPad)
                         // Подсказка сотруднику при создании брони из карточки известного гостя —
                         // для брони «с нуля» (без выбора гостя) не показываем, данных ещё нет.
                         if isNew && (prefillVisits > 0 || prefillNoShows > 0) {
@@ -934,7 +992,10 @@ private struct BookingEditor: View {
                             }
                         }
                     }
+                    // Кол-во гостей — свойство БРОНИ (меняется от визита к визиту), а не гостя
+                    // (имя/телефон) — раньше стояло в секции «Гость», путало.
                     Section(t("bk.secBooking")) {
+                        field(t("bk.guests"), text: $guests).keyboardType(.numberPad)
                         Toggle(t("bk.setTime"), isOn: $hasTime).tint(BK_ACCENT)
                         if hasTime {
                             DatePicker(t("bk.time"), selection: $time, displayedComponents: .hourAndMinute)

@@ -19,6 +19,7 @@ struct SwipeActionRow<Content: View>: View {
     var leading: SwipeAction? = nil          // свайп вправо (зелёное, мгновенно)
     var trailing: [SwipeAction] = []         // свайп влево (порядок слева→направо)
     var fullSwipeTrailing: Bool = true       // полный свайп влево запускает последнее действие
+    var onTap: (() -> Void)? = nil           // тап по всему ряду (контент — не Button)
     @ViewBuilder var content: Content
 
     @State private var offset: CGFloat = 0
@@ -47,9 +48,17 @@ struct SwipeActionRow<Content: View>: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
-            content
-                .offset(x: offset)
-                .gesture(drag)
+            // .simultaneousGesture (не .gesture) — голый .gesture поверх Button/суб-кнопок в
+            // content крадёт/задерживает их тап (известный SwiftUI-конфликт). onTapGesture
+            // весится только когда onTap задан (Bookings — весь ряд открывает редактор);
+            // остальные экраны параметр не передают, их суб-кнопки не затронуты.
+            Group {
+                if let onTap {
+                    content.offset(x: offset).simultaneousGesture(drag).onTapGesture(perform: onTap)
+                } else {
+                    content.offset(x: offset).simultaneousGesture(drag)
+                }
+            }
         }
     }
 
