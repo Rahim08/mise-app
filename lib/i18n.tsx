@@ -710,6 +710,7 @@ const STRINGS: Record<string, Row> = {
   'pe.checklistCloseTitle':{ en: 'Closing checklist', ru: 'Чек-лист закрытия', it: 'Checklist di chiusura', fr: 'Checklist de fermeture', az: 'Bağlanış yoxlama siyahısı', tr: 'Kapanış kontrol listesi', uk: 'Чек-лист закриття', kk: 'Жабылу тексеру тізімі' },
   'pe.workshop':     { en: 'Team', ru: 'Цех', it: 'Reparto', fr: 'Équipe', az: 'Sex', tr: 'Ekip', uk: 'Цех', kk: 'Цех' },
   'pe.itemN':        { en: 'Item {n}', ru: 'Пункт {n}', it: 'Voce {n}', fr: 'Élément {n}', az: 'Bənd {n}', tr: 'Madde {n}', uk: 'Пункт {n}', kk: 'Тармақ {n}' },
+  'pe.itemWeight':   { en: 'Weight', ru: 'Вес', it: 'Peso', fr: 'Poids', az: 'Çəki', tr: 'Ağırlık', uk: 'Вага', kk: 'Салмақ' },
   'pe.addItem':      { en: '+ Add item', ru: '+ Добавить пункт', it: '+ Aggiungi voce', fr: '+ Ajouter un élément', az: '+ Bənd əlavə et', tr: '+ Madde ekle', uk: '+ Додати пункт', kk: '+ Тармақ қосу' },
   'pe.enterName':    { en: 'Enter a name', ru: 'Укажите название', it: 'Inserisci un nome', fr: 'Indiquez un nom', az: 'Ad daxil edin', tr: 'Bir ad girin', uk: 'Вкажіть назву', kk: 'Атауын енгізіңіз' },
   'pe.saved':        { en: 'Saved', ru: 'Сохранено', it: 'Salvato', fr: 'Enregistré', az: 'Saxlanıldı', tr: 'Kaydedildi', uk: 'Збережено', kk: 'Сақталды' },

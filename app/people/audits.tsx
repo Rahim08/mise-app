@@ -62,9 +62,12 @@ export function recurrenceSummary(audit: any, tr: (k: string, v?: Record<string,
   return null
 }
 
-export function normItem(x: any, i: number): { id: string; label: string; photo_required: boolean } {
-  if (typeof x === 'string') return { id: String(i), label: x, photo_required: false }
-  return { id: x?.id ?? String(i), label: x?.label ?? '', photo_required: !!x?.photo_required }
+// weight — вес пункта в скоринге разовых аудитов (Б6, kind='audit'); по умолчанию 1
+// (обратная совместимость: старые пункты и чек-листы смены без веса весят как обычно).
+export function normItem(x: any, i: number): { id: string; label: string; photo_required: boolean; weight: number } {
+  if (typeof x === 'string') return { id: String(i), label: x, photo_required: false, weight: 1 }
+  const w = Number(x?.weight)
+  return { id: x?.id ?? String(i), label: x?.label ?? '', photo_required: !!x?.photo_required, weight: Number.isFinite(w) && w > 0 ? w : 1 }
 }
 // Оценка пункта аудита (ревью Б1/Б2): result пишется только в grading-режиме (разовые
 // аудиты), done остаётся для обратной совместимости (result != null ⇒ done = true —
@@ -128,7 +131,7 @@ async function reportViolation(opts: {
 // grading (ревью Б1/Б2): вместо бинарной галки — исход ✓/✗/N/A + комментарий к пункту
 // (модель SafetyCulture/iAuditor). Включается только для разовых аудитов.
 export function ChecklistCard({ title, items, state, canFill, restaurantId, completionId, staff, myId, accent, t, toast, onSetItem, actions, grading }: {
-  title: React.ReactNode; items: { id: string; label: string; photo_required: boolean }[]; state: ItemState[]
+  title: React.ReactNode; items: { id: string; label: string; photo_required: boolean; weight: number }[]; state: ItemState[]
   canFill: boolean; restaurantId: string; completionId?: string; staff: any[]; myId: string; accent: string; t: any; toast: (m: string) => void
   onSetItem: (idx: number, next: ItemState) => void
   actions?: React.ReactNode
@@ -480,9 +483,9 @@ export function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFil
   const [completions, setCompletions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState<{
-    id: string | null; title: string; items: string[]; targetType: 'role' | 'staff' | 'venue'; targetVal: string
+    id: string | null; title: string; items: { label: string; weight: number }[]; targetType: 'role' | 'staff' | 'venue'; targetVal: string
     recurrence: 'none' | 'daily' | 'weekly' | 'monthly'; recurrenceWeekdays: number[]; recurrenceDayOfMonth: number
-    origItems?: { label: string; photo_required: boolean }[]
+    origItems?: { label: string; photo_required: boolean; weight: number }[]
   } | null>(null)
   const [saving, setSaving] = useState(false)
   const [historyOf, setHistoryOf] = useState<any | null>(null)
@@ -557,7 +560,7 @@ export function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFil
   const editAudit = (audit: any) => {
     const orig = (Array.isArray(audit.items) ? audit.items : []).map((x: any, i: number) => normItem(x, i))
     setCreating({
-      id: audit.id, title: audit.title || '', items: orig.map((it: any) => it.label),
+      id: audit.id, title: audit.title || '', items: orig.map((it: any) => ({ label: it.label, weight: it.weight })),
       targetType: audit.target_scope || 'venue',
       targetVal: audit.target_scope === 'role' ? (audit.role || '') : audit.target_scope === 'staff' ? (audit.assigned_staff_id || '') : '',
       recurrence: audit.recurrence || 'none',
@@ -568,12 +571,18 @@ export function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFil
 
   const launch = async () => {
     if (!creating) return
-    const clean = creating.items.map(s => s.trim()).filter(Boolean)
+    const clean = creating.items
+      .map(it => ({ label: it.label.trim(), weight: Number(it.weight) > 0 ? Math.round(Number(it.weight)) : 1 }))
+      .filter(it => it.label)
     if (!creating.title.trim() || clean.length === 0) { toast(tr('pe.addAtLeastOneItem')); return }
     if (creating.targetType !== 'venue' && !creating.targetVal) return
     setSaving(true)
+    // items — объекты {id,label,weight,photo_required} (Б6): вес правится в веб-форме,
+    // photo_required сохраняем по индексу при редактировании (в веб-форме флаг не правится).
     const payload: any = {
-      kind: 'audit', title: creating.title.trim(), items: clean, target_scope: creating.targetType,
+      kind: 'audit', title: creating.title.trim(),
+      items: clean.map((it, i) => ({ id: String(i), label: it.label, weight: it.weight, photo_required: creating.origItems?.[i]?.photo_required || false })),
+      target_scope: creating.targetType,
       recurrence: creating.recurrence,
       recurrence_weekdays: creating.recurrence === 'weekly' ? creating.recurrenceWeekdays : null,
       recurrence_day_of_month: creating.recurrence === 'monthly' ? creating.recurrenceDayOfMonth : null,
@@ -582,8 +591,6 @@ export function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFil
     if (creating.targetType === 'role') payload.role = creating.targetVal
     if (creating.targetType === 'staff') payload.assigned_staff_id = creating.targetVal
     if (creating.id) {
-      // Редактирование шаблона: photo_required сохраняем по индексу (в веб-форме флаг не правится).
-      payload.items = clean.map((label, i) => ({ id: String(i), label, photo_required: creating.origItems?.[i]?.photo_required || false }))
       await db.from('shift_checklists').update(payload).eq('id', creating.id)
       setSaving(false); setCreating(null); toast(tr('pe.save')); await load()
       return
@@ -602,7 +609,7 @@ export function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFil
     <div>
       {!canFill && <div style={{ background: `${t.orange}14`, borderRadius: 12, padding: '12px 14px', fontSize: 13, color: t.orange, marginBottom: 14 }}>{tr('pe.needCheckInFirst')}</div>}
       {isManager && (
-        <button onClick={() => setCreating({ id: null, title: '', items: [''], targetType: 'role', targetVal: '', recurrence: 'none', recurrenceWeekdays: [], recurrenceDayOfMonth: 1 })} style={{ width: '100%', padding: '14px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', marginBottom: 16, boxShadow: `0 4px 16px ${accent}44` }}>
+        <button onClick={() => setCreating({ id: null, title: '', items: [{ label: '', weight: 1 }], targetType: 'role', targetVal: '', recurrence: 'none', recurrenceWeekdays: [], recurrenceDayOfMonth: 1 })} style={{ width: '100%', padding: '14px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', marginBottom: 16, boxShadow: `0 4px 16px ${accent}44` }}>
           {tr('pe.newAudit')}
         </button>
       )}
@@ -696,13 +703,17 @@ export function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFil
                 placeholder={tr('pe.dayOfMonthLabel')} style={{ ...inp(t), marginBottom: 14 }} />
             )}
             <label style={lbl(t)}>{tr('pe.itemsLabel')}</label>
-            {creating.items.map((v, i) => (
+            {creating.items.map((it, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                <input value={v} onChange={e => setCreating(c => ({ ...c!, items: c!.items.map((x, j) => j === i ? e.target.value : x) }))} placeholder={tr('pe.itemN', { n: i + 1 })} style={{ ...inp(t), marginBottom: 0, flex: 1 }} />
+                <input value={it.label} onChange={e => setCreating(c => ({ ...c!, items: c!.items.map((x, j) => j === i ? { ...x, label: e.target.value } : x) }))} placeholder={tr('pe.itemN', { n: i + 1 })} style={{ ...inp(t), marginBottom: 0, flex: 1 }} />
+                <input type="number" min={1} max={9} value={it.weight} title={tr('pe.itemWeight')}
+                  onChange={e => setCreating(c => ({ ...c!, items: c!.items.map((x, j) => j === i ? { ...x, weight: Math.min(9, Math.max(1, Math.round(Number(e.target.value)) || 1)) } : x) }))}
+                  style={{ ...inp(t), marginBottom: 0, width: 52, flexShrink: 0, textAlign: 'center', padding: '0 4px' }} />
                 <button onClick={() => setCreating(c => ({ ...c!, items: c!.items.filter((_, j) => j !== i) }))} style={{ width: 44, borderRadius: 12, border: 'none', background: `${t.red}14`, color: t.red, cursor: 'pointer', fontSize: 18, fontFamily: 'inherit' }}>−</button>
               </div>
             ))}
-            <button onClick={() => setCreating(c => ({ ...c!, items: [...c!.items, ''] }))} style={{ width: '100%', padding: '11px', borderRadius: 12, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: t.text3, fontFamily: 'inherit', fontSize: 14, cursor: 'pointer', marginBottom: 14 }}>{tr('pe.addItem')}</button>
+            <div style={{ fontSize: 11, color: t.text3, marginTop: -4, marginBottom: 10 }}>{tr('pe.itemWeight')}: 1–9</div>
+            <button onClick={() => setCreating(c => ({ ...c!, items: [...c!.items, { label: '', weight: 1 }] }))} style={{ width: '100%', padding: '11px', borderRadius: 12, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: t.text3, fontFamily: 'inherit', fontSize: 14, cursor: 'pointer', marginBottom: 14 }}>{tr('pe.addItem')}</button>
             <button onClick={launch} disabled={saving} style={{ width: '100%', padding: '15px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${accent}44` }}>
               {saving ? '...' : tr('pe.launchAudit')}
             </button>
@@ -723,14 +734,17 @@ export function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFil
   )
 }
 
-// Счёт прогона (ревью Б3/Б4): N/A вне знаменателя; fail и «не проверено» = не выполнено.
+// Счёт прогона (ревью Б3/Б4, весы — Б6): N/A вне знаменателя; fail и «не проверено» = не
+// выполнено. Пункт весит items[i].weight (по умолчанию 1 — старые записи и чек-листы смены
+// без весов считаются как раньше, поштучно).
 export function runScore(items: any[], state: ItemState[]): { pass: number; total: number } {
   let pass = 0, total = 0
-  items.forEach((_, i) => {
+  items.forEach((it, i) => {
     const eff = effResult(state[i])
     if (eff === 'na') return
-    total++
-    if (eff === 'pass') pass++
+    const w = Number(it?.weight) > 0 ? Number(it.weight) : 1
+    total += w
+    if (eff === 'pass') pass += w
   })
   return { pass, total }
 }

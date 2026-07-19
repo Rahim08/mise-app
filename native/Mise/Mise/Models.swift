@@ -182,28 +182,33 @@ nonisolated struct MenuOrder: Codable, Identifiable, Sendable {
 }
 
 /// Пункт чек-листа/аудита. Декодируется и из старого формата (голая строка = label),
-/// и из нового `{id,label,photo_required}` — обратная совместимость на чтение,
+/// и из нового `{id,label,photo_required,weight}` — обратная совместимость на чтение,
 /// миграция данных не требуется (см. docs/migrations/audits-v1-2026-07.sql).
+/// weight — вес пункта в скоринге разовых аудитов (Б6, kind="audit"), по умолчанию 1;
+/// чек-листы смены весов не задают — считаются как раньше, поштучно.
 nonisolated struct ChecklistItem: Codable, Identifiable, Sendable, Hashable {
     var id: String
     var label: String
     var photo_required: Bool
+    var weight: Int
 
-    init(id: String = UUID().uuidString, label: String, photo_required: Bool = false) {
-        self.id = id; self.label = label; self.photo_required = photo_required
+    init(id: String = UUID().uuidString, label: String, photo_required: Bool = false, weight: Int = 1) {
+        self.id = id; self.label = label; self.photo_required = photo_required; self.weight = weight
     }
 
-    private enum CodingKeys: String, CodingKey { case id, label, photo_required }
+    private enum CodingKeys: String, CodingKey { case id, label, photo_required, weight }
 
     init(from decoder: Decoder) throws {
         if let sv = try? decoder.singleValueContainer(), let str = try? sv.decode(String.self) {
-            id = str; label = str; photo_required = false
+            id = str; label = str; photo_required = false; weight = 1
             return
         }
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
         label = try c.decode(String.self, forKey: .label)
         photo_required = try c.decodeIfPresent(Bool.self, forKey: .photo_required) ?? false
+        let w = try c.decodeIfPresent(Int.self, forKey: .weight) ?? 1
+        weight = w > 0 ? w : 1
     }
 
     func encode(to encoder: Encoder) throws {
@@ -211,11 +216,12 @@ nonisolated struct ChecklistItem: Codable, Identifiable, Sendable, Hashable {
         try c.encode(id, forKey: .id)
         try c.encode(label, forKey: .label)
         try c.encode(photo_required, forKey: .photo_required)
+        try c.encode(weight, forKey: .weight)
     }
 
     /// Плоский словарь для записи через DB.update([String: Any]) — JSONSerialization
     /// не умеет сериализовать Swift-структуры напрямую.
-    var asDict: [String: Any] { ["id": id, "label": label, "photo_required": photo_required] }
+    var asDict: [String: Any] { ["id": id, "label": label, "photo_required": photo_required, "weight": weight] }
 }
 
 nonisolated struct ShiftChecklist: Codable, Identifiable, Sendable {

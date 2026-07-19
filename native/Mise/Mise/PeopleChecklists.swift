@@ -400,16 +400,18 @@ struct ItemNoteSheet: View {
     }
 }
 
-/// Счёт прогона (ревью Б3/Б4): N/A вне знаменателя, pass = выполнено;
-/// legacy-записи без result — done = pass.
+/// Счёт прогона (ревью Б3/Б4, весы — Б6): N/A вне знаменателя, pass = выполнено;
+/// legacy-записи без result — done = pass. Пункт весит item.weight (по умолчанию 1 —
+/// чек-листы смены без весов считаются как раньше, поштучно).
 nonisolated func auditRunScore(_ items: [ChecklistItem], _ state: [ChecklistItemState]) -> (pass: Int, total: Int) {
     var pass = 0, total = 0
     for i in items.indices {
         let st: ChecklistItemState? = i < state.count ? state[i] : nil
         let eff = st?.result ?? (st?.done == true ? "pass" : nil)
         if eff == "na" { continue }
-        total += 1
-        if eff == "pass" { pass += 1 }
+        let w = items[i].weight > 0 ? items[i].weight : 1
+        total += w
+        if eff == "pass" { pass += w }
     }
     return (pass, total)
 }
@@ -973,6 +975,12 @@ struct ChecklistEditSheet: View {
                             HStack {
                                 TextField(t("pe.itemN", ["n": "\(i + 1)"]), text: $edit.items[i].label)
                                 Spacer()
+                                // Вес пункта (Б6) — только для разовых аудитов, чек-листы смены без весов.
+                                if edit.kind == "audit" {
+                                    Stepper(value: $edit.items[i].weight, in: 1...9) {
+                                        Text("×\(edit.items[i].weight)").font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
+                                    }.fixedSize()
+                                }
                                 Button { edit.items[i].photo_required.toggle() } label: {
                                     Image(systemName: edit.items[i].photo_required ? "camera.fill" : "camera")
                                         .font(.system(size: 15))

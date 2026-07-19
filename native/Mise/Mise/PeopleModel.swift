@@ -983,7 +983,7 @@ final class PeopleModel {
     }
 
     func saveChecklistTemplate(id: String?, role: String?, items: [ChecklistItem], kind: String = "shift", targetScope: String = "role", assignedStaffId: String? = nil, title: String? = nil, type: String? = nil, recurrence: String = "none", recurrenceWeekdays: [Int]? = nil, recurrenceDayOfMonth: Int? = nil) async {
-        let clean = items.map { ChecklistItem(id: $0.id, label: $0.label.trimmingCharacters(in: .whitespaces), photo_required: $0.photo_required) }.filter { !$0.label.isEmpty }
+        let clean = items.map { ChecklistItem(id: $0.id, label: $0.label.trimmingCharacters(in: .whitespaces), photo_required: $0.photo_required, weight: $0.weight) }.filter { !$0.label.isEmpty }
         guard !clean.isEmpty else { flash(t("pe.addItem")); return }
         let roleVal: Any = role ?? NSNull()
         let itemDicts = clean.map { $0.asDict }
