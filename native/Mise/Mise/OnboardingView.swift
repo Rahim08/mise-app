@@ -132,7 +132,9 @@ private struct PinView: View {
     @State private var shake = false
     @State private var checking = false
 
-    private let keys = ["1","2","3","4","5","6","7","8","9","","0","⌫"]
+    private var keys: [String] {
+        ["1","2","3","4","5","6","7","8","9", Biometrics.available ? "faceid" : "", "0","⌫"]
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -199,6 +201,7 @@ private struct PinView: View {
     }
 
     private func tap(_ k: String) {
+        if k == "faceid" { Task { await retryBiometrics() }; return }
         if k == "⌫" { if !pin.isEmpty { pin.removeLast() }; return }
         guard !k.isEmpty, pin.count < 4, !checking else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -222,6 +225,17 @@ private struct PinView: View {
             }
         }
     }
+
+    private func retryBiometrics() async {
+        guard !checking else { return }
+        checking = true
+        let ok = await Biometrics.authenticate(reason: t("faceid.loginReason"))
+        checking = false
+        if ok {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            model.proceedAfterPin()
+        }
+    }
 }
 
 private struct KeyLabel: View {
@@ -230,9 +244,13 @@ private struct KeyLabel: View {
     var body: some View {
         ZStack {
             if !k.isEmpty {
-                Circle().fill(k == "⌫" ? Color.clear : Color.primary.opacity(0.08))
+                Circle().fill(k == "⌫" || k == "faceid" ? Color.clear : Color.primary.opacity(0.08))
             }
-            Text(k).font(.system(size: k == "⌫" ? 22 : 28, weight: .regular)).foregroundStyle(.primary)
+            if k == "faceid" {
+                Image(systemName: "faceid").font(.system(size: 26, weight: .regular)).foregroundStyle(.primary)
+            } else {
+                Text(k).font(.system(size: k == "⌫" ? 22 : 28, weight: .regular)).foregroundStyle(.primary)
+            }
         }
         .frame(width: 74, height: 74)
     }

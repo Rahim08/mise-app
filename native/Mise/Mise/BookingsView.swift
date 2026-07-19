@@ -148,9 +148,10 @@ final class BookingsModel {
         saving = true; defer { saving = false }
         var values: [String: Any] = [
             "booking_date": b.booking_date ?? key(currentDate),
-            // Новая бронь создаётся БЕЗ статуса — статус ставится свайпом (пришёл/опоздал).
-            "status": b.status ?? NSNull(),
         ]
+        // status NOT NULL DEFAULT 'new' в БД — не шлём NULL явно, иначе insert/update падает.
+        // Новая бронь создаётся БЕЗ статуса (пусть БД поставит default) — статус ставится свайпом.
+        if let status = b.status { values["status"] = status }
         values["booking_time"] = b.booking_time ?? NSNull()
         values["guest_name"] = b.guest_name ?? NSNull()
         values["guests_count"] = b.guests_count ?? NSNull()
@@ -161,14 +162,24 @@ final class BookingsModel {
         if isNew {
             values["created_by"] = b.created_by ?? NSNull()
             values["created_by_name"] = b.created_by_name ?? NSNull()
-            try? await DB.from("bookings").insert(values).run()
+            do {
+                try await DB.from("bookings").insert(values).run()
+            } catch {
+                flash(t("bk.saveFailed"))
+                return
+            }
             let segs = notifyBodySegments(b)
             await Notify.send(type: "booking", title: t("bk.new"), body: notifyBody(b),
                               audience: ["managers": true], titleKey: "notify.bookingTitle",
                               bodySegments: segs.isEmpty ? nil : segs, data: ["module": "bookings"])
         } else {
             values["updated_at"] = ISO8601DateFormatter().string(from: Date())
-            try? await DB.from("bookings").update(values).eq("id", b.id).run()
+            do {
+                try await DB.from("bookings").update(values).eq("id", b.id).run()
+            } catch {
+                flash(t("bk.saveFailed"))
+                return
+            }
         }
         await load()
         await loadMonth()

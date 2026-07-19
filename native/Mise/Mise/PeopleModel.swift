@@ -989,8 +989,8 @@ final class PeopleModel {
         let itemDicts = clean.map { $0.asDict }
         // Расписание имеет смысл только для разовых аудитов — для kind="shift" всегда "none"/NULL.
         let recurrenceVal: Any = kind == "audit" ? recurrence : "none"
-        let weekdaysVal: Any = kind == "audit" ? (recurrenceWeekdays ?? NSNull()) : NSNull()
-        let domVal: Any = kind == "audit" ? (recurrenceDayOfMonth ?? NSNull()) : NSNull()
+        let weekdaysVal: Any = kind == "audit" ? ((recurrenceWeekdays as Any?) ?? NSNull()) : NSNull()
+        let domVal: Any = kind == "audit" ? ((recurrenceDayOfMonth as Any?) ?? NSNull()) : NSNull()
         do {
             if let id {
                 try await DB.from("shift_checklists").update([

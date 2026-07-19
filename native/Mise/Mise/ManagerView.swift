@@ -114,6 +114,8 @@ final class ManagerModel {
         loadError = false
         defer { if gen == loadGen { loading = false } }
         let dateStr = key(date)
+        // prevClosing не зависит от shifts — грузим параллельно, не друг за другом.
+        async let openingTask = prevClosing(before: date)
         // do/catch вместо try?: отмену (быстрые тапы по датам) игнорируем без ошибки,
         // реальный сбой → состояние ошибки с кнопкой «Повторить».
         let shifts: [Shift]
@@ -132,7 +134,7 @@ final class ManagerModel {
         }
         guard gen == loadGen else { return }   // пользователь уже сменил дату — игнор
         // nil = не смогли узнать остаток (сеть) → оставить хранимое значение, не показывать 0
-        let opening = try? await prevClosing(before: date)
+        let opening = try? await openingTask
 
         // На случай дублей на одну дату (до миграции shifts-date-fix.sql) берём смену
         // с наибольшими данными, чтобы не показывать пустую/«открыть смену».
@@ -151,7 +153,14 @@ final class ManagerModel {
         incomeCard = (sh.income_card ?? 0) > 0 ? trimNum(sh.income_card!) : ""
         inkSum = (sh.inkassation ?? 0) > 0 ? trimNum(sh.inkassation!) : ""
 
-        let exps = (try? await DB.from("shift_expenses").select().eq("shift_id", sh.id).list(ShiftExpense.self)) ?? []
+        // Три независимых запроса — грузим параллельно, не друг за другом.
+        // sh — var (мутируется чуть выше), поэтому фиксируем id в let до захвата в async let.
+        let shId = sh.id
+        async let expsTask = (try? await DB.from("shift_expenses").select().eq("shift_id", shId).list(ShiftExpense.self)) ?? []
+        async let inksTask = (try? await DB.from("inkassations").select().eq("shift_id", shId).limit(1).list(Inkassation.self)) ?? []
+        async let absencesTask: Void = loadAbsences(dateStr)
+
+        let exps = await expsTask
         var amounts: [String: String] = [:], notes: [String: String] = [:], extras: [String: String] = [:]
         for e in exps {
             if let emp = e.employee_id { extras[emp] = trimNum(e.amount ?? 0) }
@@ -160,9 +169,9 @@ final class ManagerModel {
             }
         }
         catAmounts = amounts; catNotes = notes; empExtras = extras
-        await loadAbsences(dateStr)
 
-        let inks = (try? await DB.from("inkassations").select().eq("shift_id", sh.id).limit(1).list(Inkassation.self)) ?? []
+        let inks = await inksTask
+        await absencesTask
         if let ink = inks.first {
             inkExpense = (ink.expense ?? 0) > 0 ? trimNum(ink.expense!) : ""
             inkReason = ink.reason ?? ""
