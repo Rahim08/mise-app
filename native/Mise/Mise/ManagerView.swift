@@ -90,7 +90,7 @@ final class ManagerModel {
         async let emps = (try? DB.from("employees").select("id,name,deduct_per_absence")
             .eq("is_active", true).order("name").list(Employee.self)) ?? []
         async let cats = (try? DB.from("expense_categories").select("id,name")
-            .order("name").list(Category.self)) ?? []
+            .eq("is_active", true).order("name").list(Category.self)) ?? []
         employees = await emps
         categories = await cats
         await loadDay(currentDate)

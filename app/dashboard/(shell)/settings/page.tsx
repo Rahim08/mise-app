@@ -21,7 +21,7 @@ function CategoriesCard({ restaurantId }: { restaurantId: string }) {
 
   const load = async () => {
     setLoading(true)
-    const { data } = await db.from('expense_categories').select('*').eq('restaurant_id', restaurantId).order('name')
+    const { data } = await db.from('expense_categories').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name')
     // Закреплённые — первыми (как в Аналитике), внутри групп по алфавиту.
     const rows = (data || []).sort((a: any, b: any) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) || String(a.name).localeCompare(String(b.name)))
     setCats(rows); setLoading(false)
@@ -30,8 +30,17 @@ function CategoriesCard({ restaurantId }: { restaurantId: string }) {
   useEffect(() => { if (restaurantId) load() }, [restaurantId])
 
   const add = async () => {
-    if (!newName.trim()) return
-    await db.from('expense_categories').insert({ restaurant_id: restaurantId, name: newName.trim() })
+    const name = newName.trim()
+    if (!name) return
+    // Реактивируем ранее удалённую категорию с тем же названием вместо дубля с новым id
+    // (сохраняет is_pinned, старые расходы уже используют это имя текстом).
+    const { data: existing } = await db.from('expense_categories').select('*').eq('restaurant_id', restaurantId).ilike('name', name).limit(1)
+    const match = existing?.[0]
+    if (match) {
+      if (!match.is_active) await db.from('expense_categories').update({ is_active: true }).eq('id', match.id)
+    } else {
+      await db.from('expense_categories').insert({ restaurant_id: restaurantId, name })
+    }
     setNewName(''); load()
   }
 
@@ -42,9 +51,9 @@ function CategoriesCard({ restaurantId }: { restaurantId: string }) {
   }
 
   const remove = async (id: string) => {
-    // Detach from any saved shift expenses (keeps their category_name) so the FK doesn't block deletion.
-    await db.from('shift_expenses').update({ category_id: null }).eq('category_id', id)
-    const { error } = await db.from('expense_categories').delete().eq('id', id)
+    // Soft-delete (Б6-follow-up): строка остаётся, старые расходы (текстом category_name)
+    // не задеты; повторное добавление того же названия реактивирует эту же запись.
+    const { error } = await db.from('expense_categories').update({ is_active: false }).eq('id', id)
     if (error) { alert(tr('dash.notSaved') + error.message); return }
     load()
   }
@@ -114,15 +123,25 @@ function HookahSettingsCard() {
     if (!edit || !edit.name.trim()) { alert(tr('dash.enterTitle')); return }
     if (saving) return
     setSaving(true)
+    const name = edit.name.trim()
     const payload = {
-      name: edit.name.trim(),
+      name,
       price: parseFloat(edit.price) || 0,
       portion_g: parseFloat(edit.portion) || 20,
       brands: edit.brands.split(',').map(b => b.trim()).filter(Boolean),
     }
-    const res = edit.id
-      ? await db.from('hookah_types').update(payload).eq('id', edit.id)
-      : await db.from('hookah_types').insert(payload)
+    let res
+    if (edit.id) {
+      res = await db.from('hookah_types').update(payload).eq('id', edit.id)
+    } else {
+      // Реактивируем ранее удалённый тип с тем же названием вместо дубля с новым id
+      // (старые продажи уже привязаны к его id и переживут это как обычно).
+      const { data: existing } = await db.from('hookah_types').select('id').ilike('name', name).limit(1)
+      const match = existing?.[0]
+      res = match
+        ? await db.from('hookah_types').update({ ...payload, is_active: true }).eq('id', match.id)
+        : await db.from('hookah_types').insert(payload)
+    }
     setSaving(false)
     if (res.error) { alert(tr('dash.notSaved') + res.error.message); return }
     setEdit(null); await load()

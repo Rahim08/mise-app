@@ -97,7 +97,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const init = async () => {
     const [empsRes, catsRes] = await Promise.all([
       db.from('employees').select('id,name,deduct_per_absence').eq('restaurant_id', restaurantId).eq('is_active', true).order('name'),
-      db.from('expense_categories').select('id,name').eq('restaurant_id', restaurantId).order('name')
+      db.from('expense_categories').select('id,name').eq('restaurant_id', restaurantId).eq('is_active', true).order('name')
     ])
     setEmployees(empsRes.data || [])
     setCategories(catsRes.data || [])
