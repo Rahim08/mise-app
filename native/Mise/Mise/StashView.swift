@@ -31,6 +31,11 @@ final class StashModel {
     var venueBase = 0.0
     var shiftLoading = true
     var saving = false
+    // Снэпшот уже сохранённых сегодня продаж — грамовка ЗАФИКСИРОВАНА на момент loadShift()
+    // (реальный portion_g из hookah_sales), а не живая настройка типа. Иначе смена грамовки
+    // в Настройках задним числом двигает venueLeft для уже пробитых сегодня чеков.
+    var savedGrams = 0.0
+    var savedQtyByType: [String: Int] = [:]
 
     // KPI-цели по кальянам (текущий календарный месяц)
     var goals: [HookahGoal] = []
@@ -83,9 +88,13 @@ final class StashModel {
         types = tps
         var p: [String: String] = [:], fr: [String: [String: String]] = [:]
         var pastGrams = 0.0
+        var todaySavedGrams = 0.0
+        var todaySavedQty: [String: Int] = [:]
         for r in sales {
             if r.date == dateStr, let id = r.hookah_type_id {
                 let q = Int(r.quantity ?? 0)
+                todaySavedQty[id, default: 0] += q
+                todaySavedGrams += (r.quantity ?? 0) * (r.portion_g ?? 0)
                 if r.is_free == true {
                     let cat = r.flavor ?? (freeCats.first ?? "")
                     fr[id, default: [:]][cat] = String((Int(fr[id]?[cat] ?? "") ?? 0) + q)
@@ -97,6 +106,8 @@ final class StashModel {
             }
         }
         paid = p; free = fr
+        savedGrams = todaySavedGrams
+        savedQtyByType = todaySavedQty
         // Списание «с заведения» = движение writeoff без бренда/вкуса (общий вес зала).
         let venueWriteoff = venueWo.filter { $0.brand.isEmpty && $0.flavor.isEmpty }.reduce(0) { $0 + $1.quantity_g }
         venueBase = max(0, outs.reduce(0) { $0 + $1.quantity_g } - pastGrams - venueWriteoff)
@@ -170,7 +181,16 @@ final class StashModel {
     var paidTotal: Int { types.reduce(0) { $0 + paidOf($1.id) } }
     var freeTotal: Int { types.reduce(0) { $0 + freeTotalOf($1.id) } }
     var revenue: Double { types.reduce(0) { $0 + Double(paidOf($1.id)) * ($1.price ?? 0) } }
-    var gramsUsed: Double { types.reduce(0) { $0 + Double(paidOf($1.id) + freeTotalOf($1.id)) * ($1.portion_g ?? 0) } }
+    // Сохранённая часть — по реальной portion_g из БД (savedGrams). Несохранённая
+    // дельта (то, что ввели, но ещё не нажали «Сохранить смену») — по живой настройке,
+    // это единственно верное значение для нового ввода, ведь в БД его ещё нет.
+    var gramsUsed: Double {
+        savedGrams + types.reduce(0) { acc, tp in
+            let currentQty = paidOf(tp.id) + freeTotalOf(tp.id)
+            let delta = max(0, currentQty - (savedQtyByType[tp.id] ?? 0))
+            return acc + Double(delta) * (tp.portion_g ?? 0)
+        }
+    }
     var venueLeft: Double { max(0, venueBase - gramsUsed) }
 
     func saveShift() async {

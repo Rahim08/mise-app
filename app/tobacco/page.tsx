@@ -148,6 +148,11 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
   const [venueBase, setVenueBase] = useState(0) // выдано в зал − расход прочих дней
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  // Снэпшот уже сохранённых сегодня продаж — грамовка ЗАФИКСИРОВАНА на момент загрузки
+  // (реальный portion_g из hookah_sales), а не живая настройка типа. Иначе смена грамовки
+  // в Настройках задним числом двигает venueLeft для уже пробитых сегодня чеков.
+  const [savedGrams, setSavedGrams] = useState(0)
+  const [savedQty, setSavedQty] = useState<Record<string, number>>({})
 
   useEffect(() => {
     setLoading(true)
@@ -159,8 +164,12 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
       setTypes(tps || [])
       const v: Record<string, { paid: string; free: Record<string, string> }> = {}
       let pastGrams = 0
+      let todaySavedGrams = 0
+      const todaySavedQty: Record<string, number> = {}
       ;(sales || []).forEach((r: any) => {
         if (r.date === dateStr && r.hookah_type_id) {
+          todaySavedQty[r.hookah_type_id] = (todaySavedQty[r.hookah_type_id] || 0) + (r.quantity || 0)
+          todaySavedGrams += (r.quantity || 0) * Number(r.portion_g || 0)
           const cur = v[r.hookah_type_id] || { paid: '', free: {} }
           if (r.is_free) {
             const cat = r.flavor || FREE_CATS[0]
@@ -174,6 +183,8 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
         }
       })
       setVals(v)
+      setSavedGrams(todaySavedGrams)
+      setSavedQty(todaySavedQty)
       setVenueBase((outs || []).reduce((s: number, m: any) => s + (m.quantity_g || 0), 0) - pastGrams)
       setLoading(false)
     })
@@ -195,7 +206,13 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
   const paidTotal = types.reduce((s, tp) => s + paidOf(tp.id), 0)
   const freeTotal = types.reduce((s, tp) => s + freeTotalOf(tp.id), 0)
   const revenue = types.reduce((s, tp) => s + paidOf(tp.id) * Number(tp.price || 0), 0)
-  const grams = types.reduce((s, tp) => s + (paidOf(tp.id) + freeTotalOf(tp.id)) * Number(tp.portion_g || 0), 0)
+  // Сохранённая часть — по реальной portion_g из БД (savedGrams). Несохранённая
+  // дельта (введено, но ещё не нажали «Сохранить смену») — по живой настройке.
+  const grams = types.reduce((s, tp) => {
+    const currentQty = paidOf(tp.id) + freeTotalOf(tp.id)
+    const delta = Math.max(0, currentQty - (savedQty[tp.id] || 0))
+    return s + delta * Number(tp.portion_g || 0)
+  }, savedGrams)
   const venueLeft = venueBase - grams
 
   const save = async () => {

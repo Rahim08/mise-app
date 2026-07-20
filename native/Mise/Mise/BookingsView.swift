@@ -1008,7 +1008,7 @@ private struct BookingEditor: View {
                         Section(t("bk.status")) {
                             Picker(t("bk.status"), selection: $status) {
                                 Text(t("bk.stNone")).tag(String?.none)
-                                ForEach([BkStatus.arrived, .late, .cancelled, .noShow], id: \.rawValue) { s in
+                                ForEach([BkStatus.confirmed, .arrived, .late, .cancelled, .noShow], id: \.rawValue) { s in
                                     Text(s.label).tag(Optional(s.rawValue))
                                 }
                             }.pickerStyle(.segmented)
