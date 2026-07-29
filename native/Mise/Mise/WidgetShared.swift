@@ -19,6 +19,19 @@ public let kMiseSnapshotKey = "mise.widget.snapshot.v1"
 /// UserDefaults.standard of the main app) renders text in the same language as the app.
 public let kMiseWidgetLangKey = "mise.widget.lang"
 
+/// URLSession whose cookie storage lives in the shared App Group container instead of
+/// each process's own sandbox. The main app's PIN-session cookie is written here (see
+/// API.swift), so the widget extension's "mark arrived" intent can authenticate the same
+/// way without a separate login (юзер-фидбог 2026-07-22: восстановление интерактивной
+/// галки «Пришёл» в виджете — раньше было сделано, но не закоммичено и потерялось).
+public enum MiseSharedSession {
+    public static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.sharedContainerIdentifier = kMiseAppGroup
+        return URLSession(configuration: config)
+    }()
+}
+
 /// A small, self-contained snapshot of the three widget metrics.
 /// Money values are stored as raw Double + a currency symbol so the widget can
 /// format them identically to the app without depending on app-only code.

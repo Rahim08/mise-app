@@ -21,15 +21,16 @@ type Booking = {
   created_by_name?: string | null; created_at?: string
 }
 
-const STATUS: Record<string, { label: string; tone: Tone }> = {
-  new:       { label: 'bk.stNew',       tone: 'accent' },
-  confirmed: { label: 'bk.stConfirmed', tone: 'ok' },
+// 3 бакета максимум (см. BkBucket в BookingsView.swift) — сырые значения в БД не трогаем,
+// "confirmed"/легаси "late" схлопываются в waiting("new"), "no_show" схлопывается в cancelled.
+const STATUS: Record<'new' | 'arrived' | 'cancelled', { label: string; tone: Tone }> = {
+  new:       { label: 'bk.stWaiting',   tone: 'accent' },
   arrived:   { label: 'bk.stArrived',   tone: 'violet' },
-  late:      { label: 'bk.stLate',      tone: 'warn' },
   cancelled: { label: 'bk.stCancelled', tone: 'neutral' },
-  no_show:   { label: 'bk.stNoShow',    tone: 'danger' },
 }
-const statusOf = (s?: string | null) => STATUS[s || 'new'] || STATUS.new
+const bkBucket = (s?: string | null): 'new' | 'arrived' | 'cancelled' =>
+  s === 'arrived' ? 'arrived' : (s === 'cancelled' || s === 'no_show') ? 'cancelled' : 'new'
+const statusOf = (s?: string | null) => STATUS[bkBucket(s)]
 
 // Тот же ключ гостя, что в iOS GuestsView.swift: цифры телефона, иначе lowercase-имя.
 function guestKey(b: Booking): string | null {
@@ -140,10 +141,12 @@ export default function BookingsPage() {
 
   // ── ГОСТИ ──
   type Guest = { id: string; name: string; phone: string; visits: number; lastVisit: string; bookings: Booking[] }
+  type GuestProfile = { note: string; last_name: string; email: string; birthday: string }
+  const blankProfile: GuestProfile = { note: '', last_name: '', email: '', birthday: '' }
   const [allBookings, setAllBookings] = useState<Booking[] | null>(null)
-  const [guestNotes, setGuestNotes] = useState<Record<string, string>>({})
+  const [guestNotes, setGuestNotes] = useState<Record<string, GuestProfile>>({})
   const [selectedGuestKey, setSelectedGuestKey] = useState<string | null>(null)
-  const [noteDraft, setNoteDraft] = useState('')
+  const [profileDraft, setProfileDraft] = useState<GuestProfile>(blankProfile)
   const [noteSaving, setNoteSaving] = useState(false)
 
   useEffect(() => {
@@ -152,11 +155,13 @@ export default function BookingsPage() {
       const yearAgo = new Date(); yearAgo.setMonth(yearAgo.getMonth() - 12)
       const [{ data: bks }, { data: notes }] = await Promise.all([
         db.from('bookings').select('*').eq('restaurant_id', restaurantId).gte('booking_date', dateKey(yearAgo)).order('booking_date', { ascending: false }),
-        db.from('guest_notes').select('guest_key, note').eq('restaurant_id', restaurantId),
+        db.from('guest_notes').select('guest_key, note, last_name, email, birthday').eq('restaurant_id', restaurantId),
       ])
       setAllBookings(bks || [])
-      const nm: Record<string, string> = {}
-      ;(notes || []).forEach((n: any) => { nm[n.guest_key] = n.note })
+      const nm: Record<string, GuestProfile> = {}
+      ;(notes || []).forEach((n: any) => {
+        nm[n.guest_key] = { note: n.note || '', last_name: n.last_name || '', email: n.email || '', birthday: n.birthday || '' }
+      })
       setGuestNotes(nm)
     })()
   }, [tab, restaurantId])
@@ -183,16 +188,22 @@ export default function BookingsPage() {
   }, [allBookings, tr])
 
   const selectedGuest = guests.find(g => g.id === selectedGuestKey) || null
-  useEffect(() => { setNoteDraft(selectedGuestKey ? (guestNotes[selectedGuestKey] || '') : '') }, [selectedGuestKey, guestNotes])
+  useEffect(() => {
+    setProfileDraft(selectedGuestKey ? (guestNotes[selectedGuestKey] || blankProfile) : blankProfile)
+  }, [selectedGuestKey, guestNotes])
 
   const saveGuestNote = async () => {
     if (!selectedGuestKey) return
     setNoteSaving(true)
     await db.from('guest_notes').upsert(
-      { restaurant_id: restaurantId, guest_key: selectedGuestKey, note: noteDraft, updated_at: new Date().toISOString() },
+      {
+        restaurant_id: restaurantId, guest_key: selectedGuestKey, note: profileDraft.note,
+        last_name: profileDraft.last_name || null, email: profileDraft.email || null,
+        birthday: profileDraft.birthday || null, updated_at: new Date().toISOString(),
+      },
       { onConflict: 'restaurant_id,guest_key' },
     )
-    setGuestNotes(n => ({ ...n, [selectedGuestKey]: noteDraft }))
+    setGuestNotes(n => ({ ...n, [selectedGuestKey]: profileDraft }))
     setNoteSaving(false)
   }
 
@@ -244,13 +255,11 @@ export default function BookingsPage() {
   ]
 
   const statusOptions = [
-    { value: 'new', label: tr('bk.stNew') },
-    { value: 'confirmed', label: tr('bk.stConfirmed') },
+    { value: 'new', label: tr('bk.stWaiting') },
     { value: 'arrived', label: tr('bk.stArrived') },
-    { value: 'late', label: tr('bk.stLate') },
     { value: 'cancelled', label: tr('bk.stCancelled') },
-    { value: 'no_show', label: tr('bk.stNoShow') },
   ]
+  const formStatusBucket = bkBucket(form.status)
 
   return (
     <Container size="wide">
@@ -341,8 +350,17 @@ export default function BookingsPage() {
                 <Field label={tr('bk.time')} value={form.booking_time} onChange={v => setForm({ ...form, booking_time: v })} type="time" />
                 <Field label={tr('bk.guestsCount')} value={form.guests_count} onChange={v => setForm({ ...form, guests_count: v })} type="number" min={1} />
                 <Field label={tr('bk.table')} value={form.table_label} onChange={v => setForm({ ...form, table_label: v })} />
-                <Field label={tr('bk.status')} value={form.status} onChange={v => setForm({ ...form, status: v })} select options={statusOptions} />
+                <Field label={tr('bk.status')} value={formStatusBucket}
+                  onChange={v => setForm({ ...form, status: v === 'cancelled' ? (form.status === 'no_show' ? 'no_show' : 'cancelled') : v })}
+                  select options={statusOptions} />
               </div>
+              {formStatusBucket === 'cancelled' && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.82rem', color: 'var(--tx2)', margin: '4px 0 0' }}>
+                  <input type="checkbox" checked={form.status === 'no_show'}
+                    onChange={e => setForm({ ...form, status: e.target.checked ? 'no_show' : 'cancelled' })} />
+                  {tr('bk.stNoShow')}
+                </label>
+              )}
               <Field label={tr('bk.note')} value={form.note} onChange={v => setForm({ ...form, note: v })} />
 
               <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
@@ -386,7 +404,10 @@ export default function BookingsPage() {
                     <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)' }}>{selectedGuest.name}</div>
                     {selectedGuest.phone && <div style={{ fontSize: '.8rem', color: 'var(--tx2)', marginTop: 2 }}>{selectedGuest.phone}</div>}
 
-                    <Field label={tr('bk.guestNote')} value={noteDraft} onChange={setNoteDraft} placeholder={tr('bk.guestNotePh')} />
+                    <Field label={tr('gs.lastName')} value={profileDraft.last_name} onChange={v => setProfileDraft({ ...profileDraft, last_name: v })} />
+                    <Field label={tr('gs.email')} value={profileDraft.email} onChange={v => setProfileDraft({ ...profileDraft, email: v })} type="email" />
+                    <Field label={tr('gs.birthday')} value={profileDraft.birthday} onChange={v => setProfileDraft({ ...profileDraft, birthday: v })} type="date" />
+                    <Field label={tr('bk.guestNote')} value={profileDraft.note} onChange={v => setProfileDraft({ ...profileDraft, note: v })} placeholder={tr('bk.guestNotePh')} />
                     <Btn small onClick={saveGuestNote} disabled={noteSaving}>{noteSaving ? tr('dash.saving') : tr('dash.save')}</Btn>
 
                     <div style={{ fontSize: '.72rem', fontWeight: 700, color: 'var(--tx2)', textTransform: 'uppercase', letterSpacing: '.04em', margin: '16px 0 8px' }}>{tr('bk.guestHistory')}</div>

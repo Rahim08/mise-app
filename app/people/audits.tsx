@@ -1028,7 +1028,7 @@ export function AuditsView({ me, isManager, restaurantId, accent, t, toast }: { 
   const myId = me.id || ''
   const myRole = me.role
   const today = fmtDate(new Date())
-  const [seg, setSeg] = useState<'shift' | 'oneoff' | 'stats'>('shift')
+  const [seg, setSeg] = useState<'shift' | 'oneoff' | 'walk' | 'stats'>('shift')
   const [staff, setStaff] = useState<any[]>([])
   const [geoRequired, setGeoRequired] = useState(false)
   const [checkedInToday, setCheckedInToday] = useState(true)
@@ -1060,6 +1060,7 @@ export function AuditsView({ me, isManager, restaurantId, accent, t, toast }: { 
   const SEGS = [
     { id: 'shift', label: tr('pe.shiftChecklists') },
     { id: 'oneoff', label: tr('pe.oneOffAudits') },
+    { id: 'walk', label: tr('pe.walks') },
     ...(isManager ? [{ id: 'stats', label: tr('pe.statistics') }] : []),
   ] as const
 
@@ -1072,7 +1073,97 @@ export function AuditsView({ me, isManager, restaurantId, accent, t, toast }: { 
       </div>
       {seg === 'shift' && <ShiftChecklistsView isManager={isManager} myId={myId} myRole={myRole} canFill={canFill} openShiftId={openShiftId} staff={staff} restaurantId={restaurantId} accent={accent} t={t} toast={toast} />}
       {seg === 'oneoff' && <AdHocAuditsView isManager={isManager} myId={myId} myName={me.name || ''} myRole={myRole} staff={staff} canFill={canFill} restaurantId={restaurantId} accent={accent} t={t} toast={toast} />}
+      {seg === 'walk' && <WalkHistoryView staff={staff} accent={accent} t={t} />}
       {seg === 'stats' && isManager && <AuditStatsView accent={accent} t={t} />}
+    </div>
+  )
+}
+
+// ── ВОСЬМЁРКА (обход-восьмёрка) — read-only история, создание/прохождение только в iOS ──
+// kind='walk' в тех же таблицах; items хранит вложенное дерево блок→категория→пункт
+// (см. native/Mise/Mise/PeopleWalk.swift), а не плоский список — парсим только для детального
+// просмотра одного прогона (плоская развёртка тем же порядком, что и на iOS: DFS).
+
+function walkFlatItems(template: any): { id: string; label: string }[] {
+  const blocks = Array.isArray(template?.items) ? template.items : []
+  const out: { id: string; label: string }[] = []
+  for (const b of blocks) for (const c of (b.categories || [])) for (const it of (c.items || [])) out.push({ id: it.id, label: it.label })
+  return out
+}
+
+function fmtWalkElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60), s = seconds % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+export function WalkHistoryView({ staff, accent, t }: { staff: any[]; accent: string; t: any }) {
+  const { t: tr } = useI18n()
+  const [templates, setTemplates] = useState<any[]>([])
+  const [runs, setRuns] = useState<any[]>([])
+  const [ready, setReady] = useState(false)
+  const [openRun, setOpenRun] = useState<any | null>(null)
+
+  useEffect(() => {
+    const since = fmtDate(new Date(Date.now() - 30 * 86400000))
+    Promise.all([
+      db.from('shift_checklists').select('*').eq('kind', 'walk'),
+      db.from('shift_checklist_completions').select('*').gte('date', since).order('date', { ascending: false }),
+    ]).then(([tpl, comp]: any) => {
+      const templateRows = tpl.data || []
+      const ids = new Set(templateRows.map((r: any) => r.id))
+      setTemplates(templateRows)
+      setRuns((comp.data || []).filter((r: any) => ids.has(r.checklist_id)))
+      setReady(true)
+    })
+  }, [])
+
+  if (!ready) return <div style={{ color: t.text3, fontSize: 13, textAlign: 'center', padding: '40px 0' }}>{tr('loading')}</div>
+  if (!runs.length) return <div style={{ color: t.text3, fontSize: 13, textAlign: 'center', padding: '40px 0' }}>{tr('pe.noRunYet')}</div>
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {runs.map(run => {
+        const template = templates.find(x => x.id === run.checklist_id)
+        const items = (run.items_state || []) as { done?: boolean }[]
+        const doneN = items.filter(i => i.done).length
+        const staffName = staff.find((s: any) => s.id === run.staff_id)?.name || '—'
+        return (
+          <button key={run.id} onClick={() => setOpenRun(run)} style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 6, padding: 12, borderRadius: 14, background: t.fill, border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{template?.title || '—'}</span>
+              <span style={{ fontSize: 12, color: t.text3 }}>{run.date}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 14, fontSize: 12, color: t.text2 }}>
+              <span>{staffName}</span>
+              <span>{fmtWalkElapsed(run.duration_seconds || 0)}</span>
+              <span>{run.steps || 0} {tr('pe.walkSteps')}</span>
+              <span>{doneN}/{items.length}</span>
+            </div>
+          </button>
+        )
+      })}
+      {openRun && (() => {
+        const template = templates.find(x => x.id === openRun.checklist_id)
+        const flat = walkFlatItems(template)
+        const items = (openRun.items_state || []) as { done?: boolean }[]
+        const staffName = staff.find((s: any) => s.id === openRun.staff_id)?.name || '—'
+        return (
+          <Sheet onClose={() => setOpenRun(null)} t={t}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: t.text, marginBottom: 4 }}>{template?.title || '—'}</div>
+            <div style={{ fontSize: 12, color: t.text3, marginBottom: 12 }}>
+              {openRun.date} · {staffName} · {fmtWalkElapsed(openRun.duration_seconds || 0)} · {openRun.steps || 0} {tr('pe.walkSteps')}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {flat.map((item, i) => (
+                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, background: t.fill }}>
+                  <span style={{ color: items[i]?.done ? accent : t.text3, fontWeight: 700 }}>{items[i]?.done ? '✓' : '—'}</span>
+                  <span style={{ fontSize: 13, color: t.text }}>{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </Sheet>
+        )
+      })()}
     </div>
   )
 }

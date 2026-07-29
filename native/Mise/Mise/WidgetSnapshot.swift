@@ -21,16 +21,16 @@ enum SnapshotWriter {
         f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()
-    private static var todayKey: String { dfKey.string(from: Date()) }
-
     /// Compute and persist a fresh snapshot. `canSeeMoney` gates the cash metric.
-    /// `force` bypasses the throttle (used on explicit refresh).
-    static func refresh(canSeeMoney: Bool, force: Bool = false) async {
+    /// `force` bypasses the throttle (used on explicit refresh). `dayStartHour` — операционный
+    /// день заведения (см. AppModel.businessDate): виджет раньше всегда брал голую
+    /// календарную дату, ночью до dayStartHour показывал пустую кассу вместо вчерашней смены.
+    static func refresh(canSeeMoney: Bool, dayStartHour: Int = 6, force: Bool = false) async {
         if !force, let last = lastRun, Date().timeIntervalSince(last) < 90 { return }
         lastRun = Date()
 
         let symbol = Money.symbol
-        let today = todayKey
+        let today = dfKey.string(from: AppModel.businessDate(dayStartHour: dayStartHour))
 
         async let cash = loadCash(today: today, canSeeMoney: canSeeMoney)
         async let hookahs = loadHookahs(today: today)
@@ -128,9 +128,12 @@ enum SnapshotWriter {
         guard let rows = try? await DB.from("bookings").select()
             .eq("booking_date", today).order("booking_time").list(Booking.self) else { return [] }
 
-        // Only future/active bookings; drop cancelled. Keep the next few.
+        // Only future/active bookings; drop cancelled/no-show. Keep the next few.
         let nowHM = nowHHmm()
-        let active = rows.filter { ($0.status ?? "new") != "cancelled" }
+        let active = rows.filter {
+            let s = $0.status ?? "new"
+            return s != "cancelled" && s != "no_show" && s != "arrived"
+        }
         let upcoming = active.filter { b in
             guard let tm = b.booking_time, !tm.isEmpty else { return true } // no time -> keep
             return tm >= nowHM

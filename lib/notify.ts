@@ -25,6 +25,7 @@ const TYPE_PREF: Record<string, string> = {
   purchase: 'purchase',
   booking: 'booking',
   news: 'news',
+  salary_payout_reminder: 'salary_payout',
 }
 
 export interface Audience { staff_ids?: string[]; owner?: boolean; managers?: boolean; all?: boolean }
@@ -151,7 +152,9 @@ export async function dispatchNotification(admin: any, rid: string, input: Notif
     for (const [lang, tokens] of byLang) {
       const pTitle = titleKey ? renderNotify(lang, titleKey, resolveParams(lang, titleParams)) : title
       const pBody = bodyFor(r, lang)
-      const res = await sendPush(tokens, { title: pTitle, body: pBody, data })
+      // type в data явно — iOS читает его из userInfo при тапе по системному пушу
+      // (PushManager.didReceive response:), чтобы открыть нужный модуль/вкладку.
+      const res = await sendPush(tokens, { title: pTitle, body: pBody, data: { ...data, type } })
       pushed += res.sent
       invalid.push(...res.invalid)
     }

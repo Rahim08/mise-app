@@ -11,7 +11,6 @@ struct ChecklistsTab: View {
     @State private var edit: ChecklistEdit?
     @State private var showHistory = false
     @State private var auditHistoryOf: ShiftChecklist?
-    @State private var subTab = "shift" // shift | audits | stats
 
     struct ChecklistEdit: Identifiable {
         var id = UUID(); var listId: String?; var role: String?; var items: [ChecklistItem]
@@ -24,22 +23,25 @@ struct ChecklistsTab: View {
             if !m.checklistsLoaded {
                 RowListSkeleton(rows: 3)
             } else {
-                if m.isManager {
-                    Picker("", selection: $subTab) {
-                        Text(t("pe.shiftTab")).tag("shift")
-                        Text(t("pe.audits")).tag("audits")
-                        Text(t("pe.statistics")).tag("stats")
-                    }.pickerStyle(.segmented)
-                }
-                switch subTab {
+                // Раньше пикер показывался только менеджеру (аудиты — их зона). «Восьмёрка» же
+                // доступна ЛЮБОМУ сотруднику (личные шаблоны) — поэтому пикер теперь виден всем,
+                // просто у не-менеджера меньше сегментов («Аудиты»/«Статистика» остаются скрыты).
+                Picker("", selection: $m.checklistsSubTab) {
+                    Text(t("pe.shiftTab")).tag("shift")
+                    if m.isManager { Text(t("pe.audits")).tag("audits") }
+                    Text(t("pe.walks")).tag("walk")
+                    if m.isManager { Text(t("pe.statistics")).tag("stats") }
+                }.pickerStyle(.segmented)
+                switch m.checklistsSubTab {
                 case "audits": auditsSection
+                case "walk": WalkTab(m: m)
                 case "stats" where m.isManager: StatisticsSection(m: m)
                 default: shiftSection
                 }
             }
         }
         .task(id: m.opsView) { if m.opsView == "check" && !m.checklistsLoaded { await m.loadChecklists() } }
-        .task(id: subTab) { if subTab == "audits" && !m.auditsLoaded { await m.loadAudits() } }
+        .task(id: m.checklistsSubTab) { if m.checklistsSubTab == "audits" && !m.auditsLoaded { await m.loadAudits() } }
         .sheet(item: $edit) { e in ChecklistEditSheet(m: m, edit: e) }
         .sheet(isPresented: $showHistory) { ChecklistHistorySheet(m: m) }
         .sheet(item: $auditHistoryOf) { a in AuditHistorySheet(m: m, list: a) }

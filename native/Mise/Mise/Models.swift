@@ -69,6 +69,7 @@ nonisolated struct Inkassation: Codable, Sendable {
 
 nonisolated struct ClosingOnly: Codable, Sendable { let closing_balance: Double? }
 nonisolated struct InkOnly: Codable, Sendable { let inkassation: Double? }
+nonisolated struct InkTotalOnly: Codable, Sendable { let total: Double? }
 
 // MARK: - Stash (склад табака + кальянная смена)
 
@@ -354,6 +355,118 @@ nonisolated struct ChecklistCompletion: Codable, Identifiable, Sendable {
     var status: String? = nil     // "pending" | "in_progress" | "done"
     var requested_by: String? = nil
     var attendance_id: String? = nil
+    // Только для kind="walk" (см. WalkTemplate ниже): суммарное активное время (без пауз, сек)
+    // и шаги за весь обход (CMPedometer). NULL у kind="audit"/"shift".
+    var duration_seconds: Int? = nil
+    var steps: Int? = nil
+}
+
+// MARK: - «Восьмёрка» (обход-восьмёрка, HoReCa floor-walk) — kind="walk" в shift_checklists
+//
+// Свободное дерево блок → категория → пункт (юзер сам называет всё), в отличие от плоских
+// items у kind="audit"/"shift". Хранится в ТОЙ ЖЕ колонке items (JSONB) — просто другая форма,
+// клиент решает как парсить по kind. См. docs/migrations/walk-eight-2026-07.sql.
+
+nonisolated struct WalkItem: Codable, Identifiable, Sendable, Hashable {
+    var id: String
+    var label: String
+
+    init(id: String = UUID().uuidString, label: String) { self.id = id; self.label = label }
+    var asDict: [String: Any] { ["id": id, "label": label] }
+}
+
+nonisolated struct WalkCategory: Codable, Identifiable, Sendable, Hashable {
+    var id: String
+    var label: String
+    var items: [WalkItem]
+
+    init(id: String = UUID().uuidString, label: String, items: [WalkItem] = []) {
+        self.id = id; self.label = label; self.items = items
+    }
+    var asDict: [String: Any] { ["id": id, "label": label, "items": items.map(\.asDict)] }
+}
+
+nonisolated struct WalkBlock: Codable, Identifiable, Sendable, Hashable {
+    var id: String
+    var label: String
+    var categories: [WalkCategory]
+
+    init(id: String = UUID().uuidString, label: String, categories: [WalkCategory] = []) {
+        self.id = id; self.label = label; self.categories = categories
+    }
+    var asDict: [String: Any] { ["id": id, "label": label, "categories": categories.map(\.asDict)] }
+}
+
+/// Шаблон восьмёрки. target_scope переиспользует тот же словарь, что у kind="audit":
+/// "staff" — личный шаблон сотрудника (assigned_staff_id = он сам); "role" — назначил
+/// владелец/менеджер под должность (role) — сотрудник этой должности только запускает.
+nonisolated struct WalkTemplate: Codable, Identifiable, Sendable {
+    var id: String
+    var title: String?
+    var role: String?
+    var target_scope: String?        // "staff" | "role"
+    var assigned_staff_id: String?   // владелец личного шаблона (target_scope="staff"); nil у "role"
+    var walk_pause_mode: String      // "pause" (по умолчанию) | "continuous"
+    var blocks: [WalkBlock]
+
+    init(id: String = UUID().uuidString, title: String? = nil, role: String? = nil,
+         target_scope: String? = "staff", assigned_staff_id: String? = nil,
+         walk_pause_mode: String = "pause", blocks: [WalkBlock] = []) {
+        self.id = id; self.title = title; self.role = role
+        self.target_scope = target_scope; self.assigned_staff_id = assigned_staff_id
+        self.walk_pause_mode = walk_pause_mode; self.blocks = blocks
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, role, target_scope, assigned_staff_id, walk_pause_mode
+        case blocks = "items"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        role = try c.decodeIfPresent(String.self, forKey: .role)
+        target_scope = try c.decodeIfPresent(String.self, forKey: .target_scope)
+        assigned_staff_id = try c.decodeIfPresent(String.self, forKey: .assigned_staff_id)
+        walk_pause_mode = try c.decodeIfPresent(String.self, forKey: .walk_pause_mode) ?? "pause"
+        blocks = try c.decodeIfPresent([WalkBlock].self, forKey: .blocks) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encodeIfPresent(title, forKey: .title)
+        try c.encodeIfPresent(role, forKey: .role)
+        try c.encodeIfPresent(target_scope, forKey: .target_scope)
+        try c.encodeIfPresent(assigned_staff_id, forKey: .assigned_staff_id)
+        try c.encode(walk_pause_mode, forKey: .walk_pause_mode)
+        try c.encode(blocks, forKey: .blocks)
+    }
+
+    /// DFS-развёртка дерева в плоский список пунктов — items_state прогона позиционно
+    /// совпадает с этим порядком (тот же приём, что у плоских kind="audit"/"shift").
+    var flatItems: [WalkItem] { blocks.flatMap { $0.categories.flatMap(\.items) } }
+
+    var asUpdateDict: [String: Any] {
+        [
+            "kind": "walk", "title": title ?? NSNull(), "role": role ?? NSNull(),
+            "target_scope": target_scope ?? "staff", "assigned_staff_id": assigned_staff_id ?? NSNull(),
+            "walk_pause_mode": walk_pause_mode, "items": blocks.map(\.asDict),
+        ]
+    }
+}
+
+/// Один прогон восьмёрки — итог по завершению обхода.
+nonisolated struct WalkRun: Codable, Identifiable, Sendable {
+    let id: String
+    let checklist_id: String?
+    let date: String?
+    var staff_id: String? = nil
+    var items_state: [ChecklistItemState]?   // позиционно совпадает с WalkTemplate.flatItems
+    var duration_seconds: Int? = nil
+    var steps: Int? = nil
+    var completed_at: String? = nil
 }
 
 /// Лёгкая ссылка на смену (для привязки чек-листа к открытой смене Manager).
@@ -386,6 +499,7 @@ nonisolated struct AttendanceRecord: Codable, Identifiable, Sendable {
 }
 
 nonisolated struct GraceRow: Codable, Sendable { let late_grace_min: Int? }
+nonisolated struct PayoutDayRow: Codable, Sendable { let salary_payout_day: Int? }
 
 nonisolated struct PurchaseItem: Codable, Identifiable, Sendable {
     let id: String
@@ -414,6 +528,18 @@ nonisolated struct SalaryAdvance: Codable, Identifiable, Sendable {
     let employee_id: String?
     let amount: Double?
     let date: String?
+    let note: String?
+}
+
+// Факт выдачи ЗП сотруднику (People→Зарплата, ЗП-долг 2026-07-28) — отдельно от salary_advances
+// (авансы В ТЕЧЕНИЕ месяца) и monthly_card_amounts (план на карту, вводится вручную).
+nonisolated struct SalaryPayment: Codable, Identifiable, Sendable {
+    let id: String
+    let employee_id: String?
+    let period: String?   // YYYY-MM-01
+    let amount: Double?
+    let method: String?
+    let paid_at: String?
     let note: String?
 }
 

@@ -54,11 +54,29 @@ struct PeopleView: View {
                 if let o = ProcessInfo.processInfo.environment["MISE_DEMO_OPS"] { model.opsView = o }
                 if let sv = ProcessInfo.processInfo.environment["MISE_DEMO_SHIFTS"] { model.shiftsView = sv }
                 #endif
+                // Переход из уведомления (см. AppModel.routeNotification) — применяем сразу
+                // при создании модели, до первой отрисовки.
+                if let r = app.pendingPeopleRoute { applyPeopleRoute(r, to: model); app.pendingPeopleRoute = nil }
                 await model.loadTasks()
                 await model.loadOrders() // для бейджа активных заказов на вкладке «Зал»
             }
         }
+        // People уже открыт (модель жива) и прилетело новое уведомление — применяем на лету,
+        // без пересоздания модели.
+        .onChange(of: app.pendingPeopleRoute) { _, route in
+            guard let route, let m else { return }
+            applyPeopleRoute(route, to: m)
+            app.pendingPeopleRoute = nil
+        }
     }
+}
+
+@MainActor private func applyPeopleRoute(_ r: AppModel.PeopleRoute, to model: PeopleModel) {
+    model.tab = r.tab
+    if let sv = r.shiftsView { model.shiftsView = sv }
+    if let ov = r.opsView { model.opsView = ov }
+    if let ts = r.tasksSeg { model.tasksSeg = ts }
+    if let cs = r.checklistsSubTab { model.checklistsSubTab = cs }
 }
 
 struct PeopleBody: View {
@@ -79,7 +97,7 @@ struct PeopleBody: View {
                     .badge(m.activeOrders.isEmpty ? 0 : m.activeOrders.count)
                 AppTabPage(refresh: { await m.loadPurchase() }) { PurchaseTab(m: m) }
                     .tabItem { Label(t("tab.purchase"), systemImage: "cart") }.tag("purchase")
-                AppTabPage(refresh: { await m.loadSalary() }) { PeopleSalaryTab(m: m) }
+                AppTabPage(refresh: { await m.loadSalary(); await m.loadSalaryDebt() }) { PeopleSalaryTab(m: m) }
                     .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
             }
             .tint(PEOPLE_ACCENT)
@@ -107,7 +125,9 @@ struct PeopleBody: View {
                 if !m.menuLoaded { await m.loadMenu() }
                 if !m.ordersLoaded { await m.loadOrders() }
             case "purchase": if !m.purchaseLoaded { await m.loadPurchase() }
-            case "salary": if !m.salaryLoaded { await m.loadSalary() }
+            case "salary":
+                if !m.salaryLoaded { await m.loadSalary() }
+                await m.loadSalaryDebt()
             default:       if !m.schedLoaded { await m.loadSchedule() }
             }
         }

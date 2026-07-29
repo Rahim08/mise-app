@@ -8,27 +8,14 @@ import UIKit
 
 struct ShiftsHubTab: View {
     @Bindable var m: PeopleModel
-    @State private var showNotifs = false
     var body: some View {
-        HStack(spacing: 10) {
-            Picker("", selection: $m.shiftsView) {
-                Text(t("tab.shifts")).tag("shifts")
-                if m.isManager { Text(t("pe.discipline")).tag("discipline") }
-                Text(t("pe.swaps")).tag("swaps")
-            }.pickerStyle(.segmented)
-            // Журнал уведомлений (ревью Г2): пуш смахнул — информация больше не теряется.
-            Button { showNotifs = true } label: {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: "bell").font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary.opacity(0.65))
-                    if m.notifsUnread > 0 {
-                        Circle().fill(BrandKit.menu).frame(width: 8, height: 8).offset(x: 3, y: -2)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-        }
-        .task { if !m.notifsLoaded { await m.loadNotifications() } }
-        .sheet(isPresented: $showNotifs) { NotificationsSheet(m: m) }
+        // Колокольчик уведомлений переехал в MainView (глобальный, видим на любом модуле) —
+        // раньше был только тут, но уведомления бывают о чём угодно, не только о сменах.
+        Picker("", selection: $m.shiftsView) {
+            Text(t("tab.shifts")).tag("shifts")
+            if m.isManager { Text(t("pe.discipline")).tag("discipline") }
+            Text(t("pe.swaps")).tag("swaps")
+        }.pickerStyle(.segmented)
 
         switch m.shiftsView {
         case "swaps": SwapsTab(m: m)
@@ -40,65 +27,7 @@ struct ShiftsHubTab: View {
 
 /// Журнал уведомлений (ревью Г2): notifications с перерендером title_key/body_key на языке
 /// зрителя (NotifyStrings.swift) — тот же механизм, что веб-колокольчик. Открытие = прочитано.
-struct NotificationsSheet: View {
-    @Bindable var m: PeopleModel
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.miseBg.ignoresSafeArea()
-                if !m.notifsLoaded {
-                    RowListSkeleton(rows: 4)
-                } else if m.notifs.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "bell").font(.system(size: 34)).foregroundStyle(PEOPLE_ACCENT.opacity(0.5))
-                        Text(t("pe.noNotifs")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4))
-                        Text(t("pe.noNotifsHint")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3)).multilineTextAlignment(.center).padding(.horizontal, 30)
-                    }
-                } else {
-                    ScrollView {
-                        VStack(spacing: 8) {
-                            ForEach(m.notifs) { n in row(n) }
-                        }
-                        .padding(16)
-                    }
-                }
-            }
-            .navigationTitle(t("pe.notifications"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.miseBg, for: .navigationBar)
-        }
-        .task {
-            if !m.notifsLoaded { await m.loadNotifications() }
-            await m.markNotificationsRead()
-        }
-    }
-
-    private func row(_ n: AppNotification) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Circle().fill(n.read_at == nil ? PEOPLE_ACCENT : Color.clear).frame(width: 8, height: 8).padding(.top, 5)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(notifTitle(n)).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
-                if let body = notifBody(n), !body.isEmpty {
-                    Text(body).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.55))
-                }
-                Text(notifDate(n.created_at)).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.35))
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
-    }
-
-    private func notifDate(_ iso: String?) -> String {
-        guard let iso else { return "" }
-        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let f2 = ISO8601DateFormatter()
-        guard let d = f.date(from: iso) ?? f2.date(from: iso) else { return "" }
-        let out = DateFormatter(); out.locale = appLocale(); out.dateFormat = "dd.MM · HH:mm"
-        return out.string(from: d)
-    }
-}
+// NotificationsSheet переехал в MainView.swift (глобальный колокольчик, читает AppModel).
 
 /// Смены + явка в одном разделе: сверху отметка прихода/статус, ниже — расписание.
 struct CombinedShifts: View {

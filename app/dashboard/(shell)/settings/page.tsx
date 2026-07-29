@@ -242,6 +242,51 @@ function AnalyticsSettingsCard() {
   )
 }
 
+// ── ДЕНЬ ВЫДАЧИ ЗП (ЗП-долг 2026-07-28) ────────────────────────────────────────
+// День месяца, когда выдаётся ЗП за прошлый месяц (обычно 10-15 число следующего).
+// Используется только для напоминания и группировки «срочно»/«накопление» в People→Зарплата —
+// сам период начисления ЗП остаётся календарным месяцем (не меняется).
+function SalaryPayoutSettingsCard() {
+  const { t: tr } = useI18n()
+  const [row, setRow] = useState<any>(null)
+  const [day, setDay] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
+      const r = Array.isArray(data) ? data[0] : data
+      if (r) { setRow(r); setDay(r.salary_payout_day != null ? String(r.salary_payout_day) : '') }
+    })
+  }, [])
+
+  const save = async () => {
+    if (saving) return
+    setSaving(true)
+    const n = day ? Math.min(31, Math.max(1, parseInt(day) || 1)) : null
+    const payload = { salary_payout_day: n }
+    const res = row?.id
+      ? await db.from('restaurant_settings').update(payload).eq('id', row.id)
+      : await db.from('restaurant_settings').insert(payload).select().single()
+    if (res.error) { alert(tr('dash.notSaved') + res.error.message); setSaving(false); return }
+    if (!row?.id && res.data) setRow(res.data)
+    setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000)
+  }
+
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>{tr('dash.salaryPayoutDay')}</div>
+      <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 2, marginBottom: 12, maxWidth: 420 }}>{tr('dash.salaryPayoutDaySub')}</div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+        <div style={{ maxWidth: 140 }}>
+          <Field label={tr('dash.salaryPayoutDayLabel')} value={day} onChange={(v: string) => setDay(v.replace(/[^0-9]/g, ''))} placeholder="10" />
+        </div>
+        <Btn onClick={save} disabled={saving}>{saving ? tr('dash.saving') : saved ? tr('dash.savedCheck') : tr('dash.save')}</Btn>
+      </div>
+    </Card>
+  )
+}
+
 // ── GEO / ATTENDANCE (mise People) ────────────────────────────────────────────
 function GeoSettingsCard() {
   const { t: tr } = useI18n()
@@ -497,6 +542,8 @@ export default function SettingsPage() {
       <HookahSettingsCard />
 
       <AnalyticsSettingsCard />
+
+      <SalaryPayoutSettingsCard />
 
       <GeoSettingsCard />
 

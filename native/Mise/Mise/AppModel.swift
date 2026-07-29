@@ -8,8 +8,33 @@ final class AppModel {
     var phase: Phase = .loading {
         didSet {
             // Войдя, регистрируем APNs-токен и привязываем его к ресторану/пользователю.
-            if phase == .authed { PushManager.shared.registerForPush() }
+            if phase == .authed {
+                PushManager.shared.registerForPush()
+                Task { await loadDayStartHour() }
+            }
         }
+    }
+
+    /// Во сколько утра у заведения начинаются "новые сутки" (см. day-start-hour-2026-07.sql).
+    /// Бронь на 00:00 — dayStartHour используется, чтобы понять: это "поздний вечер вчера"
+    /// (заведение работает допоздна) или реально "начало нового дня".
+    var dayStartHour: Int = 6
+    private struct DayStartRow: Codable { let day_start_hour: Int? }
+    func loadDayStartHour() async {
+        if let row = try? await DB.from("restaurant_settings").select("day_start_hour").limit(1).list(DayStartRow.self).first,
+           let h = row.day_start_hour {
+            dayStartHour = h
+        }
+    }
+
+    /// "Сегодня" операционного дня заведения — до dayStartHour часов утра ещё считается
+    /// вчерашними сутками (ночное заведение, юзер-фидбог 2026-07-23: расширили с бейджа
+    /// «опаздывает» на кассу дня в Manager/Analytics/виджете — раньше везде была голая
+    /// календарная дата, полночь обнуляла ещё не закрытую смену).
+    static func businessDate(dayStartHour: Int, from now: Date = Date()) -> Date {
+        let cal = Calendar.current
+        guard cal.component(.hour, from: now) < dayStartHour else { return now }
+        return cal.date(byAdding: .day, value: -1, to: now) ?? now
     }
     var restaurant: Restaurant? {
         didSet { Money.symbol = (restaurant?.currency).flatMap { $0.isEmpty ? nil : $0 } ?? "€" }
@@ -215,6 +240,100 @@ final class AppModel {
 
     func openApp(_ id: String) { currentApp = id }
     func backToLauncher() { currentApp = nil }
+
+    // MARK: журнал уведомлений (глобальный колокольчик — раньше жил только внутри
+    // People→Смены, но уведомления бывают о чём угодно, переехал на верхний уровень)
+
+    var notifs: [AppNotification] = []
+    var notifsLoaded = false
+    var notifsUnread = 0
+
+    private var notifMyId: String { staff?.id ?? "owner" }
+
+    /// Журнал получателя: staff — свои записи, владелец — to_owner.
+    func loadNotifications() async {
+        var q = DB.from("notifications").select()
+        if notifMyId == "owner" || notifMyId.isEmpty { q = q.eq("to_owner", true) }
+        else { q = q.eq("staff_id", notifMyId) }
+        if let rows = try? await q.order("created_at", ascending: false).limit(50).list(AppNotification.self) {
+            notifs = rows
+            notifsUnread = rows.filter { $0.read_at == nil }.count
+        }
+        notifsLoaded = true
+    }
+
+    /// Открыл журнал — всё прочитано (как веб-колокольчик).
+    func markNotificationsRead() async {
+        let unread = notifs.filter { $0.read_at == nil }.map(\.id)
+        guard !unread.isEmpty else { return }
+        let now = ISO8601DateFormatter().string(from: Date())
+        for i in notifs.indices where notifs[i].read_at == nil { notifs[i].read_at = now }
+        notifsUnread = 0
+        try? await DB.from("notifications").update(["read_at": now]).in("id", unread).run()
+    }
+
+    /// Удалить одно уведомление из журнала (свайп).
+    func deleteNotification(_ id: String) async {
+        let wasUnread = notifs.first { $0.id == id }?.read_at == nil
+        notifs.removeAll { $0.id == id }
+        if wasUnread { notifsUnread = max(0, notifsUnread - 1) }
+        try? await DB.from("notifications").delete().eq("id", id).run()
+    }
+
+    /// Очистить весь журнал.
+    func clearAllNotifications() async {
+        let ids = notifs.map(\.id)
+        notifs = []
+        notifsUnread = 0
+        guard !ids.isEmpty else { return }
+        try? await DB.from("notifications").delete().in("id", ids).run()
+    }
+
+    // MARK: маршрутизация тапа по уведомлению (в журнале или системном пуше) — открыть
+    // нужный модуль и, если это People, нужную вкладку внутри него.
+
+    struct PeopleRoute: Equatable {
+        var tab: String
+        var shiftsView: String? = nil
+        var opsView: String? = nil
+        var tasksSeg: String? = nil
+        var checklistsSubTab: String? = nil
+    }
+    /// PeopleView применяет и сбрасывает при создании/смене модели (см. PeopleView.swift).
+    var pendingPeopleRoute: PeopleRoute?
+    /// BookingsView прыгает на эту дату и сбрасывает (см. BookingsView.swift).
+    var pendingBookingsDate: String?
+    /// AnalyticsView прыгает на эту смену и сбрасывает (см. AnalyticsView.swift).
+    var pendingAnalyticsDate: String?
+
+    /// data — плоские строковые поля из payload уведомления (booking_date, shift_date и т.п.,
+    /// см. BookingsView.swift/ManagerView.swift Notify.send). Один и тот же вызов обслуживает
+    /// и тап по журналу (данные из AppNotification.data), и тап по системному пушу (из userInfo).
+    func routeNotification(type: String, data: [String: String] = [:]) {
+        switch type {
+        case "cash_close":
+            if let d = data["shift_date"], !d.isEmpty { pendingAnalyticsDate = d }
+            openApp("analytics")
+        case "cash_open", "shift_reminder":
+            openApp("manager")
+        case "booking":
+            if let d = data["booking_date"], !d.isEmpty { pendingBookingsDate = d }
+            openApp("bookings")
+        case "news":
+            openApp("news")
+        case "purchase":
+            pendingPeopleRoute = PeopleRoute(tab: "purchase"); openApp("people")
+        case "swap_request", "swap_result":
+            pendingPeopleRoute = PeopleRoute(tab: "shifts", shiftsView: "swaps"); openApp("people")
+        case "attendance":
+            pendingPeopleRoute = PeopleRoute(tab: "shifts"); openApp("people")
+        case "task":
+            pendingPeopleRoute = PeopleRoute(tab: "tasks", tasksSeg: "tasks"); openApp("people")
+        case "audit", "audit_close_reminder":
+            pendingPeopleRoute = PeopleRoute(tab: "ops", opsView: "check", checklistsSubTab: "audits"); openApp("people")
+        default: break
+        }
+    }
 
     // MARK: выход
 

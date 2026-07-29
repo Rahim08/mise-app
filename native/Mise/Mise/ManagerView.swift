@@ -14,7 +14,7 @@ private func money(_ v: Double) -> String { Money.s(v) }
 final class ManagerModel {
     let rid: String
 
-    var currentDate = Date()
+    var currentDate: Date
     var shift: Shift?
     var employees: [Employee] = []
     var categories: [Category] = []
@@ -30,15 +30,20 @@ final class ManagerModel {
     var inkReason = ""
     var inkSalary = ""
     var inkSalaryNote = ""
+    var inkReserve: Double? = nil
 
     var locked = false
     var saving = false
     var loading = true
     var loadError = false        // реальная ошибка загрузки (не отмена) → показать «Повторить»
     var toast: String?
+    var showChecklistWarn = false
     private var loadGen = 0       // поколение загрузки — защита от гонок при быстрой смене даты
 
-    init(rid: String) { self.rid = rid }
+    init(rid: String, dayStartHour: Int = 6) {
+        self.rid = rid
+        self.currentDate = AppModel.businessDate(dayStartHour: dayStartHour)
+    }
 
     private let dfKey: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX")
@@ -94,6 +99,15 @@ final class ManagerModel {
         employees = await emps
         categories = await cats
         await loadDay(currentDate)
+        await loadInkReserve()
+    }
+
+    // Остаток инкассации (ЗП-долг 2026-07-28): сумма (инкассация − расход − зарплата) по ВСЕМ
+    // дням с начала учёта — что физически должно лежать в загашнике/сейфе. Списания «увезли
+    // в банк» и т.п. — через уже существующее поле «Расход по инкассации».
+    func loadInkReserve() async {
+        let rows = (try? await DB.from("inkassations").select("total").list(InkTotalOnly.self)) ?? []
+        inkReserve = rows.reduce(0) { $0 + ($1.total ?? 0) }
     }
 
     // Последняя смена НЕ ПОЗЖЕ вчера (не обязательно ровно вчера) — пропущенный день
@@ -240,9 +254,7 @@ final class ManagerModel {
             shift = sh
             await loadAbsences(key(currentDate))
             flash(t("mg.shiftOpened"))
-            await Notify.send(type: "cash_open", title: t("mg.pushCashOpen"), body: t("mg.pushShiftOpened"),
-                              audience: ["managers": true], titleKey: "notify.cashOpenTitle", bodyKey: "notify.cashOpenBody",
-                              bodyParams: ["date": dayMonth(currentDate)])
+            // Пуш «смена открыта» отключён по запросу — низкая ценность, шумит (юзер-фидбек 2026-07-22).
             // Запланировать напоминание о закрытии смены
             if ShiftReminder.isEnabled() { ShiftReminder.schedule() }
         } catch {
@@ -343,14 +355,29 @@ final class ManagerModel {
         return c.balance
     }
 
-    func save() async {
+    // Мягкий гейт (не блокирует): если чек-лист закрытия смены на сегодня не пройден целиком,
+    // спрашиваем подтверждение вместо тихого закрытия кассы (юзер-фидбек 2026-07-28).
+    nonisolated struct CloseChecklistId: Codable, Sendable { let id: String }
+    nonisolated struct ChecklistCompletionStatus: Codable, Sendable { let checklist_id: String?; let status: String? }
+    func closeChecklistIncomplete() async -> Bool {
+        guard let lists = try? await DB.from("shift_checklists").select("id")
+            .eq("kind", "shift").eq("type", "close").list(CloseChecklistId.self), !lists.isEmpty else { return false }
+        let ids = lists.map(\.id)
+        let completions = (try? await DB.from("shift_checklist_completions").select("checklist_id, status")
+            .eq("date", key(currentDate)).in("checklist_id", ids).list(ChecklistCompletionStatus.self)) ?? []
+        return !ids.allSatisfy { id in completions.contains { $0.checklist_id == id && $0.status == "done" } }
+    }
+
+    func save(force: Bool = false) async {
         guard shift != nil else { return }
+        if !force, await closeChecklistIncomplete() { showChecklistWarn = true; return }
         saving = true
         do {
             try await persist()
             locked = true
             ShiftReminder.cancel() // отменить напоминание — смена закрыта
             flash(t("mg.shiftSaved"))
+            Task { await loadInkReserve() }
             let c = calc
             // Дайджест дня: сводка в защищённом теле (показывается, если включён show_cash_amount).
             nonisolated struct HkSale: Codable, Sendable { let quantity: Double?; let price: Double?; let is_free: Bool? }
@@ -374,11 +401,14 @@ final class ManagerModel {
             segs.append(["key": "notify.dCash", "value": Money.s(c.balance)])
             if paid > 0 { segs.append(["key": "notify.dHookah", "value": "\(paid) (\(Money.s(rev)))"]) }
 
+            // shift_date в data — тап по уведомлению открывает Analytics сразу на эту смену
+            // (юзер-фидбек 2026-07-22), не просто модуль.
             await Notify.send(type: "cash_close", title: t("mg.pushCashClosed"), body: t("mg.pushShiftClosed"),
                               audience: ["managers": true],
                               titleKey: "notify.cashCloseTitle", bodyKey: "notify.cashCloseBody",
                               bodyParams: ["date": dayMonth(currentDate)],
-                              secureBody: digest, secureBodySegments: segs)
+                              secureBody: digest, secureBodySegments: segs,
+                              data: ["module": "analytics", "shift_date": key(currentDate)])
         } catch {
             flash(t("saveFailed", ["err": error.localizedDescription]))
         }
@@ -426,15 +456,8 @@ final class ManagerModel {
             if !str("inkReason").isEmpty   { inkReason = str("inkReason") }
             if !str("inkSalary").isEmpty   { inkSalary = str("inkSalary") }
             flash(t("ai.applied"))
-        } catch let err as APIError {
-            switch err {
-            case .http(403, _): flash(t("ai.err403"))
-            case .http(500, _): flash(t("ai.err500"))
-            case .http(502, _): flash(t("ai.err502"))
-            default: flash(t("ai.errGeneric"))
-            }
         } catch {
-            flash(t("ai.errGeneric"))
+            flash(aiErrorMessage(error))
         }
         return nil
     }
@@ -466,7 +489,7 @@ struct ManagerView: View {
                       onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
         .task {
             if m == nil {
-                let model = ManagerModel(rid: app.restaurant?.id ?? "")
+                let model = ManagerModel(rid: app.restaurant?.id ?? "", dayStartHour: app.dayStartHour)
                 m = model
                 await model.start()
             }
@@ -632,6 +655,14 @@ private struct ManagerBody: View {
                     textRow(t("mg.inkReason"), text: $m.inkReason)
                     divider
                     fieldRow(t("mg.salary"), text: $m.inkSalary)
+                    if let reserve = m.inkReserve {
+                        divider
+                        VStack(alignment: .leading, spacing: 2) {
+                            sumRow(t("mg.inkReserve"), money(reserve))
+                            Text(t("mg.inkReserveHint")).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 6)
+                    }
                 }
                 sectionTitle(t("mg.cash"))
                 card {
@@ -751,6 +782,13 @@ private struct ManagerBody: View {
             }
         }
         .padding(.top, 4)
+        .confirmationDialog(t("mg.closeChecklistWarnTitle"), isPresented: Binding(get: { m.showChecklistWarn }, set: { m.showChecklistWarn = $0 }),
+                             titleVisibility: .visible) {
+            Button(t("mg.closeChecklistWarnAnyway"), role: .destructive) { Task { await m.save(force: true) } }
+            Button(t("mg.closeChecklistWarnBack"), role: .cancel) {}
+        } message: {
+            Text(t("mg.closeChecklistWarnBody"))
+        }
     }
 
     // MARK: мелкие элементы

@@ -327,15 +327,8 @@ final class StashModel {
             } else {
                 flash(t("ai.noData"))
             }
-        } catch let err as APIError {
-            switch err {
-            case .http(403, _): flash(t("ai.err403"))
-            case .http(500, _): flash(t("ai.err500"))
-            case .http(502, _): flash(t("ai.err502"))
-            default: flash(t("ai.errGeneric"))
-            }
         } catch {
-            flash(t("ai.errGeneric"))
+            flash(aiErrorMessage(error))
         }
         return nil
     }

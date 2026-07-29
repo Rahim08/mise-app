@@ -30,36 +30,61 @@ struct SwipeActionRow<Content: View>: View {
 
     var body: some View {
         ZStack {
-            // Фон с кнопками: слева — ведущее, справа — trailing.
+            // Фон с кнопками: слева — ведущее, справа — trailing. Без alignment на leading —
+            // дефолтный .center, чтобы иконка+текст центрировались в растущей зоне при оверпуле,
+            // как у trailing (было .leading — контент прилипал слева, пустое место справа).
             HStack(spacing: 0) {
                 if let l = leading, offset > 1 {
-                    actionLabel(l).frame(width: max(offset, btnW), alignment: .leading)
+                    // Каждая кнопка — отдельный полностью скруглённый чип со всех 4 сторон.
+                    // Не пытаемся стыковать её со швом контента (там и была дыра) — независимая
+                    // скруглённая форма гарантированно не даёт квадратных/дырявых углов нигде.
+                    actionLabel(l).frame(width: max(offset, btnW))
                         .background(l.tint)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     Spacer(minLength: 0)
                 } else if offset < -1 {
                     Spacer(minLength: 0)
-                    ForEach(trailing) { a in
+                    // Полный оверпул (сверх trailingW) растягивает ПОСЛЕДНЮю кнопку — как в Apple:
+                    // красная зона расширяется вместе с пальцем, сигналя «отпустишь — удалится».
+                    let overpull = fullSwipeTrailing ? max(0, -offset - trailingW) : 0
+                    ForEach(Array(trailing.enumerated()), id: \.element.id) { idx, a in
+                        let isLast = idx == trailing.count - 1
+                        let extra = isLast ? overpull : 0
                         Button { trigger(a) } label: {
-                            actionLabel(a).frame(width: btnW)
+                            actionLabel(a).frame(width: btnW + extra)
                         }
                         .buttonStyle(.plain).background(a.tint)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
             // .simultaneousGesture (не .gesture) — голый .gesture поверх Button/суб-кнопок в
             // content крадёт/задерживает их тап (известный SwiftUI-конфликт). onTapGesture
             // весится только когда onTap задан (Bookings — весь ряд открывает редактор);
             // остальные экраны параметр не передают, их суб-кнопки не затронуты.
+            // content.clipShape(Rectangle()) — контент (BookingCard и т.п.) сам скруглён по ВСЕМ
+            // 4 углам всегда. При свайпе он съезжает офсетом, и его СОБСТВЕННЫЙ скруглённый угол
+            // оказывается посреди ряда (на границе с открывшейся кнопкой) — там, где кривая уходит
+            // внутрь, видно чёрный/прозрачный фон вместо цвета кнопки (тот самый «пустой уголок»).
+            // Квадратим контент здесь — скругление даёт только внешний clipShape ниже + свои
+            // угловые маски у кнопок; у внутреннего шва скругляться нечему, шов всегда ровный.
             Group {
                 if let onTap {
-                    content.offset(x: offset).simultaneousGesture(drag).onTapGesture(perform: onTap)
+                    content.clipShape(Rectangle()).offset(x: offset).simultaneousGesture(drag).onTapGesture(perform: onTap)
                 } else {
-                    content.offset(x: offset).simultaneousGesture(drag)
+                    content.clipShape(Rectangle()).offset(x: offset).simultaneousGesture(drag)
                 }
             }
         }
+        // Один clipShape на ОБА слоя (фон-кнопки + контент) вместо двух отдельных — иначе два
+        // независимых расчёта одной и той же скруглённой формы дают волосяной зазор по углам
+        // (особенно заметно с .ultraThinMaterial: чёрная щель в углу при свайпе до конца).
+        // compositingGroup ОБЯЗАТЕЛЕН перед clipShape: без него SwiftUI клипует .ultraThinMaterial
+        // отдельным слоем от цветных Button-фонов — маска не берёт материал, угол остаётся квадратным.
+        // С compositingGroup весь ZStack сначала сплющивается в один растр, потом обрезается целиком.
+        .compositingGroup()
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func actionLabel(_ a: SwipeAction) -> some View {
@@ -83,14 +108,17 @@ struct SwipeActionRow<Content: View>: View {
                 offset = min(max(x, -(trailingW + 90)), 150)
             }
             .onEnded { v in
-                guard abs(v.translation.width) > abs(v.translation.height) || settled != 0 else { return }
+                // offset уже отфильтрован в onChanged (только горизонтальный жест двигает его) —
+                // решаем по нему всегда, без доп. гарда. Раньше при вертикальном завершении жеста
+                // (ScrollView перехватывает свайп на полпути) settle() не вызывался — offset
+                // замирал недвинутым, строка «зависала» приоткрытой.
                 let x = offset
                 if let l = leading, x > 110 {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    settle(0); l.handler()
+                    settle(0); fire(l.handler)
                 } else if fullSwipeTrailing, let last = trailing.last, x < -(trailingW + 50) {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    settle(0); last.handler()
+                    settle(0); fire(last.handler)
                 } else if !trailing.isEmpty, x < -(trailingW * 0.5) {
                     settle(-trailingW)
                 } else {
@@ -100,11 +128,23 @@ struct SwipeActionRow<Content: View>: View {
     }
 
     private func trigger(_ a: SwipeAction) {
-        settle(0); a.handler()
+        // Свайп закрывается со спрингом (не рывком — юзер-фидбек 2026-07-22: «резко отскакивает,
+        // дёрганая анимация»). handler откладывается на длительность спринга: если он открывает
+        // confirmationDialog (напр. «Удалить»), презентация не должна стартовать, пока offset ещё
+        // едет — иначе UIKit берёт transitional anchor строки и рисует диалог как поповер-«пузырь»
+        // не на месте (было и с рывком, и с анимацией — дело не в резкости, а в тайминге).
+        settle(0); fire(a.handler)
     }
-    private func settle(_ to: CGFloat) {
+    private func fire(_ handler: @escaping () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: handler)
+    }
+    private func settle(_ to: CGFloat, animated: Bool = true) {
         settled = to
-        withAnimation(.spring(duration: 0.3, bounce: 0.1)) { offset = to }
+        if animated {
+            withAnimation(.spring(duration: 0.3, bounce: 0.1)) { offset = to }
+        } else {
+            offset = to
+        }
     }
 }
 

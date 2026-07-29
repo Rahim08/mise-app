@@ -60,6 +60,8 @@ final class PeopleModel {
     var checklists: [ShiftChecklist] = []
     var completions: [ChecklistCompletion] = []
     var checklistsLoaded = false
+    var checklistsSubTab = "shift" // shift | audits | walk | stats — вынесено из ChecklistsTab
+                                    // ради маршрутизации из уведомлений (AppModel.PeopleRoute)
     var clType = "open"
     var openShiftId: String?           // id открытой смены Manager на сегодня (чек-лист привязан к ней)
     var clHistory: [ChecklistCompletion] = []
@@ -69,6 +71,11 @@ final class PeopleModel {
     var audits: [ShiftChecklist] = []
     var auditRuns: [ChecklistCompletion] = []
     var auditsLoaded = false
+
+    // восьмёрка (обход-восьмёрка, kind="walk" в тех же таблицах)
+    var walkTemplates: [WalkTemplate] = []
+    var walkRuns: [WalkRun] = []
+    var walksLoaded = false
 
     // техкарты
     var techCards: [TechCard] = []
@@ -261,31 +268,43 @@ final class PeopleModel {
         let absenceList: [String]  // absence dates for display
         let deduct: Double; let card: Double; let advance: Double
         let advanceList: [SalaryAdvance]; let total: Double; let cash: Double
+        var paid: Double = 0; var remaining: Double = 0; var lastPaidAt: String? = nil
     }
 
-    func loadSalary() async {
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedSalary(); return }
-        #endif
-        let ym = String(key(Date()).prefix(7))
-        async let empsR = try? DB.from("employees").select("id, name, salary, deduct_per_absence").eq("is_active", true).order("name").list(Employee.self)
-        async let absR = try? DB.from("shift_absences").select("employee_id, date, source").gte("date", ym + "-01").list(Absence.self)
-        async let cardsR = try? DB.from("monthly_card_amounts").select("employee_id, card_amount").eq("month", ym).list(CardAmount.self)
-        guard let employees = await empsR else {
-            if !salaryRows.isEmpty { flash(t("refreshFailed")) }
-            return
-        }
-        let absences = (await absR) ?? [], cardAmounts = (await cardsR) ?? []
+    var salaryViewMonth: Date = Date()
+    var salaryDebtTotal: Double = 0
+    var salaryDebtByEmp: [String: Double] = [:]
+    var salaryPayoutDay: Int? = nil
 
-        // ym+"-31" в 30-дневных месяцах — невалидная дата для колонки типа date (400 → авансы
+    var salaryIsCurrentMonth: Bool { Calendar.current.isDate(salaryViewMonth, equalTo: Date(), toGranularity: .month) }
+
+    func changeSalaryMonth(_ dir: Int) {
+        if dir > 0 && salaryIsCurrentMonth { return }
+        guard let d = Calendar.current.date(byAdding: .month, value: dir, to: salaryViewMonth) else { return }
+        salaryViewMonth = d
+        Task { await loadSalary() }
+    }
+
+    // Расчёт зарплаты за произвольный месяц — канон расчёта решение 2026-07-17, долг/выплаты
+    // добавлены 2026-07-28 (salary_payments — факт фактической выдачи, отдельно от авансов
+    // и от monthly_card_amounts, который не трогаем — юзер вводит его сам помесячно).
+    private func computeSalary(monthOf date: Date) async -> [SalRow] {
+        let cal = Calendar.current
+        let ym = String(key(date).prefix(7))
+        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: date)) ?? date
+        // ym+"-31" в 30-дневных месяцах — невалидная дата для колонки типа date (400 → записи
         // молча пропадали). Считаем реальный конец месяца.
-        let advCal = Calendar.current
-        let advStart = advCal.date(from: advCal.dateComponents([.year, .month], from: Date())) ?? Date()
-        let advEnd = advCal.date(byAdding: DateComponents(month: 1, day: -1), to: advStart) ?? advStart
-        let advances = (try? await DB.from("salary_advances").select()
-            .gte("date", ym + "-01").lte("date", key(advEnd)).list(SalaryAdvance.self)) ?? []
+        let monthEnd = cal.date(byAdding: DateComponents(month: 1, day: -1), to: monthStart) ?? monthStart
+        async let empsR = try? DB.from("employees").select("id, name, salary, deduct_per_absence").eq("is_active", true).order("name").list(Employee.self)
+        async let absR = try? DB.from("shift_absences").select("employee_id, date, source").gte("date", ym + "-01").lte("date", key(monthEnd)).list(Absence.self)
+        async let cardsR = try? DB.from("monthly_card_amounts").select("employee_id, card_amount").eq("month", ym).list(CardAmount.self)
+        async let advR = try? DB.from("salary_advances").select().gte("date", ym + "-01").lte("date", key(monthEnd)).list(SalaryAdvance.self)
+        async let paysR = try? DB.from("salary_payments").select().eq("period", ym + "-01").list(SalaryPayment.self)
+        guard let employees = await empsR else { return [] }
+        let absences = (await absR) ?? [], cardAmounts = (await cardsR) ?? []
+        let advances = (await advR) ?? [], payments = (await paysR) ?? []
 
-        var list = employees.map { e -> SalRow in
+        return employees.map { e -> SalRow in
             let absForEmp = absences.filter { $0.employee_id == e.id && $0.source != "auto" }
             let absN = absForEmp.count
             let absenceList = absForEmp.compactMap { $0.date }.sorted()
@@ -296,14 +315,71 @@ final class PeopleModel {
             let card = cardAmounts.first { $0.employee_id == e.id }?.card_amount ?? 0
             let advForEmp = advances.filter { $0.employee_id == e.id }
             let advance = advForEmp.reduce(0) { $0 + ($1.amount ?? 0) }
+            let paysForEmp = payments.filter { $0.employee_id == e.id }
+            let paid = paysForEmp.reduce(0) { $0 + ($1.amount ?? 0) }
+            let lastPaidAt = paysForEmp.compactMap { $0.paid_at }.max()
             let total = max(0, (e.salary ?? 0) - deduct)
             let cash = max(0, total - advance - card)
-            return SalRow(id: e.id, name: e.name, salary: e.salary ?? 0, absences: absN, absenceList: absenceList, deduct: deduct, card: card, advance: advance, advanceList: advForEmp, total: total, cash: cash)
+            let remaining = max(0, cash - paid)
+            return SalRow(id: e.id, name: e.name, salary: e.salary ?? 0, absences: absN, absenceList: absenceList, deduct: deduct, card: card, advance: advance, advanceList: advForEmp, total: total, cash: cash, paid: paid, remaining: remaining, lastPaidAt: lastPaidAt)
         }
+    }
+
+    func loadSalary() async {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedSalary(); return }
+        #endif
+        if salaryPayoutDay == nil {
+            salaryPayoutDay = (try? await DB.from("restaurant_settings").select("salary_payout_day").limit(1).list(PayoutDayRow.self))?.first?.salary_payout_day
+        }
+        var list = await computeSalary(monthOf: salaryViewMonth)
         if !isManager { list = list.filter { $0.name == myName } }
         salaryRows = list; salaryLoaded = true
     }
     var salaryFund: Double { salaryRows.reduce(0) { $0 + $1.total } }
+    // Буфер до реального дня выплаты (salary_payout_day, ЗП-долг 2026-07-28): ЗП за месяц
+    // выдаётся 10-15 числа СЛЕДУЮЩЕГО месяца, поэтому 100% начисления должно достигаться не
+    // в конце текущего месяца, а на payout_day следующего.
+    var salaryAccruedToday: Double {
+        guard salaryIsCurrentMonth else { return salaryFund }
+        let cal = Calendar.current
+        let day = cal.component(.day, from: Date())
+        let daysInMonth = cal.range(of: .day, in: .month, for: salaryViewMonth)?.count ?? 30
+        let denom = salaryPayoutDay.map { daysInMonth + $0 } ?? daysInMonth
+        return salaryFund * Double(min(day, denom)) / Double(denom)
+    }
+
+    // Задолженность = сумма непокрытого остатка по всем ЗАКРЫТЫМ месяцам (строго раньше
+    // текущего), окно 6 месяцев назад (дальше пересчёт дороже — 5 запросов на месяц).
+    func loadSalaryDebt() async {
+        guard isManager else { return }
+        var total = 0.0; var byEmp: [String: Double] = [:]
+        for i in 1...6 {
+            guard let d = Calendar.current.date(byAdding: .month, value: -i, to: Date()) else { continue }
+            let list = await computeSalary(monthOf: d)
+            for r in list where r.remaining > 0 {
+                total += r.remaining
+                byEmp[r.id, default: 0] += r.remaining
+            }
+        }
+        salaryDebtTotal = total; salaryDebtByEmp = byEmp
+    }
+
+    func markSalaryPaid(employeeId: String, amount: Double, method: String, date: Date, note: String) async {
+        guard amount > 0 else { return }
+        let period = String(key(salaryViewMonth).prefix(7)) + "-01"
+        let paidAt = ISO8601DateFormatter().string(from: date)
+        let noteVal: Any = note.isEmpty ? NSNull() : note
+        do {
+            try await DB.from("salary_payments").insert([
+                "employee_id": employeeId, "period": period, "amount": amount, "method": method,
+                "paid_at": paidAt, "note": noteVal,
+            ]).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+        flash(t("pe.paymentSaved"))
+        await loadSalary()
+        await loadSalaryDebt()
+    }
 
     // MARK: расписание
 
@@ -857,35 +933,8 @@ final class PeopleModel {
         if allDone { flash(clType == "open" ? t("pe.checklistOpenDone") : t("pe.checklistCloseDone")) }
     }
 
-    // MARK: журнал уведомлений (ревью Г2)
-
-    var notifs: [AppNotification] = []
-    var notifsLoaded = false
-    var notifsUnread = 0
-
-    /// Журнал получателя: staff — свои записи, владелец — to_owner.
-    func loadNotifications() async {
-        var q = DB.from("notifications").select()
-        if myId == "owner" || myId.isEmpty { q = q.eq("to_owner", true) }
-        else { q = q.eq("staff_id", myId) }
-        if let rows = try? await q.order("created_at", ascending: false).limit(50).list(AppNotification.self) {
-            notifs = rows
-            notifsUnread = rows.filter { $0.read_at == nil }.count
-        } else if !notifs.isEmpty {
-            flash(t("refreshFailed"))
-        }
-        notifsLoaded = true
-    }
-
-    /// Открыл журнал — всё прочитано (как веб-колокольчик).
-    func markNotificationsRead() async {
-        let unread = notifs.filter { $0.read_at == nil }.map(\.id)
-        guard !unread.isEmpty else { return }
-        let now = ISO8601DateFormatter().string(from: Date())
-        for i in notifs.indices where notifs[i].read_at == nil { notifs[i].read_at = now }
-        notifsUnread = 0
-        try? await DB.from("notifications").update(["read_at": now]).in("id", unread).run()
-    }
+    // Журнал уведомлений переехал в AppModel (глобальный колокольчик, см. MainView.swift) —
+    // раньше жил только тут (People→Смены), но уведомления бывают о любом модуле.
 
     // MARK: оффлайн-очередь отметок чек-листа/аудита (по образцу pendingCheckIn)
 
@@ -1017,6 +1066,86 @@ final class PeopleModel {
         } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadChecklists() }
     }
 
+    // MARK: восьмёрка (обход-восьмёрка)
+
+    func loadWalks() async {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { walksLoaded = true; return }
+        #endif
+        if let rows = try? await DB.from("shift_checklists").select().eq("kind", "walk").list(WalkTemplate.self) {
+            walkTemplates = rows
+        } else if !walkTemplates.isEmpty { flash(t("refreshFailed")) }
+        let from = key(Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date())
+        let ids = Set(walkTemplates.map(\.id))
+        walkRuns = ((try? await DB.from("shift_checklist_completions").select()
+            .gte("date", from).order("date", ascending: false).list(WalkRun.self)) ?? [])
+            .filter { ids.contains($0.checklist_id ?? "") }
+        walksLoaded = true
+    }
+
+    /// Личные шаблоны сотрудника + те, что владелец/менеджер назначил его должности
+    /// (только запуск — правка гейтится в UI через canEditWalk).
+    func relevantWalks() -> [WalkTemplate] {
+        walkTemplates.filter { w in
+            (w.target_scope == "staff" && w.assigned_staff_id == myId)
+                || (w.target_scope == "role" && (w.role == nil || w.role == myRole))
+                || isManager
+        }
+    }
+    /// Редактировать может: автор личного шаблона, или owner/manager у ролевого.
+    func canEditWalk(_ w: WalkTemplate) -> Bool {
+        (w.target_scope == "staff" && w.assigned_staff_id == myId) || isManager
+    }
+
+    func saveWalkTemplate(_ template: WalkTemplate) async {
+        let clean = template.blocks
+            .map { WalkBlock(id: $0.id, label: $0.label.trimmingCharacters(in: .whitespaces), categories:
+                $0.categories.map { WalkCategory(id: $0.id, label: $0.label.trimmingCharacters(in: .whitespaces), items:
+                    $0.items.map { WalkItem(id: $0.id, label: $0.label.trimmingCharacters(in: .whitespaces)) }.filter { !$0.label.isEmpty }) }
+                    .filter { !$0.label.isEmpty && !$0.items.isEmpty }) }
+            .filter { !$0.label.isEmpty && !$0.categories.isEmpty }
+        guard !clean.isEmpty else { flash(t("pe.addItem")); return }
+        var t2 = template; t2.blocks = clean
+        let isNew = !walkTemplates.contains { $0.id == template.id }
+        do {
+            if isNew {
+                var values = t2.asUpdateDict
+                values["restaurant_id"] = rid
+                values["id"] = t2.id
+                try await DB.from("shift_checklists").insert(values).run()
+            } else {
+                try await DB.from("shift_checklists").update(t2.asUpdateDict).eq("id", t2.id).run()
+            }
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+        flash(t("pe.checklistSaved"))
+        await loadWalks()
+    }
+
+    func deleteWalkTemplate(_ id: String) async {
+        walkTemplates.removeAll { $0.id == id }
+        do {
+            try await DB.from("shift_checklists").delete().eq("id", id).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadWalks() }
+    }
+
+    /// Итог прогона восьмёрки — пишется ОДНИМ запросом по завершению обхода (не поштучно,
+    /// как аудиты: чекбоксы копятся локально в раннере, таймер/шагомер — тоже; сеть нужна
+    /// только один раз в конце, обход не прерывается офлайн-очередями на каждый тап).
+    func finishWalkRun(template: WalkTemplate, itemsState: [ChecklistItemState], durationSeconds: Int, steps: Int) async {
+        guard await requireGeoCheckIn() else { return }
+        let staffVal: Any = myId == "owner" || myId.isEmpty ? NSNull() : myId
+        do {
+            try await DB.from("shift_checklist_completions").insert([
+                "restaurant_id": rid, "checklist_id": template.id, "date": todayKey,
+                "staff_id": staffVal, "items_state": itemsState.map { $0.asDict },
+                "completed_at": ISO8601DateFormatter().string(from: Date()), "status": "done",
+                "duration_seconds": durationSeconds, "steps": steps,
+            ] as [String: Any]).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+        flash(t("pe.auditDone"))
+        await loadWalks()
+    }
+
     // MARK: техкарты
 
     func loadTechCards() async {
@@ -1061,9 +1190,10 @@ final class PeopleModel {
                 "target_id": targetId, "status": "pending_peer", "note": noteVal,
             ]).run()
         } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
+        let dateLabel = swapSched(scheduleId).map { dayLabel($0.date) } ?? ""
         await Notify.send(type: "swap_request", title: t("pe.swapRequestTitle"), body: t("pe.swapRequestBody", ["name": myName]),
                           audience: ["staff_ids": [targetId]], titleKey: "notify.swapRequestTitle",
-                          bodyKey: "notify.swapRequestBody", bodyParams: ["name": myName, "date": ""])
+                          bodyKey: "notify.swapRequestBody", bodyParams: ["name": myName, "date": dateLabel])
         flash(t("pe.requestSent"))
         await loadSwaps()
         return true

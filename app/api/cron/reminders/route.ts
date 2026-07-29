@@ -311,6 +311,89 @@ async function remindOpenCloseChecklist(admin: any, now: Date, tzMap: Record<str
   }
 }
 
+// Долг по ЗП за один месяц (targetYm) для одного ресторана — сервер-side порт формулы из
+// app/people/tabs-salary.tsx computeMonth (ЗП-долг 2026-07-28). Не трогает advances/card —
+// только считает остаток (total - advance - card - paid), чтобы просуммировать по
+// закрытым месяцам для напоминания владельцу перед днём выдачи.
+async function monthSalaryRemaining(admin: any, rid: string, targetYm: string): Promise<number> {
+  const monthStart = `${targetYm}-01`
+  const [y, m] = targetYm.split('-').map(Number)
+  const monthEnd = fmtDate(new Date(y, m, 0))
+  const [{ data: emps }, { data: abs }, { data: cards }, { data: advs }, { data: pays }] = await Promise.all([
+    admin.from('employees').select('id, salary, deduct_per_absence').eq('restaurant_id', rid).eq('is_active', true),
+    admin.from('shift_absences').select('employee_id, date, source').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd),
+    admin.from('monthly_card_amounts').select('employee_id, card_amount').eq('restaurant_id', rid).eq('month', targetYm),
+    admin.from('salary_advances').select('employee_id, amount').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd),
+    admin.from('salary_payments').select('employee_id, amount').eq('restaurant_id', rid).eq('period', monthStart),
+  ])
+  const absByEmp: Record<string, number> = {}
+  ;(abs || []).forEach((a: any) => { if (a.source !== 'auto') absByEmp[a.employee_id] = (absByEmp[a.employee_id] || 0) + 1 })
+  const cardByEmp: Record<string, number> = {}; (cards || []).forEach((c: any) => { cardByEmp[c.employee_id] = Number(c.card_amount || 0) })
+  const advByEmp: Record<string, number> = {}; (advs || []).forEach((a: any) => { advByEmp[a.employee_id] = (advByEmp[a.employee_id] || 0) + Number(a.amount || 0) })
+  const paidByEmp: Record<string, number> = {}; (pays || []).forEach((p: any) => { paidByEmp[p.employee_id] = (paidByEmp[p.employee_id] || 0) + Number(p.amount || 0) })
+
+  let remaining = 0
+  ;(emps || []).forEach((e: any) => {
+    const deduct = (absByEmp[e.id] || 0) * Number(e.deduct_per_absence || 0)
+    const total = Math.max(0, Number(e.salary || 0) - deduct)
+    const cash = Math.max(0, total - (advByEmp[e.id] || 0) - (cardByEmp[e.id] || 0))
+    remaining += Math.max(0, cash - (paidByEmp[e.id] || 0))
+  })
+  return remaining
+}
+
+// Напоминание владельцу за N=3 дня до дня выдачи ЗП (restaurant_settings.salary_payout_day,
+// настройка 2026-07-28): долг = сумма непокрытого остатка по закрытым месяцам (окно 6 назад,
+// как в People→Зарплата), резерв = сумма всей инкассации с начала учёта. Раз в день на точку.
+async function remindSalaryPayout(admin: any, now: Date, tzMap: Record<string, string>): Promise<number> {
+  const REMIND_DAYS_BEFORE = 3
+  try {
+    const { data: settings } = await admin.from('restaurant_settings').select('restaurant_id, salary_payout_day').not('salary_payout_day', 'is', null)
+    if (!settings?.length) return 0
+
+    const today = fmtDate(now)
+    const { data: sentRows } = await admin.from('notifications')
+      .select('restaurant_id').eq('type', 'salary_payout_reminder').gte('created_at', `${today}T00:00:00Z`)
+    const alreadySent = new Set((sentRows || []).map((n: any) => n.restaurant_id))
+
+    let sent = 0
+    for (const s of settings) {
+      if (alreadySent.has(s.restaurant_id)) continue
+      const payoutDay = Number(s.salary_payout_day)
+      if (!payoutDay || payoutDay < 1) continue
+      const { dom } = localParts(now, tzMap[s.restaurant_id])
+      // Простой случай: день напоминания = день выдачи минус N. Если выдача в начале месяца
+      // (<=N) — граница переходит в предыдущий месяц, что усложняет расчёт почти без пользы
+      // (payout_day=1 юзеру и так эквивалентен текущему поведению без лага) — пропускаем.
+      const remindDom = payoutDay - REMIND_DAYS_BEFORE
+      if (remindDom < 1 || dom !== remindDom) continue
+
+      const { data: rest } = await admin.from('restaurants').select('currency').eq('id', s.restaurant_id).maybeSingle()
+      const currency = rest?.currency || '€'
+      const fmt = (n: number) => `${currency}${Math.round(n).toLocaleString('de-DE')}`
+
+      let due = 0
+      for (let i = 1; i <= 6; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+        due += await monthSalaryRemaining(admin, s.restaurant_id, fmtDate(d).slice(0, 7))
+      }
+      const { data: inkRows } = await admin.from('inkassations').select('total').eq('restaurant_id', s.restaurant_id)
+      const reserve = (inkRows || []).reduce((sum: number, r: any) => sum + (r.total || 0), 0)
+
+      await dispatchNotification(admin, s.restaurant_id, {
+        type: 'salary_payout_reminder', title: 'Salary payout soon', body: `${REMIND_DAYS_BEFORE} days left — due ${fmt(due)}, reserve ${fmt(reserve)}`,
+        titleKey: 'notify.salaryPayoutSoonTitle', bodyKey: 'notify.salaryPayoutSoonBody',
+        bodyParams: { days: REMIND_DAYS_BEFORE, due: fmt(due), reserve: fmt(reserve) },
+        audience: { managers: true },
+      }).catch(() => {})
+      sent++
+    }
+    return sent
+  } catch {
+    return 0
+  }
+}
+
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET
   if (!secret || req.headers.get('authorization') !== `Bearer ${secret}`) {
@@ -335,7 +418,8 @@ export async function GET(req: NextRequest) {
     const purchaseDigest = await sendPurchaseDigest(admin, now)
     const scheduledAudits = await runScheduledAudits(admin, now, tzMap)
     const closeReminders = await remindOpenCloseChecklist(admin, now, tzMap)
-    return NextResponse.json({ ok: true, sent: 0, trialEmails, trialsExpired, noShows, purchaseDigest, scheduledAudits, closeReminders })
+    const salaryPayoutReminders = await remindSalaryPayout(admin, now, tzMap)
+    return NextResponse.json({ ok: true, sent: 0, trialEmails, trialsExpired, noShows, purchaseDigest, scheduledAudits, closeReminders, salaryPayoutReminders })
   }
 
   // Уже отправленные напоминания за последние 2 дня → set(schedule_id)
@@ -373,5 +457,6 @@ export async function GET(req: NextRequest) {
   const purchaseDigest = await sendPurchaseDigest(admin, now)
   const scheduledAudits = await runScheduledAudits(admin, now, tzMap)
   const closeReminders = await remindOpenCloseChecklist(admin, now, tzMap)
-  return NextResponse.json({ ok: true, sent: reminded, pushed, trialEmails, trialsExpired, noShows, purchaseDigest, scheduledAudits, closeReminders })
+  const salaryPayoutReminders = await remindSalaryPayout(admin, now, tzMap)
+  return NextResponse.json({ ok: true, sent: reminded, pushed, trialEmails, trialsExpired, noShows, purchaseDigest, scheduledAudits, closeReminders, salaryPayoutReminders })
 }

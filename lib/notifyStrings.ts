@@ -70,6 +70,11 @@ export const NOTIFY_STRINGS: Record<string, Row> = {
   'notify.violationBody':      { en: '{item} — needs fixing', ru: '{item} — нужно исправить', it: '{item} — da correggere', fr: '{item} — à corriger', az: '{item} — düzəldilməlidir', tr: '{item} — düzeltilmeli', uk: '{item} — потрібно виправити', kk: '{item} — түзету қажет' },
   'notify.closeChecklistReminderTitle': { en: 'Closing checklist not done', ru: 'Чек-лист закрытия не пройден', it: 'Checklist di chiusura non completata', fr: 'Checklist de clôture non terminée', az: 'Bağlanış çek-listi tamamlanmayıb', tr: 'Kapanış kontrol listesi tamamlanmadı', uk: 'Чек-лист закриття не пройдено', kk: 'Жабылу тексеру тізімі толтырылмаған' },
   'notify.closeChecklistReminderBody':  { en: 'Check off the remaining items before closing', ru: 'Отметьте оставшиеся пункты до закрытия', it: 'Spunta i punti rimanenti prima della chiusura', fr: 'Cochez les éléments restants avant la clôture', az: 'Bağlanmazdan əvvəl qalan bəndləri qeyd edin', tr: 'Kapanıştan önce kalan maddeleri işaretleyin', uk: 'Відмітьте решту пунктів до закриття', kk: 'Жабу алдында қалған тармақтарды белгілеңіз' },
+
+  // Напоминание за N дней до дня выдачи ЗП (restaurant_settings.salary_payout_day, 2026-07-28):
+  // due/reserve приходят уже отформатированными строками с валютой ресторана.
+  'notify.salaryPayoutSoonTitle': { en: 'Salary payout soon', ru: 'Скоро выплата ЗП', it: 'Pagamento stipendi a breve', fr: 'Versement du salaire bientôt', az: 'Maaş ödənişi tezliklə', tr: 'Maaş ödemesi yaklaşıyor', uk: 'Скоро виплата ЗП', kk: 'Жалақы төлемі жақында' },
+  'notify.salaryPayoutSoonBody':  { en: '{days} days left — due {due}, reserve {reserve}', ru: 'Через {days} дн. выплата — к оплате {due}, в резерве {reserve}', it: 'Mancano {days} giorni — da pagare {due}, riserva {reserve}', fr: 'Dans {days} jours — à verser {due}, réserve {reserve}', az: '{days} gün qalıb — ödəniləcək {due}, ehtiyatda {reserve}', tr: '{days} gün kaldı — ödenecek {due}, rezervde {reserve}', uk: 'Через {days} дн. виплата — до оплати {due}, у резерві {reserve}', kk: '{days} күн қалды — төленеді {due}, резервте {reserve}' },
 }
 
 const CAT_KEYS: Record<string, string> = {
@@ -86,6 +91,8 @@ export function renderNotify(locale: string | null | undefined, key: string, var
   const row = NOTIFY_STRINGS[key]
   let s = row?.[loc] ?? row?.en ?? key
   if (vars) for (const k in vars) s = s.split(`{${k}}`).join(String(vars[k]))
+  // Защита от незаполненной переменной (напр. звонок без bodyParams) — не показывать сырые {var}.
+  s = s.replace(/\{[a-zA-Z_]+\}/g, '')
   return s.replace(/\s+/g, ' ').trim()
 }
 

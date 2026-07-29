@@ -79,6 +79,10 @@ struct GuestsView: View {
     @State private var searchText = ""
     @State private var selectedGuest: GuestProfile?
     @State private var editingGuest: GuestProfile?
+    @State private var editingProfile = GuestEditPrefill(lastName: "", email: "", birthday: nil, note: "")
+    // Форсит пересоздание GuestDetailView (полный ре-фетч loadNote) после успешного
+    // сохранения в GuestEditSheet — иначе уже открытая карточка не увидит свежие данные.
+    @State private var detailRefreshTick = 0
     @State private var deleteTarget: GuestProfile?
     @State private var errorMsg: String?
     @State private var showReviews = false
@@ -171,24 +175,22 @@ struct GuestsView: View {
             .sheet(isPresented: $showReviews) {
                 GoogleReviewsView()
             }
-            .sheet(item: $selectedGuest) { g in
-                GuestDetailView(guest: g, rid: m.rid, canEdit: canEditGuest(g), onNewBooking: { name, phone, visits, noShows in
-                    // Закрываем карточку гостя, затем родитель закрывает список и открывает редактор.
-                    selectedGuest = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        onNewBooking(name, phone, visits, noShows)
-                    }
-                }, onEdit: {
-                    selectedGuest = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { editingGuest = g }
+            // Push, не sheet-на-sheet: карточка гостя больше не отдельный модал внутри
+            // модала (список гостей). "Новая бронь" теперь единственный dismiss на выходе
+            // (см. onNewBooking) вместо цепочки из нескольких закрывающихся шитов подряд.
+            .navigationDestination(item: $selectedGuest) { g in
+                GuestDetailView(guest: g, rid: m.rid, canEdit: canEditGuest(g), onNewBooking: onNewBooking, onEdit: { prefill in
+                    editingProfile = prefill
+                    editingGuest = g
                 }, onDelete: {
-                    selectedGuest = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { deleteTarget = g }
+                    deleteTarget = g
                 })
+                .id(detailRefreshTick)
             }
             .sheet(item: $editingGuest) { g in
-                GuestEditSheet(guest: g, rid: m.rid) { newName, newPhone in
+                GuestEditSheet(guest: g, rid: m.rid, prefill: editingProfile) { newName, newPhone in
                     editingGuest = nil
+                    detailRefreshTick += 1
                     // Отражаем правку локально сразу — без этого список гостей оставался
                     // со старым именем/телефоном до следующей полной перезагрузки броней.
                     let ids = Set(g.bookings.map { $0.id })
@@ -348,22 +350,51 @@ private struct GuestRow: View {
 
 // MARK: - GuestDetailView
 
-private nonisolated struct GuestNote: Codable, Sendable { let note: String? }
+private nonisolated struct GuestNote: Codable, Sendable {
+    let note: String?
+    let last_name: String?
+    let email: String?
+    let birthday: String?
+}
+
+/// Снимок профиля гостя, переданный из GuestDetailView в GuestEditSheet — одна форма
+/// на весь гость (имя/телефон/фамилия/email/ДР/заметка), см. онEdit ниже.
+struct GuestEditPrefill {
+    var lastName: String
+    var email: String
+    var birthday: Date?
+    var note: String
+}
 
 struct GuestDetailView: View {
     let guest: GuestProfile
     let rid: String
     var canEdit: Bool = true
     var onNewBooking: (String?, String?, Int, Int) -> Void = { _, _, _, _ in }
-    var onEdit: () -> Void = {}
+    // Передаём уже загруженный профиль (фамилия/email/ДР) в шторку правки — там и только
+    // там их теперь можно менять (юзер-фидбек: не дублировать поля в самой карточке, они
+    // должны появляться только если зайти в «Редактировать» и заполнить).
+    var onEdit: (GuestEditPrefill) -> Void = { _ in }
     var onDelete: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
 
     @State private var note = ""
+    @State private var lastName = ""
+    @State private var email = ""
+    @State private var hasBirthday = false
+    @State private var birthday = Date()
     @State private var noteLoaded = false
     @State private var showPhoneMenu = false
-    @State private var noteSavedFlash = false
     @State private var confirmDelete = false
+
+    private static let bdayFmt: DateFormatter = {
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"; df.locale = Locale(identifier: "en_US_POSIX")
+        return df
+    }()
+    private static let bdayDisplayFmt: DateFormatter = {
+        let df = DateFormatter(); df.dateFormat = "d MMM yyyy"; df.locale = Locale(identifier: I18n.code)
+        return df
+    }()
 
     private var sortedBookings: [Booking] {
         guest.bookings.sorted { ($0.booking_date ?? "") > ($1.booking_date ?? "") }
@@ -381,56 +412,53 @@ struct GuestDetailView: View {
         guest.phone ?? guest.bookings.compactMap { $0.phone }.first { !$0.isEmpty }
     }
 
+    // Пуш внутри NavigationStack родителя (GuestsView), не отдельный sheet — назад
+    // системный back-chevron, без Done-кнопки (см. точку 4 фидбека: убрать каскад шитов).
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.miseBg.ignoresSafeArea()
-                ScrollView {
-                    VStack(spacing: 16) {
-                        guestHeader
-                        newBookingButton
-                        statsCard
-                        noteSection
+        ZStack {
+            Color.miseBg.ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 16) {
+                    guestHeader
+                    newBookingButton
+                    statsCard
+                    noteSection
 
-                        // История броней
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(t("gs.history"))
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.primary.opacity(0.5))
-                                .padding(.horizontal, 4)
+                    // История броней
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(t("gs.history"))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary.opacity(0.5))
+                            .padding(.horizontal, 4)
 
-                            ForEach(sortedBookings) { b in
-                                historyRow(b)
-                            }
-                        }
-                    }
-                    .padding(16).padding(.bottom, 24)
-                }
-            }
-            .navigationTitle(guest.displayName)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.miseBg, for: .navigationBar)
-            .toolbar {
-                if canEdit {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Menu {
-                            Button { dismiss(); onEdit() } label: { Label(t("edit"), systemImage: "pencil") }
-                            Button(role: .destructive) { confirmDelete = true } label: { Label(t("delete"), systemImage: "trash") }
-                        } label: {
-                            Image(systemName: "ellipsis.circle").foregroundStyle(GS_ACCENT)
+                        ForEach(sortedBookings) { b in
+                            historyRow(b)
                         }
                     }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(t("done")) { dismiss() }
+                .padding(16).padding(.bottom, 24)
+            }
+        }
+        .navigationTitle(guest.displayName)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Color.miseBg, for: .navigationBar)
+        .toolbar {
+            if canEdit {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button { onEdit(GuestEditPrefill(lastName: lastName, email: email, birthday: hasBirthday ? birthday : nil, note: note)) } label: { Label(t("edit"), systemImage: "pencil") }
+                        Button(role: .destructive) { confirmDelete = true } label: { Label(t("delete"), systemImage: "trash") }
+                    } label: {
+                        Image(systemName: "ellipsis.circle").foregroundStyle(GS_ACCENT)
+                    }
                 }
             }
-            .alert(t("gs.deleteGuest"), isPresented: $confirmDelete) {
-                Button(t("cancel"), role: .cancel) {}
-                Button(t("delete"), role: .destructive) { dismiss(); onDelete() }
-            } message: {
-                Text(t("gs.deleteGuestConfirm", ["name": guest.displayName]))
-            }
+        }
+        .alert(t("gs.deleteGuest"), isPresented: $confirmDelete) {
+            Button(t("cancel"), role: .cancel) {}
+            Button(t("delete"), role: .destructive) { dismiss(); onDelete() }
+        } message: {
+            Text(t("gs.deleteGuestConfirm", ["name": guest.displayName]))
         }
         .task { if !noteLoaded { await loadNote() } }
     }
@@ -487,6 +515,17 @@ struct GuestDetailView: View {
                         }
                         Button(t("cancel"), role: .cancel) {}
                     }
+                }
+                // Только то, что реально заполнено — пусто просто не показываем (заполняется
+                // через «...» → «Редактировать», не пустыми полями прямо в карточке).
+                if !lastName.isEmpty {
+                    Text(lastName).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.6))
+                }
+                if !email.isEmpty {
+                    Text(email).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.6))
+                }
+                if hasBirthday {
+                    Text(Self.bdayDisplayFmt.string(from: birthday)).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.6))
                 }
             }
             Spacer()
@@ -550,51 +589,38 @@ struct GuestDetailView: View {
         }
     }
 
-    // MARK: заметка о госте
+    // MARK: заметка о госте — read-only здесь; редактируется вместе с остальным профилем
+    // ТОЛЬКО через «...» → «Редактировать» (GuestEditSheet), одной формой на весь гость —
+    // юзер-фидбек 2026-07-22: нелогично разносить имя/фамилию/заметку по разным местам,
+    // это всё об одном госте.
 
-    private var noteSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(t("gs.note"))
-                .font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.5))
-                .padding(.horizontal, 4)
-            TextField(t("gs.notePh"), text: $note, axis: .vertical)
-                .lineLimit(1...4).font(.system(size: 14))
-                .padding(12)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .onSubmit { saveNote() }
-            HStack {
-                if noteSavedFlash {
-                    Label(t("gs.noteSaved"), systemImage: "checkmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(.green)
-                        .transition(.opacity)
-                }
-                Spacer()
-                Button(t("bk.save")) { saveNote() }
-                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(GS_ACCENT)
+    @ViewBuilder private var noteSection: some View {
+        if !note.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(t("gs.note"))
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.5))
+                    .padding(.horizontal, 4)
+                Text(note).font(.system(size: 14)).foregroundStyle(.primary)
+                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            .animation(.easeInOut(duration: 0.2), value: noteSavedFlash)
         }
     }
 
     private func loadNote() async {
         if let row = try? await DB.from("guest_notes").select().eq("guest_key", guest.id).single(GuestNote.self) {
             note = row.note ?? ""
+            lastName = row.last_name ?? ""
+            email = row.email ?? ""
+            if let bd = row.birthday, let d = Self.bdayFmt.date(from: bd) {
+                birthday = d; hasBirthday = true
+            }
         }
         noteLoaded = true
     }
 
-    private func saveNote() {
-        let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        Task {
-            try? await DB.from("guest_notes")
-                .upsert(["guest_key": guest.id, "note": text], onConflict: "restaurant_id,guest_key").run()
-            noteSavedFlash = true
-            try? await Task.sleep(nanoseconds: 1_800_000_000)
-            noteSavedFlash = false
-        }
-    }
-
     private func historyRow(_ b: Booking) -> some View {
-        let st: BkStatusPublic? = (b.status?.isEmpty == false) ? BkStatusPublic(rawValue: b.status!) : nil
+        let bucket = bkBucket(for: b.status)
         return HStack(spacing: 12) {
             VStack(spacing: 2) {
                 Text(b.booking_time ?? "—").font(.system(size: 14, weight: .bold)).foregroundStyle(.primary)
@@ -622,10 +648,10 @@ struct GuestDetailView: View {
 
             Spacer()
 
-            if let st {
-                Text(st.label).font(.system(size: 10, weight: .bold)).foregroundStyle(st.color)
+            if let bucket {
+                Text(bucket.label).font(.system(size: 10, weight: .bold)).foregroundStyle(bucket.color)
                     .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(st.color.opacity(0.16), in: Capsule())
+                    .background(bucket.color.opacity(0.16), in: Capsule())
             }
         }
         .padding(12)
@@ -649,25 +675,68 @@ private struct GuestEditSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var phone: String
+    @State private var lastName: String
+    @State private var email: String
+    @State private var hasBirthday: Bool
+    @State private var birthday: Date
     @State private var saving = false
     @State private var errorMsg: String?
 
-    init(guest: GuestProfile, rid: String, onDone: @escaping (String, String) -> Void) {
+    private static let bdayFmt: DateFormatter = {
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"; df.locale = Locale(identifier: "en_US_POSIX")
+        return df
+    }()
+
+    @State private var note: String
+
+    // Всё про одного гостя — одна форма, один Save (юзер-фидбек 2026-07-22: не разносить
+    // имя/фамилию/заметку по разным местам). prefill приходит уже загруженным из
+    // GuestDetailView (см. onEdit) — единственное место, где это теперь редактируется.
+    init(guest: GuestProfile, rid: String, prefill: GuestEditPrefill, onDone: @escaping (String, String) -> Void) {
         self.guest = guest
         self.rid = rid
         self.onDone = onDone
         _name = State(initialValue: guest.displayName == guest.id ? "" : guest.displayName)
         _phone = State(initialValue: guest.phone ?? "")
+        _lastName = State(initialValue: prefill.lastName)
+        _email = State(initialValue: prefill.email)
+        _hasBirthday = State(initialValue: prefill.birthday != nil)
+        _birthday = State(initialValue: prefill.birthday ?? Date())
+        _note = State(initialValue: prefill.note)
     }
 
     var body: some View {
         NavigationStack {
             ZStack { Color.miseBg.ignoresSafeArea()
                 Form {
+                    // Имя/фамилия/ДР — это всё о личности гостя, не контакт; телефон/email —
+                    // отдельно, это способы связи (юзер-фидбек: ДР не контактные данные).
                     Section(t("gs.guestInfo")) {
                         TextField(t("gs.namePh"), text: $name)
+                        TextField(t("gs.lastName"), text: $lastName)
+                        // Без тумблера — просто дата: пусто = нет ДР, выбрана = есть (юзер-
+                        // фидбек: незачем отдельный флаг, когда сама дата уже это говорит).
+                        if hasBirthday {
+                            HStack {
+                                DatePicker(t("gs.birthday"), selection: $birthday, displayedComponents: .date)
+                                Button { withAnimation { hasBirthday = false } } label: {
+                                    Image(systemName: "xmark.circle.fill").foregroundStyle(.primary.opacity(0.3))
+                                }.buttonStyle(.plain)
+                            }
+                        } else {
+                            Button { withAnimation { hasBirthday = true; birthday = Date() } } label: {
+                                Label(t("gs.birthday"), systemImage: "plus.circle").foregroundStyle(GS_ACCENT)
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                    Section(t("gs.secContacts")) {
                         TextField(t("gs.phonePh"), text: $phone)
                             .keyboardType(.phonePad)
+                        TextField(t("gs.email"), text: $email)
+                            .keyboardType(.emailAddress).textInputAutocapitalization(.never)
+                    }
+                    Section(t("gs.note")) {
+                        TextField(t("gs.notePh"), text: $note, axis: .vertical).lineLimit(2...5)
                     }
                 }
                 if let errorMsg {
@@ -715,6 +784,12 @@ private struct GuestEditSheet: View {
                     break
                 }
             }
+            let lastTrim = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let emailTrim = email.trimmingCharacters(in: .whitespacesAndNewlines)
+            let noteTrim = note.trimmingCharacters(in: .whitespacesAndNewlines)
+            var values: [String: Any] = ["guest_key": guest.id, "last_name": lastTrim, "email": emailTrim, "note": noteTrim]
+            values["birthday"] = hasBirthday ? Self.bdayFmt.string(from: birthday) : NSNull()
+            try? await DB.from("guest_notes").upsert(values, onConflict: "restaurant_id,guest_key").run()
             await MainActor.run {
                 saving = false
                 if let failure {
@@ -724,30 +799,6 @@ private struct GuestEditSheet: View {
                     dismiss()
                 }
             }
-        }
-    }
-}
-
-// MARK: - BkStatusPublic (нужен в GuestsView без доступа к private enum)
-
-enum BkStatusPublic: String {
-    case new, confirmed, arrived, late, cancelled
-    var color: Color {
-        switch self {
-        case .new:       return BrandKit.manager
-        case .confirmed: return BrandKit.analytics
-        case .arrived:   return BrandKit.analytics
-        case .late:      return BrandKit.stash
-        case .cancelled: return BrandKit.accent
-        }
-    }
-    var label: String {
-        switch self {
-        case .new:       return t("bk.stNew")
-        case .confirmed: return t("bk.stConfirmed")
-        case .arrived:   return t("bk.stArrived")
-        case .late:      return t("bk.stLate")
-        case .cancelled: return t("bk.stCancelled")
         }
     }
 }

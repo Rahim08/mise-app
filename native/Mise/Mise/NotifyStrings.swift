@@ -52,6 +52,7 @@ nonisolated struct AppNotification: Codable, Identifiable, Sendable {
     let body_key: String?
     let title_params: [String: JSONVal]?
     let body_params: [String: JSONVal]?
+    let data: [String: JSONVal]?   // произвольные данные для точного роутинга (booking_date и т.п.)
     let created_at: String?
     var read_at: String?
 }
@@ -114,6 +115,9 @@ private let NOTIFY: [String: [String]] = [
     "notify.violationBody":      ["{item} — needs fixing", "{item} — нужно исправить", "{item} — da correggere", "{item} — à corriger", "{item} — düzəldilməlidir", "{item} — düzeltilmeli", "{item} — потрібно виправити", "{item} — түзету қажет"],
     "notify.closeChecklistReminderTitle": ["Closing checklist not done", "Чек-лист закрытия не пройден", "Checklist di chiusura non completata", "Checklist de clôture non terminée", "Bağlanış çek-listi tamamlanmayıb", "Kapanış kontrol listesi tamamlanmadı", "Чек-лист закриття не пройдено", "Жабылу тексеру тізімі толтырылмаған"],
     "notify.closeChecklistReminderBody":  ["Check off the remaining items before closing", "Отметьте оставшиеся пункты до закрытия", "Spunta i punti rimanenti prima della chiusura", "Cochez les éléments restants avant la clôture", "Bağlanmazdan əvvəl qalan bəndləri qeyd edin", "Kapanıştan önce kalan maddeleri işaretleyin", "Відмітьте решту пунктів до закриття", "Жабу алдында қалған тармақтарды белгілеңіз"],
+
+    "notify.salaryPayoutSoonTitle": ["Salary payout soon", "Скоро выплата ЗП", "Pagamento stipendi a breve", "Versement du salaire bientôt", "Maaş ödənişi tezliklə", "Maaş ödemesi yaklaşıyor", "Скоро виплата ЗП", "Жалақы төлемі жақында"],
+    "notify.salaryPayoutSoonBody":  ["{days} days left — due {due}, reserve {reserve}", "Через {days} дн. выплата — к оплате {due}, в резерве {reserve}", "Mancano {days} giorni — da pagare {due}, riserva {reserve}", "Dans {days} jours — à verser {due}, réserve {reserve}", "{days} gün qalıb — ödəniləcək {due}, ehtiyatda {reserve}", "{days} gün kaldı — ödenecek {due}, rezervde {reserve}", "Через {days} дн. виплата — до оплати {due}, у резерві {reserve}", "{days} күн қалды — төленеді {due}, резервте {reserve}"],
 ]
 
 private let NOTIFY_LANG_ORDER = ["en", "ru", "it", "fr", "az", "tr", "uk", "kk"]
@@ -123,6 +127,8 @@ private let NOTIFY_LANG_ORDER = ["en", "ru", "it", "fr", "az", "tr", "uk", "kk"]
     guard let row = NOTIFY[key] else { return key }
     var s = idx < row.count ? row[idx] : row[0]
     if let vars { for (k, v) in vars { s = s.replacingOccurrences(of: "{\(k)}", with: v) } }
+    // Защита от незаполненной переменной (напр. звонок без vars) — не показывать сырые {var}.
+    s = s.replacingOccurrences(of: "\\{[a-zA-Z_]+\\}", with: "", options: .regularExpression)
     return s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
 }
 

@@ -33,6 +33,16 @@ struct RootView: View {
             default: break
             }
         }
+        // Тап по системному пуш-уведомлению (см. PushManager.didReceive response:).
+        // userInfo — плоские ключи из data (booking_date/shift_date и т.п., см. lib/apns.ts).
+        .onReceive(NotificationCenter.default.publisher(for: .pushTapped)) { note in
+            guard model.phase == .authed, let type = note.object as? String else { return }
+            var data: [String: String] = [:]
+            if let info = note.userInfo {
+                for (k, v) in info { if let key = k as? String, let val = v as? String { data[key] = val } }
+            }
+            model.routeNotification(type: type, data: data)
+        }
         .onChange(of: model.phase) { _, phase in
             if phase == .authed, let id = pendingLink {
                 pendingLink = nil

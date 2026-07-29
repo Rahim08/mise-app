@@ -31,6 +31,7 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   monthly_card_amounts: { read: ['analytics', 'people'], write: ['analytics'] }, // помесячная сумма на карту правится в Analytics
   salary_advances:      { read: ['analytics', 'people'], write: ['analytics'] }, // авансы по зарплате
   salary_records:       { read: ['analytics'], write: [] },
+  salary_payments:      { read: ['analytics', 'people'], write: ['people'] }, // факт выдачи ЗП — отмечается в People→Зарплата
   tobacco_stock:        { read: ['stash', 'analytics'], write: ['stash'] }, // analytics: остаток склада на вкладке Кальян
   tobacco_movements:    { read: ['stash', 'analytics'], write: ['stash'] },
   hookah_sales:         { read: ['stash', 'analytics'], write: ['stash'] }, // смена кальянщика

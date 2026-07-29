@@ -83,16 +83,27 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const [inkSalary, setInkSalary] = useState('')    // выплата зарплаты — вычитается из итога инкассации
   const [inkSalaryNote, setInkSalaryNote] = useState('')
   const [showSummary, setShowSummary] = useState(false)
+  const [checklistWarn, setChecklistWarn] = useState(false)
   const [locked, setLocked] = useState(false) // сохранённая смена закрыта «матовым стеклом» до Редактировать
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
   const [mounted, setMounted] = useState(false)
+  const [inkReserve, setInkReserve] = useState<number | null>(null)
 
   useEffect(() => {
     setMounted(true)
     init()
+    loadInkReserve()
   }, [])
+
+  // Остаток инкассации (ЗП-долг 2026-07-28): сумма (инкассация − расход − зарплата) по ВСЕМ
+  // дням с начала учёта, не только за месяц — что физически должно лежать в загашнике/сейфе.
+  // Списания «увезли в банк» и т.п. — через уже существующее поле «Расход по инкассации».
+  const loadInkReserve = async () => {
+    const { data } = await db.from('inkassations').select('total').eq('restaurant_id', restaurantId)
+    setInkReserve((data || []).reduce((s: number, r: any) => s + (r.total || 0), 0))
+  }
 
   const init = async () => {
     const [empsRes, catsRes] = await Promise.all([
@@ -180,7 +191,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
         setShift({ ...sh, opening_balance: openingBalance })
         await loadAbsencesByDate(restaurantId, fmtDate(currentDate)) // подтянуть авто-прогулы дня
         showToast(tr('mg.shiftOpened'))
-        pushNotify({ type: 'cash_open', title: tr('mg.pushCashOpen'), body: tr('mg.pushShiftOpened'), titleKey: 'notify.cashOpenTitle', bodyKey: 'notify.cashOpenBody', bodyParams: { date: dd(fmtDate(currentDate)) }, audience: { managers: true } })
+        // Пуш «смена открыта» отключён по запросу — низкая ценность, шумит (юзер-фидбек 2026-07-22).
       } else if (error?.code === '23505') {
         // Shift already exists — reload it
         await loadDay(restaurantId, currentDate, employees, categories)
@@ -262,13 +273,26 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     return balance
   }
 
-  const saveShift = async () => {
+  // Мягкий гейт (не блокирует): если чек-лист закрытия смены на сегодня не пройден целиком,
+  // спрашиваем подтверждение вместо тихого закрытия кассы (юзер-фидбек 2026-07-28).
+  const closeChecklistIncomplete = async (): Promise<boolean> => {
+    const { data: lists } = await db.from('shift_checklists').select('id').eq('kind', 'shift').eq('type', 'close')
+    const ids = (lists || []).map((l: any) => l.id)
+    if (!ids.length) return false
+    const dateStr = fmtDate(currentDate)
+    const { data: completions } = await db.from('shift_checklist_completions').select('checklist_id, status').eq('date', dateStr).in('checklist_id', ids)
+    return !ids.every((id: string) => completions?.some((c: any) => c.checklist_id === id && c.status === 'done'))
+  }
+
+  const saveShift = async (force = false) => {
     if (!shift) return
+    if (!force && await closeChecklistIncomplete()) { setChecklistWarn(true); return }
     setSaving(true)
     try { await persistShift() } catch (e: any) { showToast(tr('mg.err') + ': ' + (e?.message || tr('mg.notSaved'))); setSaving(false); return }
     setShowSummary(false)
     setLocked(true)
     showToast(tr('mg.shiftSaved'))
+    loadInkReserve()
     const c = calc()
     pushNotify({
       type: 'cash_close', title: tr('mg.pushCashClosed'), body: tr('mg.pushShiftClosed'),
@@ -488,6 +512,15 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 700, color: t.orange }}>€{fv(inkNet)}</div>
                 </div>
+                {inkReserve !== null && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderTop: `0.5px solid ${t.sep2}` }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: t.text2 }}>{tr('mg.inkReserve')}</div>
+                      <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>{tr('mg.inkReserveHint')}</div>
+                    </div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: t.text }}>€{fv(inkReserve)}</div>
+                  </div>
+                )}
               </div>
 
               {/* КАССА */}
@@ -602,9 +635,24 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
             </div>
             <div style={{ padding: '10px 16px 20px', display: 'flex', gap: 10 }}>
               <button onClick={() => setShowSummary(false)} style={{ flex: 1, padding: '14px', borderRadius: 14, border: 'none', background: t.fill, color: t.text, fontFamily: 'inherit', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>{tr('mg.cancel')}</button>
-              <button onClick={saveShift} disabled={saving} style={{ flex: 2, padding: '14px', borderRadius: 14, border: 'none', background: saving ? t.fill : t.blue, color: saving ? t.text3 : '#fff', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: saving ? 'none' : `0 4px 16px ${t.blue}44` }}>
+              <button onClick={() => saveShift()} disabled={saving} style={{ flex: 2, padding: '14px', borderRadius: 14, border: 'none', background: saving ? t.fill : t.blue, color: saving ? t.text3 : '#fff', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: saving ? 'none' : `0 4px 16px ${t.blue}44` }}>
                 {saving ? tr('mg.saving') : tr('mg.confirm')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Мягкий гейт: чек-лист закрытия не пройден */}
+      {checklistWarn && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 700, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+          onClick={() => setChecklistWarn(false)}>
+          <div style={{ background: t.bg, borderRadius: 20, width: '100%', maxWidth: 380, padding: 20 }} onClick={(e: any) => e.stopPropagation()}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 6 }}>{tr('mg.closeChecklistWarnTitle')}</div>
+            <div style={{ fontSize: 14, color: t.text2, marginBottom: 18 }}>{tr('mg.closeChecklistWarnBody')}</div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setChecklistWarn(false)} style={{ flex: 1, padding: '13px', borderRadius: 14, border: 'none', background: t.fill, color: t.text, fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>{tr('mg.closeChecklistWarnBack')}</button>
+              <button onClick={() => { setChecklistWarn(false); saveShift(true) }} style={{ flex: 1, padding: '13px', borderRadius: 14, border: 'none', background: t.red, color: '#fff', fontFamily: 'inherit', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>{tr('mg.closeChecklistWarnAnyway')}</button>
             </div>
           </div>
         </div>

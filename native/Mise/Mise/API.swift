@@ -11,6 +11,24 @@ enum APIError: Error, LocalizedError {
     }
 }
 
+/// Человеческий текст ошибки для AI-советника. Без интернета URLSession кидает голый
+/// системный текст («A TLS error caused the secure connection to fail») — непрофессионально
+/// показывать это как есть, подменяем на понятное «нет соединения».
+@MainActor func aiErrorMessage(_ error: Error) -> String {
+    if let apiErr = error as? APIError {
+        switch apiErr {
+        case .http(401, _): return t("ai.err401")
+        case .http(403, _): return t("ai.err403")
+        case .http(500, _): return t("ai.err500")
+        case .http(502, _): return t("ai.err502")
+        default: break
+        }
+    }
+    let ns = error as NSError
+    if ns.domain == NSURLErrorDomain { return t("ai.errOffline") }
+    return "\(t("ai.errGeneric")): \(error.localizedDescription)"
+}
+
 /// Нативный клиент к существующему серверному API (misesuite.com/api/*).
 /// Бэкенд, авторизация и бизнес-логика не переписываются — переиспользуются.
 /// URLSession сам хранит и переотправляет cookie-токен (PIN-сессия).
@@ -33,7 +51,7 @@ enum API {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await MiseSharedSession.session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1, nil) }
         guard (200..<300).contains(http.statusCode) else { throw APIError.http(http.statusCode, serverMessage(data)) }
         do { return try JSONDecoder().decode(T.self, from: data) }
@@ -59,7 +77,7 @@ enum API {
             "lang": L10n.shared.lang.rawValue,
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await MiseSharedSession.session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1, nil) }
         guard (200..<300).contains(http.statusCode) else { throw APIError.http(http.statusCode, serverMessage(data)) }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw APIError.decode }
@@ -74,7 +92,7 @@ enum API {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await MiseSharedSession.session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw APIError.http(-1, nil) }
         guard (200..<300).contains(http.statusCode) else {
             checkAuth(http.statusCode)

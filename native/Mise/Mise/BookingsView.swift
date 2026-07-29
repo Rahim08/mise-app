@@ -9,28 +9,38 @@ import SwiftUI
 private let BK_ACCENT = BrandKit.bookings
 
 // MARK: Статусы
+//
+// 3 бакета максимум (было 6 — юзер-фидбек: слишком много вариаций на floor). Сырые
+// значения в БД (text, без CHECK) не трогаем ради истории/аналитики/веб-паритета —
+// "new"/"confirmed" схлопываются в .waiting, "no_show" схлопывается в .cancelled
+// (причина различается флагом «Гость не пришёл» в редакторе, не отдельной пилюлей).
+// «Опаздывает» больше не ручной статус — авто-бейдж по времени поверх .waiting
+// (см. BookingCard.badgeLabel/badgeColor).
 
-private enum BkStatus: String, CaseIterable {
-    case new, confirmed, arrived, late, cancelled, noShow = "no_show"
+enum BkBucket: String, CaseIterable {
+    case waiting, arrived, cancelled
     var color: Color {
         switch self {
-        case .new:       return BrandKit.manager
-        case .confirmed: return BrandKit.analytics
+        case .waiting:   return BrandKit.manager
         case .arrived:   return BrandKit.analytics
-        case .late:      return BrandKit.stash
         case .cancelled: return BrandKit.accent
-        case .noShow:    return BrandKit.accent
         }
     }
     var label: String {
         switch self {
-        case .new:       return t("bk.stNew")
-        case .confirmed: return t("bk.stConfirmed")
+        case .waiting:   return t("bk.stWaiting")
         case .arrived:   return t("bk.stArrived")
-        case .late:      return t("bk.stLate")
         case .cancelled: return t("bk.stCancelled")
-        case .noShow:    return t("bk.stNoShow")
         }
+    }
+}
+
+func bkBucket(for raw: String?) -> BkBucket? {
+    guard let raw, !raw.isEmpty else { return nil }
+    switch raw {
+    case "arrived": return .arrived
+    case "cancelled", "no_show": return .cancelled
+    default: return .waiting   // new, confirmed, легаси "late" — всё в ожидании
     }
 }
 
@@ -84,15 +94,19 @@ final class BookingsModel {
         loading = true
         defer { loading = false }
         // Только при успехе перезаписываем — сбой на refresh не должен стирать данные.
-        guard let rows = try? await DB.from("bookings").select()
-            .eq("booking_date", key(currentDate))
-            .order("booking_time").list(Booking.self) else {
-            if !bookings.isEmpty { flash(t("refreshFailed")) }
-            return
-        }
-        // Сортировка: брони без времени — в конец.
-        bookings = rows.sorted {
-            ($0.booking_time ?? "~", $0.created_by_name ?? "") < ($1.booking_time ?? "~", $1.created_by_name ?? "")
+        do {
+            let rows = try await DB.from("bookings").select()
+                .eq("booking_date", key(currentDate))
+                .order("booking_time").list(Booking.self)
+            // Сортировка: брони без времени — в конец.
+            bookings = rows.sorted {
+                ($0.booking_time ?? "~", $0.created_by_name ?? "") < ($1.booking_time ?? "~", $1.created_by_name ?? "")
+            }
+        } catch {
+            // Причина найдена (юзер-фидбек 2026-07-22): pull-to-refresh отменяет предыдущий
+            // Task, URLSession кидает .cancelled — не настоящая ошибка сети, молчим.
+            let cancelled = error is CancellationError || (error as? URLError)?.code == .cancelled
+            if !cancelled && !bookings.isEmpty { flash(t("refreshFailed")) }
         }
     }
 
@@ -177,9 +191,12 @@ final class BookingsModel {
                 return
             }
             let segs = notifyBodySegments(b)
+            // booking_date в data — чтобы тап по уведомлению открыл ИМЕННО эту дату в Bookings,
+            // а не просто модуль (юзер-фидбек 2026-07-22).
             await Notify.send(type: "booking", title: t("bk.new"), body: notifyBody(b),
                               audience: ["managers": true], titleKey: "notify.bookingTitle",
-                              bodySegments: segs.isEmpty ? nil : segs, data: ["module": "bookings"])
+                              bodySegments: segs.isEmpty ? nil : segs,
+                              data: ["module": "bookings", "booking_date": b.booking_date ?? ""])
         } else {
             values["updated_at"] = ISO8601DateFormatter().string(from: Date())
             do {
@@ -253,7 +270,7 @@ final class BookingsModel {
 
 // MARK: - Гостевой профиль (агрегат)
 
-struct GuestProfile: Identifiable {
+struct GuestProfile: Identifiable, Hashable {
     let id: String       // нормализованный ключ: телефон-цифры или lowercase-имя
     var displayName: String
     var phone: String?
@@ -262,6 +279,11 @@ struct GuestProfile: Identifiable {
     var lastVisitDate: String?   // "yyyy-MM-dd"
     var totalGuests: Int
     var bookings: [Booking]
+
+    // Hashable по id — нужен для navigationDestination(item:); полное сравнение по всем
+    // полям (включая массив bookings) избыточно, id уже уникально идентифицирует гостя.
+    static func == (lhs: GuestProfile, rhs: GuestProfile) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 // MARK: - Цель редактора брони (identity для .sheet(item:))
@@ -290,6 +312,7 @@ struct BookingsView: View {
     @State private var editorTarget: BookingEditorTarget?
     @State private var pendingDelete: Booking?
     @State private var showGuests = false
+    @State private var pendingNewBooking: (name: String?, phone: String?, visits: Int, noShows: Int)?
     @State private var selectedRange: BookingRange = .today
     @State private var searchText = ""
     @State private var duplicating: Booking?
@@ -427,7 +450,7 @@ struct BookingsView: View {
                 .animation(.easeInOut(duration: 0.2), value: m.toast)
                 .confirmationDialog(t("bk.delete"),
                                     isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-                                    titleVisibility: .visible) {
+                                    titleVisibility: .hidden) {
                     Button(t("bk.delete"), role: .destructive) {
                         if let b = pendingDelete { deleteAndSync(b, m: m) }; pendingDelete = nil
                     }
@@ -459,13 +482,18 @@ struct BookingsView: View {
                         )
                     }
                 }
-                .sheet(isPresented: $showGuests) {
+                // onDismiss вместо ручного asyncAfter — единственный dismiss (не каскад из
+                // нескольких вложенных sheet) и editor открывается сразу как только система
+                // подтвердила, что шит гостей реально закрылся (Apple-паттерн present-after-dismiss).
+                .sheet(isPresented: $showGuests, onDismiss: {
+                    if let p = pendingNewBooking {
+                        pendingNewBooking = nil
+                        editorTarget = .create(name: p.name, phone: p.phone, visits: p.visits, noShows: p.noShows)
+                    }
+                }) {
                     GuestsView(m: m, onNewBooking: { name, phone, visits, noShows in
-                        // Закрываем шит гостей и открываем редактор с префиллом.
+                        pendingNewBooking = (name, phone, visits, noShows)
                         showGuests = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                            editorTarget = .create(name: name, phone: phone, visits: visits, noShows: noShows)
-                        }
                     })
                 }
                 .confirmationDialog(t("bk.duplicateTitle"), isPresented: $showDuplicateDialog, titleVisibility: .visible) {
@@ -502,6 +530,12 @@ struct BookingsView: View {
         .task {
             if m == nil, let rid = app.restaurant?.id {
                 let model = BookingsModel(rid: rid); m = model
+                // Переход из уведомления (см. AppModel.routeNotification) — прыгаем на дату
+                // ДО первой загрузки, чтобы не грузить «сегодня» впустую и сразу открыть нужное.
+                if let dateStr = app.pendingBookingsDate, let d = Self.parseDateKey(dateStr) {
+                    app.pendingBookingsDate = nil
+                    model.currentDate = d
+                }
                 async let l: () = model.load()
                 async let lm: () = model.loadMonth()
                 async let lr: () = loadInitialRange(model)
@@ -514,6 +548,18 @@ struct BookingsView: View {
         .onChange(of: selectedRange) { _, _ in
             if let m { Task { await refreshRange(m) } }
         }
+        // Bookings уже открыт (модель жива) и прилетело новое уведомление — прыгаем на лету.
+        .onChange(of: app.pendingBookingsDate) { _, dateStr in
+            guard let dateStr, let d = Self.parseDateKey(dateStr), let m else { return }
+            app.pendingBookingsDate = nil
+            selectedRange = .today
+            Task { await m.selectDay(d) }
+        }
+    }
+
+    private static func parseDateKey(_ s: String) -> Date? {
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"; df.locale = Locale(identifier: "en_US_POSIX")
+        return df.date(from: s)
     }
 
     // save()/delete() всегда обновляют только «сегодня» — если открыта Завтра/Неделя,
@@ -559,14 +605,15 @@ struct BookingsView: View {
     @ViewBuilder
     private func bookingRow(_ b: Booking, m: BookingsModel) -> some View {
         let visits = pastVisitCount(for: b, in: m.allBookings)
-        // WhatsApp-свайп: вправо=пришёл, неполный влево=[опаздывает][удалить], полный влево=удалить (с подтв.).
+        // WhatsApp-свайп: вправо=пришёл, неполный влево=[отменить][удалить], полный влево=удалить (с подтв.).
+        // «Опаздывает» больше не ручной статус (см. BkBucket) — свайпом больше не ставится.
         SwipeActionRow(
             leading: canEdit(b) ? SwipeAction(label: t("bk.stArrived"), systemImage: "checkmark.circle.fill", tint: BrandKit.analytics) {
                 Task { await m.setStatus(b, to: "arrived") }
             } : nil,
             trailing: canEdit(b) ? [
-                SwipeAction(label: t("bk.stLate"), systemImage: "clock.fill", tint: BrandKit.stash) {
-                    Task { await m.setStatus(b, to: "late") }
+                SwipeAction(label: t("bk.stCancelled"), systemImage: "xmark.circle.fill", tint: BrandKit.stash) {
+                    Task { await m.setStatus(b, to: "cancelled") }
                 },
                 SwipeAction(label: t("bk.delete"), systemImage: "trash.fill", tint: BrandKit.menu) {
                     pendingDelete = b
@@ -835,10 +882,32 @@ private struct BookingCard: View {
     let editable: Bool
     let pastVisits: Int
 
+    @Environment(AppModel.self) private var app
     @State private var showPhoneMenu = false
 
-    // nil/пустой статус = бронь «без статуса» (бейдж не показываем).
-    private var st: BkStatus? { (b.status?.isEmpty == false) ? BkStatus(rawValue: b.status!) : nil }
+    private var bucket: BkBucket? { bkBucket(for: b.status) }
+
+    // Авто-«опаздывает»: ожидание + бронь сегодня + время уже прошло на 15+ минут.
+    // Не хранится в БД — чисто вычисляемый бейдж, чтобы не плодить ручной статус.
+    //
+    // dayStartHour (операционный день заведения, по умолчанию 6:00) — бронь на 00:00-05:59
+    // это "поздний вечер вчера" для заведений, работающих допоздна, а не начало нового дня
+    // (юзер-фидбек 2026-07-22): без этого 00:00 сразу считалась просроченной.
+    private var isOverdue: Bool {
+        guard bucket == .waiting, let timeStr = b.booking_time, let dateStr = b.booking_date else { return false }
+        let cal = Calendar.current
+        let dateDf = DateFormatter(); dateDf.dateFormat = "yyyy-MM-dd"; dateDf.locale = Locale(identifier: "en_US_POSIX")
+        guard var day = dateDf.date(from: dateStr) else { return false }
+        let hour = Int(timeStr.prefix(2)) ?? 0
+        if hour < app.dayStartHour { day = cal.date(byAdding: .day, value: 1, to: day) ?? day }
+        let timeDf = DateFormatter(); timeDf.dateFormat = "HH:mm"; timeDf.locale = Locale(identifier: "en_US_POSIX")
+        guard let timeOnly = timeDf.date(from: timeStr) else { return false }
+        let comps = cal.dateComponents([.hour, .minute], from: timeOnly)
+        guard let dt = cal.date(bySettingHour: comps.hour ?? 0, minute: comps.minute ?? 0, second: 0, of: day) else { return false }
+        return Date().timeIntervalSince(dt) > 15 * 60
+    }
+    private var badgeLabel: String { isOverdue ? t("bk.stLate") : (bucket?.label ?? "") }
+    private var badgeColor: Color { isOverdue ? BrandKit.stash : (bucket?.color ?? .clear) }
 
     var body: some View {
         // Тап по ряду обрабатывает SwipeActionRow (onTap) — здесь просто контент,
@@ -913,10 +982,10 @@ private struct BookingCard: View {
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 6) {
-                    if let st {
-                        Text(st.label).font(.system(size: 11, weight: .bold)).foregroundStyle(st.color)
+                    if bucket != nil {
+                        Text(badgeLabel).font(.system(size: 11, weight: .bold)).foregroundStyle(badgeColor)
                             .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(st.color.opacity(0.16), in: Capsule())
+                            .background(badgeColor.opacity(0.16), in: Capsule())
                     }
                     if !editable {
                         Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(.primary.opacity(0.25))
@@ -925,7 +994,7 @@ private struct BookingCard: View {
             }
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .opacity(st == .cancelled ? 0.55 : 1)
+        .opacity(bucket == .cancelled ? 0.55 : 1)
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
@@ -954,6 +1023,7 @@ private struct BookingEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
+    @State private var lastName = ""   // только для isNew — см. bk.secGuest
     @State private var phone = ""
     @State private var guests = ""
     @State private var table = ""
@@ -961,17 +1031,53 @@ private struct BookingEditor: View {
     @State private var status: String? = nil    // nil = без статуса (новая бронь)
     @State private var hasTime = false
     @State private var time = Date()
+    @State private var bookingDate = Date()
     @State private var confirmDelete = false
 
     private var isNew: Bool { booking == nil }
+
+    // 3-бакетный Picker поверх сырого status-string (см. bkBucket) — раздельный "не пришёл"
+    // только виден когда выбрана «Отменена», не занимает отдельный сегмент.
+    private var statusBucket: Binding<BkBucket> {
+        Binding(
+            get: { bkBucket(for: status) ?? .waiting },
+            set: { newBucket in
+                switch newBucket {
+                case .waiting:   status = "new"
+                case .arrived:   status = "arrived"
+                case .cancelled: status = (status == "no_show") ? "no_show" : "cancelled"
+                }
+            }
+        )
+    }
+    private var noShowFlag: Binding<Bool> {
+        Binding(get: { status == "no_show" }, set: { flag in status = flag ? "no_show" : "cancelled" })
+    }
 
     var body: some View {
         NavigationStack {
             ZStack {
                 Color.miseBg.ignoresSafeArea()
                 Form {
+                    // Выбор даты — только для НОВОЙ брони, сверху формы: не всегда удобно
+                    // сначала мотать календарь на нужный день, потом жать «+» (юзер-фидбек 2026-07-22).
+                    // При редактировании дата брони не меняется здесь — остаётся как есть.
+                    if isNew {
+                        Section {
+                            DatePicker(t("bk.date"), selection: $bookingDate, displayedComponents: .date)
+                        }
+                    }
                     Section(t("bk.secGuest")) {
-                        field(t("bk.name"), text: $name)
+                        // Имя/фамилия раздельно только при СОЗДАНИИ (юзер-фидбек 2026-07-22) —
+                        // фамилия заодно уходит в профиль гостя (guest_notes), не только в бронь.
+                        // При редактировании существующей брони — как раньше, одно поле (не
+                        // разбираем уже сохранённую строку эвристикой, это ненадёжно).
+                        if isNew {
+                            field(t("bk.firstName"), text: $name)
+                            field(t("gs.lastName"), text: $lastName)
+                        } else {
+                            field(t("bk.name"), text: $name)
+                        }
                         field(t("bk.phone"), text: $phone).keyboardType(.phonePad)
                         // Подсказка сотруднику при создании брони из карточки известного гостя —
                         // для брони «с нуля» (без выбора гостя) не показываем, данных ещё нет.
@@ -996,7 +1102,23 @@ private struct BookingEditor: View {
                     // (имя/телефон) — раньше стояло в секции «Гость», путало.
                     Section(t("bk.secBooking")) {
                         field(t("bk.guests"), text: $guests).keyboardType(.numberPad)
-                        Toggle(t("bk.setTime"), isOn: $hasTime).tint(BK_ACCENT)
+                        // Кастомный Binding вместо .onChange(of: hasTime) — .onChange ловил и
+                        // программную установку hasTime=true из prime() при открытии УЖЕ
+                        // сохранённой брони, затирая распарсенное время округлённым «сейчас»
+                        // ещё до того как юзер успевал покрутить колесо (юзер-фидбог 2026-07-22:
+                        // «выставляю время а оно не меняется»). Округление до ближайших 15 минут
+                        // нужно только когда юзер САМ включает тумблер, не при программном prime().
+                        Toggle(t("bk.setTime"), isOn: Binding(
+                            get: { hasTime },
+                            set: { on in
+                                hasTime = on
+                                guard on else { return }
+                                let cal = Calendar.current
+                                let mins = cal.component(.minute, from: Date())
+                                let rounded = ((mins / 15) + 1) * 15
+                                time = cal.date(byAdding: .minute, value: rounded - mins, to: Date()) ?? Date()
+                            }
+                        ).animation()).tint(BK_ACCENT)
                         if hasTime {
                             DatePicker(t("bk.time"), selection: $time, displayedComponents: .hourAndMinute)
                         }
@@ -1006,12 +1128,14 @@ private struct BookingEditor: View {
                     // (новая создаётся без статуса; пришёл/опоздал ставятся свайпом).
                     if !isNew {
                         Section(t("bk.status")) {
-                            Picker(t("bk.status"), selection: $status) {
-                                Text(t("bk.stNone")).tag(String?.none)
-                                ForEach([BkStatus.confirmed, .arrived, .late, .cancelled, .noShow], id: \.rawValue) { s in
-                                    Text(s.label).tag(Optional(s.rawValue))
+                            Picker(t("bk.status"), selection: statusBucket) {
+                                ForEach(BkBucket.allCases, id: \.rawValue) { b in
+                                    Text(b.label).tag(b)
                                 }
                             }.pickerStyle(.segmented)
+                            if statusBucket.wrappedValue == .cancelled {
+                                Toggle(t("bk.stNoShow"), isOn: noShowFlag).tint(BK_ACCENT)
+                            }
                         }
                     }
                     Section(t("bk.note")) {
@@ -1022,7 +1146,7 @@ private struct BookingEditor: View {
                             Button(role: .destructive) { confirmDelete = true } label: {
                                 Label(t("bk.delete"), systemImage: "trash")
                             }
-                            .confirmationDialog(t("bk.delete"), isPresented: $confirmDelete, titleVisibility: .visible) {
+                            .confirmationDialog(t("bk.delete"), isPresented: $confirmDelete, titleVisibility: .hidden) {
                                 Button(t("bk.delete"), role: .destructive) { onDelete(b); dismiss() }
                                 Button(t("cancel"), role: .cancel) {}
                             }
@@ -1051,6 +1175,7 @@ private struct BookingEditor: View {
             // Новая бронь: префилл из карточки гостя (имя/телефон), статуса нет.
             name = prefillName ?? ""
             phone = prefillPhone ?? ""
+            bookingDate = Self.dateFmt.date(from: defaultDate) ?? Date()
             return
         }
         name = b.guest_name ?? ""
@@ -1068,11 +1193,16 @@ private struct BookingEditor: View {
         let trimmed = { (s: String) -> String? in
             let v = s.trimmingCharacters(in: .whitespacesAndNewlines); return v.isEmpty ? nil : v
         }
+        // При создании — имя и фамилия из раздельных полей склеиваются в guest_name (бронь
+        // хранит одну строку); фамилия ОТДЕЛЬНО уходит в профиль гостя (guest_notes) ниже.
+        let fullName = isNew
+            ? [name, lastName].map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " ")
+            : name
         let b = Booking(
             id: booking?.id ?? "",
-            booking_date: booking?.booking_date ?? defaultDate,
+            booking_date: booking?.booking_date ?? Self.dateFmt.string(from: bookingDate),
             booking_time: hasTime ? Self.timeFmt.string(from: time) : nil,
-            guest_name: trimmed(name),
+            guest_name: trimmed(fullName),
             guests_count: Int(guests.trimmingCharacters(in: .whitespaces)),
             phone: trimmed(phone),
             table_label: trimmed(table),
@@ -1082,11 +1212,23 @@ private struct BookingEditor: View {
             created_by_name: booking?.created_by_name ?? author.1
         )
         onSave(b, isNew)
+        if isNew {
+            let lastTrim = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let digits = phone.filter { $0.isNumber }
+            let key = !digits.isEmpty ? digits : fullName.lowercased().trimmingCharacters(in: .whitespaces)
+            if !lastTrim.isEmpty, !key.isEmpty {
+                Task { try? await DB.from("guest_notes").upsert(["guest_key": key, "last_name": lastTrim], onConflict: "restaurant_id,guest_key").run() }
+            }
+        }
         dismiss()
     }
 
     private static let timeFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "HH:mm"; f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()
 }

@@ -79,6 +79,16 @@ export default function ShiftsPage() {
   const [closeConfirm, setCloseConfirm] = useState(false)
   const [closing, setClosing] = useState(false)
   const [err, setErr] = useState('')
+  const [inkReserve, setInkReserve] = useState<number | null>(null)
+  const [checklistWarn, setChecklistWarn] = useState(false)
+
+  // Остаток инкассации (ЗП-долг 2026-07-28): сумма (инкассация − расход − зарплата) по ВСЕМ
+  // дням с начала учёта — что физически должно лежать в загашнике/сейфе. Списания «увезли
+  // в банк» и т.п. — через уже существующее поле «Расход по инкассации».
+  const loadInkReserve = async () => {
+    const { data } = await db.from('inkassations').select('total').eq('restaurant_id', restaurantId)
+    setInkReserve((data || []).reduce((s: number, r: any) => s + (r.total || 0), 0))
+  }
 
   const loadAbsencesByDate = async (dateStr: string) => {
     const { data: abs } = await db.from('shift_absences').select('*').eq('restaurant_id', restaurantId).eq('date', dateStr)
@@ -130,6 +140,7 @@ export default function ShiftsPage() {
       ])
       setEmployees(empsRes.data || []); setCategories(catsRes.data || [])
       await loadDay(currentDate)
+      await loadInkReserve()
     })()
   }, [restaurantId])
 
@@ -156,7 +167,7 @@ export default function ShiftsPage() {
       if (sh) {
         setShift({ ...sh, opening_balance: openingBalance })
         await loadAbsencesByDate(fmtDate(currentDate))
-        pushNotify({ type: 'cash_open', title: tr('mg.pushCashOpen'), body: tr('mg.pushShiftOpened'), titleKey: 'notify.cashOpenTitle', bodyKey: 'notify.cashOpenBody', bodyParams: { date: dd(fmtDate(currentDate)) }, audience: { managers: true } })
+        // Пуш «смена открыта» отключён по запросу — низкая ценность, шумит (юзер-фидбек 2026-07-22).
         await loadHistory()
       } else if (error?.code === '23505') {
         await loadDay(currentDate)
@@ -223,8 +234,20 @@ export default function ShiftsPage() {
     return balance
   }
 
-  const saveShift = async () => {
+  // Мягкий гейт (не блокирует): если чек-лист закрытия смены на сегодня не пройден целиком,
+  // спрашиваем подтверждение вместо тихого закрытия кассы (юзер-фидбек 2026-07-28).
+  const closeChecklistIncomplete = async (): Promise<boolean> => {
+    const { data: lists } = await db.from('shift_checklists').select('id').eq('kind', 'shift').eq('type', 'close')
+    const ids = (lists || []).map((l: any) => l.id)
+    if (!ids.length) return false
+    const dateStr = fmtDate(currentDate)
+    const { data: completions } = await db.from('shift_checklist_completions').select('checklist_id, status').eq('date', dateStr).in('checklist_id', ids)
+    return !ids.every((id: string) => completions?.some((c: any) => c.checklist_id === id && c.status === 'done'))
+  }
+
+  const saveShift = async (force = false) => {
     if (!shift) return
+    if (!force && await closeChecklistIncomplete()) { setChecklistWarn(true); return }
     setSaving(true); setErr('')
     try { await persistShift() } catch (e: any) { setErr(tr('mg.err') + ': ' + (e?.message || tr('mg.notSaved'))); setSaving(false); return }
     setLocked(true)
@@ -238,6 +261,7 @@ export default function ShiftsPage() {
     })
     setSaving(false)
     await loadHistory()
+    await loadInkReserve()
   }
 
   const forceClose = async () => {
@@ -385,6 +409,15 @@ export default function ShiftsPage() {
                   <span style={{ fontSize: '.8rem', fontWeight: 600, color: 'var(--warn)' }}>{tr('mg.inkNet')}</span>
                   <span style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--warn)' }}>€{fv(inkNet)}</span>
                 </div>
+                {inkReserve !== null && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, borderTop: 'var(--hairline)', marginTop: 8 }}>
+                    <div>
+                      <div style={{ fontSize: '.8rem', fontWeight: 600, color: 'var(--tx2)' }}>{tr('mg.inkReserve')}</div>
+                      <div style={{ fontSize: '.68rem', color: 'var(--tx3)', marginTop: 1 }}>{tr('mg.inkReserveHint')}</div>
+                    </div>
+                    <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--tx)' }}>€{fv(inkReserve)}</span>
+                  </div>
+                )}
               </Card>
 
               <Card>
@@ -420,9 +453,20 @@ export default function ShiftsPage() {
                 {locked ? (
                   <Btn full variant="gray" onClick={() => setLocked(false)}>{tr('mg.edit')}</Btn>
                 ) : (
-                  <Btn full onClick={saveShift} disabled={saving}>{saving ? tr('mg.saving') : tr('mg.save')}</Btn>
+                  <Btn full onClick={() => saveShift()} disabled={saving}>{saving ? tr('mg.saving') : tr('mg.save')}</Btn>
                 )}
               </div>
+
+              {checklistWarn && (
+                <Card>
+                  <div style={{ fontSize: '.85rem', fontWeight: 700, color: 'var(--tx)', marginBottom: 4 }}>{tr('mg.closeChecklistWarnTitle')}</div>
+                  <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginBottom: 10, lineHeight: 1.5 }}>{tr('mg.closeChecklistWarnBody')}</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Btn small variant="danger" onClick={() => { setChecklistWarn(false); saveShift(true) }}>{tr('mg.closeChecklistWarnAnyway')}</Btn>
+                    <Btn small variant="ghost" onClick={() => setChecklistWarn(false)}>{tr('mg.closeChecklistWarnBack')}</Btn>
+                  </div>
+                </Card>
+              )}
 
               {shift.status === 'open' && (
                 closeConfirm ? (

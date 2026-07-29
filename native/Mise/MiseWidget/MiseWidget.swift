@@ -354,6 +354,14 @@ private struct BookingWidget: View {
 
     private func row(_ b: SnapBooking) -> some View {
         HStack(spacing: 8) {
+            // Тап — сразу «Пришёл» без открытия приложения (юзер-фидбог 2026-07-22:
+            // была такая галка раньше, потерялась при пересборке виджета — вернул).
+            Button(intent: MarkBookingArrivedIntent(bookingID: b.id)) {
+                Image(systemName: "circle")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.35))
+            }
+            .buttonStyle(.plain)
             Text(b.time.isEmpty ? "—" : b.time)
                 .font(.system(size: 13, weight: .bold)).foregroundStyle(accent)
                 .frame(width: 42, alignment: .leading)

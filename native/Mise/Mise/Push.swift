@@ -65,6 +65,22 @@ final class PushManager: NSObject, UNUserNotificationCenterDelegate {
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound, .badge])
     }
+
+    // Тап по системному пуш-баннеру — тот же payload.type, что и в журнале уведомлений
+    // (см. lib/apns.ts: payload = { aps, ...data }, data.type приходит из lib/notify.ts).
+    // Постим через NotificationCenter (как quickAction) — RootView решает куда роутить,
+    // у PushManager нет прямого доступа к живому AppModel.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        if let type = info["type"] as? String {
+            // userInfo целиком (booking_date и т.п. — плоские ключи, см. lib/apns.ts) —
+            // для точного перехода не только в модуль, но и на конкретную запись.
+            NotificationCenter.default.post(name: .pushTapped, object: type, userInfo: info)
+        }
+        completionHandler()
+    }
 }
 
 /// Пересобирает Quick Actions с текущими переводами — вызывается при старте и при смене
@@ -119,6 +135,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
 extension Notification.Name {
     nonisolated static let quickAction = Notification.Name("mise.quickAction")
+    nonisolated static let pushTapped = Notification.Name("mise.pushTapped")
 }
 
 /// Планировщик локальных уведомлений (напоминание о смене).

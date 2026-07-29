@@ -12,5 +12,6 @@ import SwiftUI
 struct MiseWidgetBundle: WidgetBundle {
     var body: some Widget {
         MiseWidget()
+        WalkActivityWidget()
     }
 }

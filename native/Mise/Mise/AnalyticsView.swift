@@ -19,7 +19,7 @@ final class AnalyticsModel {
     let rid: String
     var tab = "period"
     var loading = true
-    var currentDate = Date()
+    var currentDate: Date
     var showPrevious = false // показать сравнение с прошлым месяцем
 
     var includeCard = false
@@ -113,16 +113,8 @@ final class AnalyticsModel {
         do {
             let result = try await API.aiChat(module: "analytics", message: message, context: ctx)
             return result["reply"] as? String ?? t("ai.noReply")
-        } catch let err as APIError {
-            switch err {
-            case .http(401, _): return t("ai.err401")
-            case .http(403, _): return t("ai.err403")
-            case .http(500, _): return t("ai.err500")
-            case .http(502, _): return t("ai.err502")
-            default: return "\(t("ai.errGeneric")): \(err.localizedDescription)"
-            }
         } catch {
-            return "\(t("ai.errGeneric")): \(error.localizedDescription)"
+            return aiErrorMessage(error)
         }
     }
 
@@ -133,7 +125,10 @@ final class AnalyticsModel {
     var stockG = 0.0
     var types: [HookahType] = []
 
-    init(rid: String) { self.rid = rid }
+    init(rid: String, dayStartHour: Int = 6) {
+        self.rid = rid
+        self.currentDate = AppModel.businessDate(dayStartHour: dayStartHour)
+    }
 
     private let df: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX"); return f
@@ -844,14 +839,32 @@ struct AnalyticsView: View {
         .animation(.easeOut(duration: 0.3), value: m == nil)
         .task {
             if m == nil {
-                let model = AnalyticsModel(rid: app.restaurant?.id ?? "")
+                let model = AnalyticsModel(rid: app.restaurant?.id ?? "", dayStartHour: app.dayStartHour)
                 m = model
                 #if DEBUG
                 if let t = ProcessInfo.processInfo.environment["MISE_DEMO_TAB"] { model.tab = t }
                 #endif
+                // Переход из уведомления «Смена закрыта» (см. AppModel.routeNotification) —
+                // сразу на день этой смены, а не просто в модуль (юзер-фидбек 2026-07-22).
+                if let dateStr = app.pendingAnalyticsDate, let d = Self.parseDateKey(dateStr) {
+                    app.pendingAnalyticsDate = nil
+                    model.tab = "period"; model.periodMode = "day"; model.currentDate = d
+                }
                 await model.load()
             }
         }
+        // Analytics уже открыт (модель жива) и прилетело новое уведомление — прыгаем на лету.
+        .onChange(of: app.pendingAnalyticsDate) { _, dateStr in
+            guard let dateStr, let d = Self.parseDateKey(dateStr), let m else { return }
+            app.pendingAnalyticsDate = nil
+            m.tab = "period"; m.periodMode = "day"
+            Task { await m.setDate(d) }
+        }
+    }
+
+    private static func parseDateKey(_ s: String) -> Date? {
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"; df.locale = Locale(identifier: "en_US_POSIX")
+        return df.date(from: s)
     }
 }
 
