@@ -106,12 +106,19 @@ export function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: bo
   // Задолженность = сумма непокрытого остатка по всем ЗАКРЫТЫМ месяцам (строго раньше
   // текущего), окно 6 месяцев назад — дальше долг копить маловероятно, а пересчёт дороже
   // (7 запросов на каждый месяц).
+  // DEBT_TRACKING_START: до этой фичи (2026-07-28) факт выплаты нигде не фиксировался,
+  // поэтому по умолчанию «не оплачено» = вся история месяцев за 6 лет назад — ложный
+  // многотысячный долг сразу при первом включении (юзер-фидбек 2026-07-29). Долг честно
+  // считаем только с месяцев ПОСЛЕ этой даты — легаси-месяцы (до и включая июль 2026)
+  // в подсчёт никогда не попадают.
+  const DEBT_TRACKING_START = new Date(2026, 7, 1) // 2026-08-01
   const loadDebt = async () => {
     if (!isManager) return
     const now = new Date()
     let total = 0; const byId: Record<string, number> = {}
     for (let i = 1; i <= 6; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      if (d < DEBT_TRACKING_START) continue
       const list = await computeMonth(fmtDate(d).slice(0, 7))
       list.forEach((r: any) => { if (r.remaining > 0) { total += r.remaining; byId[r.id] = (byId[r.id] || 0) + r.remaining } })
     }
@@ -135,9 +142,14 @@ export function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: bo
   }
 
   // Статус выплаты для карточки сотрудника: только если начисление в этом месяце вообще есть.
+  // Если remaining === total (ничего не платили/не авансировали) — сумма уже видна в
+  // заголовке строки, повторять её в статусе не надо (юзер-фидбек: «дублируется») — вместо
+  // числа нейтральная пометка «Не выплачено». Строка и кнопка «Отметить выплату» при этом
+  // остаются — только текст без повторного числа.
   const payStatus = (r: any) => {
     if (r.total <= 0) return null
     if (r.remaining <= 0) return { label: r.lastPaidAt ? tr('pe.paidOn', { date: absDate(r.lastPaidAt) }) : tr('pe.paidStatus'), color: t.green }
+    if (r.remaining === r.total) return { label: tr('pe.notPaidYet'), color: t.orange }
     return { label: tr('pe.oweAmount', { amount: eur(r.remaining) }), color: t.orange }
   }
   const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate()

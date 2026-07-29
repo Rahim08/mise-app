@@ -560,6 +560,7 @@ let STRINGS: [String: [Lang: String]] = [
     "pe.paidStatus":     tr("Paid", "Выплачено", "Pagato", "Payé", "Ödənildi", "Ödendi", "Виплачено", "Төленді"),
     "pe.paidOn":         tr("Paid {date}", "Выплачено {date}", "Pagato il {date}", "Payé le {date}", "{date} ödənildi", "{date} ödendi", "Виплачено {date}", "{date} төленді"),
     "pe.oweAmount":      tr("Owed {amount}", "Осталось {amount}", "Dovuti {amount}", "Restant {amount}", "Qalıq {amount}", "Kalan {amount}", "Залишилось {amount}", "Қалды {amount}"),
+    "pe.notPaidYet":     tr("Not paid yet", "Не выплачено", "Non ancora pagato", "Pas encore payé", "Hələ ödənilməyib", "Henüz ödenmedi", "Ще не виплачено", "Әлі төленбеді"),
     "pe.debtTitle":      tr("Salary debt", "Задолженность по ЗП", "Debito stipendi", "Dette de salaire", "Maaş borcu", "Maaş borcu", "Заборгованість по ЗП", "Жалақы бойынша борыш"),
     "pe.debtHint":       tr("Unpaid balance from past closed months", "Неоплаченный остаток за прошлые закрытые месяцы", "Saldo non pagato dei mesi chiusi passati", "Solde impayé des mois clos précédents", "Keçmiş bağlanmış aylardan ödənilməmiş qalıq", "Geçmiş kapanmış aylardan ödenmemiş bakiye", "Несплачений залишок за минулі закриті місяці", "Өткен жабылған айлардан төленбеген қалдық"),
     "pe.accruedToday":   tr("Accrued so far", "Начислено на сегодня", "Maturato finora", "Cumulé à ce jour", "Bu günə hesablanıb", "Bugüne kadar tahakkuk", "Нараховано на сьогодні", "Бүгінге дейін есептелді"),

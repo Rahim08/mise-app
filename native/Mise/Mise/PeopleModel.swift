@@ -351,11 +351,16 @@ final class PeopleModel {
 
     // Задолженность = сумма непокрытого остатка по всем ЗАКРЫТЫМ месяцам (строго раньше
     // текущего), окно 6 месяцев назад (дальше пересчёт дороже — 5 запросов на месяц).
+    // debtTrackingStart: до этой фичи (2026-07-28) факт выплаты нигде не фиксировался,
+    // поэтому по умолчанию «не оплачено» = вся история месяцев — ложный многотысячный долг
+    // сразу при первом включении (юзер-фидбек 2026-07-29). Легаси-месяцы (до и включая
+    // июль 2026) в подсчёт никогда не попадают.
+    private var debtTrackingStart: Date { DateComponents(calendar: .current, year: 2026, month: 8, day: 1).date ?? Date() }
     func loadSalaryDebt() async {
         guard isManager else { return }
         var total = 0.0; var byEmp: [String: Double] = [:]
         for i in 1...6 {
-            guard let d = Calendar.current.date(byAdding: .month, value: -i, to: Date()) else { continue }
+            guard let d = Calendar.current.date(byAdding: .month, value: -i, to: Date()), d >= debtTrackingStart else { continue }
             let list = await computeSalary(monthOf: d)
             for r in list where r.remaining > 0 {
                 total += r.remaining

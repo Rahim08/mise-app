@@ -26,6 +26,7 @@ final class AnalyticsModel {
     var hkPrice = 0.0
     var hkPortion = 20.0
     var revGoal = 0.0
+    var payoutDay: Int? = nil
     var kassaMode = "kassa"
     var periodMode = "month" // day | week | month
     var cumulativeInkass = 0.0 // инкассация накопительно (до конца выбранного месяца)
@@ -160,6 +161,7 @@ final class AnalyticsModel {
             hkPrice = s.hookah_price ?? 0
             hkPortion = s.hookah_portion_g ?? 20
             revGoal = s.monthly_revenue_goal ?? 0
+            payoutDay = s.salary_payout_day
         }
 
         // Грузим в optional и присваиваем в state ТОЛЬКО при успехе: при сетевом сбое
@@ -315,6 +317,11 @@ final class AnalyticsModel {
         Calendar.current.isDate(currentDate, equalTo: Date(), toGranularity: .month)
     }
     var daysPassed: Int { isCurrentMonth ? Calendar.current.component(.day, from: Date()) : daysInMonth }
+    // Буфер до реального дня выплаты (salary_payout_day): ЗП за месяц выдаётся 10-15 числа
+    // СЛЕДУЮЩЕГО месяца, поэтому 100% начисления должно достигаться не в конце текущего
+    // месяца, а на payout_day следующего — иначе владелец видит «нехватку» инкассации
+    // задолго до реального срока выплаты.
+    var payoutDenom: Int { payoutDay.map { daysInMonth + $0 } ?? daysInMonth }
     var dailyAvg: Double { daysPassed > 0 ? totalIncome / Double(daysPassed) : 0 }
     var projected: Double { (dailyAvg * Double(daysInMonth)).rounded() }
     var goalPct: Double { revGoal > 0 ? min(100, totalIncome / revGoal * 100) : 0 }
@@ -1518,7 +1525,7 @@ private struct KassaTab: View {
                 .padding(14).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
             }
         } else {
-            let salToday = max(0, (m.payrollTotal / Double(m.daysInMonth) * Double(m.daysPassed) - m.salAdvance).rounded())
+            let salToday = max(0, (m.payrollTotal / Double(m.payoutDenom) * Double(m.daysPassed) - m.salAdvance).rounded())
             // Инкассация — накопительная (деньги заведения, перетекают из месяца в месяц).
             let diff = m.cumulativeInkass - salToday
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {

@@ -463,7 +463,10 @@ struct PeopleSalaryTab: View {
         .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    // MARK: статус выплаты — «Выплачено»/«Осталось X€», только если начисление в месяце есть
+    // MARK: статус выплаты — «Выплачено»/«Осталось X€», только если начисление в месяце есть.
+    // Если remaining == total (ничего не платили/не авансировали) — сумма уже видна в
+    // заголовке строки, повторять её тут не надо (юзер-фидбек: «дублируется») — нейтральная
+    // пометка «Не выплачено» вместо числа.
     private func payStatus(_ r: PeopleModel.SalRow) -> (String, Color)? {
         guard r.total > 0 else { return nil }
         if r.remaining <= 0 {
@@ -473,6 +476,7 @@ struct PeopleSalaryTab: View {
             }
             return (t("pe.paidStatus"), .green)
         }
+        if r.remaining == r.total { return (t("pe.notPaidYet"), .orange) }
         return (t("pe.oweAmount", ["amount": eur(r.remaining)]), .orange)
     }
     private func shortDate2(_ d: Date) -> String {

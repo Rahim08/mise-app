@@ -429,6 +429,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [includeCard, setIncludeCard] = useState(false) // restaurant_settings.include_card_in_analytics
   const [revGoal, setRevGoal] = useState(0)             // restaurant_settings.monthly_revenue_goal (цель выручки на месяц)
+  const [payoutDay, setPayoutDay] = useState<number | null>(null) // restaurant_settings.salary_payout_day
   const [expSalary, setExpSalary] = useState<string | null>(null) // раскрытая карточка ЗП (сворачиваемые)
   const [expDay, setExpDay] = useState<string | null>(null)       // раскрытый день в «По дням» (кальян)
   // Кальян: настройки + остатки (all-time) + строки смен кальянщика за месяц
@@ -472,6 +473,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       const r = Array.isArray(data) ? data[0] : data
       setIncludeCard(!!r?.include_card_in_analytics)
       setRevGoal(Number(r?.monthly_revenue_goal || 0))
+      setPayoutDay(r?.salary_payout_day ?? null)
       setHk(h => ({ ...h, price: Number(r?.hookah_price || 0), portion: Number(r?.hookah_portion_g || 20) }))
     })
     // Кальян: склад, выдано в зал (all-time) и продано (all-time) — для остатка «в заведении»
@@ -984,7 +986,12 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     const shiftsWithInk = shifts.filter((s: any) => (s.inkassation || 0) > 0)
     const inkBal = totalInkass
     const totalSal = employees.reduce((s: number, e: any) => s + e.salary, 0)
-    const salToday = Math.round(totalSal / dIM * now.getDate()); const diff = inkBal - salToday
+    // Буфер до реального дня выплаты (salary_payout_day): ЗП за месяц выдаётся 10-15 числа
+    // СЛЕДУЮЩЕГО месяца, поэтому 100% начисления должно достигаться не в конце текущего
+    // месяца, а на payout_day следующего — иначе владелец видит «нехватку» инкассации
+    // задолго до реального срока выплаты.
+    const payoutDenom = payoutDay ? dIM + payoutDay : dIM
+    const salToday = Math.round(totalSal / payoutDenom * now.getDate()); const diff = inkBal - salToday
 
     return (
       <div>

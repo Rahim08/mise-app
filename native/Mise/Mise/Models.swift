@@ -55,6 +55,7 @@ nonisolated struct AnalyticsSettings: Codable, Sendable {
     let monthly_revenue_goal: Double?
     let hookah_price: Double?
     let hookah_portion_g: Double?
+    let salary_payout_day: Int?
 }
 
 nonisolated struct Inkassation: Codable, Sendable {
