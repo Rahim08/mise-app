@@ -47,6 +47,9 @@ final class PeopleModel {
     var attLoaded = false
     var checking = false
     var todayScheduledIds: Set<String> = []
+    /// Своя опубликованная смена на сегодня — гейт «Я здесь» (Д4, 2026-07-31). nil, пока не
+    /// проверено ИЛИ смены нет; published-фильтр серверный (.eq), поле в модель не тащим.
+    var mySchedToday: Schedule? = nil
     /// true — есть отложенная явка (сеть не работала при отметке)
     var pendingCheckIn = false
 
@@ -60,8 +63,7 @@ final class PeopleModel {
     var checklists: [ShiftChecklist] = []
     var completions: [ChecklistCompletion] = []
     var checklistsLoaded = false
-    var checklistsSubTab = "shift" // shift | audits | walk | stats — вынесено из ChecklistsTab
-                                    // ради маршрутизации из уведомлений (AppModel.PeopleRoute)
+    var checklistsSubTab = "shift" // shift | walk | audits — пилюля контента в ShiftAuditHub (Д5).
     var clType = "open"
     var openShiftId: String?           // id открытой смены Manager на сегодня (чек-лист привязан к ней)
     var clHistory: [ChecklistCompletion] = []
@@ -101,6 +103,11 @@ final class PeopleModel {
     var discLoaded = false
     var discPeriod = "thisMonth" // thisMonth | lastMonth | 30d | 90d
     var discSel: String? = nil
+    /// Провал = менеджер поставил fail при верификации смены (result="fail" независимо от
+    /// галочки сотрудника) — виноваты все, у кого attendance_records за тот день (и тот же
+    /// цех, если чек-лист цеховой; все, если общий), не тот, кто именно тапнул чекбокс
+    /// (Д4, 2026-07-31 — attribution по галочке ненадёжна, сознательный отказ).
+    var checklistFailMap: [String: [ChecklistFailDay]] = [:]
 
     init(rid: String, myId: String, myName: String, isManager: Bool, myRole: String?) {
         self.rid = rid; self.myId = myId; self.myName = myName; self.isManager = isManager; self.myRole = myRole
@@ -514,6 +521,8 @@ final class PeopleModel {
             if let a = try? await DB.from("attendance_records").select().eq("staff_id", myId).order("date", ascending: false).limit(62).list(AttendanceRecord.self) {
                 attendance = a
             } else if !attendance.isEmpty { flash(t("refreshFailed")) }
+            mySchedToday = try? await DB.from("staff_schedules").select()
+                .eq("staff_id", myId).eq("date", todayKey).eq("published", true).limit(1).list(Schedule.self).first
         }
         attLoaded = true
 
@@ -528,6 +537,10 @@ final class PeopleModel {
 
     func checkIn() async {
         guard todayRec == nil else { return }
+        // Хард-гейт по графику (Д4, 2026-07-31): без опубликованной смены на сегодня «Я
+        // здесь» не проходит — кнопка и сама не показывается (staffView), это защитная
+        // сетка на случай гонки/устаревшего рендера.
+        guard mySchedToday != nil else { return }
         checking = true; defer { checking = false }
 
         if let g = geo, g.attendance_enabled == true, let lat = g.latitude, let lng = g.longitude {
@@ -540,9 +553,20 @@ final class PeopleModel {
             .eq("staff_id", myId).eq("date", todayKey).limit(1).list(AttendanceRecord.self)) ?? []
         guard existing.isEmpty else { await loadAttendance(); return }
 
+        // Опоздание — как на вебе (checkIn в tabs-shifts.tsx): от начала смены по графику.
+        var late: Int? = nil, status = "present"
+        if let start = mySchedToday?.shift_start, start.count >= 5 {
+            let hh = Int(start.prefix(2)) ?? 0, mm = Int(start.dropFirst(3).prefix(2)) ?? 0
+            var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+            comps.hour = hh; comps.minute = mm
+            if let startDate = Calendar.current.date(from: comps) {
+                let mins = max(0, Int(Date().timeIntervalSince(startDate) / 60))
+                late = mins; status = mins > 5 ? "late" : "present"
+            }
+        }
         let payload: [String: Any] = [
             "restaurant_id": rid, "staff_id": myId, "date": todayKey,
-            "check_in_at": ISO8601DateFormatter().string(from: Date()), "status": "present", "source": "manual",
+            "check_in_at": ISO8601DateFormatter().string(from: Date()), "late_minutes": late as Any, "status": status, "source": "manual",
         ]
         do {
             try await DB.from("attendance_records").insert(payload).run()
@@ -857,21 +881,6 @@ final class PeopleModel {
         }
     }
 
-    /// Готовые шаблоны под общепит — по явному нажатию менеджера, не автоматически.
-    func addPresetTemplates() async {
-        guard isManager else { return }
-        let presets: [(type: String, role: String?, items: [String])] = [
-            ("open", nil, [t("pe.presetOpenHall1"), t("pe.presetOpenHall2"), t("pe.presetOpenHall3")]),
-            ("close", nil, [t("pe.presetCloseHall1"), t("pe.presetCloseHall2"), t("pe.presetCloseHall3")]),
-            ("open", "bar", [t("pe.presetOpenBar1"), t("pe.presetOpenBar2")]),
-        ]
-        for p in presets {
-            let items = p.items.map { ChecklistItem(label: $0) }
-            await saveChecklistTemplate(id: nil, role: p.role, items: items, kind: "shift", targetScope: "role", title: nil, type: p.type)
-        }
-        let sanitationItems = [t("pe.presetSanitation1"), t("pe.presetSanitation2"), t("pe.presetSanitation3"), t("pe.presetSanitation4")].map { ChecklistItem(label: $0, photo_required: true) }
-        await saveChecklistTemplate(id: nil, role: nil, items: sanitationItems, kind: "audit", targetScope: "venue", title: t("pe.presetSanitationTitle"))
-    }
 
     /// Гео-гейт: если явка с геолокацией включена, пункт можно отмечать только если у
     /// сотрудника уже есть сегодняшняя запись attendance_records — иначе открытая касса
@@ -936,6 +945,42 @@ final class PeopleModel {
             await loadChecklists()
         }
         if allDone { flash(clType == "open" ? t("pe.checklistOpenDone") : t("pe.checklistCloseDone")) }
+    }
+
+    /// Менеджерская верификация сменного чек-листа (Д4, 2026-07-31): result выставляется
+    /// НЕЗАВИСИМО от done сотрудника — тот же приём, что у gradeAuditItem, просто пишет в
+    /// completions (по цеху/дню), а не в auditRuns. Без гео-гейта и без guard на openShiftId —
+    /// менеджер проверяет независимо от своей явки (владелец может смотреть удалённо),
+    /// вызывается только когда прогон уже status='done' (см. gradingNow в RoutineTab).
+    func gradeChecklistItem(_ list: ShiftChecklist, _ idx: Int, result: String?, photoURL: String? = nil) async {
+        let itemsList = list.itemDetails ?? []
+        var state = completion(list)?.items_state ?? Array(repeating: ChecklistItemState(done: false), count: itemsList.count)
+        while state.count <= idx { state.append(ChecklistItemState(done: false)) }
+        var item = state[idx]
+        if result == "pass", idx < itemsList.count, itemsList[idx].photo_required, photoURL == nil, item.photo_url == nil {
+            flash(t("pe.photoRequired")); return
+        }
+        item.result = result
+        item.done = result != nil
+        if let photoURL { item.photo_url = photoURL }
+        state[idx] = item
+        var allDone = state.allSatisfy { $0.done }
+        guard let i = completions.firstIndex(where: { $0.checklist_id == list.id }) else { return }
+        let cid = completions[i].id
+        // Против lost update: свежая копия с сервера, мержим ТОЛЬКО свой индекс.
+        if let freshState = try? await DB.from("shift_checklist_completions").select().fresh().eq("id", cid).limit(1).list(ChecklistCompletion.self).first?.items_state {
+            var merged = freshState
+            while merged.count <= idx { merged.append(ChecklistItemState(done: false)) }
+            merged[idx] = item
+            state = merged
+            allDone = state.allSatisfy { $0.done }
+        }
+        completions[i].items_state = state
+        do {
+            try await DB.from("shift_checklist_completions").update([
+                "items_state": state.map { $0.asDict }, "status": allDone ? "done" : "in_progress",
+            ] as [String: Any]).eq("id", cid).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])) }
     }
 
     // Журнал уведомлений переехал в AppModel (глобальный колокольчик, см. MainView.swift) —
@@ -1088,19 +1133,12 @@ final class PeopleModel {
         walksLoaded = true
     }
 
-    /// Личные шаблоны сотрудника + те, что владелец/менеджер назначил его должности
-    /// (только запуск — правка гейтится в UI через canEditWalk).
-    func relevantWalks() -> [WalkTemplate] {
-        walkTemplates.filter { w in
-            (w.target_scope == "staff" && w.assigned_staff_id == myId)
-                || (w.target_scope == "role" && (w.role == nil || w.role == myRole))
-                || isManager
-        }
-    }
-    /// Редактировать может: автор личного шаблона, или owner/manager у ролевого.
-    func canEditWalk(_ w: WalkTemplate) -> Bool {
-        (w.target_scope == "staff" && w.assigned_staff_id == myId) || isManager
-    }
+    /// Восьмёрка — общий пул для менеджеров (Д3, 2026-07-30): по исследованию обход-восьмёрка
+    /// исторически обязанность сменного менеджера, не рядового персонала — раньше сотрудник
+    /// мог завести себе личный шаблон, теперь любой шаблон виден/редактируем любому менеджеру,
+    /// рядовой сотрудник не видит вкладку вообще (гейтится в ZalTab).
+    func relevantWalks() -> [WalkTemplate] { isManager ? walkTemplates : [] }
+    func canEditWalk(_ w: WalkTemplate) -> Bool { isManager }
 
     func saveWalkTemplate(_ template: WalkTemplate) async {
         let clean = template.blocks
@@ -1136,8 +1174,9 @@ final class PeopleModel {
     /// Итог прогона восьмёрки — пишется ОДНИМ запросом по завершению обхода (не поштучно,
     /// как аудиты: чекбоксы копятся локально в раннере, таймер/шагомер — тоже; сеть нужна
     /// только один раз в конце, обход не прерывается офлайн-очередями на каждый тап).
-    func finishWalkRun(template: WalkTemplate, itemsState: [ChecklistItemState], durationSeconds: Int, steps: Int) async {
-        guard await requireGeoCheckIn() else { return }
+    @discardableResult
+    func finishWalkRun(template: WalkTemplate, itemsState: [ChecklistItemState], durationSeconds: Int, steps: Int) async -> Bool {
+        guard await requireGeoCheckIn() else { return false }
         let staffVal: Any = myId == "owner" || myId.isEmpty ? NSNull() : myId
         do {
             try await DB.from("shift_checklist_completions").insert([
@@ -1146,9 +1185,10 @@ final class PeopleModel {
                 "completed_at": ISO8601DateFormatter().string(from: Date()), "status": "done",
                 "duration_seconds": durationSeconds, "steps": steps,
             ] as [String: Any]).run()
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
         flash(t("pe.auditDone"))
         await loadWalks()
+        return true
     }
 
     // MARK: техкарты
@@ -1323,7 +1363,11 @@ final class PeopleModel {
     }
 
     // дисциплина
-    struct DiscStat { var shifts = 0; var evaluable = 0; var onTime = 0; var late = 0; var extra = 0; var totalMin = 0; var avgMin = 0; var maxMin = 0; var punct: Int? = nil }
+    struct ChecklistFailDay { let date: String; let role: String?; let items: [String] }
+    struct DiscStat {
+        var shifts = 0; var evaluable = 0; var onTime = 0; var late = 0; var extra = 0; var totalMin = 0; var avgMin = 0; var maxMin = 0; var punct: Int? = nil
+        var checklistFails = 0; var checklistFailDays: [ChecklistFailDay] = []
+    }
 
     func discRange() -> (String, String) {
         let cal = Calendar.current; let now = Date()
@@ -1343,12 +1387,39 @@ final class PeopleModel {
 
     func loadDiscipline() async {
         let (from, to) = discRange()
-        let recs = (try? await DB.from("attendance_records").select().gte("date", from).lte("date", to).order("date", ascending: false).limit(3000).list(AttendanceRecord.self)) ?? []
+        async let recsL = (try? await DB.from("attendance_records").select().gte("date", from).lte("date", to).order("date", ascending: false).limit(3000).list(AttendanceRecord.self)) ?? []
+        async let listsL = (try? await DB.from("shift_checklists").select().eq("kind", "shift").list(ShiftChecklist.self)) ?? []
+        async let compsL = (try? await DB.from("shift_checklist_completions").select().gte("date", from).lte("date", to).limit(3000).list(ChecklistCompletion.self)) ?? []
+        let recs = await recsL
         if dir.isEmpty {
             dir = (try? await DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)) ?? []
         }
         let g = (try? await DB.from("restaurant_settings").select("late_grace_min").limit(1).list(GraceRow.self))?.first
-        discRecords = recs; discGrace = g?.late_grace_min ?? 5; discLoaded = true
+        discRecords = recs; discGrace = g?.late_grace_min ?? 5
+
+        let lists = await listsL, comps = await compsL
+        let listById = Dictionary(uniqueKeysWithValues: lists.map { ($0.id, $0) })
+        var attendByDate: [String: [String]] = [:]
+        for r in recs { if let d = r.date, let sid = r.staff_id { attendByDate[d, default: []].append(sid) } }
+        var roleOf: [String: String?] = [:]
+        for s in dir { roleOf[s.id] = s.role }
+        var fm: [String: [ChecklistFailDay]] = [:]
+        for c in comps {
+            guard let cid = c.checklist_id, let list = listById[cid], let date = c.date else { continue }
+            let items = list.itemDetails ?? []
+            let state = c.items_state ?? []
+            var failed: [String] = []
+            for i in items.indices {
+                let eff = i < state.count ? (state[i].result ?? (state[i].done ? "pass" : nil)) : nil
+                if eff == "fail" { failed.append(items[i].label) }
+            }
+            guard !failed.isEmpty else { continue }
+            let attendees = attendByDate[date] ?? []
+            let blamed = list.role == nil ? attendees : attendees.filter { (roleOf[$0] ?? nil) == list.role }
+            for sid in blamed { fm[sid, default: []].append(ChecklistFailDay(date: date, role: list.role, items: failed)) }
+        }
+        checklistFailMap = fm
+        discLoaded = true
     }
 
     func discStat(_ sid: String) -> DiscStat {
@@ -1362,6 +1433,8 @@ final class PeopleModel {
         s.avgMin = lateR.isEmpty ? 0 : total / lateR.count
         s.maxMin = lateR.reduce(0) { max($0, $1.late_minutes ?? 0) }
         s.punct = eval.isEmpty ? nil : Int((Double(eval.count - lateR.count) / Double(eval.count) * 100).rounded())
+        let failDays = checklistFailMap[sid] ?? []
+        s.checklistFailDays = failDays; s.checklistFails = failDays.reduce(0) { $0 + $1.items.count }
         return s
     }
 

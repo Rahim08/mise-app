@@ -26,7 +26,7 @@ final class AnalyticsModel {
     var hkPrice = 0.0
     var hkPortion = 20.0
     var revGoal = 0.0
-    var payoutDay: Int? = nil
+    var payoutDay: Int? = nil // restaurant_settings.salary_payout_day — только для «до выплаты N дн.», в рамп начисления НЕ входит
     var kassaMode = "kassa"
     var periodMode = "month" // day | week | month
     var cumulativeInkass = 0.0 // инкассация накопительно (до конца выбранного месяца)
@@ -42,6 +42,11 @@ final class AnalyticsModel {
 
     var inkDetails: [String: Inkassation] = [:]
     var advances: [SalaryAdvance] = []
+    // Прошлый месяц — для «Начислено» до payout_day (см. cycleTotalCash в карточке кассы):
+    // до дня выплаты карточка ещё показывает не выплаченную ЗП за прошлый месяц.
+    var prevCardAmounts: [CardAmount] = []
+    var prevAbsences: [Absence] = []
+    var prevAdvances: [SalaryAdvance] = []
 
     func handleAI(_ message: String) async -> String? {
         // expenses by category (current period)
@@ -172,6 +177,10 @@ final class AnalyticsModel {
         async let cards = try? DB.from("monthly_card_amounts").select("id, employee_id, card_amount").eq("month", ym).list(CardAmount.self)
         async let abs = try? DB.from("shift_absences").select().gte("date", key(monthStart)).lte("date", key(monthEnd)).list(Absence.self)
         async let hk = try? DB.from("hookah_sales").select().gte("date", key(monthStart)).lte("date", key(monthEnd)).order("date").list(HookahSale.self)
+        let prevYm = String(key(prevStart).prefix(7))
+        async let prevCards = try? DB.from("monthly_card_amounts").select("id, employee_id, card_amount").eq("month", prevYm).list(CardAmount.self)
+        async let prevAbs = try? DB.from("shift_absences").select().gte("date", key(prevStart)).lte("date", key(prevEnd)).list(Absence.self)
+        async let prevAdv = try? DB.from("salary_advances").select().gte("date", key(prevStart)).lte("date", key(prevEnd)).list(SalaryAdvance.self)
 
         shiftsRaw = (await sh) ?? shiftsRaw
         prevShiftsRaw = (await prev) ?? prevShiftsRaw
@@ -179,6 +188,9 @@ final class AnalyticsModel {
         cardAmounts = (await cards) ?? cardAmounts
         if let a = await abs { absences = a.filter { $0.source != "auto" } }
         hookahRows = (await hk) ?? hookahRows
+        prevCardAmounts = (await prevCards) ?? prevCardAmounts
+        if let pa = await prevAbs { prevAbsences = pa.filter { $0.source != "auto" } }
+        prevAdvances = (await prevAdv) ?? prevAdvances
 
         let ids = shiftsRaw.map(\.id)
         if !ids.isEmpty {
@@ -317,11 +329,6 @@ final class AnalyticsModel {
         Calendar.current.isDate(currentDate, equalTo: Date(), toGranularity: .month)
     }
     var daysPassed: Int { isCurrentMonth ? Calendar.current.component(.day, from: Date()) : daysInMonth }
-    // Буфер до реального дня выплаты (salary_payout_day): ЗП за месяц выдаётся 10-15 числа
-    // СЛЕДУЮЩЕГО месяца, поэтому 100% начисления должно достигаться не в конце текущего
-    // месяца, а на payout_day следующего — иначе владелец видит «нехватку» инкассации
-    // задолго до реального срока выплаты.
-    var payoutDenom: Int { payoutDay.map { daysInMonth + $0 } ?? daysInMonth }
     var dailyAvg: Double { daysPassed > 0 ? totalIncome / Double(daysPassed) : 0 }
     var projected: Double { (dailyAvg * Double(daysInMonth)).rounded() }
     var goalPct: Double { revGoal > 0 ? min(100, totalIncome / revGoal * 100) : 0 }
@@ -414,6 +421,38 @@ final class AnalyticsModel {
     var salCard: Double { salaryRows.reduce(0) { $0 + $1.card } }
     var salCash: Double { salaryRows.reduce(0) { $0 + $1.cash } }
     var salAdvance: Double { salaryRows.reduce(0) { $0 + $1.advance } }
+    // Та же формула salCash, но по прошлому месяцу — нужна, пока не наступил payout_day.
+    func prevCardOf(_ e: Employee) -> Double {
+        prevCardAmounts.first(where: { $0.employee_id == e.id })?.card_amount ?? 0
+    }
+    var prevSalCash: Double {
+        employees.reduce(0.0) { s, e in
+            let absN = prevAbsences.filter { $0.employee_id == e.id }.count
+            let deduct = Double(absN) * (e.deduct_per_absence ?? 0)
+            let card = prevCardOf(e)
+            let advance = prevAdvances.filter { $0.employee_id == e.id }.reduce(0) { $0 + ($1.amount ?? 0) }
+            let total = max(0, (e.salary ?? 0) - deduct)
+            return s + max(0, total - advance - card)
+        }
+    }
+    var prevDaysInMonth: Int {
+        let cal = Calendar.current
+        guard let prevMonth = cal.date(byAdding: .month, value: -1, to: currentDate) else { return 30 }
+        return cal.range(of: .day, in: .month, for: prevMonth)?.count ?? 30
+    }
+    // Цикл начисления привязан к payout_day, не к 1-му числу: с payout_day этого месяца
+    // стартует новый цикл (копит на ЗП текущего месяца, выплата — в следующем месяце на
+    // payout_day); до payout_day ещё идёт дособор на прошлый месяц (выплата — в этом
+    // месяце на payout_day). Без настройки payout_day — обычный календарный месяц.
+    var cycleStart: Int { payoutDay ?? 1 }
+    var salToday: Double {
+        let today = Calendar.current.component(.day, from: Date())
+        if today >= cycleStart {
+            return max(0, (salCash / Double(daysInMonth) * Double(today - cycleStart + 1)).rounded())
+        } else {
+            return max(0, (prevSalCash / Double(prevDaysInMonth) * Double(prevDaysInMonth - cycleStart + today + 1)).rounded())
+        }
+    }
     /// Сохранить сумму «на карту» за выбранный месяц.
     func saveMonthlyCard(_ empId: String, _ amount: Double) async {
         if let ex = cardAmounts.first(where: { $0.employee_id == empId }), let cid = ex.id {
@@ -1525,7 +1564,11 @@ private struct KassaTab: View {
                 .padding(14).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
             }
         } else {
-            let salToday = max(0, (m.payrollTotal / Double(m.payoutDenom) * Double(m.daysPassed) - m.salAdvance).rounded())
+            // Нетто (salCash = оклад − прогулы − аванс − карта), а не оклад: та же логика,
+            // что в per-employee строках People→Зарплата, иначе выданный аванс/карта не
+            // уменьшают «начислено» и цифра расходится с реальным долгом. Цикл рампа
+            // привязан к payout_day, см. m.salToday.
+            let salToday = m.salToday
             // Инкассация — накопительная (деньги заведения, перетекают из месяца в месяц).
             let diff = m.cumulativeInkass - salToday
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {

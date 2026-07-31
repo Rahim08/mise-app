@@ -6,45 +6,30 @@ import UIKit
 
 // MARK: Чек-листы
 
-struct ChecklistsTab: View {
+struct ChecklistEdit: Identifiable {
+    var id = UUID(); var listId: String?; var role: String?; var items: [ChecklistItem]
+    var kind: String = "shift"; var targetScope: String = "role"; var assignedStaffId: String?; var title: String = ""
+    var recurrence: String = "none"; var recurrenceWeekdays: Set<Int> = []; var recurrenceDayOfMonth: Int = 1
+}
+
+// «Смена» — открытие/закрытие, весь персонал по цеху. Восьмёрка выделена в отдельную пилюлю
+// в ShiftAuditHub (Д5, флаттенинг: раньше был пикер Смена|Восьмёрка внутри «Рутины», теперь
+// это отдельные пилюли одного уровня — ShiftAuditHub переключает контент напрямую).
+struct RoutineTab: View {
     @Bindable var m: PeopleModel
     @State private var edit: ChecklistEdit?
     @State private var showHistory = false
-    @State private var auditHistoryOf: ShiftChecklist?
-
-    struct ChecklistEdit: Identifiable {
-        var id = UUID(); var listId: String?; var role: String?; var items: [ChecklistItem]
-        var kind: String = "shift"; var targetScope: String = "role"; var assignedStaffId: String?; var title: String = ""
-        var recurrence: String = "none"; var recurrenceWeekdays: Set<Int> = []; var recurrenceDayOfMonth: Int = 1
-    }
 
     var body: some View {
         Group {
             if !m.checklistsLoaded {
                 RowListSkeleton(rows: 3)
             } else {
-                // Раньше пикер показывался только менеджеру (аудиты — их зона). «Восьмёрка» же
-                // доступна ЛЮБОМУ сотруднику (личные шаблоны) — поэтому пикер теперь виден всем,
-                // просто у не-менеджера меньше сегментов («Аудиты»/«Статистика» остаются скрыты).
-                Picker("", selection: $m.checklistsSubTab) {
-                    Text(t("pe.shiftTab")).tag("shift")
-                    if m.isManager { Text(t("pe.audits")).tag("audits") }
-                    Text(t("pe.walks")).tag("walk")
-                    if m.isManager { Text(t("pe.statistics")).tag("stats") }
-                }.pickerStyle(.segmented)
-                switch m.checklistsSubTab {
-                case "audits": auditsSection
-                case "walk": WalkTab(m: m)
-                case "stats" where m.isManager: StatisticsSection(m: m)
-                default: shiftSection
-                }
+                shiftSection
             }
         }
-        .task(id: m.opsView) { if m.opsView == "check" && !m.checklistsLoaded { await m.loadChecklists() } }
-        .task(id: m.checklistsSubTab) { if m.checklistsSubTab == "audits" && !m.auditsLoaded { await m.loadAudits() } }
         .sheet(item: $edit) { e in ChecklistEditSheet(m: m, edit: e) }
         .sheet(isPresented: $showHistory) { ChecklistHistorySheet(m: m) }
-        .sheet(item: $auditHistoryOf) { a in AuditHistorySheet(m: m, list: a) }
     }
 
     private var shiftSection: some View {
@@ -57,12 +42,7 @@ struct ChecklistsTab: View {
             if lists.isEmpty {
                 Text(t("pe.noChecklists")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
             } else {
-                ForEach(lists) { list in
-                    ChecklistRunCard(m: m, list: list, run: m.completion(list), showManagerControls: m.isManager,
-                                      onToggle: { i, photo in await m.toggleChecklistItem(list, i, photoURL: photo) },
-                                      onEdit: { edit = ChecklistEdit(listId: list.id, role: list.role, items: (list.itemDetails?.isEmpty == false) ? list.itemDetails! : [ChecklistItem(label: "")]) },
-                                      onDelete: { Task { await m.deleteChecklist(list.id) } })
-                }
+                ForEach(lists) { list in checklistRow(list) }
             }
             if m.isManager {
                 Button { edit = ChecklistEdit(listId: nil, role: nil, items: [ChecklistItem(label: "")]) } label: {
@@ -77,13 +57,62 @@ struct ChecklistsTab: View {
                         .font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
                         .frame(maxWidth: .infinity).padding(.vertical, 12)
                 }
-                Button { Task { await m.addPresetTemplates() } } label: {
-                    Label(t("pe.presetTemplates"), systemImage: "wand.and.stars")
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.5))
-                        .frame(maxWidth: .infinity).padding(.vertical, 10)
-                }
             }
         }
+    }
+
+    // Менеджерская верификация (Д4, 2026-07-31): когда сотрудники дожали прогон до
+    // status="done", карточка менеджера автоматически переключается в grading-режим
+    // (pass/fail/N/A поверх готового чек-листа) — тот же механизм, что у разовых аудитов,
+    // ничего нового не строим. Вынесено в отдельный метод — инлайновый let+тернарник внутри
+    // ForEach-замыкания ломал вывод типов ViewBuilder ("ambiguous use of init").
+    private func gradingNow(_ list: ShiftChecklist) -> Bool { m.isManager && m.completion(list)?.status == "done" }
+    private func gradeCallback(_ list: ShiftChecklist) -> ((Int, String?, String?) async -> Void)? {
+        guard gradingNow(list) else { return nil }
+        return { i, r, photo in await m.gradeChecklistItem(list, i, result: r, photoURL: photo) }
+    }
+
+    @ViewBuilder private func checklistRow(_ list: ShiftChecklist) -> some View {
+        ChecklistRunCard(m: m, list: list, run: m.completion(list), showManagerControls: m.isManager,
+                          onToggle: { i, photo in await m.toggleChecklistItem(list, i, photoURL: photo) },
+                          onEdit: { edit = ChecklistEdit(listId: list.id, role: list.role, items: (list.itemDetails?.isEmpty == false) ? list.itemDetails! : [ChecklistItem(label: "")]) },
+                          onDelete: { Task { await m.deleteChecklist(list.id) } },
+                          grading: gradingNow(list),
+                          onGrade: gradeCallback(list))
+    }
+
+    private var inactiveBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "clock.badge.exclamationmark").font(.system(size: 18)).foregroundStyle(BrandKit.stash)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(t("mg.noShift")).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
+                Text(t("pe.checklistNoShiftHint"))
+                    .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
+            }
+            Spacer()
+        }
+        .padding(14).background(BrandKit.stash.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+// «Аудиты»: список/создание/история/отчёт разовых проверок. Статистика вынесена в
+// шторку в ShiftAuditHub (Д5). Видимость самой пилюли «Аудиты» решает isManager ||
+// relevantAudits() в ShiftAuditHub.
+struct AuditsTab: View {
+    @Bindable var m: PeopleModel
+    @State private var edit: ChecklistEdit?
+    @State private var auditHistoryOf: ShiftChecklist?
+
+    var body: some View {
+        Group {
+            if !m.auditsLoaded {
+                RowListSkeleton(rows: 3)
+            } else {
+                auditsSection
+            }
+        }
+        .sheet(item: $edit) { e in ChecklistEditSheet(m: m, edit: e) }
+        .sheet(item: $auditHistoryOf) { a in AuditHistorySheet(m: m, list: a) }
     }
 
     private var auditsSection: some View {
@@ -152,19 +181,6 @@ struct ChecklistsTab: View {
                 }
             }
         }
-    }
-
-    private var inactiveBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "clock.badge.exclamationmark").font(.system(size: 18)).foregroundStyle(BrandKit.stash)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(t("mg.noShift")).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
-                Text(t("pe.checklistNoShiftHint"))
-                    .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
-            }
-            Spacer()
-        }
-        .padding(14).background(BrandKit.stash.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
@@ -795,12 +811,21 @@ struct ReportProblemSheet: View {
 struct StatisticsSection: View {
     @Bindable var m: PeopleModel
     @State private var loaded = false
-    // Раздельная статистика (audit | shift): рутина открытия/закрытия размывала «%
+    // Раздельная статистика (audit | shift | walk, 'walk' добавлен Д3 2026-07-30 — до этого
+    // восьмёрка вообще не участвовала в статистике): рутина открытия/закрытия размывала «%
     // выполнения» аудитов. Топ нарушений (из задач) — только в сегменте аудитов.
-    @State private var kind = "audit"
+    // initialKind (Д5): открывается из конкретной пилюли хаба — статистика сразу того же типа.
+    @State private var kind: String
     @State private var completionPct = 0
     @State private var topViolations: [(String, Int)] = []
     @State private var staffRating: [(String, Int)] = []
+    @State private var avgDurationSec = 0
+    @State private var runsCount = 0
+
+    init(m: PeopleModel, initialKind: String = "audit") {
+        self.m = m
+        _kind = State(initialValue: initialKind)
+    }
 
     var body: some View {
         Group {
@@ -811,9 +836,10 @@ struct StatisticsSection: View {
                     Picker("", selection: $kind) {
                         Text(t("pe.audits")).tag("audit")
                         Text(t("pe.shiftTab")).tag("shift")
+                        Text(t("pe.walks")).tag("walk")
                     }
                     .pickerStyle(.segmented)
-                    if completionPct == 0 && topViolations.isEmpty && staffRating.isEmpty {
+                    if completionPct == 0 && topViolations.isEmpty && staffRating.isEmpty && runsCount == 0 {
                         Text(t("pe.statsNoData")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4))
                             .frame(maxWidth: .infinity).padding(.top, 40)
                     } else {
@@ -823,13 +849,27 @@ struct StatisticsSection: View {
             }
         }
         .task { await load() }
-        .onChange(of: kind) { recompute() }
+        .onChange(of: kind) { Task { if kind == "walk" && !m.walksLoaded { await m.loadWalks() }; recompute() } }
     }
 
     private var statsContent: some View {
                 VStack(alignment: .leading, spacing: 16) {
-                    statCard(title: t("pe.statsCompletionRate")) {
-                        Text("\(completionPct)%").font(.system(size: 32, weight: .bold)).foregroundStyle(PEOPLE_ACCENT)
+                    if kind == "walk" {
+                        HStack(spacing: 10) {
+                            statCard(title: t("pe.statsCompletionRate")) {
+                                Text("\(completionPct)%").font(.system(size: 26, weight: .bold)).foregroundStyle(PEOPLE_ACCENT)
+                            }
+                            statCard(title: t("pe.statsAvgDuration")) {
+                                Text(fmtStatsElapsed(avgDurationSec)).font(.system(size: 26, weight: .bold)).foregroundStyle(.primary)
+                            }
+                            statCard(title: t("pe.statsRunsCount")) {
+                                Text("\(runsCount)").font(.system(size: 26, weight: .bold)).foregroundStyle(.primary)
+                            }
+                        }
+                    } else {
+                        statCard(title: t("pe.statsCompletionRate")) {
+                            Text("\(completionPct)%").font(.system(size: 32, weight: .bold)).foregroundStyle(PEOPLE_ACCENT)
+                        }
                     }
                     if !topViolations.isEmpty {
                         statCard(title: t("pe.statsTopViolations")) {
@@ -845,7 +885,7 @@ struct StatisticsSection: View {
                         }
                     }
                     if !staffRating.isEmpty {
-                        statCard(title: t("pe.statsStaffRating")) {
+                        statCard(title: kind == "walk" ? t("pe.walkConductedBy") : t("pe.statsStaffRating")) {
                             VStack(alignment: .leading, spacing: 6) {
                                 ForEach(Array(staffRating.enumerated()), id: \.offset) { _, row in
                                     HStack {
@@ -872,11 +912,46 @@ struct StatisticsSection: View {
     private func load() async {
         if !m.clHistoryLoaded { await m.loadChecklistHistory() }
         if !m.tasksLoaded { await m.loadTasks() }
+        if !m.walksLoaded { await m.loadWalks() }
         recompute()
         loaded = true
     }
 
+    // Восьмёрка (Д3, 2026-07-30): нет pass/fail/N/A — только done, плюс своя механика
+    // (таймер/шагомер), поэтому отдельная ветка вместо effResult-логики ниже.
+    private func recomputeWalk() {
+        var total = 0, done = 0
+        var uncheckedCounts: [String: Int] = [:]
+        var staffTotal: [String: Int] = [:], staffDone: [String: Int] = [:]
+        var totalDuration = 0
+        let byId = Dictionary(uniqueKeysWithValues: m.walkTemplates.map { ($0.id, $0) })
+        for run in m.walkRuns {
+            guard let cid = run.checklist_id, let template = byId[cid] else { continue }
+            let flat = template.flatItems
+            let state = run.items_state ?? []
+            let staffLabel = m.staffName(run.staff_id)
+            for i in flat.indices {
+                let on = i < state.count && state[i].done
+                total += 1
+                staffTotal[staffLabel, default: 0] += 1
+                if on { done += 1; staffDone[staffLabel, default: 0] += 1 }
+                else { uncheckedCounts[flat[i].label, default: 0] += 1 }
+            }
+            totalDuration += run.duration_seconds ?? 0
+        }
+        completionPct = total > 0 ? Int((Double(done) / Double(total) * 100).rounded()) : 0
+        topViolations = uncheckedCounts.sorted { $0.value > $1.value }.prefix(5).map { ($0.key, $0.value) }
+        staffRating = staffTotal.compactMap { name, tot -> (String, Int)? in
+            guard tot > 0, name != "—" else { return nil }
+            let pct = Int((Double(staffDone[name] ?? 0) / Double(tot) * 100).rounded())
+            return (name, pct)
+        }.sorted { $0.1 > $1.1 }
+        runsCount = m.walkRuns.count
+        avgDurationSec = runsCount > 0 ? totalDuration / runsCount : 0
+    }
+
     private func recompute() {
+        if kind == "walk" { recomputeWalk(); return }
         var total = 0, done = 0
         var violationCounts: [String: Int] = [:]
         var staffTotal: [String: Int] = [:], staffDone: [String: Int] = [:]
@@ -912,7 +987,13 @@ struct StatisticsSection: View {
             let pct = Int((Double(staffDone[name] ?? 0) / Double(tot) * 100).rounded())
             return (name, pct)
         }.sorted { $0.1 > $1.1 }
+        runsCount = 0; avgDurationSec = 0
     }
+}
+
+private func fmtStatsElapsed(_ seconds: Int) -> String {
+    let m = seconds / 60, s = seconds % 60
+    return String(format: "%d:%02d", m, s)
 }
 
 let CHECKLIST_ROLE_CODES: [String?] = [nil, "kitchen", "bar", "hookah", "waiter", "host", "cleaner"]
@@ -925,7 +1006,7 @@ let TASK_ROLE_CODES: [String] = ["kitchen", "bar", "hookah", "waiter", "host", "
 struct ChecklistEditSheet: View {
     @Bindable var m: PeopleModel
     @Environment(\.dismiss) private var dismiss
-    @State var edit: ChecklistsTab.ChecklistEdit
+    @State var edit: ChecklistEdit
     @State private var saving = false
 
     var body: some View {

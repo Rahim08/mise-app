@@ -11,16 +11,63 @@ struct ShiftsHubTab: View {
     var body: some View {
         // Колокольчик уведомлений переехал в MainView (глобальный, видим на любом модуле) —
         // раньше был только тут, но уведомления бывают о чём угодно, не только о сменах.
+        // «Аудит» (Рутина+Аудиты) переехал сюда из «Зала» (Д4, 2026-07-31) — семантически
+        // про жизнь смены, не про физическое пространство.
         Picker("", selection: $m.shiftsView) {
             Text(t("tab.shifts")).tag("shifts")
+            Text(t("pe.auditTab")).tag("audit")
             if m.isManager { Text(t("pe.discipline")).tag("discipline") }
             Text(t("pe.swaps")).tag("swaps")
         }.pickerStyle(.segmented)
 
         switch m.shiftsView {
         case "swaps": SwapsTab(m: m)
+        case "audit": ShiftAuditHub(m: m)
         case "discipline": DisciplineTab(m: m)
         default: CombinedShifts(m: m)
+        }
+    }
+}
+
+/// «Проверки»: один ряд пилюль по типу контента — Смена | Восьмёрка (менеджер).
+/// Статистика — под кнопку-шторку, не постоянный третий ряд табов (Д5, флаттенинг по
+/// фидбеку юзера: 3 уровня вложенности читались как повторяющиеся подпункты).
+/// Д6: пилюля «Аудиты» скрыта из навигации по просьбе юзера (термин не понравился, разовые
+/// проверки пока не нужны) — AuditsTab/loadAudits остаются нетронутыми, просто не вызываются
+/// отсюда. Чтобы вернуть — восстановить showAudits/тег "audits"/case ниже.
+struct ShiftAuditHub: View {
+    @Bindable var m: PeopleModel
+    @State private var showStats = false
+
+    var body: some View {
+        Group {
+            HStack(spacing: 8) {
+                Picker("", selection: $m.checklistsSubTab) {
+                    Text(t("pe.shiftTab")).tag("shift")
+                    if m.isManager { Text(t("pe.walks")).tag("walk") }
+                }.pickerStyle(.segmented)
+                if m.isManager {
+                    Button { showStats = true } label: {
+                        Image(systemName: "chart.bar.fill").font(.system(size: 14))
+                            .foregroundStyle(.primary.opacity(0.6))
+                            .frame(width: 36, height: 32)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(.primary.opacity(0.06)))
+                    }
+                }
+            }
+            switch m.checklistsSubTab {
+            case "walk" where m.isManager: WalkTab(m: m)
+            default: RoutineTab(m: m)
+            }
+        }
+        .task {
+            if !m.checklistsLoaded { await m.loadChecklists() }
+        }
+        .sheet(isPresented: $showStats) {
+            NavigationStack {
+                ScrollView { StatisticsSection(m: m, initialKind: m.checklistsSubTab == "walk" ? "walk" : m.checklistsSubTab == "audits" ? "audit" : "shift").padding(16) }
+                    .navigationTitle(t("pe.statistics")).navigationBarTitleDisplayMode(.inline)
+            }
         }
     }
 }
@@ -100,6 +147,16 @@ struct AttendanceTab: View {
                 }
                 .frame(maxWidth: .infinity).padding(20)
                 .background(BrandKit.stash.opacity(0.12), in: RoundedRectangle(cornerRadius: 18))
+            } else if m.mySchedToday == nil {
+                // Хард-гейт по графику (Д4, 2026-07-31): без опубликованной смены на сегодня
+                // кнопка «Я здесь» вообще не показывается.
+                VStack(spacing: 6) {
+                    Image(systemName: "calendar.badge.exclamationmark").font(.system(size: 32)).foregroundStyle(.secondary)
+                    Text(t("pe.noScheduledShift")).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+                    Text(t("pe.noScheduledShiftHint")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5)).multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity).padding(20)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
             } else {
                 Button {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -259,6 +316,11 @@ struct DisciplineTab: View {
                                         .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
                                 }
                                 Spacer()
+                                if item.st.checklistFails > 0 {
+                                    Text("\(item.st.checklistFails) \(t("pe.checklistErrorsShort"))")
+                                        .font(.system(size: 11, weight: .bold)).foregroundStyle(.red)
+                                        .padding(.horizontal, 8).padding(.vertical, 3).background(Color.red.opacity(0.16), in: Capsule())
+                                }
                                 if let p = item.st.punct {
                                     Text("\(p)%").font(.system(size: 14, weight: .bold)).foregroundStyle(punctColor(p))
                                 }
@@ -297,6 +359,7 @@ struct DisciplineTab: View {
                 statCell(t("pe.disTotal"), "\(st.totalMin)\(t("pe.disMin"))", .primary)
                 statCell(t("pe.disAvg"), "\(st.avgMin)\(t("pe.disMin"))", .primary)
                 statCell(t("pe.disMax"), "\(st.maxMin)\(t("pe.disMin"))", .primary)
+                statCell(t("pe.checklistErrors"), "\(st.checklistFails)", st.checklistFails > 0 ? .red : .green)
             }
 
             ForEach(discMonths(), id: \.key) { mn in
@@ -325,6 +388,27 @@ struct DisciplineTab: View {
                 }
             }
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+
+            // Дни с проваленными пунктами чек-листа (менеджерская верификация, Д4 2026-07-31)
+            if !st.checklistFailDays.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(st.checklistFailDays.enumerated()), id: \.offset) { i, d in
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text("\(dayLabel(d.date)) · \(d.role != nil ? checklistRoleLabel(d.role) : t("pe.role.general"))")
+                                    .font(.system(size: 14)).foregroundStyle(.primary)
+                                Spacer()
+                                Text("\(d.items.count)").font(.system(size: 11, weight: .bold)).foregroundStyle(.red)
+                                    .padding(.horizontal, 8).padding(.vertical, 2).background(Color.red.opacity(0.16), in: Capsule())
+                            }
+                            Text(d.items.joined(separator: ", ")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
+                        }
+                        .padding(.vertical, 10).padding(.horizontal, 14)
+                        if i < st.checklistFailDays.count - 1 { Divider().overlay(Color.primary.opacity(0.07)).padding(.leading, 14) }
+                    }
+                }
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            }
 
             Button { copySummary(s?.name ?? "", st) } label: {
                 Text(t("pe.disCopy")).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)

@@ -137,13 +137,16 @@ struct PeopleBody: View {
         if m.tasksSeg == "reports" { await m.loadReports() } else { await m.loadTasks() }
     }
     private func refreshShifts() async {
-        if m.shiftsView == "swaps" { await m.loadSwaps() }
-        else { await m.loadAttendance(); await m.loadSchedule() }
+        switch m.shiftsView {
+        case "swaps": await m.loadSwaps()
+        case "audit": await m.loadChecklists(); await m.loadAudits()
+        case "discipline": await m.loadDiscipline()
+        default: await m.loadAttendance(); await m.loadSchedule()
+        }
     }
     private func refreshOps() async {
         switch m.opsView {
         case "orders": await m.loadOrders()
-        case "check":  await m.loadChecklists()
         case "tech":   await m.loadTechCards()
         default:       await m.loadMenu()
         }

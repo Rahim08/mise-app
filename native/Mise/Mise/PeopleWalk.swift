@@ -23,7 +23,7 @@ struct WalkTab: View {
                 RowListSkeleton(rows: 3)
             } else {
                 Button {
-                    edit = WalkTemplate(target_scope: "staff", assigned_staff_id: m.myId)
+                    edit = WalkTemplate()
                 } label: {
                     Label(t("pe.newWalkTemplate"), systemImage: "plus")
                         .font(.system(size: 14, weight: .semibold)).foregroundStyle(WALK_ACCENT)
@@ -89,7 +89,6 @@ struct WalkEditSheet: View {
     @State private var saving = false
 
     private var isNew: Bool { !m.walkTemplates.contains { $0.id == template.id } }
-    private var isManagerEditingRole: Bool { m.isManager }
 
     var body: some View {
         NavigationStack {
@@ -98,23 +97,6 @@ struct WalkEditSheet: View {
                 Form {
                     Section(t("pe.walkTitleLabel")) {
                         TextField(t("pe.walkTitlePh"), text: Binding(get: { template.title ?? "" }, set: { template.title = $0 }))
-                    }
-                    if isManagerEditingRole {
-                        Section(t("pe.targetScope")) {
-                            Picker(t("pe.targetScope"), selection: Binding(get: { template.target_scope ?? "staff" }, set: { newVal in
-                                template.target_scope = newVal
-                                if newVal == "staff" { template.assigned_staff_id = m.myId; template.role = nil }
-                                else { template.assigned_staff_id = nil }
-                            })) {
-                                Text(t("pe.walkTargetSelf")).tag("staff")
-                                Text(t("pe.targetRole")).tag("role")
-                            }.pickerStyle(.segmented)
-                            if template.target_scope == "role" {
-                                Picker(t("pe.workshop"), selection: Binding(get: { template.role ?? "" }, set: { template.role = $0.isEmpty ? nil : $0 })) {
-                                    ForEach(CHECKLIST_ROLE_CODES, id: \.self) { code in Text(checklistRoleLabel(code)).tag(code ?? "") }
-                                }
-                            }
-                        }
                     }
                     Section(t("pe.walkPauseMode")) {
                         Picker(t("pe.walkPauseMode"), selection: $template.walk_pause_mode) {
@@ -262,7 +244,7 @@ struct WalkRunnerView: View {
                 }
             }
             .confirmationDialog(t("pe.walkFinishConfirm"), isPresented: $confirmFinish, titleVisibility: .visible) {
-                Button(t("pe.walkFinish")) { Task { await teardown(save: true); dismiss() } }
+                Button(t("pe.walkFinish")) { Task { if await teardown(save: true) { dismiss() } } }
                 Button(t("cancel"), role: .cancel) {}
             }
         }
@@ -398,13 +380,17 @@ struct WalkRunnerView: View {
         }
     }
 
-    private func teardown(save: Bool) async {
+    /// true — можно закрывать раннер (отмена, либо прогон сохранён); false — сохранение
+    /// не удалось (напр. гейт геочекина) и раннер должен остаться открытым для повтора,
+    /// иначе прогон (чек-лист/время/шаги) молча терялся без следа в истории.
+    @discardableResult
+    private func teardown(save: Bool) async -> Bool {
         if !isContinuous, let s = segmentStart { accumulated += Date().timeIntervalSince(s); segmentStart = nil }
         pedometer.stop()
         await activity.end()
-        guard save, started else { return }
+        guard save, started else { return true }
         let state = template.flatItems.map { ChecklistItemState(done: checked.contains($0.id)) }
-        await m.finishWalkRun(template: template, itemsState: state, durationSeconds: elapsed, steps: steps)
+        return await m.finishWalkRun(template: template, itemsState: state, durationSeconds: elapsed, steps: steps)
     }
 }
 

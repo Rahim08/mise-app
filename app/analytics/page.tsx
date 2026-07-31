@@ -429,7 +429,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [includeCard, setIncludeCard] = useState(false) // restaurant_settings.include_card_in_analytics
   const [revGoal, setRevGoal] = useState(0)             // restaurant_settings.monthly_revenue_goal (цель выручки на месяц)
-  const [payoutDay, setPayoutDay] = useState<number | null>(null) // restaurant_settings.salary_payout_day
+  const [payoutDay, setPayoutDay] = useState<number | null>(null) // restaurant_settings.salary_payout_day — только для «до выплаты N дн.», в рамп начисления НЕ входит
   const [expSalary, setExpSalary] = useState<string | null>(null) // раскрытая карточка ЗП (сворачиваемые)
   const [expDay, setExpDay] = useState<string | null>(null)       // раскрытый день в «По дням» (кальян)
   // Кальян: настройки + остатки (all-time) + строки смен кальянщика за месяц
@@ -438,6 +438,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [shiftsRaw, setShifts] = useState<any[]>([])
   const [prevShiftsRaw, setPrevShifts] = useState<any[]>([])
   const [allShiftsRaw, setAllShifts] = useState<any[]>([])
+  const [inkDeductions, setInkDeductions] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
   const [allExpenses, setAllExpenses] = useState<any[]>([])
   const [pinnedCats, setPinnedCats] = useState<Set<string>>(new Set())
@@ -445,6 +446,9 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [cardAmounts, setCardAmounts] = useState<any[]>([])
   const [absences, setAbsences] = useState<any[]>([])
   const [advances, setAdvances] = useState<any[]>([])
+  const [prevAbsences, setPrevAbsences] = useState<any[]>([])
+  const [prevAdvances, setPrevAdvances] = useState<any[]>([])
+  const [prevCardAmounts, setPrevCardAmounts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showMonthPicker, setShowMonthPicker] = useState(false)
   const [showAI, setShowAI] = useState(false)
@@ -499,7 +503,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     const prevStart = fmtDate(new Date(date.getFullYear(), date.getMonth() - 1, 1))
     const prevEnd = fmtDate(new Date(date.getFullYear(), date.getMonth(), 0))
 
-    const [s1, s2, s3, s4, s5, s6, s7] = await Promise.all([
+    const [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] = await Promise.all([
       db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd).order('date'),
       db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', prevStart).lte('date', prevEnd).order('date'),
       db.from('employees').select('*').eq('restaurant_id', rid).eq('is_active', true).order('name'),
@@ -507,9 +511,17 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       db.from('shift_absences').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd),
       db.from('hookah_sales').select('*').gte('date', monthStart).lte('date', monthEnd).order('date'),
       db.from('salary_advances').select('*').gte('date', monthStart).lte('date', monthEnd),
+      // Прошлый месяц — для «Начислено» до payout_day (см. cycleTotalCash): до дня выплаты
+      // карточка ещё показывает не выплаченную ЗП за прошлый месяц, а не новый цикл.
+      db.from('shift_absences').select('*').eq('restaurant_id', rid).gte('date', prevStart).lte('date', prevEnd),
+      db.from('salary_advances').select('*').gte('date', prevStart).lte('date', prevEnd),
+      db.from('monthly_card_amounts').select('*').eq('restaurant_id', rid).eq('month', prevStart.slice(0, 7)),
     ])
     setAdvances(s7.data || [])
     setHookahRows(s6.data || [])
+    setPrevAbsences((s8.data || []).filter((a: any) => a.source !== 'auto'))
+    setPrevAdvances(s9.data || [])
+    setPrevCardAmounts(s10.data || [])
 
     const shiftList = s1.data || []
     setShifts(shiftList); setPrevShifts(s2.data || [])
@@ -534,6 +546,10 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       const { data: ex } = await db.from('shift_expenses').select('*').in('shift_id', sh.map((s: any) => s.id))
       setAllExpenses(ex || [])
     }
+    // Инкассация копится через месяцы, не обнуляется 1-го числа (как «Касса» на iOS):
+    // валовая инкассация по сменам минус всё списанное из неё (расход + выплаченная ЗП).
+    const { data: ink } = await db.from('inkassations').select('expense, salary')
+    setInkDeductions(ink || [])
   }
 
   // ── COMPUTED ──
@@ -555,6 +571,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const totalIncome = shifts.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
   const totalExpense = shifts.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
   const totalInkass = shifts.reduce((s: number, sh: any) => s + (sh.inkassation || 0), 0)
+  const cumulativeInkass = allShifts.reduce((s: number, sh: any) => s + (sh.inkassation || 0), 0)
+    - inkDeductions.reduce((s: number, d: any) => s + (d.expense || 0) + (d.salary || 0), 0)
   const lastShift = shifts[shifts.length - 1]
   const prevIncome = prevShifts.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
   const prevExpense = prevShifts.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
@@ -983,15 +1001,41 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     }
 
     const now = new Date(); const dIM = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    const prevDIM = new Date(now.getFullYear(), now.getMonth(), 0).getDate()
     const shiftsWithInk = shifts.filter((s: any) => (s.inkassation || 0) > 0)
-    const inkBal = totalInkass
-    const totalSal = employees.reduce((s: number, e: any) => s + e.salary, 0)
-    // Буфер до реального дня выплаты (salary_payout_day): ЗП за месяц выдаётся 10-15 числа
-    // СЛЕДУЮЩЕГО месяца, поэтому 100% начисления должно достигаться не в конце текущего
-    // месяца, а на payout_day следующего — иначе владелец видит «нехватку» инкассации
-    // задолго до реального срока выплаты.
-    const payoutDenom = payoutDay ? dIM + payoutDay : dIM
-    const salToday = Math.round(totalSal / payoutDenom * now.getDate()); const diff = inkBal - salToday
+    // Инкассация — не месячный, а накопительный счёт (не обнуляется 1-го числа): валовая
+    // инкассация по сменам минус всё списанное из неё (расход + выплаченная ЗП), см. cumulativeInkass.
+    const inkBal = cumulativeInkass
+    // Нетто, не оклад: прогулы/аванс/карта уменьшают то, что реально нужно из кассы —
+    // те же вычеты, что в People→Зарплата (salaryOf в exportSalary), иначе «начислено»
+    // не падает при выданном авансе/выплате на карту и не совпадает с реальным долгом.
+    const totalCash = employees.reduce((s: number, e: any) => {
+      const abs = absences.filter((a: any) => a.employee_id === e.id).length
+      const deduct = abs * Number(e.deduct_per_absence || 0)
+      const total = Math.max(0, Number(e.salary || 0) - deduct)
+      return s + Math.max(0, total - advanceOf(e) - cardOf(e))
+    }, 0)
+    // Та же формула, но по прошлому месяцу — нужна, пока не наступил payout_day (см. ниже).
+    const prevCardOf = (emp: any) => Number(prevCardAmounts.find((c: any) => c.employee_id === emp.id)?.card_amount || 0)
+    const prevAdvanceOf = (emp: any) => prevAdvances.filter((a: any) => a.employee_id === emp.id).reduce((s: number, a: any) => s + Number(a.amount || 0), 0)
+    const prevTotalCash = employees.reduce((s: number, e: any) => {
+      const abs = prevAbsences.filter((a: any) => a.employee_id === e.id).length
+      const deduct = abs * Number(e.deduct_per_absence || 0)
+      const total = Math.max(0, Number(e.salary || 0) - deduct)
+      return s + Math.max(0, total - prevAdvanceOf(e) - prevCardOf(e))
+    }, 0)
+    // Цикл начисления привязан к payout_day, не к 1-му числу: с payout_day этого месяца
+    // стартует новый цикл (копит на ЗП текущего месяца, выплата — в следующем месяце на
+    // payout_day); до payout_day ещё идёт дособор на прошлый месяц (выплата — в этом
+    // месяце на payout_day). Без настройки payout_day — обычный календарный месяц.
+    const cycleStart = payoutDay || 1
+    const inNewCycle = now.getDate() >= cycleStart
+    const salToday = Math.round(
+      inNewCycle
+        ? totalCash / dIM * (now.getDate() - cycleStart + 1)
+        : prevTotalCash / prevDIM * (prevDIM - cycleStart + now.getDate() + 1)
+    )
+    const diff = inkBal - salToday
 
     return (
       <div>

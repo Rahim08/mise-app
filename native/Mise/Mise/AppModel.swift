@@ -217,16 +217,24 @@ final class AppModel {
     private func persist(_ r: Restaurant, _ s: ResolvedStaff) {
         if let rd = try? JSONEncoder().encode(r) { d.set(rd, forKey: "mise_restaurant") }
         if let sd = try? JSONEncoder().encode(s) { d.set(sd, forKey: "mise_staff") }
-        // pin/check выставил httpOnly cookie (URLSession хранит его). Дублируем срок ~7 дней.
-        d.set(Date().addingTimeInterval(7 * 24 * 3600).timeIntervalSince1970, forKey: "mise_token_until")
+        // pin/check выставил httpOnly cookie (URLSession хранит его). Дублируем срок — держать
+        // в синхроне с TTL_SECONDS в lib/staffToken.ts (сейчас 10 лет, практически бессрочно;
+        // выход только по кнопке «Выйти» — юзер-фидбэк 2026-07-31, раньше было 7 дней).
+        d.set(Date().addingTimeInterval(60 * 60 * 24 * 365 * 10).timeIntervalSince1970, forKey: "mise_token_until")
     }
 
     func goPermissions() { phase = .permissions }
-    func finish() { phase = .authed }
+    /// mise_device_onboarded переживает истечение mise_token_until (7 дней), logout() и любые
+    /// сессии, отвалившиеся без переустановки приложения — юзер-фидбэк: у каждого сотрудника
+    /// свой личный телефон (не общее устройство на смену), поэтому экраны Face ID/геолокации/
+    /// уведомлений не должны спрашиваться заново на том же устройстве, где разрешения уже
+    /// выданы на уровне iOS.
+    func finish() { d.set(true, forKey: "mise_device_onboarded"); phase = .authed }
 
-    /// Куда идти после верного PIN: первичная настройка → разрешения; повторный вход → сразу внутрь.
+    /// Куда идти после верного PIN: первичная настройка → разрешения; повторный вход
+    /// (или устройство уже проходило Permissions раньше) → сразу внутрь.
     var isReauth = false
-    func proceedAfterPin() { phase = isReauth ? .authed : .permissions }
+    func proceedAfterPin() { phase = (isReauth || d.bool(forKey: "mise_device_onboarded")) ? .authed : .permissions }
 
     // MARK: хаб приложений
 
@@ -330,7 +338,9 @@ final class AppModel {
         case "task":
             pendingPeopleRoute = PeopleRoute(tab: "tasks", tasksSeg: "tasks"); openApp("people")
         case "audit", "audit_close_reminder":
-            pendingPeopleRoute = PeopleRoute(tab: "ops", opsView: "check", checklistsSubTab: "audits"); openApp("people")
+            // Д5: флаттенинг — внутренний сегмент снова checklistsSubTab (единая пилюля
+            // Смена|Восьмёрка|Аудиты вместо отдельного auditSeg на удалённом уровне Рутина/Аудиты).
+            pendingPeopleRoute = PeopleRoute(tab: "shifts", shiftsView: "audit", checklistsSubTab: "audits"); openApp("people")
         default: break
         }
     }
@@ -347,7 +357,11 @@ final class AppModel {
         restaurant = nil
         staff = nil
         currentApp = nil
-        isReauth = false   // сбрасываем, иначе следующий вход пропустит экран Permissions
+        isReauth = false
+        // mise_device_onboarded НЕ трогаем: у каждого сотрудника свой личный телефон (не
+        // общее устройство на смену), поэтому OS-разрешения (Face ID/гео/уведомления) уже
+        // выданы этому приложению на этом телефоне и после выхода/повторного входа спрашивать
+        // их заново незачем (юзер-фидбэк).
         phase = .welcome
         SnapshotWriter.clear()   // чистим снимок виджета, чтобы не светились старые цифры
         DB.clearCache()   // кеш SELECT-ов не ключуется по ресторану/сессии — иначе следующий

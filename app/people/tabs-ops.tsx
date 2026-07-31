@@ -13,7 +13,6 @@ import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
 import { tCurrent } from '@/lib/i18n'
 import { ScheduleTab } from '@/components/people/ScheduleTab'
-import { AuditsView } from './audits'
 import { btnB2, inp, lbl, clock, hoursOf, fmtHours, HistoryList } from './shared'
 import { mondayOf, addDays, hhmm, timeRange, dayLabel, navBtn, roleLabel, getMe, Sheet, Placeholder, DOW_SHORT, DOW_FULL, MON } from '@/components/people/helpers'
 
@@ -531,7 +530,7 @@ export function PurchaseTab({ me, isManager, accent, t, toast }: { me: any; isMa
 
 export function OpsTab({ me, isManager, restaurantId, accent, t, toast }: { me: any; isManager: boolean; restaurantId: string; accent: string; t: any; toast: (m: string) => void }) {
   const { t: tr } = useI18n()
-  const [view, setView] = useState<'stop' | 'orders' | 'check' | 'tech'>('stop')
+  const [view, setView] = useState<'stop' | 'orders' | 'tech'>('stop')
   const [currency, setCurrency] = useState('€')
   const [ordersEnabled, setOrdersEnabled] = useState(false)
 
@@ -548,10 +547,11 @@ export function OpsTab({ me, isManager, restaurantId, accent, t, toast }: { me: 
 
   const canStop = isManager || me.role === 'kitchen' // стоп ставят кухня и менеджер
   const canTech = isManager || me.role === 'kitchen' || me.role === 'bar' // техкарты — кухне/бару (не официанту/кальянщику)
+  // Рутина/Аудиты переехали в «Смены» (Д4, 2026-07-31) — «Зал» снова только про физическое
+  // пространство (стоп-лист/заказы/техкарты), как до редизайна Д3.
   const VIEWS = [
     { id: 'stop', label: tr('pe.vStop') },
     ...(ordersEnabled ? [{ id: 'orders', label: tr('pe.vOrders') }] : []),
-    { id: 'check', label: tr('pe.vChecklists') },
     ...(canTech ? [{ id: 'tech', label: tr('pe.vTech') }] : []),
   ] as const
 
@@ -564,7 +564,6 @@ export function OpsTab({ me, isManager, restaurantId, accent, t, toast }: { me: 
       </div>
       {view === 'stop' && <StopListTab canEdit={canStop} currency={currency} accent={accent} t={t} toast={toast} />}
       {view === 'orders' && ordersEnabled && <OrdersInbox currency={currency} accent={accent} t={t} toast={toast} />}
-      {view === 'check' && <AuditsView me={me} isManager={isManager} restaurantId={restaurantId} accent={accent} t={t} toast={toast} />}
       {view === 'tech' && canTech && <TechCardsView isManager={isManager} accent={accent} t={t} toast={toast} />}
     </div>
   )

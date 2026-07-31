@@ -411,7 +411,7 @@ nonisolated struct WalkTemplate: Codable, Identifiable, Sendable {
     var blocks: [WalkBlock]
 
     init(id: String = UUID().uuidString, title: String? = nil, role: String? = nil,
-         target_scope: String? = "staff", assigned_staff_id: String? = nil,
+         target_scope: String? = nil, assigned_staff_id: String? = nil,
          walk_pause_mode: String = "pause", blocks: [WalkBlock] = []) {
         self.id = id; self.title = title; self.role = role
         self.target_scope = target_scope; self.assigned_staff_id = assigned_staff_id
@@ -449,10 +449,13 @@ nonisolated struct WalkTemplate: Codable, Identifiable, Sendable {
     /// совпадает с этим порядком (тот же приём, что у плоских kind="audit"/"shift").
     var flatItems: [WalkItem] { blocks.flatMap { $0.categories.flatMap(\.items) } }
 
+    // Восьмёрка — общий пул для менеджеров (Д3, 2026-07-30): target_scope/assigned_staff_id
+    // больше не задаются целенаправленно (личный/цеховой таргетинг убран), но колонки в БД
+    // не трогаем — просто не пишем в них ничего осмысленного, старые значения не читаются.
     var asUpdateDict: [String: Any] {
         [
             "kind": "walk", "title": title ?? NSNull(), "role": role ?? NSNull(),
-            "target_scope": target_scope ?? "staff", "assigned_staff_id": assigned_staff_id ?? NSNull(),
+            "target_scope": target_scope ?? NSNull(), "assigned_staff_id": assigned_staff_id ?? NSNull(),
             "walk_pause_mode": walk_pause_mode, "items": blocks.map(\.asDict),
         ]
     }

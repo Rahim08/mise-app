@@ -9,15 +9,15 @@ import UIKit
 struct ZalTab: View {
     @Bindable var m: PeopleModel
     var body: some View {
+        // Рутина/Аудиты переехали в «Смены» (Д4, 2026-07-31) — «Зал» снова только про
+        // физическое пространство, как до редизайна Д3.
         Picker("", selection: $m.opsView) {
             Text(t("pe.stop")).tag("stop")
             Text(m.activeOrders.isEmpty ? t("pe.orders") : t("pe.ordersN", ["n": "\(m.activeOrders.count)"])).tag("orders")
-            Text(t("pe.checklists")).tag("check")
             if m.canTech { Text(t("pe.techcards")).tag("tech") }
         }.pickerStyle(.segmented)
         switch m.opsView {
         case "orders": OrdersInbox(m: m)
-        case "check":  ChecklistsTab(m: m)
         case "tech":   TechCardsTab(m: m)
         default:       StopTab(m: m)
         }

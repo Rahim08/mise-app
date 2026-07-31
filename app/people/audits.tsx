@@ -417,6 +417,12 @@ export function ShiftChecklistsView({ isManager, myId, myRole, canFill, openShif
         const items = (Array.isArray(list.items) ? list.items : []).map((x: any, i: number) => normItem(x, i))
         const completion = completions.find(c => c.checklist_id === list.id)
         const state = (Array.isArray(completion?.items_state) ? completion.items_state : []).map(normState)
+        // Менеджерская верификация (Д4, 2026-07-31): когда сотрудники дожали прогон до
+        // status='done', карточка менеджера автоматически переключается в grading-режим
+        // (pass/fail/N/A поверх готового чек-листа) — тот же механизм, что у разовых
+        // аудитов, ничего нового не строим. canFill=true в этом режиме: менеджер проверяет
+        // независимо от своей гео-явки (владелец может смотреть удалённо).
+        const gradingNow = isManager && completion?.status === 'done'
         return (
           <div key={list.id}>
             {isManager && (
@@ -429,7 +435,7 @@ export function ShiftChecklistsView({ isManager, myId, myRole, canFill, openShif
             )}
             <ChecklistCard
               title={list.role ? tr(roleLabel(list.role)) : tr('pe.general')}
-              items={items} state={state} canFill={canFillShift}
+              items={items} state={state} canFill={gradingNow ? true : canFillShift} grading={gradingNow}
               restaurantId={restaurantId} completionId={completion?.id} staff={staff} myId={myId}
               accent={accent} t={t} toast={toast}
               onSetItem={(idx, next) => setItem(list, idx, next)}
@@ -906,14 +912,16 @@ export function AuditReportSheet({ audit, completion, staff, accent, t, onClose 
   )
 }
 
-export function AuditStatsView({ accent, t }: { accent: string; t: any }) {
+export function AuditStatsView({ accent, t, initialKind }: { accent: string; t: any; initialKind?: 'audit' | 'shift' | 'walk' }) {
   const { t: tr } = useI18n()
   const [loading, setLoading] = useState(true)
   const [lists, setLists] = useState<any[]>([])
   const [completions, setCompletions] = useState<any[]>([])
   const [staff, setStaff] = useState<any[]>([])
   // Раздельная статистика: рутина открытия/закрытия смены размывала «% выполнения» аудитов.
-  const [kind, setKind] = useState<'audit' | 'shift'>('audit')
+  // 'walk' добавлен Д3 2026-07-30 — до этого восьмёрка вообще не участвовала в статистике.
+  // initialKind (Д4): открывается из конкретной вкладки хаба — статистика сразу того же типа.
+  const [kind, setKind] = useState<'audit' | 'shift' | 'walk'>(initialKind || 'audit')
 
   useEffect(() => {
     const since = fmtDate(new Date(Date.now() - 30 * 86400000))
@@ -927,9 +935,104 @@ export function AuditStatsView({ accent, t }: { accent: string; t: any }) {
   }, [])
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
-  if (completions.length === 0) return <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>{tr('pe.noStatsYet')}</div>
+
+  const kindPicker = (
+    <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 14, gap: 2 }}>
+      {([['audit', tr('dash.audits')], ['shift', tr('pe.shiftChecklists')], ['walk', tr('pe.walks')]] as const).map(([id, label]) => (
+        <button key={id} onClick={() => setKind(id)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 12.5, fontWeight: kind === id ? 700 : 500, cursor: 'pointer', background: kind === id ? t.surface : 'transparent', color: kind === id ? accent : t.text3, boxShadow: kind === id ? t.sh2 : 'none' }}>{label}</button>
+      ))}
+    </div>
+  )
 
   const listById = new Map(lists.map((l: any) => [l.id, l]))
+
+  // Восьмёрка (Д3, 2026-07-30): нет pass/fail/N/A — только done, плюс своя механика
+  // (таймер/шагомер), поэтому считаем отдельной веткой вместо effResult-логики ниже.
+  if (kind === 'walk') {
+    const walkLists = lists.filter((l: any) => l.kind === 'walk')
+    const walkIds = new Set(walkLists.map((l: any) => l.id))
+    const runs = completions.filter((c: any) => walkIds.has(c.checklist_id))
+    let totalItems = 0, doneItems = 0
+    const unchecked = new Map<string, number>()
+    const byStaff = new Map<string, { total: number; done: number }>()
+    let totalDuration = 0, totalSteps = 0
+    for (const c of runs) {
+      const list = listById.get(c.checklist_id)
+      const flat = walkFlatItems(list)
+      const state = (Array.isArray(c.items_state) ? c.items_state : []) as { done?: boolean }[]
+      const staffCur = c.staff_id ? (byStaff.get(c.staff_id) || { total: 0, done: 0 }) : null
+      flat.forEach((it, i) => {
+        totalItems++
+        if (staffCur) staffCur.total++
+        if (state[i]?.done) { doneItems++; if (staffCur) staffCur.done++ }
+        else unchecked.set(it.label, (unchecked.get(it.label) || 0) + 1)
+      })
+      if (c.staff_id && staffCur) byStaff.set(c.staff_id, staffCur)
+      totalDuration += c.duration_seconds || 0
+      totalSteps += c.steps || 0
+    }
+    const rate = totalItems > 0 ? Math.round((doneItems / totalItems) * 100) : 0
+    const topUnchecked = Array.from(unchecked.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    const conductedBy = Array.from(byStaff.entries())
+      .map(([id, v]) => ({ name: staff.find((s: any) => s.id === id)?.name || '—', pct: v.total > 0 ? Math.round((v.done / v.total) * 100) : 0 }))
+      .sort((a, b) => b.pct - a.pct)
+    return (
+      <div>
+        {kindPicker}
+        {runs.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px 20px', color: t.text3 }}>{tr('pe.noStatsYet')}</div>
+        ) : (
+        <>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+          <div style={{ background: t.surface, borderRadius: 16, padding: '16px 10px', boxShadow: t.sh, textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: accent }}>{rate}%</div>
+            <div style={{ fontSize: 10.5, color: t.text3, marginTop: 3 }}>{tr('pe.completionRate')}</div>
+          </div>
+          <div style={{ background: t.surface, borderRadius: 16, padding: '16px 10px', boxShadow: t.sh, textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: t.text }}>{fmtWalkElapsed(runs.length > 0 ? Math.round(totalDuration / runs.length) : 0)}</div>
+            <div style={{ fontSize: 10.5, color: t.text3, marginTop: 3 }}>{tr('pe.statsAvgDuration')}</div>
+          </div>
+          <div style={{ background: t.surface, borderRadius: 16, padding: '16px 10px', boxShadow: t.sh, textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: t.text }}>{runs.length}</div>
+            <div style={{ fontSize: 10.5, color: t.text3, marginTop: 3 }}>{tr('pe.statsRunsCount')}</div>
+          </div>
+        </div>
+
+        {topUnchecked.length > 0 && (
+          <>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>{tr('pe.topViolations')}</div>
+            <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 16 }}>
+              {topUnchecked.map(([label, n], i) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: i < topUnchecked.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                  <span style={{ fontSize: 14, color: t.text }}>{label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: t.red }}>{n}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {conductedBy.length > 0 && (
+          <>
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px 8px' }}>{tr('pe.walkConductedBy')}</div>
+            <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
+              {conductedBy.map((r, i) => (
+                <div key={r.name + i} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderBottom: i < conductedBy.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                  <span style={{ fontSize: 14, color: t.text }}>{r.name}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: r.pct >= 80 ? t.green : r.pct >= 50 ? t.orange : t.red }}>{r.pct}%</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+        </>
+        )}
+      </div>
+    )
+  }
+
+  if (completions.length === 0) return <><div>{kindPicker}</div><div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>{tr('pe.noStatsYet')}</div></>
+
   let totalItems = 0, doneItems = 0
   const violationsByLabel = new Map<string, number>()
   const byStaff = new Map<string, { total: number; done: number }>()
@@ -974,11 +1077,7 @@ export function AuditStatsView({ accent, t }: { accent: string; t: any }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 14, gap: 2 }}>
-        {([['audit', tr('dash.audits')], ['shift', tr('pe.shiftChecklists')]] as const).map(([id, label]) => (
-          <button key={id} onClick={() => setKind(id)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 12.5, fontWeight: kind === id ? 700 : 500, cursor: 'pointer', background: kind === id ? t.surface : 'transparent', color: kind === id ? accent : t.text3, boxShadow: kind === id ? t.sh2 : 'none' }}>{label}</button>
-        ))}
-      </div>
+      {kindPicker}
       {totalItems === 0 && unfinished === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px 20px', color: t.text3 }}>{tr('pe.noStatsYet')}</div>
       ) : (
@@ -1022,13 +1121,12 @@ export function AuditStatsView({ accent, t }: { accent: string; t: any }) {
   )
 }
 
-// Обёртка: сегмент «Смена / Разовые / Статистика» + общий гео-гейт (личная явка сегодня).
-export function AuditsView({ me, isManager, restaurantId, accent, t, toast }: { me: any; isManager: boolean; restaurantId: string; accent: string; t: any; toast: (m: string) => void }) {
-  const { t: tr } = useI18n()
+// Гео-гейт (личная явка сегодня) + справочник сотрудников + открытая касса-смена —
+// общее для «Смена»/«Восьмёрка»/«Аудиты» в ShiftAuditHub (гейт-логика не менялась,
+// просто общий хук, вызывается один раз в хабе вместо отдельного вызова на каждый под-раздел).
+export function useOpsGate(me: any) {
   const myId = me.id || ''
-  const myRole = me.role
   const today = fmtDate(new Date())
-  const [seg, setSeg] = useState<'shift' | 'oneoff' | 'walk' | 'stats'>('shift')
   const [staff, setStaff] = useState<any[]>([])
   const [geoRequired, setGeoRequired] = useState(false)
   const [checkedInToday, setCheckedInToday] = useState(true)
@@ -1056,26 +1154,23 @@ export function AuditsView({ me, isManager, restaurantId, accent, t, toast }: { 
   // Fail-closed до загрузки данных (гео/явка/смена) — как на iOS (requireGeoCheckIn ждёт
   // loadAttendance перед решением), не оставляем короткое окно кликабельности "вслепую".
   const canFill = ready && (!geoRequired || !myId || checkedInToday)
+  return { staff, canFill, openShiftId, ready }
+}
 
-  const SEGS = [
-    { id: 'shift', label: tr('pe.shiftChecklists') },
-    { id: 'oneoff', label: tr('pe.oneOffAudits') },
-    { id: 'walk', label: tr('pe.walks') },
-    ...(isManager ? [{ id: 'stats', label: tr('pe.statistics') }] : []),
-  ] as const
+// Флаттенинг (Д4): «Рутина»/«Аудиты» как отдельные вложенные экраны с собственными
+// пикерами убраны — состав (Смена/Восьмёрка/Аудиты) и вызов useOpsGate теперь в ShiftAuditHub
+// (tabs-shifts.tsx), один уровень вложенности вместо двух. Статистика переехала под
+// кнопку-шторку там же, эти обёртки больше не нужны.
 
-  return (
-    <div>
-      <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
-        {SEGS.map(s => (
-          <button key={s.id} onClick={() => setSeg(s.id as any)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 12.5, fontWeight: seg === s.id ? 700 : 500, cursor: 'pointer', background: seg === s.id ? t.surface : 'transparent', color: seg === s.id ? accent : t.text3, boxShadow: seg === s.id ? t.sh2 : 'none' }}>{s.label}</button>
-        ))}
-      </div>
-      {seg === 'shift' && <ShiftChecklistsView isManager={isManager} myId={myId} myRole={myRole} canFill={canFill} openShiftId={openShiftId} staff={staff} restaurantId={restaurantId} accent={accent} t={t} toast={toast} />}
-      {seg === 'oneoff' && <AdHocAuditsView isManager={isManager} myId={myId} myName={me.name || ''} myRole={myRole} staff={staff} canFill={canFill} restaurantId={restaurantId} accent={accent} t={t} toast={toast} />}
-      {seg === 'walk' && <WalkHistoryView staff={staff} accent={accent} t={t} />}
-      {seg === 'stats' && isManager && <AuditStatsView accent={accent} t={t} />}
-    </div>
+// Лёгкая проверка «есть ли у сотрудника хоть один релевантный разовый аудит» — используется
+// OpsTab'ом, чтобы решить, показывать ли верхний пункт «Аудиты» не-менеджеру (та же логика
+// фильтрации, что и в AdHocAuditsView.visible, просто нужна ДО открытия самого экрана).
+export async function fetchHasRelevantAudits(myId: string, myRole?: string): Promise<boolean> {
+  const { data } = await db.from('shift_checklists').select('target_scope, role, assigned_staff_id').eq('kind', 'audit')
+  return (data || []).some((a: any) =>
+    a.target_scope === 'venue' ||
+    (a.target_scope === 'role' && (!a.role || a.role === myRole)) ||
+    (a.target_scope === 'staff' && a.assigned_staff_id === myId)
   )
 }
 

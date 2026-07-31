@@ -8,7 +8,11 @@
 import crypto from 'crypto'
 
 const COOKIE_NAME = 'mise_staff_token'
-const TTL_SECONDS = 60 * 60 * 24 * 7 // 7 days (reduced from 30 for security)
+// Сессия живёт, пока сотрудник сам не нажмёт «Выйти» — как в банковских/Instagram-подобных
+// приложениях, без принудительного релогина по таймеру. 10 лет — практически бессрочно,
+// не буквальный «forever» (exp должен быть конечным числом), юзер-фидбэк 2026-07-31: раньше
+// было 7 дней, сессия дропалась даже при ежедневном использовании (TTL не продлевался).
+const TTL_SECONDS = 60 * 60 * 24 * 365 * 10 // 10 years
 
 export interface StaffTokenPayload {
   rid: string          // restaurant_id
