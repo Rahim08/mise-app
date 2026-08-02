@@ -18,8 +18,16 @@ function fg(g: number) {
   if (!g) return `0 ${tCurrent('st.gramsPh')}`
   return g >= 1000 ? `${(g / 1000).toFixed(2).replace('.', ',')} ${tCurrent('st.kg')}` : `${g} ${tCurrent('st.gramsPh')}`
 }
+// Postgres created_at — "timestamp without time zone" (now() на сервере, сессия в UTC),
+// приходит без Z/смещения. `new Date(iso)` без tz-суффикса JS трактует как ЛОКАЛЬНОЕ время
+// браузера — движение, сохранённое в 14:00 UTC, показывалось как «14:00» вместо верных 16:00
+// в Цюрихе (UTC+2), а рядом с полуночью дата целиком уезжала на соседний день.
+function toUtcDate(iso: string): Date {
+  const withTz = /[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z'
+  return new Date(withTz)
+}
 function timeStr(iso: string) {
-  return new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', ' ')
+  return toUtcDate(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', ' ')
 }
 
 // ── AUTOCOMPLETE INPUT ────────────────────────────────────────────────────────
@@ -153,42 +161,46 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
   // в Настройках задним числом двигает venueLeft для уже пробитых сегодня чеков.
   const [savedGrams, setSavedGrams] = useState(0)
   const [savedQty, setSavedQty] = useState<Record<string, number>>({})
+  const savingRef = useRef(false)
 
-  useEffect(() => {
+  const loadShift = async () => {
     setLoading(true)
-    Promise.all([
+    const [{ data: tps }, { data: sales }, { data: outs }] = await Promise.all([
       db.from('hookah_types').select('*').eq('is_active', true).order('created_at'),
       db.from('hookah_sales').select('hookah_type_id, quantity, portion_g, is_free, date, flavor'),
       db.from('tobacco_movements').select('quantity_g').eq('restaurant_id', restaurantId).eq('type', 'out'),
-    ]).then(([{ data: tps }, { data: sales }, { data: outs }]: any[]) => {
-      setTypes(tps || [])
-      const v: Record<string, { paid: string; free: Record<string, string> }> = {}
-      let pastGrams = 0
-      let todaySavedGrams = 0
-      const todaySavedQty: Record<string, number> = {}
-      ;(sales || []).forEach((r: any) => {
-        if (r.date === dateStr && r.hookah_type_id) {
-          todaySavedQty[r.hookah_type_id] = (todaySavedQty[r.hookah_type_id] || 0) + (r.quantity || 0)
-          todaySavedGrams += (r.quantity || 0) * Number(r.portion_g || 0)
-          const cur = v[r.hookah_type_id] || { paid: '', free: {} }
-          if (r.is_free) {
-            const cat = r.flavor || FREE_CATS[0]
-            cur.free[cat] = String((Number(cur.free[cat]) || 0) + (r.quantity || 0))
-          } else {
-            cur.paid = String((Number(cur.paid) || 0) + (r.quantity || 0))
-          }
-          v[r.hookah_type_id] = cur
+    ])
+    setTypes(tps || [])
+    const v: Record<string, { paid: string; free: Record<string, string> }> = {}
+    let pastGrams = 0
+    let todaySavedGrams = 0
+    const todaySavedQty: Record<string, number> = {}
+    ;(sales || []).forEach((r: any) => {
+      if (r.date === dateStr && r.hookah_type_id) {
+        todaySavedQty[r.hookah_type_id] = (todaySavedQty[r.hookah_type_id] || 0) + (r.quantity || 0)
+        todaySavedGrams += (r.quantity || 0) * Number(r.portion_g || 0)
+        const cur = v[r.hookah_type_id] || { paid: '', free: {} }
+        if (r.is_free) {
+          const cat = r.flavor || FREE_CATS[0]
+          cur.free[cat] = String((Number(cur.free[cat]) || 0) + (r.quantity || 0))
         } else {
-          pastGrams += (r.quantity || 0) * Number(r.portion_g || 0)
+          cur.paid = String((Number(cur.paid) || 0) + (r.quantity || 0))
         }
-      })
-      setVals(v)
-      setSavedGrams(todaySavedGrams)
-      setSavedQty(todaySavedQty)
-      setVenueBase((outs || []).reduce((s: number, m: any) => s + (m.quantity_g || 0), 0) - pastGrams)
-      setLoading(false)
+        v[r.hookah_type_id] = cur
+      } else if (r.date && r.date < dateStr) {
+        // Только строго прошлые даты — иначе продажи ПОСЛЕ выбранного дня (навигация назад)
+        // тоже считались «прошлым», и venueBase на старых днях врал.
+        pastGrams += (r.quantity || 0) * Number(r.portion_g || 0)
+      }
     })
-  }, [dateStr])
+    setVals(v)
+    setSavedGrams(todaySavedGrams)
+    setSavedQty(todaySavedQty)
+    setVenueBase((outs || []).reduce((s: number, m: any) => s + (m.quantity_g || 0), 0) - pastGrams)
+    setLoading(false)
+  }
+
+  useEffect(() => { loadShift() }, [dateStr])
 
   const paidOf = (typeId: string) => Number(vals[typeId]?.paid) || 0
   const freeOf = (typeId: string, cat: string) => Number(vals[typeId]?.free?.[cat]) || 0
@@ -216,32 +228,44 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
   const venueLeft = venueBase - grams
 
   const save = async () => {
+    // Гвард по ref, не по стейту: setSaving(true) не успевает попасть в рендер до
+    // быстрого второго клика — стейт ещё читается как false, второй save() проходит
+    // и удваивает продажи за день (delete+insert не атомарны, второй прогон гонится с первым).
+    if (savingRef.current) return
+    savingRef.current = true
     setSaving(true)
-    const { error: delErr } = await db.from('hookah_sales').delete().eq('date', dateStr)
-    if (delErr) { toast(tr('st.err') + ': ' + delErr.message); setSaving(false); return }
-    const rows: any[] = []
-    types.forEach(tp => {
-      const p = paidOf(tp.id)
-      if (p > 0) rows.push({
-        hookah_type_id: tp.id, quantity: p, date: dateStr,
-        price: Number(tp.price || 0), portion_g: Number(tp.portion_g || 0),
-        is_free: false, brand: null, flavor: null, flavor_id: null,
-      })
-      FREE_CATS.forEach(cat => {
-        const f = freeOf(tp.id, cat)
-        if (f > 0) rows.push({
-          hookah_type_id: tp.id, quantity: f, date: dateStr,
-          price: 0, portion_g: Number(tp.portion_g || 0),
-          is_free: true, brand: null, flavor: cat, flavor_id: null, // flavor = категория бесплатного
+    try {
+      const { error: delErr } = await db.from('hookah_sales').delete().eq('date', dateStr)
+      if (delErr) { toast(tr('st.err') + ': ' + delErr.message); return }
+      const rows: any[] = []
+      types.forEach(tp => {
+        const p = paidOf(tp.id)
+        if (p > 0) rows.push({
+          hookah_type_id: tp.id, quantity: p, date: dateStr,
+          price: Number(tp.price || 0), portion_g: Number(tp.portion_g || 0),
+          is_free: false, brand: null, flavor: null, flavor_id: null,
+        })
+        FREE_CATS.forEach(cat => {
+          const f = freeOf(tp.id, cat)
+          if (f > 0) rows.push({
+            hookah_type_id: tp.id, quantity: f, date: dateStr,
+            price: 0, portion_g: Number(tp.portion_g || 0),
+            is_free: true, brand: null, flavor: cat, flavor_id: null, // flavor = категория бесплатного
+          })
         })
       })
-    })
-    if (rows.length) {
-      const { error } = await db.from('hookah_sales').insert(rows)
-      if (error) { toast(tr('st.err') + ': ' + error.message); setSaving(false); return }
+      if (rows.length) {
+        const { error } = await db.from('hookah_sales').insert(rows)
+        if (error) { toast(tr('st.err') + ': ' + error.message); return }
+      }
+      // Перечитываем — иначе savedGrams/savedQty остаются старыми и «Табак»/остаток зала
+      // завышены до ручного refresh (уже сохранённый ввод считался ещё раз как несохранённый).
+      await loadShift()
+      toast(`${tr('st.shiftSaved')} · ${paidTotal} ${tr('st.soldWord')}${freeTotal ? ` · ${freeTotal} ${tr('st.freeWord')}` : ''}`)
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
-    setSaving(false)
-    toast(`${tr('st.shiftSaved')} · ${paidTotal} ${tr('st.soldWord')}${freeTotal ? ` · ${freeTotal} ${tr('st.freeWord')}` : ''}`)
   }
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('st.loading')}</div>
@@ -382,6 +406,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
   const [movRows, setMovRows] = useState<MovRow[]>([newRow()])
   const [invRows, setInvRows] = useState<InvRow[]>([])
   const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
   const [toast, setToast] = useState('')
   const [expandedBatch, setExpandedBatch] = useState<string | null>(null)
   const [expandedInv, setExpandedInv] = useState<string | null>(null)
@@ -407,7 +432,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
     setLoading(true)
     const [s1, s2, s3] = await Promise.all([
       db.from('tobacco_stock').select('*').eq('restaurant_id', rid).order('brand').order('flavor'),
-      db.from('tobacco_movements').select('*').eq('restaurant_id', rid).order('created_at', { ascending: false }).limit(200),
+      db.from('tobacco_movements').select('*').eq('restaurant_id', rid).order('created_at', { ascending: false }).limit(1000),
       db.from('tobacco_inventories').select('*').eq('restaurant_id', rid).order('created_at', { ascending: false }).limit(50),
     ])
     setStock(s1.data || [])
@@ -450,47 +475,78 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
   }
 
   const saveMov = async () => {
+    // Гвард по ref — setSaving(true) не успевает в рендер до второго быстрого клика,
+    // стейт saving ещё читается как false и второй вызов проходит следом за первым.
+    if (savingRef.current) return
     const filled = movRows.filter(r => r.brand && r.flavor && parseFloat(r.quantity_g) > 0)
     if (!filled.length) { showToastMsg(tr('st.addAtLeastOne')); return }
-    for (const r of filled) {
-      const qty = parseFloat(r.quantity_g)
-      if (movMode !== 'in') {
-        const item = stock.find(s => s.brand === r.brand && s.flavor === r.flavor)
-        if (!item) { showToastMsg(`${r.brand} · ${r.flavor} ${tr('st.notFoundSuffix')}`); return }
-        if (qty > item.quantity_g) { showToastMsg(`${r.brand} · ${r.flavor}: ${tr('st.onlyWord')} ${fg(item.quantity_g)}`); return }
-      }
-    }
     if (movMode === 'writeoff' && !movReason.trim()) { showToastMsg(tr('st.enterWriteoffReason')); return }
+    savingRef.current = true
     setSaving(true)
-    const batchId = editBatch || crypto.randomUUID()
-    if (editBatch) {
-      const oldMovs = movements.filter(m => m.batch_id === editBatch)
-      for (const m of oldMovs) {
-        const item = stock.find(s => s.brand === m.brand && s.flavor === m.flavor)
-        if (item) {
-          const revert = m.type === 'in' ? -m.quantity_g : m.quantity_g
-          await db.from('tobacco_stock').update({ quantity_g: item.quantity_g + revert }).eq('id', item.id)
+    try {
+      // Один живой снэпшот склада на всю операцию — валидация и апдейты идут по нему,
+      // а не по возможно устаревшему стейту `stock` (правки в другой вкладке/сессии).
+      const { data: freshData } = await db.from('tobacco_stock').select('*').eq('restaurant_id', restaurantId)
+      const freshStock: StockItem[] = freshData || []
+      for (const r of filled) {
+        const qty = parseFloat(r.quantity_g)
+        if (movMode !== 'in') {
+          const item = freshStock.find(s => s.brand === r.brand && s.flavor === r.flavor)
+          if (!item) { showToastMsg(`${r.brand} · ${r.flavor} ${tr('st.notFoundSuffix')}`); return }
+          if (qty > item.quantity_g) { showToastMsg(`${r.brand} · ${r.flavor}: ${tr('st.onlyWord')} ${fg(item.quantity_g)}`); return }
         }
       }
-      await db.from('tobacco_movements').delete().eq('batch_id', editBatch)
-    }
-    const { data: freshStock } = await db.from('tobacco_stock').select('*').eq('restaurant_id', restaurantId)
-    const currentStock: StockItem[] = freshStock || []
-    for (const r of filled) {
-      const qty = parseFloat(r.quantity_g)
-      const existing = currentStock.find(s => s.brand === r.brand && s.flavor === r.flavor)
-      const reason = movReason.trim() || (movMode === 'in' ? 'Поставка' : movMode === 'out' ? 'Выдача в зал' : 'Списание')
-      await db.from('tobacco_movements').insert({ restaurant_id: restaurantId, brand: r.brand, flavor: r.flavor, quantity_g: qty, type: movMode, batch_id: batchId, reason, flavor_id: existing?.id || null })
-      if (existing) {
-        const delta = movMode === 'in' ? qty : -qty
-        await db.from('tobacco_stock').update({ quantity_g: existing.quantity_g + delta, updated_at: new Date().toISOString() }).eq('id', existing.id)
-      } else if (movMode === 'in') {
-        await db.from('tobacco_stock').insert({ restaurant_id: restaurantId, brand: r.brand, flavor: r.flavor, quantity_g: qty, flavor_name: r.flavor, updated_at: new Date().toISOString() })
+
+      const batchId = editBatch || crypto.randomUUID()
+      const byId: Record<string, StockItem> = {}
+      freshStock.forEach(s => { byId[s.id] = s })
+      // Дельты копим по id и применяем ОДНИМ апдейтом на позицию в конце — иначе несколько
+      // строк батча (старый откат + новая запись), задевающих один и тот же товар,
+      // перезаписывали друг друга последовательными update() по одному и тому же base-значению.
+      const deltas: Record<string, number> = {}
+      let originalCreatedAt: string | undefined
+
+      if (editBatch) {
+        const oldMovs = movements.filter(m => m.batch_id === editBatch)
+        originalCreatedAt = oldMovs[0]?.created_at
+        for (const m of oldMovs) {
+          const item = freshStock.find(s => s.brand === m.brand && s.flavor === m.flavor)
+          if (item) {
+            const revert = m.type === 'in' ? -m.quantity_g : m.quantity_g
+            deltas[item.id] = (deltas[item.id] || 0) + revert
+          }
+        }
+        await db.from('tobacco_movements').delete().eq('batch_id', editBatch)
       }
+      for (const r of filled) {
+        const qty = parseFloat(r.quantity_g)
+        const existing = freshStock.find(s => s.brand === r.brand && s.flavor === r.flavor)
+        const reason = movReason.trim() || (movMode === 'in' ? 'Поставка' : movMode === 'out' ? 'Выдача в зал' : 'Списание')
+        // Правка сохраняет исходный created_at — иначе дата/время движения «прыгали»
+        // на момент правки вместо исходного момента поставки/выдачи.
+        const movementRow: Record<string, unknown> = { restaurant_id: restaurantId, brand: r.brand, flavor: r.flavor, quantity_g: qty, type: movMode, batch_id: batchId, reason, flavor_id: existing?.id || null }
+        if (originalCreatedAt) movementRow.created_at = originalCreatedAt
+        await db.from('tobacco_movements').insert(movementRow)
+        if (existing) {
+          const delta = movMode === 'in' ? qty : -qty
+          deltas[existing.id] = (deltas[existing.id] || 0) + delta
+        } else if (movMode === 'in') {
+          await db.from('tobacco_stock').insert({ restaurant_id: restaurantId, brand: r.brand, flavor: r.flavor, quantity_g: qty, flavor_name: r.flavor, updated_at: new Date().toISOString() })
+        }
+      }
+      for (const id of Object.keys(deltas)) {
+        const base = byId[id]
+        if (!base) continue
+        await db.from('tobacco_stock').update({ quantity_g: Math.max(0, base.quantity_g + deltas[id]), updated_at: new Date().toISOString() }).eq('id', id)
+      }
+
+      await loadAll(restaurantId)
+      setMovRows([newRow()]); setMovReason(''); setShowAddMov(false); setEditBatch(null)
+      showToastMsg(tr('st.savedItems', { n: filled.length }))
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
-    await loadAll(restaurantId)
-    setMovRows([newRow()]); setMovReason(''); setShowAddMov(false); setEditBatch(null); setSaving(false)
-    showToastMsg(tr('st.savedItems', { n: filled.length }))
   }
 
   const openEdit = (batchId: string, items: Movement[]) => {
@@ -507,25 +563,32 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
   }
 
   const saveInv = async () => {
+    if (savingRef.current) return
     const filled = invRows.filter(r => r.actual_g !== '' && parseFloat(r.actual_g) !== r.expected_g)
     if (!filled.length) { showToastMsg(tr('st.noDiff')); return }
+    savingRef.current = true
     setSaving(true)
-    const items = filled.map(r => ({ brand: r.brand, flavor: r.flavor, expected_g: r.expected_g, actual_g: parseFloat(r.actual_g), diff_g: parseFloat(r.actual_g) - r.expected_g }))
-    await db.from('tobacco_inventories').insert({ restaurant_id: restaurantId, type: 'warehouse', items })
-    for (const r of filled) {
-      const item = stock.find(s => s.brand === r.brand && s.flavor === r.flavor)
-      if (item) await db.from('tobacco_stock').update({ quantity_g: parseFloat(r.actual_g), updated_at: new Date().toISOString() }).eq('id', item.id)
+    try {
+      const items = filled.map(r => ({ brand: r.brand, flavor: r.flavor, expected_g: r.expected_g, actual_g: parseFloat(r.actual_g), diff_g: parseFloat(r.actual_g) - r.expected_g }))
+      await db.from('tobacco_inventories').insert({ restaurant_id: restaurantId, type: 'warehouse', items })
+      for (const r of filled) {
+        const item = stock.find(s => s.brand === r.brand && s.flavor === r.flavor)
+        if (item) await db.from('tobacco_stock').update({ quantity_g: Math.max(0, parseFloat(r.actual_g)), updated_at: new Date().toISOString() }).eq('id', item.id)
+      }
+      await loadAll(restaurantId)
+      setShowInv(false)
+      showToastMsg(tr('st.invSaved', { n: filled.length }))
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
-    await loadAll(restaurantId)
-    setSaving(false); setShowInv(false)
-    showToastMsg(tr('st.invSaved', { n: filled.length }))
   }
 
   const groupedMovements = () => {
     const filtered = movements.filter(m => m.type === movMode)
     const batches: Record<string, Movement[]> = {}
     filtered.forEach(m => { const key = m.batch_id || m.id; if (!batches[key]) batches[key] = []; batches[key].push(m) })
-    return Object.entries(batches).sort((a, b) => new Date(b[1][0].created_at).getTime() - new Date(a[1][0].created_at).getTime())
+    return Object.entries(batches).sort((a, b) => toUtcDate(b[1][0].created_at).getTime() - toUtcDate(a[1][0].created_at).getTime())
   }
 
   if (!restaurantId) return <AuthGate appId="stash" appName="Mise Stash" onAuth={setRestaurantId} />

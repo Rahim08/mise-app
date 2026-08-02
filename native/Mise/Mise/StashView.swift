@@ -63,17 +63,23 @@ final class StashModel {
 
     // MARK: смена
 
-    func loadShift() async {
+    @discardableResult
+    func loadShift() async -> Bool {
         #if DEBUG
-        if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedDemo(); return }
+        if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedDemo(); return true }
         #endif
         shiftLoading = true; defer { shiftLoading = false }
         async let tpsR = try? DB.from("hookah_types").select().eq("is_active", true).order("created_at").list(HookahType.self)
+        // venueBase = вся история «выдано в зал» минус «использовано» минус «списано с зала» —
+        // нет running-агрегата на сервере, поэтому тянем всё целиком. Без явного .limit()
+        // PostgREST молча режет на 1000 строк — на старом заведении venueBase тихо занижался
+        // бы за этим потолком. .limit() тут — не полный фикс (потолок всё ещё есть), а страховка
+        // от тихого урезания на разумный срок; настоящий фикс — серверный агрегат.
         async let salesR = try? DB.from("hookah_sales")
-            .select("hookah_type_id, quantity, portion_g, is_free, date, flavor").list(HookahSale.self)
+            .select("hookah_type_id, quantity, portion_g, is_free, date, flavor").limit(20000).list(HookahSale.self)
         // Полный select — Movement требует brand/flavor (иначе строки отбрасываются Lossy-декодом).
-        async let outsR = try? DB.from("tobacco_movements").select().eq("type", "out").list(Movement.self)
-        async let venueWoR = try? DB.from("tobacco_movements").select().eq("type", "writeoff").list(Movement.self)
+        async let outsR = try? DB.from("tobacco_movements").select().eq("type", "out").limit(20000).list(Movement.self)
+        async let venueWoR = try? DB.from("tobacco_movements").select().eq("type", "writeoff").limit(20000).list(Movement.self)
         // Категории бесплатных кальянов из настроек заведения (дашборд → Настройки → Кальян).
         nonisolated struct FreeCatsSettings: Codable { let free_hookah_categories: [String]? }
         if let cats = try? await DB.from("restaurant_settings").select("free_hookah_categories").limit(1).list(FreeCatsSettings.self).first?.free_hookah_categories, !cats.isEmpty {
@@ -83,7 +89,7 @@ final class StashModel {
         // Только при успехе перезаписываем — сбой на refresh не должен стирать смену.
         guard let tps = await tpsR, let sales = await salesR, let outs = await outsR, let venueWo = await venueWoR else {
             if !types.isEmpty { flash(t("refreshFailed")) }
-            return
+            return false
         }
         types = tps
         var p: [String: String] = [:], fr: [String: [String: String]] = [:]
@@ -101,7 +107,9 @@ final class StashModel {
                 } else {
                     p[id] = String((Int(p[id] ?? "") ?? 0) + q)
                 }
-            } else {
+            } else if let d = r.date, d < dateStr {
+                // Только СТРОГО прошлые даты — иначе продажи ПОСЛЕ выбранного дня (навигация
+                // назад по смене) тоже считались «прошлым» и venueBase на старых днях врал.
                 pastGrams += (r.quantity ?? 0) * (r.portion_g ?? 0)
             }
         }
@@ -111,6 +119,7 @@ final class StashModel {
         // Списание «с заведения» = движение writeoff без бренда/вкуса (общий вес зала).
         let venueWriteoff = venueWo.filter { $0.brand.isEmpty && $0.flavor.isEmpty }.reduce(0) { $0 + $1.quantity_g }
         venueBase = max(0, outs.reduce(0) { $0 + $1.quantity_g } - pastGrams - venueWriteoff)
+        return true
     }
 
     // MARK: KPI-цели
@@ -194,6 +203,9 @@ final class StashModel {
     var venueLeft: Double { max(0, venueBase - gramsUsed) }
 
     func saveShift() async {
+        // Гвард от двойного тапа: без него быстрый второй тап запускал второй
+        // delete+insert параллельно первому — удвоенные продажи за день.
+        guard !saving else { return }
         saving = true; defer { saving = false }
         do {
             try await DB.from("hookah_sales").delete().eq("date", dateStr).run()
@@ -204,7 +216,11 @@ final class StashModel {
                     rows.append(["hookah_type_id": tp.id, "quantity": p, "date": dateStr,
                                  "price": tp.price ?? 0, "portion_g": tp.portion_g ?? 0, "is_free": false])
                 }
-                for cat in freeCats {
+                // Категории из настроек + категории, реально присутствующие в введённых данных —
+                // если владелец убрал категорию в дашборде уже после того, как по ней были продажи
+                // сегодня, freeCats её больше не содержит и цифры просто терялись при пересохранении.
+                let cats = Set(freeCats).union((free[tp.id] ?? [:]).keys)
+                for cat in cats {
                     let f = freeOf(tp.id, cat)
                     if f > 0 {
                         rows.append(["hookah_type_id": tp.id, "quantity": f, "date": dateStr,
@@ -213,6 +229,9 @@ final class StashModel {
                 }
             }
             if !rows.isEmpty { try await DB.from("hookah_sales").insert(rows).run() }
+            // Перечитываем — иначе savedGrams/savedQtyByType остаются старыми, и плитка «Табак»/
+            // остаток зала завышены (считают уже сохранённый ввод ещё раз как «несохранённую дельту»).
+            await loadShift()
             flash(t("st.shiftSaved", ["p": "\(paidTotal)"]) + (freeTotal > 0 ? t("st.shiftSavedFree", ["f": "\(freeTotal)"]) : ""))
         } catch {
             flash(t("saveFailed", ["err": error.localizedDescription]))
@@ -220,8 +239,18 @@ final class StashModel {
     }
 
     func shiftDay(_ d: Int) async {
+        let prev = currentDate
         currentDate = Calendar.current.date(byAdding: .day, value: d, to: currentDate) ?? currentDate
-        await loadShift()
+        // Сбой загрузки нового дня раньше оставлял на экране данные ПРЕДЫДУЩЕГО дня под
+        // датой НОВОГО — «Сохранить» дописал бы их не туда. Откатываем дату при неудаче.
+        if !(await loadShift()) { currentDate = prev }
+    }
+
+    /// Переход к сегодняшнему дню — тот же откат на сбое, что и в shiftDay().
+    func goToToday() async {
+        let prev = currentDate
+        currentDate = Date()
+        if !(await loadShift()) { currentDate = prev }
     }
 
     // MARK: склад
@@ -232,7 +261,9 @@ final class StashModel {
         #endif
         defer { warehouseLoading = false }
         async let sR = try? DB.from("tobacco_stock").select().order("brand").order("flavor").list(StockItem.self)
-        async let mvR = try? DB.from("tobacco_movements").select().order("created_at", ascending: false).limit(200).list(Movement.self)
+        // 200 обрубало ленту и правку/удаление старых батчей раньше, чем у venueBase
+        // (loadShift читает всю историю без лимита) — расхождение между лентой и цифрами.
+        async let mvR = try? DB.from("tobacco_movements").select().order("created_at", ascending: false).limit(1000).list(Movement.self)
         async let ivR = try? DB.from("tobacco_inventories").select().order("created_at", ascending: false).limit(50).list(Inventory.self)
         // Только при успехе перезаписываем — сбой на refresh не должен стирать склад.
         guard let s = await sR, let mv = await mvR, let iv = await ivR else {
@@ -333,51 +364,52 @@ final class StashModel {
         return nil
     }
 
-    func saveMovement(_ rows: [MovRow], reason: String) async -> Bool {
-        // Гвард от двойного тапа Save: .disabled(m.saving) обновляется на следующий кадр,
-        // быстрый двойной тап успевает создать два Task ещё до перерисовки — тогда без
-        // этой проверки уходят два одинаковых батча движений (склад не дублируется
-        // только по счастливой случайности non-atomic update, но лента — дублируется).
-        guard !saving else { return false }
-        // Тримим ввод, чтобы лишние пробелы не плодили дубли на складе.
+    /// Тримит/схлопывает строки и валидирует остаток по переданному снэпшоту склада.
+    /// Ничего не пишет в БД. nil (с flash) → невалидно. Снэпшот параметром — вызывающий
+    /// может передать как живой остаток, так и симулированный (после отката старого батча),
+    /// чтобы провалившаяся валидация не оставляла БД в промежуточном состоянии.
+    private func prepareRows(_ rows: [MovRow], mode: String, stock stockSnapshot: [StockItem]) -> [MovRow]? {
         var filled = rows
             .map { MovRow(brand: $0.brand.trimmingCharacters(in: .whitespaces), flavor: $0.flavor.trimmingCharacters(in: .whitespaces), grams: $0.grams) }
             .filter { !$0.brand.isEmpty && !$0.flavor.isEmpty && (Double($0.grams) ?? 0) > 0 }
-        if filled.isEmpty { flash(t("st.fillRow")); return false }
+        if filled.isEmpty { flash(t("st.fillRow")); return nil }
         // Схлопываем повторяющиеся бренд/вкус (сумма граммов) до параллельной записи —
         // иначе два запроса по одному и тому же товару читают один и тот же "fresh"
         // остаток и один апдейт затирает дельту другого.
-        do {
-            var merged: [String: MovRow] = [:]
-            var order: [String] = []
+        var merged: [String: MovRow] = [:]
+        var order: [String] = []
+        for r in filled {
+            let key = norm(r.brand) + "\u{0}" + norm(r.flavor)
+            if let ex = merged[key] {
+                merged[key] = MovRow(brand: ex.brand, flavor: ex.flavor, grams: String((Double(ex.grams) ?? 0) + (Double(r.grams) ?? 0)))
+            } else {
+                merged[key] = r; order.append(key)
+            }
+        }
+        filled = order.compactMap { merged[$0] }
+        if mode != "in" {
             for r in filled {
-                let key = norm(r.brand) + "\u{0}" + norm(r.flavor)
-                if let ex = merged[key] {
-                    merged[key] = MovRow(brand: ex.brand, flavor: ex.flavor, grams: String((Double(ex.grams) ?? 0) + (Double(r.grams) ?? 0)))
-                } else {
-                    merged[key] = r; order.append(key)
+                guard let item = stockSnapshot.first(where: { norm($0.brand) == norm(r.brand) && norm($0.flavor) == norm(r.flavor) }) else {
+                    flash(t("st.notInStock", ["b": r.brand, "fl": r.flavor])); return nil
+                }
+                if (Double(r.grams) ?? 0) > item.quantity_g {
+                    flash(t("st.onlyLeft", ["b": r.brand, "fl": r.flavor, "g": grams(item.quantity_g)])); return nil
                 }
             }
-            filled = order.compactMap { merged[$0] }
         }
-        for r in filled where movMode != "in" {
-            guard let item = stockOf(r.brand, r.flavor) else {
-                flash(t("st.notInStock", ["b": r.brand, "fl": r.flavor])); return false
-            }
-            if (Double(r.grams) ?? 0) > item.quantity_g { flash(t("st.onlyLeft", ["b": r.brand, "fl": r.flavor, "g": grams(item.quantity_g)])); return false }
-        }
-        if movMode == "writeoff" && reason.trimmingCharacters(in: .whitespaces).isEmpty { flash(t("st.writeoffReason")); return false }
-        saving = true; defer { saving = false }
-        let batchId = UUID().uuidString
-        let fresh = (try? await DB.from("tobacco_stock").select().list(StockItem.self)) ?? stock
-        let mode = movMode
+        return filled
+    }
+
+    /// Собственно запись строк движения + апдейт остатка по переданному снэпшоту склада.
+    /// Не гвардит `saving` — вызывающий уже держит флаг.
+    private func writeMovementRows(_ filled: [MovRow], reason: String, mode: String, batchId: String, stock fresh: [StockItem], createdAt: String? = nil) async -> Bool {
         let rid = rid
         let defReason = reason.isEmpty ? (mode == "in" ? "Поставка" : mode == "out" ? "Выдача в зал" : "Списание") : reason
         // Каждая строка — свой товар (после схлопывания дублей), запросы независимы →
         // шлём параллельно вместо последовательной цепочки (было ~2×N round-trip'ов подряд).
         // Значения из MainActor (mode/rid) сняты в локальные let ДО addTask — дочерние
         // задачи не изолированы на MainActor и не могут читать его свойства напрямую.
-        let ok = await withTaskGroup(of: Bool.self) { group in
+        return await withTaskGroup(of: Bool.self) { group in
             for r in filled {
                 group.addTask { [norm] in
                     let qty = Double(r.grams) ?? 0
@@ -386,13 +418,20 @@ final class StashModel {
                     let brand = existing?.brand ?? r.brand
                     let flavor = existing?.flavor ?? r.flavor
                     do {
-                        try await DB.from("tobacco_movements").insert([
+                        var values: [String: Any] = [
                             "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty,
                             "type": mode, "batch_id": batchId, "reason": defReason,
-                        ]).run()
+                            "flavor_id": existing?.id ?? NSNull(),
+                        ]
+                        // Правка батча передаёт исходный created_at — иначе дата/время движения
+                        // «прыгали» на момент правки вместо исходного момента поставки/выдачи.
+                        if let createdAt { values["created_at"] = createdAt }
+                        try await DB.from("tobacco_movements").insert(values).run()
                         if let ex = existing {
                             let delta = mode == "in" ? qty : -qty
-                            try await DB.from("tobacco_stock").update(["quantity_g": ex.quantity_g + delta]).eq("id", ex.id).run()
+                            // Клампим в 0 — иначе гонка параллельных списаний могла увести остаток
+                            // в минус, а такая позиция выпадала из всех фильтров UI (ни «в наличии», ни «нет»).
+                            try await DB.from("tobacco_stock").update(["quantity_g": max(0, ex.quantity_g + delta)]).eq("id", ex.id).run()
                         } else if mode == "in" {
                             try await DB.from("tobacco_stock").insert([
                                 "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty, "flavor_name": flavor,
@@ -408,10 +447,28 @@ final class StashModel {
             for await r in group where !r { allOk = false }
             return allOk
         }
+    }
+
+    func saveMovement(_ rows: [MovRow], reason: String, mode: String? = nil) async -> Bool {
+        // Гвард от двойного тапа Save: .disabled(m.saving) обновляется на следующий кадр,
+        // быстрый двойной тап успевает создать два Task ещё до перерисовки — тогда без
+        // этой проверки уходят два одинаковых батча движений.
+        guard !saving else { return false }
+        saving = true; defer { saving = false }
+        let mvMode = mode ?? movMode
+        // .fresh() — читаем мимо 5-минутного кеша DB.swift: без этого валидация и апдейт
+        // остатка шли по устаревшим данным (read-modify-write по кешу теряло чужие правки).
+        guard let freshStock = try? await DB.from("tobacco_stock").select().fresh().list(StockItem.self) else {
+            flash(t("refreshFailed")); return false
+        }
+        guard let filled = prepareRows(rows, mode: mvMode, stock: freshStock) else { return false }
+        if mvMode == "writeoff" && reason.trimmingCharacters(in: .whitespaces).isEmpty { flash(t("st.writeoffReason")); return false }
+        let batchId = UUID().uuidString
+        let ok = await writeMovementRows(filled, reason: reason, mode: mvMode, batchId: batchId, stock: freshStock)
         guard ok else { flash(t("ai.errGeneric")); await loadWarehouse(); return false }
         await loadWarehouse()
         // Выдача в зал (out) меняет venueBase — нужно сразу пересчитать смену.
-        if movMode == "out" { await loadShift() }
+        if mvMode == "out" { await loadShift() }
         // Проверка минимального остатка — push если включено
         checkLowStock()
         flash(t("st.saved", ["n": "\(filled.count)"]))
@@ -439,81 +496,164 @@ final class StashModel {
 
     /// Списание «с заведения»: только вес, без бренда/вкуса. Уменьшает общий объём зала (venueBase),
     /// склад не трогает. Маркер — пустые brand/flavor у движения writeoff.
-    func saveVenueWriteoff(grams gramsStr: String, reason: String) async -> Bool {
+    func saveVenueWriteoff(grams gramsStr: String, reason: String, batchId: String? = nil) async -> Bool {
         guard !saving else { return false }
         let qty = Double(gramsStr.filter { $0.isNumber || $0 == "." }) ?? 0
         if qty <= 0 { flash(t("st.fillRow")); return false }
         if reason.trimmingCharacters(in: .whitespaces).isEmpty { flash(t("st.writeoffReason")); return false }
         if qty > venueBase { flash(t("st.onlyLeftVenue", ["g": grams(max(0, venueBase))])); return false }
         saving = true; defer { saving = false }
-        let batchId = UUID().uuidString
-        try? await DB.from("tobacco_movements").insert([
-            "restaurant_id": rid, "brand": "", "flavor": "", "quantity_g": qty,
-            "type": "writeoff", "batch_id": batchId, "reason": reason,
-        ]).run()
+        do {
+            try await DB.from("tobacco_movements").insert([
+                "restaurant_id": rid, "brand": "", "flavor": "", "quantity_g": qty,
+                "type": "writeoff", "batch_id": batchId ?? UUID().uuidString, "reason": reason,
+            ]).run()
+        } catch {
+            flash(t("saveFailed", ["err": error.localizedDescription])); return false
+        }
         await loadWarehouse()
         await loadShift()
         flash(t("st.saved", ["n": "1"]))
         return true
     }
 
-    /// Откатывает дельты остатка и удаляет все строки батча. Без тоста (для reuse в edit).
-    private func revertAndDelete(_ items: [Movement]) async {
-        let fresh = (try? await DB.from("tobacco_stock").select().list(StockItem.self)) ?? stock
+    /// Откатывает дельты остатка и удаляет все строки батча. Возвращает успех — на неудаче
+    /// (сеть/БД) вызывающий не должен показывать «удалено»/«сохранено» поверх провала.
+    @discardableResult
+    private func revertAndDelete(_ items: [Movement]) async -> Bool {
+        guard let fresh = try? await DB.from("tobacco_stock").select().fresh().list(StockItem.self) else {
+            flash(t("refreshFailed")); return false
+        }
         // Складские движения (с брендом/вкусом) откатываем; «с заведения» (пустые) — только удаляем,
         // venueBase пересчитается из оставшихся движений в loadShift().
         var adjust: [String: Double] = [:]
         var exById: [String: StockItem] = [:]
+        var missing: [String] = []
         for mv in items where !mv.brand.isEmpty && !mv.flavor.isEmpty {
-            guard let ex = fresh.first(where: { norm($0.brand) == norm(mv.brand) && norm($0.flavor) == norm(mv.flavor) }) else { continue }
+            guard let ex = fresh.first(where: { norm($0.brand) == norm(mv.brand) && norm($0.flavor) == norm(mv.flavor) }) else {
+                missing.append("\(mv.brand) · \(mv.flavor)"); continue
+            }
             adjust[ex.id, default: 0] += (mv.type == "in" ? -mv.quantity_g : mv.quantity_g)
             exById[ex.id] = ex
         }
+        var ok = true
         for (id, delta) in adjust {
-            if let ex = exById[id] {
-                try? await DB.from("tobacco_stock").update(["quantity_g": max(0, ex.quantity_g + delta)]).eq("id", id).run()
-            }
+            guard let ex = exById[id] else { continue }
+            do { try await DB.from("tobacco_stock").update(["quantity_g": max(0, ex.quantity_g + delta)]).eq("id", id).run() }
+            catch { ok = false }
         }
-        for mv in items { try? await DB.from("tobacco_movements").delete().eq("id", mv.id).run() }
+        for mv in items {
+            do { try await DB.from("tobacco_movements").delete().eq("id", mv.id).run() }
+            catch { ok = false }
+        }
+        if !missing.isEmpty { flash(t("saveFailed", ["err": missing.joined(separator: ", ")])) }
+        else if !ok { flash(t("ai.errGeneric")) }
+        return ok
     }
 
     /// Удаление перемещения (батча) с откатом остатка.
     func deleteMovementBatch(_ items: [Movement]) async {
         guard !items.isEmpty, !saving else { return }
         saving = true; defer { saving = false }
-        await revertAndDelete(items)
+        let ok = await revertAndDelete(items)
         await loadWarehouse()
         await loadShift()
-        flash(t("st.movDeleted"))
+        if ok { flash(t("st.movDeleted")) }
     }
 
-    /// Редактирование: откатываем старый батч и пишем новый (для складских позиций).
-    /// saveMovement сам гвардит и держит `saving` — здесь предварительная проверка лишь
-    /// отсекает двойной тап до revertAndDelete (сам saveMovement выставит saving заново).
-    func replaceMovementBatch(_ old: [Movement], rows: [MovRow], reason: String) async -> Bool {
+    /// Редактирование складского батча: валидируем новые строки ПРОТИВ СИМУЛИРОВАННОГО
+    /// остатка (живой склад + откат старого батча в памяти) — и только если валидация
+    /// проходит, реально откатываем старый батч и пишем новый. Раньше откат шёл первым,
+    /// и любой сбой валидации после него (например «уже нет столько на складе», посчитанное
+    /// по нередактированному остатку) стирал старую поставку/выдачу без замены.
+    /// batch_id сохраняем — иначе правка «переезжает» в ленте как новая запись.
+    func replaceMovementBatch(_ old: [Movement], rows: [MovRow], reason: String, mode: String? = nil) async -> Bool {
         guard !saving else { return false }
-        await revertAndDelete(old)
-        return await saveMovement(rows, reason: reason)
+        saving = true; defer { saving = false }
+        let mvMode = mode ?? old.first?.type ?? movMode
+        guard let liveStock = try? await DB.from("tobacco_stock").select().fresh().list(StockItem.self) else {
+            flash(t("refreshFailed")); return false
+        }
+        var simulated: [String: Double] = Dictionary(uniqueKeysWithValues: liveStock.map { ($0.id, $0.quantity_g) })
+        var idByKey: [String: String] = [:]
+        for s in liveStock { idByKey[norm(s.brand) + "\u{0}" + norm(s.flavor)] = s.id }
+        for mv in old where !mv.brand.isEmpty && !mv.flavor.isEmpty {
+            guard let id = idByKey[norm(mv.brand) + "\u{0}" + norm(mv.flavor)] else { continue }
+            let revert = mv.type == "in" ? -mv.quantity_g : mv.quantity_g
+            simulated[id] = max(0, (simulated[id] ?? 0) + revert)
+        }
+        let simulatedStock = liveStock.map { s in
+            StockItem(id: s.id, brand: s.brand, flavor: s.flavor, quantity_g: simulated[s.id] ?? s.quantity_g, min_quantity_g: s.min_quantity_g)
+        }
+        guard prepareRows(rows, mode: mvMode, stock: simulatedStock) != nil else { return false }
+        if mvMode == "writeoff" && reason.trimmingCharacters(in: .whitespaces).isEmpty { flash(t("st.writeoffReason")); return false }
+        // Валидация прошла — теперь безопасно откатывать старый батч.
+        guard await revertAndDelete(old) else { return false }
+        guard let postRevertStock = try? await DB.from("tobacco_stock").select().fresh().list(StockItem.self) else {
+            flash(t("refreshFailed")); await loadWarehouse(); return false
+        }
+        guard let filled = prepareRows(rows, mode: mvMode, stock: postRevertStock) else { return false }
+        let batchId = old.first?.batch_id ?? UUID().uuidString
+        let ok = await writeMovementRows(filled, reason: reason, mode: mvMode, batchId: batchId, stock: postRevertStock, createdAt: old.first?.created_at)
+        guard ok else { flash(t("ai.errGeneric")); await loadWarehouse(); return false }
+        await loadWarehouse()
+        if mvMode == "out" || old.contains(where: { $0.type == "out" }) { await loadShift() }
+        checkLowStock()
+        flash(t("st.saved", ["n": "\(filled.count)"]))
+        return true
     }
 
-    /// Редактирование списания «с заведения»: откат старого + новый вес.
+    /// Редактирование списания «с заведения»: валидируем против симулированного venueBase
+    /// (текущий + возврат старого списания) ДО удаления — та же логика, что в replaceMovementBatch.
     func replaceVenueWriteoff(_ old: [Movement], grams gramsStr: String, reason: String) async -> Bool {
         guard !saving else { return false }
-        await revertAndDelete(old)
-        await loadShift()   // venueBase должен учесть удаление старого списания до проверки лимита
-        return await saveVenueWriteoff(grams: gramsStr, reason: reason)
+        let qty = Double(gramsStr.filter { $0.isNumber || $0 == "." }) ?? 0
+        if qty <= 0 { flash(t("st.fillRow")); return false }
+        if reason.trimmingCharacters(in: .whitespaces).isEmpty { flash(t("st.writeoffReason")); return false }
+        let oldTotal = old.reduce(0) { $0 + $1.quantity_g }
+        let simulatedVenueBase = venueBase + oldTotal
+        if qty > simulatedVenueBase { flash(t("st.onlyLeftVenue", ["g": grams(max(0, simulatedVenueBase))])); return false }
+        saving = true; defer { saving = false }
+        guard await revertAndDelete(old) else { return false }
+        let batchId = old.first?.batch_id ?? UUID().uuidString
+        do {
+            var values: [String: Any] = [
+                "restaurant_id": rid, "brand": "", "flavor": "", "quantity_g": qty,
+                "type": "writeoff", "batch_id": batchId, "reason": reason,
+            ]
+            if let createdAt = old.first?.created_at { values["created_at"] = createdAt }
+            try await DB.from("tobacco_movements").insert(values).run()
+        } catch {
+            flash(t("saveFailed", ["err": error.localizedDescription])); await loadWarehouse(); await loadShift(); return false
+        }
+        await loadWarehouse()
+        await loadShift()
+        flash(t("st.saved", ["n": "1"]))
+        return true
     }
 
     struct InvRow { let id: String; let brand: String; let flavor: String; let expected: Double; let actual: Double }
 
     func saveInventory(_ rows: [InvRow]) async -> Bool {
+        guard !saving else { return false }
         let disc = rows.filter { abs($0.actual - $0.expected) > 0.001 }
         if disc.isEmpty { flash(t("st.invEmpty")); return false }
         saving = true; defer { saving = false }
         let items: [[String: Any]] = disc.map { r in
             ["brand": r.brand, "flavor": r.flavor, "expected_g": r.expected, "actual_g": r.actual, "diff_g": r.actual - r.expected]
         }
-        try? await DB.from("tobacco_inventories").insert(["restaurant_id": rid, "items": items]).run()
+        do {
+            try await DB.from("tobacco_inventories").insert(["restaurant_id": rid, "type": "warehouse", "items": items]).run()
+            // Раньше расхождение только фиксировалось записью, но остаток на складе не менялся —
+            // инвентаризация переставала иметь смысл: посчитал факт, сохранил, а склад как был.
+            for r in disc {
+                try await DB.from("tobacco_stock").update(["quantity_g": max(0, r.actual)]).eq("id", r.id).run()
+            }
+        } catch {
+            flash(t("saveFailed", ["err": error.localizedDescription]))
+            await loadWarehouse()
+            return false
+        }
         await loadWarehouse()
         flash(t("st.saved", ["n": "\(disc.count)"]))
         return true
@@ -736,7 +876,7 @@ private struct ShiftTab: View {
             VStack(spacing: 2) {
                 Text(longDate(m.currentDate)).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
                 if !m.isToday {
-                    Button { Task { m.currentDate = Date(); await m.loadShift() } } label: {
+                    Button { Task { await m.goToToday() } } label: {
                         Text(t("st.toToday")).font(.system(size: 11, weight: .semibold)).foregroundStyle(BrandKit.manager)
                     }
                 }
@@ -1057,11 +1197,29 @@ private struct AutoField: View {
     }
 }
 
+/// Одна строка вкус+граммы внутри карточки бренда (см. MovGroup).
+private struct MovLine: Identifiable {
+    let id = UUID()
+    var flavor = ""
+    var grams = ""
+}
+
+/// Карточка ручного ввода: один бренд + несколько строк вкус/граммы под ним. Раньше
+/// каждая строка была независимой (бренд+вкус+граммы), и при поставке из 6 вкусов одного
+/// бренда бренд приходилось перепечатывать 6 раз. Группировка убирает повтор: бренд
+/// выбирается один раз на карточку, кнопка «+вкус» добавляет строку под тем же брендом,
+/// «+бренд» ниже списка открывает новую карточку под другой бренд.
+private struct MovGroup: Identifiable {
+    let id = UUID()
+    var brand = ""
+    var lines: [MovLine] = [MovLine()]
+}
+
 private struct AddMovementSheet: View {
     @Bindable var m: StashModel
     var editBatch: [Movement]? = nil               // непусто → режим редактирования батча
     @Environment(\.dismiss) private var dismiss
-    @State private var rows = [StashModel.MovRow()]
+    @State private var groups: [MovGroup] = [MovGroup()]
     @State private var reason = ""
     @State private var fromStock = false
     @State private var picks: [String: String] = [:]   // stock.id → граммы для выбора со склада
@@ -1069,6 +1227,17 @@ private struct AddMovementSheet: View {
     @State private var venueGrams = ""                 // вес списания с заведения
     @State private var primed = false
     @State private var confirmDiscard = false
+    // Тип операции ВНУТРИ листа — отдельно от m.movMode (это фильтр вкладки «Движения»).
+    // Раньше лист писал прямо в m.movMode: открыл правку выдачи, будучи на вкладке «Приход» —
+    // после закрытия лента молча переключалась на «Выдачу», а смена сегмента посреди правки
+    // меняла то, куда уйдёт сохраняемый батч.
+    @State private var formMode: String
+
+    init(m: StashModel, editBatch: [Movement]? = nil) {
+        self.m = m
+        self.editBatch = editBatch
+        _formMode = State(initialValue: editBatch?.first?.type ?? m.movMode)
+    }
 
     private var isEditing: Bool { editBatch != nil }
     // Есть введённые данные → свайп вниз не должен молча их стирать (см. случай, когда
@@ -1076,14 +1245,17 @@ private struct AddMovementSheet: View {
     private var isDirty: Bool {
         !reason.trimmingCharacters(in: .whitespaces).isEmpty
             || !venueGrams.isEmpty
-            || !picks.values.contains { !$0.isEmpty }
-            || rows.contains { !$0.brand.isEmpty || !$0.flavor.isEmpty || !$0.grams.isEmpty }
+            // Было `!picks.values.contains{...}` — инвертировано: считало «грязным» пустой
+            // пикер и «чистым» после реального выбора со склада. Свайп вниз на нетронутом
+            // листе спрашивал «отменить изменения?» без единой введённой цифры.
+            || picks.values.contains { !$0.isEmpty }
+            || groups.contains { g in !g.brand.isEmpty || g.lines.contains { !$0.flavor.isEmpty || !$0.grams.isEmpty } }
     }
     private func requestClose() {
         if isDirty { confirmDiscard = true } else { dismiss() }
     }
     private var totalLabel: String {
-        switch m.movMode {
+        switch formMode {
         case "in":  return t("st.totalIn")
         case "out": return t("st.totalOut")
         default:    return t("st.totalWriteoff")
@@ -1093,7 +1265,7 @@ private struct AddMovementSheet: View {
     // Источник для «Из склада», сгруппирован по брендам: для прихода — все известные,
     // для выдачи/списания — только то, что есть в наличии (брать можно лишь имеющееся).
     private var pickGroups: [(String, [StockItem])] {
-        let base = m.movMode == "in" ? m.stock : m.inStock
+        let base = formMode == "in" ? m.stock : m.inStock
         var g: [String: [StockItem]] = [:]
         for s in base where !s.brand.isEmpty { g[s.brand, default: []].append(s) }
         return g.map { ($0.key, $0.value.sorted { $0.flavor < $1.flavor }) }
@@ -1128,51 +1300,81 @@ private struct AddMovementSheet: View {
         .padding(12).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
     }
 
+    // Строки одной карточки в flat [MovRow] — так их понимает saveMovement/prepareRows
+    // (пустые вкус/граммы там же и отфильтруются).
+    private func flattenGroups() -> [StashModel.MovRow] {
+        groups.flatMap { g in g.lines.map { StashModel.MovRow(brand: g.brand, flavor: $0.flavor, grams: $0.grams) } }
+    }
+    /// Группирует плоский список строк по бренду (первое появление задаёт порядок карточек).
+    /// Используется при входе в правку существующего батча и при AI-префилле.
+    private func groupByBrand(_ rows: [StashModel.MovRow]) -> [MovGroup] {
+        var order: [String] = []
+        var byBrand: [String: [MovLine]] = [:]
+        for r in rows {
+            if byBrand[r.brand] == nil { order.append(r.brand) }
+            byBrand[r.brand, default: []].append(MovLine(flavor: r.flavor, grams: r.grams))
+        }
+        let result = order.map { MovGroup(brand: $0, lines: byBrand[$0] ?? [MovLine()]) }
+        return result.isEmpty ? [MovGroup()] : result
+    }
+
     private func commit() async {
-        if m.movMode == "writeoff" && writeoffVenue {
+        if formMode == "writeoff" && writeoffVenue {
             let ok = isEditing
                 ? await m.replaceVenueWriteoff(editBatch!, grams: venueGrams, reason: reason)
                 : await m.saveVenueWriteoff(grams: venueGrams, reason: reason)
             if ok { dismiss() }
         } else {
-            let toSave = fromStock ? pickedRows() : rows
+            let toSave = fromStock ? pickedRows() : flattenGroups()
             let ok = isEditing
-                ? await m.replaceMovementBatch(editBatch!, rows: toSave, reason: reason)
-                : await m.saveMovement(toSave, reason: reason)
+                ? await m.replaceMovementBatch(editBatch!, rows: toSave, reason: reason, mode: formMode)
+                : await m.saveMovement(toSave, reason: reason, mode: formMode)
             if ok { dismiss() }
         }
     }
 
     private func primeForEdit(_ batch: [Movement]) {
-        m.movMode = batch.first?.type ?? "in"
         reason = batch.first?.reason ?? ""
         if batch.allSatisfy({ $0.brand.isEmpty && $0.flavor.isEmpty }) {
             writeoffVenue = true
             venueGrams = String(Int(batch.reduce(0) { $0 + $1.quantity_g }))
         } else {
             fromStock = false
-            rows = batch.map { StashModel.MovRow(brand: $0.brand, flavor: $0.flavor, grams: String(Int($0.quantity_g))) }
+            groups = groupByBrand(batch.map { StashModel.MovRow(brand: $0.brand, flavor: $0.flavor, grams: String(Int($0.quantity_g))) })
+        }
+    }
+
+    // Тост модели рисуется в StashBody, под этим листом — ошибки saveMovement/
+    // saveVenueWriteoff (нет на складе, не хватает причины и т.д.) были не видны
+    // пользователю. Дублируем его здесь поверх контента листа.
+    @ViewBuilder private var toastOverlay: some View {
+        if let toast = m.toast {
+            Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
+                .padding(.horizontal, 18).padding(.vertical, 12)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.bottom, 24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .bottom) {
                 Color.miseBg.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 12) {
-                        Picker("", selection: $m.movMode) {
+                        Picker("", selection: $formMode) {
                             Text(t("st.in")).tag("in"); Text(t("st.out")).tag("out"); Text(t("st.writeoff")).tag("writeoff")
                         }.pickerStyle(.segmented)
 
                         // Списание: со склада (бренд/вкус) или с заведения (только вес общего объёма зала).
-                        if m.movMode == "writeoff" {
+                        if formMode == "writeoff" {
                             Picker("", selection: $writeoffVenue) {
                                 Text(t("st.fromWarehouse")).tag(false); Text(t("st.fromVenue")).tag(true)
                             }.pickerStyle(.segmented)
                         }
 
-                        if writeoffVenue && m.movMode == "writeoff" {
+                        if writeoffVenue && formMode == "writeoff" {
                             venueWriteoffField
                         } else {
                             Picker("", selection: $fromStock) {
@@ -1182,14 +1384,16 @@ private struct AddMovementSheet: View {
                             if fromStock { stockPicker } else { manualRows }
                         }
 
-                        if m.movMode == "writeoff" {
+                        if formMode == "writeoff" {
                             TextField(t("st.writeoffReasonField"), text: $reason).textFieldStyle(.plain)
                                 .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.primary)
                         }
                     }
                     .padding(16)
                 }
+                toastOverlay
             }
+            .animation(.easeInOut(duration: 0.2), value: m.toast)
             .navigationTitle(isEditing ? t("st.editMovement") : t("st.movement")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { requestClose() } }
@@ -1203,55 +1407,75 @@ private struct AddMovementSheet: View {
                 Button(t("discard.confirm"), role: .destructive) { dismiss() }
                 Button(t("cancel"), role: .cancel) {}
             } message: { Text(t("discard.msg")) }
-            .onChange(of: m.movMode) { _, mode in if mode != "writeoff" { writeoffVenue = false } }
+            .onChange(of: formMode) { _, mode in if mode != "writeoff" { writeoffVenue = false } }
             .onAppear {
                 guard !primed else { return }
                 primed = true
                 if let batch = editBatch {
                     primeForEdit(batch)
                 } else if let pre = m.aiMovRows, !pre.isEmpty {
-                    rows = pre; fromStock = false; m.aiMovRows = nil
+                    groups = groupByBrand(pre); fromStock = false; m.aiMovRows = nil
                 } else {
-                    fromStock = m.movMode != "in"   // выдача/списание — со склада по умолчанию
+                    fromStock = formMode != "in"   // выдача/списание — со склада по умолчанию
                 }
             }
         }
     }
 
-    // Ручной ввод бренд/вкус/граммы со подсказками (исходный режим).
+    // Ручной ввод: карточка на бренд, внутри — строки вкус+граммы. Бренд печатается один
+    // раз на карточку, а не на каждую строку — при поставке из N вкусов одного бренда
+    // не нужно перепечатывать название N раз.
     @ViewBuilder private var manualRows: some View {
-        ForEach($rows) { $row in
-            let outOnly = m.movMode != "in"
-            let avail = m.stockOf(row.brand, row.flavor)
+        let outOnly = formMode != "in"
+        ForEach($groups) { $group in
             VStack(spacing: 8) {
-                if rows.count > 1 {
-                    HStack {
-                        Spacer()
-                        Button { rows.removeAll { $0.id == row.id } } label: {
+                HStack {
+                    AutoField(placeholder: t("st.brand"), text: $group.brand,
+                              suggestions: m.brandSuggestions(outOnly),
+                              // Смена бренда — сбрасываем вкусы строк: подсказки вкуса зависят
+                              // от бренда, старый вкус мог не существовать у нового.
+                              onPick: { for i in group.lines.indices { group.lines[i].flavor = "" } })
+                    if groups.count > 1 {
+                        Button { groups.removeAll { $0.id == group.id } } label: {
                             Image(systemName: "xmark.circle.fill").font(.system(size: 16)).foregroundStyle(.primary.opacity(0.3))
                         }.buttonStyle(.plain)
                     }
                 }
-                AutoField(placeholder: t("st.brand"), text: $row.brand,
-                          suggestions: m.brandSuggestions(outOnly),
-                          onPick: { row.flavor = "" })
-                AutoField(placeholder: t("st.flavor"), text: $row.flavor,
-                          suggestions: m.flavorsForBrand(row.brand, outOnly: outOnly),
-                          disabled: outOnly && row.brand.trimmingCharacters(in: .whitespaces).isEmpty)
-                TextField(t("st.grams"), text: $row.grams).keyboardType(.numberPad)
-                    .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.primary)
-                if let a = avail, !row.flavor.isEmpty {
-                    HStack {
-                        Text("\(t("st.available")): \(grams(a.quantity_g))")
-                            .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
-                        Spacer()
+                ForEach($group.lines) { $line in
+                    let avail = m.stockOf(group.brand, line.flavor)
+                    VStack(spacing: 6) {
+                        HStack(spacing: 8) {
+                            AutoField(placeholder: t("st.flavor"), text: $line.flavor,
+                                      suggestions: m.flavorsForBrand(group.brand, outOnly: outOnly),
+                                      disabled: outOnly && group.brand.trimmingCharacters(in: .whitespaces).isEmpty)
+                            TextField(t("st.grams"), text: $line.grams).keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+                                .foregroundStyle(.primary)
+                                .frame(width: 88)
+                            if group.lines.count > 1 {
+                                Button { group.lines.removeAll { $0.id == line.id } } label: {
+                                    Image(systemName: "xmark.circle.fill").font(.system(size: 15)).foregroundStyle(.primary.opacity(0.3))
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                        if let a = avail, !line.flavor.isEmpty {
+                            HStack {
+                                Text("\(t("st.available")): \(grams(a.quantity_g))")
+                                    .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
+                                Spacer()
+                            }
+                        }
                     }
+                }
+                Button { group.lines.append(MovLine()) } label: {
+                    Label(t("st.addFlavor"), systemImage: "plus").font(.system(size: 13, weight: .medium)).foregroundStyle(BrandKit.stash)
                 }
             }
             .padding(12).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
         }
-        Button { rows.append(.init()) } label: {
-            Label(t("st.moreRow"), systemImage: "plus").font(.system(size: 14, weight: .medium)).foregroundStyle(BrandKit.stash)
+        Button { groups.append(MovGroup()) } label: {
+            Label(t("st.addBrand"), systemImage: "plus").font(.system(size: 14, weight: .medium)).foregroundStyle(BrandKit.stash)
         }
     }
 
@@ -1305,16 +1529,27 @@ private struct AddInventorySheet: View {
     @State private var confirmDiscard = false
 
     private var items: [StockItem] {
-        m.stock.sorted { "\($0.brand)\($0.flavor)" < "\($1.brand)\($1.flavor)" }
+        // Только позиции с остатком — нулевые нечего пересчитывать (так и на вебе).
+        m.stock.filter { $0.quantity_g > 0 }.sorted { "\($0.brand)\($0.flavor)" < "\($1.brand)\($1.flavor)" }
     }
     private var isDirty: Bool { actuals.values.contains { !$0.isEmpty } }
     private func requestClose() {
         if isDirty { confirmDiscard = true } else { dismiss() }
     }
 
+    @ViewBuilder private var toastOverlay: some View {
+        if let toast = m.toast {
+            Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
+                .padding(.horizontal, 18).padding(.vertical, 12)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.bottom, 24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .bottom) {
                 Color.miseBg.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 10) {
@@ -1343,7 +1578,9 @@ private struct AddInventorySheet: View {
                     }
                     .padding(16)
                 }
+                toastOverlay
             }
+            .animation(.easeInOut(duration: 0.2), value: m.toast)
             .navigationTitle(t("st.doInventory")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { requestClose() } }

@@ -10,8 +10,17 @@ func parseISO(_ s: String?) -> Date? {
     iso.formatOptions = [.withInternetDateTime]
     if let d = iso.date(from: s) { return d }
     let df = DateFormatter(); df.locale = Locale(identifier: "en_US_POSIX")
-    for fmt in ["yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXXXX", "yyyy-MM-dd'T'HH:mm:ssXXXXX",
-                "yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd"] {
+    for fmt in ["yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXXXX", "yyyy-MM-dd'T'HH:mm:ssXXXXX"] {
+        df.dateFormat = fmt
+        if let d = df.date(from: s) { return d }
+    }
+    // Строка без смещения — это Postgres "timestamp without time zone" (created_at = now(),
+    // сессия сервера в UTC), а не локальное время. Раньше DateFormatter парсил такую строку
+    // в ТЕКУЩЕЙ таймзоне устройства — движение, сохранённое в 14:00 UTC, показывалось как
+    // «14:00» вместо верных 16:00 в Цюрихе (UTC+2), а рядом с полуночью дата целиком уезжала
+    // на соседний день. Явно фиксируем UTC для этих форматов.
+    df.timeZone = TimeZone(identifier: "UTC")
+    for fmt in ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd"] {
         df.dateFormat = fmt
         if let d = df.date(from: s) { return d }
     }

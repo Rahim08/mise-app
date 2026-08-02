@@ -36,7 +36,7 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   tobacco_movements:    { read: ['stash', 'analytics'], write: ['stash'] },
   hookah_sales:         { read: ['stash', 'analytics'], write: ['stash'] }, // смена кальянщика
   hookah_types:         { read: ['stash', 'analytics'], write: [] },        // виды кальянов — правит владелец
-  hookah_goals:         { read: ['stash', 'analytics'], write: ['analytics'] }, // KPI-цели по кальянам; постановку гейтит UI на должностных лиц
+  hookah_goals:         { read: ['stash', 'analytics'], write: ['stash', 'analytics'] }, // KPI-цели по кальянам; постановку гейтит UI на должностных лиц. StashModel.saveGoal/deleteGoal зовутся из Stash (ShiftTab) — без 'stash' здесь сотрудник с доступом только к Stash получал молчаливый 403 (try? глотал ошибку)
   tobacco_flavors:      { read: ['stash'], write: ['stash'] },
   tobacco_inventories:  { read: ['stash'], write: ['stash'] },
   menus:                { read: ['people'], write: [] }, // multi-menu; owner always, people reads menu

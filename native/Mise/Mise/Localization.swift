@@ -376,6 +376,8 @@ let STRINGS: [String: [Lang: String]] = [
     "st.grams":         tr("Grams", "Граммы", "Grammi", "Grammes", "Qram", "Gram", "Грами", "Грамм"),
     "st.available":     tr("Available", "Доступно", "Disponibile", "Disponible", "Mövcud", "Mevcut", "Доступно", "Қолжетімді"),
     "st.moreRow":       tr("One more row", "Ещё строка", "Altra riga", "Une ligne de plus", "Daha bir sətir", "Bir satır daha", "Ще рядок", "Тағы жол"),
+    "st.addFlavor":     tr("Add flavor", "Ещё вкус", "Aggiungi gusto", "Ajouter une saveur", "Dad əlavə et", "Aroma ekle", "Додати смак", "Дәм қосу"),
+    "st.addBrand":      tr("Add brand", "Ещё бренд", "Aggiungi marca", "Ajouter une marque", "Marka əlavə et", "Marka ekle", "Додати бренд", "Бренд қосу"),
     "st.writeoffReasonField": tr("Write-off reason", "Причина списания", "Motivo dello scarico", "Motif de la radiation", "Silinmə səbəbi", "Düşüm nedeni", "Причина списання", "Есептен шығару себебі"),
     "st.movement":      tr("Movement", "Движение", "Movimento", "Mouvement", "Hərəkət", "Hareket", "Рух", "Қозғалыс"),
     "st.manual":        tr("Manual", "Вручную", "Manuale", "Manuel", "Əl ilə", "Elle", "Вручну", "Қолмен"),
