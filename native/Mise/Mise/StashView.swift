@@ -7,6 +7,11 @@ private func grams(_ g: Double) -> String {
     let f = NumberFormatter(); f.numberStyle = .decimal; f.groupingSeparator = " "; f.maximumFractionDigits = 0
     return (f.string(from: NSNumber(value: g)) ?? "0") + " г"
 }
+// .numberPad клавиатура не даёт своей кнопки «Готово» (в отличие от обычной), и тап мимо
+// поля её не закрывал вообще — юзер-репорт 2026-08-05 (Движение/Инвентаризация, поле граммов).
+private func hideKeyboard() {
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+}
 // eur() — общий модульный хелпер в PeopleView.swift (после распила Д2 стал internal).
 private func i(_ s: String) -> Int { Int(s.filter(\.isNumber)) ?? 0 }
 
@@ -1390,7 +1395,10 @@ private struct AddMovementSheet: View {
                         }
                     }
                     .padding(16)
+                    .contentShape(Rectangle())
+                    .onTapGesture { hideKeyboard() }
                 }
+                .scrollDismissesKeyboard(.immediately)
                 toastOverlay
             }
             .animation(.easeInOut(duration: 0.2), value: m.toast)
@@ -1400,6 +1408,7 @@ private struct AddMovementSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(t("save")) { Task { await commit() } }.disabled(m.saving)
                 }
+                ToolbarItemGroup(placement: .keyboard) { Spacer(); Button(t("done")) { hideKeyboard() } }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
             .interactiveDismissDisabled(isDirty)
@@ -1577,7 +1586,10 @@ private struct AddInventorySheet: View {
                         }
                     }
                     .padding(16)
+                    .contentShape(Rectangle())
+                    .onTapGesture { hideKeyboard() }
                 }
+                .scrollDismissesKeyboard(.immediately)
                 toastOverlay
             }
             .animation(.easeInOut(duration: 0.2), value: m.toast)
@@ -1598,6 +1610,7 @@ private struct AddInventorySheet: View {
                         }
                     }.disabled(m.saving)
                 }
+                ToolbarItemGroup(placement: .keyboard) { Spacer(); Button(t("done")) { hideKeyboard() } }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
             .interactiveDismissDisabled(isDirty)
