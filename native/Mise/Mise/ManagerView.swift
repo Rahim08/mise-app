@@ -267,11 +267,15 @@ final class ManagerModel {
         guard let sh = shift else { return }
         let dateStr = key(currentDate)
         if absences.contains(empId) {
-            try? await DB.from("shift_absences").delete().eq("date", dateStr).eq("employee_id", empId).run()
+            do {
+                try await DB.from("shift_absences").delete().eq("date", dateStr).eq("employee_id", empId).run()
+            } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
             absences.remove(empId)
         } else {
-            try? await DB.from("shift_absences")
-                .insert(["shift_id": sh.id, "restaurant_id": rid, "employee_id": empId, "date": dateStr]).run()
+            do {
+                try await DB.from("shift_absences")
+                    .insert(["shift_id": sh.id, "restaurant_id": rid, "employee_id": empId, "date": dateStr]).run()
+            } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
             absences.insert(empId)
         }
         autoAbsences.remove(empId)

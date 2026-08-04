@@ -128,12 +128,22 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const loadDay = async (rid: string, date: Date, emps: Employee[], cats: Category[]) => {
     setLoading(true)
     const dateStr = fmtDate(date)
-    // Resilient to duplicate (restaurant_id, date) rows: take one instead of erroring on maybeSingle.
-    const { data: shList } = await db.from('shifts').select('*').eq('restaurant_id', rid).eq('date', dateStr).order('opened_at', { ascending: true }).limit(1)
-    const sh = (Array.isArray(shList) ? shList[0] : shList) || null
-    // Last shift strictly before today — not exactly "yesterday", so a skipped day
-    // (closed Monday, forgot to open a shift, holiday) doesn't silently zero the balance.
-    const { data: prevList } = await db.from('shifts').select('closing_balance').eq('restaurant_id', rid).lt('date', dateStr).order('date', { ascending: false }).order('opened_at', { ascending: false }).limit(1)
+    // shList/prevList/absences не зависят друг от друга — грузим параллельно (было
+    // последовательно, на 2-3 round-trip'а медленнее на каждое переключение дня без причины,
+    // ManagerView.swift делает то же самое параллельно, аудит 2026-08-04).
+    const [{ data: shList }, { data: prevList }] = await Promise.all([
+      // Resilient to duplicate (restaurant_id, date) rows (до миграции shifts-dedup.sql): среди
+      // дублей берём смену с наибольшей активностью (income/total_expense/inkassation), а не
+      // первую по opened_at — иначе пустой дубль-заглушка мог показаться вместо реальной смены
+      // с данными (портировано из ManagerView.swift, аудит 2026-08-04).
+      db.from('shifts').select('*').eq('restaurant_id', rid).eq('date', dateStr).order('opened_at', { ascending: true }),
+      // Last shift strictly before today — not exactly "yesterday", so a skipped day
+      // (closed Monday, forgot to open a shift, holiday) doesn't silently zero the balance.
+      db.from('shifts').select('closing_balance').eq('restaurant_id', rid).lt('date', dateStr).order('date', { ascending: false }).order('opened_at', { ascending: false }).limit(1),
+      loadAbsencesByDate(rid, dateStr),
+    ])
+    const activity = (s: any) => (s.income || 0) + (s.total_expense || 0) + (s.inkassation || 0)
+    const sh = (shList || []).reduce((best: any, cur: any) => (!best || activity(cur) > activity(best)) ? cur : best, null)
     const openingBalance = (Array.isArray(prevList) ? prevList[0] : prevList)?.closing_balance || 0
 
     if (sh) {
@@ -143,7 +153,10 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       setIncome(sh.income > 0 ? String(sh.income) : '')
       setIncomeCard(sh.income_card > 0 ? String(sh.income_card) : '')
       setInkSum(sh.inkassation > 0 ? String(sh.inkassation) : '')
-      const { data: exps } = await db.from('shift_expenses').select('*').eq('shift_id', sh.id)
+      const [{ data: exps }, { data: inkList }] = await Promise.all([
+        db.from('shift_expenses').select('*').eq('shift_id', sh.id),
+        db.from('inkassations').select('*').eq('shift_id', sh.id).limit(1),
+      ])
       const amounts: Record<string, string> = {}; const notes: Record<string, string> = {}
       const extras: Record<string, string> = {}
       ;(exps || []).forEach((e: any) => {
@@ -151,8 +164,6 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
         else if (e.category_id) { amounts[e.category_id] = String(e.amount); if (e.note) notes[e.category_id] = e.note }
       })
       setCatAmounts(amounts); setCatNotes(notes); setEmpExtras(extras)
-      await loadAbsencesByDate(rid, dateStr)
-      const { data: inkList } = await db.from('inkassations').select('*').eq('shift_id', sh.id).limit(1)
       const ink = Array.isArray(inkList) ? inkList[0] : inkList
       if (ink) {
         setInkExpense(ink.expense > 0 ? String(ink.expense) : ''); setInkReason(ink.reason || '')
@@ -160,14 +171,18 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       } else { setInkExpense(''); setInkReason(''); setInkSalary(''); setInkSalaryNote('') }
     } else {
       setShift(null); setLocked(false); setIncome(''); setIncomeCard(''); setInkSum(''); setInkExpense(''); setInkReason(''); setInkSalary(''); setInkSalaryNote('')
-      setCatAmounts({}); setCatNotes({}); setAbsences([]); setAutoAbsences(new Set()); setEmpExtras({})
+      setCatAmounts({}); setCatNotes({}); setEmpExtras({})
     }
     setLoading(false)
   }
 
   const changeDate = async (dir: number) => {
-    // Auto-save the current day before leaving so nothing entered is lost.
-    if (shift && !locked) { try { await persistShift() } catch (e: any) { showToast(tr('mg.autosaveErr') + ': ' + (e?.message || '')) } }
+    // Auto-save the current day before leaving so nothing entered is lost. Раньше при сбое
+    // showToast показывал ошибку, но день всё равно переключался — несохранённый ввод
+    // терялся (iOS в этом случае остаётся на текущей дате). Теперь так же не уходим дальше.
+    if (shift && !locked) {
+      try { await persistShift() } catch (e: any) { showToast(tr('mg.autosaveErr') + ': ' + (e?.message || '')); return }
+    }
     const d = new Date(currentDate); d.setDate(d.getDate() + dir)
     setCurrentDate(d)
     await loadDay(restaurantId, d, employees, categories)
@@ -208,11 +223,13 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     const dateStr = fmtDate(currentDate)
     if (absences.includes(empId)) {
       // ключ по дате — чтобы можно было снять и авто-прогул (у него может не быть shift_id)
-      await db.from('shift_absences').delete().eq('restaurant_id', restaurantId).eq('date', dateStr).eq('employee_id', empId)
+      const { error } = await db.from('shift_absences').delete().eq('restaurant_id', restaurantId).eq('date', dateStr).eq('employee_id', empId)
+      if (error) { showToast(tr('dash.notSaved') + error.message); return }
       setAbsences(absences.filter(id => id !== empId))
     } else {
       // ручная отметка менеджера → source по умолчанию 'manager' (учитывается в ЗП сразу)
-      await db.from('shift_absences').insert({ shift_id: shift.id, restaurant_id: restaurantId, employee_id: empId, date: dateStr })
+      const { error } = await db.from('shift_absences').insert({ shift_id: shift.id, restaurant_id: restaurantId, employee_id: empId, date: dateStr })
+      if (error) { showToast(tr('dash.notSaved') + error.message); return }
       setAbsences([...absences, empId])
     }
     // явное действие менеджера снимает «черновик»-маркер
@@ -234,8 +251,12 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   }
 
   // Core DB write — used by explicit save AND auto-save on day switch.
-  // Rebuilds expense rows from scratch (delete+insert) so nothing duplicates and
-  // everything reloads exactly as entered.
+  // Rebuilds expense/inkassation rows from scratch — insert-новых→delete-старых-по-id (не
+  // delete-then-insert): раньше обрыв сети МЕЖДУ delete и insert молча стирал все расходы/
+  // инкассацию смены. Порт фикса из ManagerView.swift (persistExpenses/persistInkassation,
+  // audit-2026-07-12) — применялся раньше только к iOS, веб оставался уязвим (аудит 2026-08-04).
+  // Если теперь упадёт финальный delete — видимые дубли, следующее успешное сохранение само
+  // подчистит (старые id уже собраны).
   const persistShift = async (sh = shift, dateForInk = currentDate) => {
     if (!sh) return
     const { inc, card, ink, totalExp, balance, salary, inkNet } = calc()
@@ -243,8 +264,9 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     // (например, если миграция features-2026-06 не применена и колонки income_card нет).
     const { error: upErr } = await db.from('shifts').update({ income: inc, income_card: card, inkassation: ink, total_expense: totalExp, closing_balance: balance }).eq('id', sh.id)
     if (upErr) throw new Error(upErr.message)
-    // Replace ALL expense lines (categories + employee extras) for this shift.
-    await db.from('shift_expenses').delete().eq('shift_id', sh.id)
+
+    const { data: oldExpenses, error: oldExpErr } = await db.from('shift_expenses').select('id').eq('shift_id', sh.id)
+    if (oldExpErr) throw new Error(oldExpErr.message)
     const inserts: any[] = []
     categories.forEach(c => {
       const amt = parseFloat(catAmounts[c.id] || '0')
@@ -254,16 +276,25 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       const extra = parseFloat(empExtras[emp.id] || '0')
       if (extra > 0) inserts.push({ shift_id: sh.id, restaurant_id: restaurantId, employee_id: emp.id, category_name: emp.name + ' (экстра)', amount: extra })
     })
-    if (inserts.length > 0) await db.from('shift_expenses').insert(inserts)
-    // Inkassation extra/reason — single row per shift (delete+insert, no upsert constraint needed).
-    await db.from('inkassations').delete().eq('shift_id', sh.id)
+    if (inserts.length > 0) {
+      const { error: insErr } = await db.from('shift_expenses').insert(inserts)
+      if (insErr) throw new Error(insErr.message)
+    }
+    if ((oldExpenses || []).length > 0) await db.from('shift_expenses').delete().in('id', (oldExpenses || []).map((e: any) => e.id))
+
+    // Inkassation extra/reason — single row per shift.
+    const { data: oldInk, error: oldInkErr } = await db.from('inkassations').select('id').eq('shift_id', sh.id)
+    if (oldInkErr) throw new Error(oldInkErr.message)
     if (ink > 0 || inkExpense || inkReason || salary > 0 || inkSalaryNote) {
-      await db.from('inkassations').insert({
+      const { error: inkInsErr } = await db.from('inkassations').insert({
         shift_id: sh.id, restaurant_id: restaurantId, date: fmtDate(dateForInk),
         amount: ink, expense: parseFloat(inkExpense) || 0, reason: inkReason,
         salary, salary_note: inkSalaryNote || null, total: inkNet
       })
+      if (inkInsErr) throw new Error(inkInsErr.message)
     }
+    if ((oldInk || []).length > 0) await db.from('inkassations').delete().in('id', (oldInk || []).map((r: any) => r.id))
+
     // Подтверждаем прогулы этого дня: привязываем к смене и снимаем «черновик» (source→manager),
     // только теперь авто-прогулы попадают в вычет ЗП в Аналитике. До миграции колонки source нет —
     // db.from вернёт ошибку молча (не бросит), что безвредно: авто-прогулов до миграции не бывает.
