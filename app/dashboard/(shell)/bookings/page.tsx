@@ -4,7 +4,7 @@
 // и GuestsView.swift на web-owner-дашборд. Права: создать/видеть — любой сотрудник (на iOS);
 // на owner-дашборде caller.owner всегда true в /api/db, так что здесь редактирование не гейтится
 // по автору — только по тарифу (entitlements 'bookings' — сайдбар гейтит сам вход на страницу).
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { db } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
@@ -13,6 +13,7 @@ import {
   Table, StatTile, type TableColumn, type Tone,
 } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
+import { notify as pushNotify } from '@/lib/notifyClient'
 
 type Booking = {
   id: string; booking_date: string; booking_time?: string | null
@@ -33,9 +34,12 @@ const bkBucket = (s?: string | null): 'new' | 'arrived' | 'cancelled' =>
 const statusOf = (s?: string | null) => STATUS[bkBucket(s)]
 
 // Тот же ключ гостя, что в iOS GuestsView.swift: цифры телефона, иначе lowercase-имя.
+// Последние 9 цифр (не весь номер) — иначе один и тот же гость, введённый один раз как
+// «079…» (местный формат) и второй раз как «+4179…» (международный), давал два разных
+// ключа и его история/визиты рассыпались на два профиля.
 function guestKey(b: Booking): string | null {
   const digits = (b.phone || '').replace(/\D/g, '')
-  if (digits) return digits
+  if (digits) return digits.slice(-9)
   const name = (b.guest_name || '').trim().toLowerCase()
   return name || null
 }
@@ -117,19 +121,45 @@ export default function BookingsPage() {
       booking_time: form.booking_time || null, table_label: form.table_label || null,
       note: form.note || null, status: form.status || 'new', // status NOT NULL DEFAULT 'new' в БД — не отправлять null
     }
+    // Раньше ошибка сети/сервера тут не проверялась вообще — форма закрывалась, будто всё
+    // сохранилось, а данные молча терялись (юзер узнавал об этом только по расхождению
+    // при следующей загрузке). Теперь форма остаётся открытой, юзер видит ошибку и не теряет ввод.
+    const { error } = selectedId === 'new'
+      ? await db.from('bookings').insert(values)
+      : selectedId
+        ? await db.from('bookings').update({ ...values, updated_at: new Date().toISOString() }).eq('id', selectedId)
+        : { error: null }
+    setSaving(false)
+    if (error) { alert(tr('dash.notSaved') + error.message); return }
+    // Пуш другим менеджерам о новой брони — на iOS это уже было (BookingsView.save), на
+    // веб-дашборде отсутствовало вообще (владелец создаёт бронь, а другие менеджеры о ней
+    // не узнают, кроме как открыв Брони руками).
     if (selectedId === 'new') {
-      await db.from('bookings').insert(values)
-    } else if (selectedId) {
-      await db.from('bookings').update({ ...values, updated_at: new Date().toISOString() }).eq('id', selectedId)
+      const segs: { key?: string; value: string }[] = []
+      if (values.guest_name) segs.push({ value: values.guest_name })
+      if (values.guests_count) segs.push({ value: String(values.guests_count) })
+      if (values.booking_time) segs.push({ value: values.booking_time })
+      if (values.table_label) segs.push({ key: 'notify.bookingTable', value: values.table_label })
+      if (values.booking_date !== dateKey(new Date())) segs.push({ value: values.booking_date })
+      pushNotify({
+        type: 'booking', title: tr('bk.newBooking'), titleKey: 'notify.bookingTitle',
+        body: segs.map(s => s.value).join(' · ') || tr('bk.newBooking'),
+        bodySegments: segs.length ? segs : undefined,
+        audience: { managers: true },
+        data: { module: 'bookings', booking_date: values.booking_date },
+      })
     }
-    setSaving(false); setSelectedId(null)
+    setSelectedId(null)
+    allBookingsDirty.current = true
     await Promise.all([loadDay(selectedDate), loadMonth(visibleMonth)])
   }
 
   const removeBooking = async () => {
     if (!selectedId || selectedId === 'new') return
-    await db.from('bookings').delete().eq('id', selectedId)
+    const { error } = await db.from('bookings').delete().eq('id', selectedId)
+    if (error) { alert(tr('dash.notSaved') + error.message); return }
     setSelectedId(null); setDeleteConfirm(false)
+    allBookingsDirty.current = true
     await Promise.all([loadDay(selectedDate), loadMonth(visibleMonth)])
   }
 
@@ -144,19 +174,25 @@ export default function BookingsPage() {
   type GuestProfile = { note: string; last_name: string; email: string; birthday: string }
   const blankProfile: GuestProfile = { note: '', last_name: '', email: '', birthday: '' }
   const [allBookings, setAllBookings] = useState<Booking[] | null>(null)
+  // Раньше грузилось один раз за жизнь страницы (гейт allBookings !== null) и никогда не
+  // инвалидировалось после create/edit/delete на вкладке «Брони» — на вкладке «Гости» висела
+  // устаревшая история/счётчик визитов до полной перезагрузки страницы. iOS-версия это уже
+  // чинит сбросом флага при save/delete — здесь его не было вообще.
+  const allBookingsDirty = useRef(false)
   const [guestNotes, setGuestNotes] = useState<Record<string, GuestProfile>>({})
   const [selectedGuestKey, setSelectedGuestKey] = useState<string | null>(null)
   const [profileDraft, setProfileDraft] = useState<GuestProfile>(blankProfile)
   const [noteSaving, setNoteSaving] = useState(false)
 
   useEffect(() => {
-    if (tab !== 'guests' || allBookings !== null || !restaurantId) return
+    if (tab !== 'guests' || (allBookings !== null && !allBookingsDirty.current) || !restaurantId) return
     ;(async () => {
       const yearAgo = new Date(); yearAgo.setMonth(yearAgo.getMonth() - 12)
       const [{ data: bks }, { data: notes }] = await Promise.all([
         db.from('bookings').select('*').eq('restaurant_id', restaurantId).gte('booking_date', dateKey(yearAgo)).order('booking_date', { ascending: false }),
         db.from('guest_notes').select('guest_key, note, last_name, email, birthday').eq('restaurant_id', restaurantId),
       ])
+      allBookingsDirty.current = false
       setAllBookings(bks || [])
       const nm: Record<string, GuestProfile> = {}
       ;(notes || []).forEach((n: any) => {
@@ -195,7 +231,7 @@ export default function BookingsPage() {
   const saveGuestNote = async () => {
     if (!selectedGuestKey) return
     setNoteSaving(true)
-    await db.from('guest_notes').upsert(
+    const { error } = await db.from('guest_notes').upsert(
       {
         restaurant_id: restaurantId, guest_key: selectedGuestKey, note: profileDraft.note,
         last_name: profileDraft.last_name || null, email: profileDraft.email || null,
@@ -203,8 +239,9 @@ export default function BookingsPage() {
       },
       { onConflict: 'restaurant_id,guest_key' },
     )
-    setGuestNotes(n => ({ ...n, [selectedGuestKey]: profileDraft }))
     setNoteSaving(false)
+    if (error) { alert(tr('dash.notSaved') + error.message); return }
+    setGuestNotes(n => ({ ...n, [selectedGuestKey]: profileDraft }))
   }
 
   // ── ОТЗЫВЫ (Google Maps, через Places API) ──

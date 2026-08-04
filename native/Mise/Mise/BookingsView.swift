@@ -370,9 +370,12 @@ struct BookingsView: View {
         }.count
     }
 
+    // Последние 9 цифр (не весь номер) — иначе один и тот же гость, введённый один раз как
+    // «079…» (местный формат) и второй раз как «+4179…» (международный), давал два разных
+    // ключа, и его история/визиты рассыпались на два профиля.
     private func guestKey(_ b: Booking) -> String {
         let phone = (b.phone ?? "").filter { $0.isNumber }
-        if !phone.isEmpty { return phone }
+        if !phone.isEmpty { return String(phone.suffix(9)) }
         return (b.guest_name ?? "").lowercased().trimmingCharacters(in: .whitespaces)
     }
 
