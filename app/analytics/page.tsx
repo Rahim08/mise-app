@@ -539,8 +539,10 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   }
 
   const loadAllHistory = async (rid: string) => {
-    const yearStart = fmtDate(new Date(new Date().getFullYear() - 1, 0, 1))
-    const { data: sh } = await db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', yearStart).order('date')
+    // Без нижней границы даты: cumulativeInkass вычитает inkDeductions ЗА ВСЁ ВРЕМЯ (тоже
+    // без границы, см. ниже) из этого gross — граница только с одной стороны занижала бы
+    // накопительный остаток, как только истории станет больше года.
+    const { data: sh } = await db.from('shifts').select('*').eq('restaurant_id', rid).order('date')
     setAllShifts(sh || [])
     if (sh && sh.length > 0) {
       const { data: ex } = await db.from('shift_expenses').select('*').in('shift_id', sh.map((s: any) => s.id))
@@ -1030,11 +1032,15 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     // месяце на payout_day). Без настройки payout_day — обычный календарный месяц.
     const cycleStart = payoutDay || 1
     const inNewCycle = now.getDate() >= cycleStart
-    const salToday = Math.round(
+    // Рамп завязан на РЕАЛЬНУЮ сегодняшнюю дату — при просмотре прошлого/будущего месяца
+    // (пикером) даёт бессмысленную цифру (% от чужого месяца по чужому дню). Прошлый
+    // закрытый месяц уже полностью начислен — 100%.
+    const isCurrentMonth = currentDate.getFullYear() === now.getFullYear() && currentDate.getMonth() === now.getMonth()
+    const salToday = isCurrentMonth ? Math.round(
       inNewCycle
         ? totalCash / dIM * (now.getDate() - cycleStart + 1)
         : prevTotalCash / prevDIM * (prevDIM - cycleStart + now.getDate() + 1)
-    )
+    ) : Math.round(totalCash)
     const diff = inkBal - salToday
 
     return (

@@ -21,6 +21,11 @@ final class AnalyticsModel {
     var loading = true
     var currentDate: Date
     var showPrevious = false // показать сравнение с прошлым месяцем
+    var toast: String?
+    func flash(_ m: String) {
+        toast = m
+        Task { try? await Task.sleep(nanoseconds: 2_400_000_000); if toast == m { toast = nil } }
+    }
 
     var includeCard = false
     var hkPrice = 0.0
@@ -149,10 +154,22 @@ final class AnalyticsModel {
         return key(end)
     }
 
-    func load() async {
+    // Кэш all-time данных (инкассация-история для cumulativeInkass, кальян-склад) — эти
+    // запросы шли БЕЗ границы даты вообще и гонялись заново на КАЖДУЮ навигацию по месяцам
+    // (каждая стрелка, каждая вкладка), хотя основа не зависит от currentDate — только verdict
+    // "на конец какого месяца" считается локально. Теперь фетчатся один раз за сессию,
+    // обновляются только явным pull-to-refresh (forceRefresh: true).
+    private var histLoaded = false
+    nonisolated struct ShiftInkRow: Codable, Sendable { let date: String; let inkassation: Double? }
+    nonisolated struct InkDeductRow: Codable, Sendable { let date: String?; let expense: Double?; let salary: Double? }
+    private var allShiftInkRows: [ShiftInkRow] = []
+    private var allInkDedRows: [InkDeductRow] = []
+
+    func load(forceRefresh: Bool = false) async {
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedDemo(); return }
         #endif
+        if forceRefresh { histLoaded = false }
         loading = true; defer { loading = false }
         let cal = Calendar.current
         let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: currentDate)) ?? currentDate
@@ -210,34 +227,40 @@ final class AnalyticsModel {
         if let adv = try? await DB.from("salary_advances").select()
             .gte("date", key(monthStart)).lte("date", key(monthEnd)).list(SalaryAdvance.self) { advances = adv }
 
-        // Инкассация копится ЧЕРЕЗ МЕСЯЦЫ (деньги заведения, не обнуляются на новый месяц):
-        // вся валовая инкассация по сменам до конца выбранного месяца минус все списания
-        // из инкассации (расход + выплаченная из неё ЗП). Берём gross из shifts (есть у каждой
-        // смены), вычеты — из inkassations (строка есть только когда были траты).
-        nonisolated struct ShiftInk: Codable, Sendable { let inkassation: Double? }
-        nonisolated struct InkDeduct: Codable, Sendable { let expense: Double?; let salary: Double? }
-        async let allShiftInk = try? DB.from("shifts").select("inkassation").lte("date", key(monthEnd)).list(ShiftInk.self)
-        async let allInkDed = try? DB.from("inkassations").select("expense, salary").lte("date", key(monthEnd)).list(InkDeduct.self)
-        let grossInk = (await allShiftInk)?.reduce(0) { $0 + ($1.inkassation ?? 0) } ?? 0
-        let dedInk = (await allInkDed)?.reduce(0) { $0 + (($1.expense ?? 0) + ($1.salary ?? 0)) } ?? 0
-        cumulativeInkass = grossInk - dedInk
-
         // Закреплённые категории расходов — показываются первыми в разбивке.
         nonisolated struct CatPin: Codable, Sendable { let name: String?; let is_pinned: Bool? }
         if let cats = try? await DB.from("expense_categories").select("name, is_pinned").list(CatPin.self) {
             pinnedCats = Set(cats.filter { $0.is_pinned == true }.compactMap { $0.name })
         }
 
-        // кальян all-time + склад
-        async let allHk = try? DB.from("hookah_sales").select("quantity, portion_g").list(HookahSale.self)
-        async let stock = try? DB.from("tobacco_stock").select("id, brand, flavor, quantity_g, min_quantity_g").list(StockItem.self)
-        async let movs = try? DB.from("tobacco_movements").select().list(Movement.self)
-        async let tps = try? DB.from("hookah_types").select("id, name").list(HookahType.self)
-        allHookah = (await allHk) ?? allHookah
-        stockRows = (await stock) ?? stockRows
-        if let mv = await movs { issuedG = mv.filter { $0.type == "out" }.reduce(0) { $0 + $1.quantity_g } }
-        stockG = stockRows.reduce(0) { $0 + $1.quantity_g }
-        types = (await tps) ?? types
+        if !histLoaded {
+            async let allShiftInk = try? DB.from("shifts").select("date, inkassation").list(ShiftInkRow.self)
+            async let allInkDed = try? DB.from("inkassations").select("date, expense, salary").list(InkDeductRow.self)
+            allShiftInkRows = (await allShiftInk) ?? allShiftInkRows
+            allInkDedRows = (await allInkDed) ?? allInkDedRows
+
+            // кальян all-time + склад — тоже не зависит от currentDate, грузим вместе с историей
+            async let allHk = try? DB.from("hookah_sales").select("quantity, portion_g").list(HookahSale.self)
+            async let stock = try? DB.from("tobacco_stock").select("id, brand, flavor, quantity_g, min_quantity_g").list(StockItem.self)
+            async let movs = try? DB.from("tobacco_movements").select().list(Movement.self)
+            async let tps = try? DB.from("hookah_types").select("id, name").list(HookahType.self)
+            allHookah = (await allHk) ?? allHookah
+            stockRows = (await stock) ?? stockRows
+            if let mv = await movs { issuedG = mv.filter { $0.type == "out" }.reduce(0) { $0 + $1.quantity_g } }
+            stockG = stockRows.reduce(0) { $0 + $1.quantity_g }
+            types = (await tps) ?? types
+            histLoaded = true
+        }
+
+        // Инкассация копится ЧЕРЕЗ МЕСЯЦЫ (деньги заведения, не обнуляются на новый месяц):
+        // вся валовая инкассация по сменам до конца выбранного месяца минус все списания
+        // из инкассации (расход + выплаченная из неё ЗП). Гросс из shiftsRaw (кэш выше),
+        // вычеты — из inkassations (строка есть только когда были траты); фильтр по
+        // monthEnd — локально, без похода в сеть на каждую смену месяца.
+        let monthEndKey = key(monthEnd)
+        let grossInk = allShiftInkRows.filter { $0.date <= monthEndKey }.reduce(0) { $0 + ($1.inkassation ?? 0) }
+        let dedInk = allInkDedRows.filter { ($0.date ?? "") <= monthEndKey }.reduce(0) { $0 + (($1.expense ?? 0) + ($1.salary ?? 0)) }
+        cumulativeInkass = grossInk - dedInk
     }
 
     func changeMonth(_ d: Int) async {
@@ -338,8 +361,11 @@ final class AnalyticsModel {
 
     func saveGoal(_ v: Double) async {
         guard v != revGoal else { return }
+        let prev = revGoal
         revGoal = v
-        try? await DB.from("restaurant_settings").update(["monthly_revenue_goal": v]).eq("restaurant_id", rid).run()
+        do {
+            try await DB.from("restaurant_settings").update(["monthly_revenue_goal": v]).eq("restaurant_id", rid).run()
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); revGoal = prev }
     }
 
     // Период: срез смен по режиму относительно ВЫБРАННОЙ даты (currentDate).
@@ -446,6 +472,10 @@ final class AnalyticsModel {
     // месяце на payout_day). Без настройки payout_day — обычный календарный месяц.
     var cycleStart: Int { payoutDay ?? 1 }
     var salToday: Double {
+        // Рамп завязан на РЕАЛЬНУЮ сегодняшнюю дату — при просмотре прошлого/будущего
+        // месяца (стрелками) даёт бессмысленную цифру (% от чужого месяца по чужому дню).
+        // Прошлый закрытый месяц уже полностью начислен — 100%.
+        guard isCurrentMonth else { return salCash }
         let today = Calendar.current.component(.day, from: Date())
         if today >= cycleStart {
             return max(0, (salCash / Double(daysInMonth) * Double(today - cycleStart + 1)).rounded())
@@ -455,16 +485,23 @@ final class AnalyticsModel {
     }
     /// Сохранить сумму «на карту» за выбранный месяц.
     func saveMonthlyCard(_ empId: String, _ amount: Double) async {
+        var saved: CardAmount?
         if let ex = cardAmounts.first(where: { $0.employee_id == empId }), let cid = ex.id {
             try? await DB.from("monthly_card_amounts").update(["card_amount": amount]).eq("id", cid).run()
+            saved = CardAmount(id: cid, employee_id: empId, card_amount: amount)
         } else {
-            try? await DB.from("monthly_card_amounts").insert([
+            // .single() возвращает реальный id вставленной строки — без него локальная запись
+            // оставалась с id=nil, второе редактирование той же карты в этой же сессии снова
+            // уходило в insert вместо update и падало на unique-constraint (restaurant_id,
+            // employee_id, month), ошибка глоталась try?, а значение молча откатывалось при
+            // следующей полной загрузке.
+            saved = try? await DB.from("monthly_card_amounts").insert([
                 "restaurant_id": rid, "employee_id": empId, "month": ymKey, "card_amount": amount,
-            ]).run()
+            ]).single(CardAmount.self)
         }
-        // локально отразить, чтобы пересчитались строки
+        guard let saved else { flash(t("bk.saveFailed")); return }
         var arr = cardAmounts.filter { $0.employee_id != empId }
-        arr.append(CardAmount(id: cardAmounts.first { $0.employee_id == empId }?.id, employee_id: empId, card_amount: amount))
+        arr.append(saved)
         cardAmounts = arr
     }
 
@@ -479,7 +516,7 @@ final class AnalyticsModel {
         guard let inserted = try? await DB.from("salary_advances").insert([
             "restaurant_id": rid, "employee_id": empId,
             "amount": amount, "date": date, "note": empName + " аванс",
-        ] as [String: Any]).single(SalaryAdvance.self) else { return }
+        ] as [String: Any]).single(SalaryAdvance.self) else { flash(t("bk.saveFailed")); return }
         advances.append(inserted)
 
         // 2. Update inkassation for the shift on that date — advance is paid from inkassated money.
@@ -516,7 +553,7 @@ final class AnalyticsModel {
         advances.removeAll { $0.id == a.id }
         do {
             try await DB.from("salary_advances").delete().eq("id", a.id).run()
-        } catch { advances.append(a); return }
+        } catch { advances.append(a); flash(t("bk.saveFailed")); return }
 
         // Reverse the inkassation expense update.
         let shift = shiftsRaw.first { $0.date == (a.date ?? "") }
@@ -928,15 +965,15 @@ private struct AnalyticsBody: View {
                 VStack(spacing: 0) {
                     monthNav
                     TabView(selection: $m.tab) {
-                        AppTabPage(refresh: { await m.load() }, scrollResetKey: m.tab) { PeriodTab(m: m, aiEnabled: aiEnabled) }
+                        AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { PeriodTab(m: m, aiEnabled: aiEnabled) }
                             .tabItem { Label(t("tab.period"), systemImage: "calendar") }.tag("period")
-                        AppTabPage(refresh: { await m.load() }, scrollResetKey: m.tab) { KassaTab(m: m) }
+                        AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { KassaTab(m: m) }
                             .tabItem { Label(t("tab.kassa"), systemImage: "banknote.fill") }.tag("kassa")
-                        AppTabPage(refresh: { await m.load() }, scrollResetKey: m.tab) { ForecastTab(m: m) }
+                        AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { ForecastTab(m: m) }
                             .tabItem { Label(t("tab.forecast"), systemImage: "chart.line.uptrend.xyaxis") }.tag("forecast")
-                        AppTabPage(refresh: { await m.load() }, scrollResetKey: m.tab) { SalaryTab(m: m) }
+                        AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { SalaryTab(m: m) }
                             .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
-                        AppTabPage(refresh: { await m.load() }, scrollResetKey: m.tab) { HookahTab(m: m) }
+                        AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { HookahTab(m: m) }
                             .tabItem { Label(t("tab.hookah"), systemImage: "flame.fill") }.tag("hookah")
                     }
                     .tint(BrandKit.analytics)
@@ -951,7 +988,15 @@ private struct AnalyticsBody: View {
             if aiEnabled {
                 AIButton(module: "analytics") { msg in await m.handleAI(msg) }
             }
+            if let toast = m.toast {
+                Text(toast).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
+                    .padding(.horizontal, 18).padding(.vertical, 12)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.bottom, 60)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
+        .animation(.easeInOut(duration: 0.2), value: m.toast)
     }
 
     private var monthNav: some View {
@@ -1236,7 +1281,10 @@ private struct SalaryTab: View {
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
         }
         .sheet(isPresented: $showAdvanceSheet) {
-            AdvanceAddSheet { amount, date in
+            let cal = Calendar.current
+            let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: m.currentDate)) ?? m.currentDate
+            let monthEnd = cal.date(byAdding: DateComponents(month: 1, day: -1), to: monthStart) ?? monthStart
+            AdvanceAddSheet(monthRange: monthStart...monthEnd) { amount, date in
                 Task { await m.addAdvance(empId: advEmpId, amount: amount, date: date) }
             }
         }
@@ -1293,10 +1341,22 @@ private struct CardInputRow: View {
 }
 
 private struct AdvanceAddSheet: View {
+    let monthRange: ClosedRange<Date>
     let onSave: (Double, String) -> Void
     @State private var amount = ""
-    @State private var date = Date()
+    @State private var date: Date
     @Environment(\.dismiss) private var dismiss
+
+    // Дефолт — реальное «сегодня», но зажатое в границы ПРОСМАТРИВАЕМОГО месяца: иначе если
+    // добавить аванс, листая Analytics на прошлый/будущий месяц, и не потрогать пикер —
+    // запись улетала под сегодняшнее число (другой месяц), инкассация списывалась со смены
+    // просматриваемого месяца, а сама запись при следующей загрузке пропадала из Зарплаты
+    // (не попадала в date-фильтр текущего просмотра) — юзер-репорт 2026-08-04.
+    init(monthRange: ClosedRange<Date>, onSave: @escaping (Double, String) -> Void) {
+        self.monthRange = monthRange
+        self.onSave = onSave
+        _date = State(initialValue: min(max(Date(), monthRange.lowerBound), monthRange.upperBound))
+    }
 
     var body: some View {
         NavigationStack {
@@ -1312,7 +1372,7 @@ private struct AdvanceAddSheet: View {
                     .padding(16)
                     .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
 
-                    DatePicker(t("an.date"), selection: $date, displayedComponents: .date)
+                    DatePicker(t("an.date"), selection: $date, in: monthRange, displayedComponents: .date)
                         .datePickerStyle(.compact).tint(BrandKit.analytics)
 
                     Spacer()
