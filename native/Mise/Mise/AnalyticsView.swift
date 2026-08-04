@@ -473,12 +473,14 @@ final class AnalyticsModel {
 
         // 1. Write to salary_advances for per-employee salary tracking.
         // If insert fails (e.g. table missing) — bail out, don't touch inkassation.
-        do {
-            try await DB.from("salary_advances").insert([
-                "restaurant_id": rid, "employee_id": empId,
-                "amount": amount, "date": date, "note": empName + " аванс",
-            ] as [String: Any]).run()
-        } catch { return }
+        // .single() returns the inserted row directly (real id) — avoids a follow-up
+        // select() that could race the fire-and-forget cache invalidation in DB.run()
+        // (DB.swift:14) and read stale cached data missing this advance.
+        guard let inserted = try? await DB.from("salary_advances").insert([
+            "restaurant_id": rid, "employee_id": empId,
+            "amount": amount, "date": date, "note": empName + " аванс",
+        ] as [String: Any]).single(SalaryAdvance.self) else { return }
+        advances.append(inserted)
 
         // 2. Update inkassation for the shift on that date — advance is paid from inkassated money.
         let shift = shiftsRaw.first { $0.date == date }
@@ -506,16 +508,15 @@ final class AnalyticsModel {
                 expense: newExpense, reason: newReason, total: newTotal,
                 salary: ink?.salary, salary_note: ink?.salary_note)
         }
-
-        // 3. Reload advances list.
-        let ym = ymKey
-        if let adv = try? await DB.from("salary_advances").select()
-            .gte("date", ym + "-01").lte("date", monthEndKey(ym)).list(SalaryAdvance.self) { advances = adv }
     }
 
     func deleteAdvance(_ a: SalaryAdvance) async {
-        try? await DB.from("salary_advances").delete().eq("id", a.id).run()
+        // Убрать локально СРАЗУ (как deleteReport/removeTask) — раньше строка висела до
+        // ответа сервера, что читалось как «удаление не показывает»/«поздно». Откат при ошибке.
         advances.removeAll { $0.id == a.id }
+        do {
+            try await DB.from("salary_advances").delete().eq("id", a.id).run()
+        } catch { advances.append(a); return }
 
         // Reverse the inkassation expense update.
         let shift = shiftsRaw.first { $0.date == (a.date ?? "") }
@@ -1175,10 +1176,6 @@ private struct SalaryTab: View {
             Text(t("an.payrollFund")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
             Text(cur(m.salTotal)).font(.system(size: 30, weight: .heavy)).foregroundStyle(BrandKit.analytics)
             HStack(spacing: 0) {
-                if m.salAdvance > 0 {
-                    miniTotal(t("an.advance"), cur(m.salAdvance), BrandKit.stash)
-                    Divider().frame(height: 30).overlay(Color.primary.opacity(0.12))
-                }
                 miniTotal(t("byCash"), cur(m.salCash), BrandKit.analytics)
                 Divider().frame(height: 30).overlay(Color.primary.opacity(0.12))
                 miniTotal(t("toCard"), cur(m.salCard), BrandKit.manager)

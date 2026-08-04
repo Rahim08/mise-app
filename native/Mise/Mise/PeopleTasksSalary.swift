@@ -488,7 +488,6 @@ struct PeopleSalaryTab: View {
     private var heroCard: some View {
         let totalCash = m.salaryRows.reduce(0) { $0 + $1.cash }
         let totalCard = m.salaryRows.reduce(0) { $0 + $1.card }
-        let totalAdv  = m.salaryRows.reduce(0) { $0 + $1.advance }
         return VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(t("an.payrollFund")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.75)).kerning(0.4)
@@ -501,10 +500,6 @@ struct PeopleSalaryTab: View {
                 heroMini(t("byCash"), eur(totalCash), .white)
                 Divider().frame(height: 28).overlay(Color.white.opacity(0.15))
                 heroMini(t("toCard"), eur(totalCard), .white.opacity(0.85))
-                if totalAdv > 0 {
-                    Divider().frame(height: 28).overlay(Color.white.opacity(0.15))
-                    heroMini(t("an.advance"), eur(totalAdv), .white.opacity(0.7))
-                }
             }
             .padding(.vertical, 10)
             if m.salaryIsCurrentMonth {
