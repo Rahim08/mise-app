@@ -1085,13 +1085,15 @@ struct ChecklistEditSheet: View {
                         saving = true
                         Task {
                             defer { saving = false }
-                            await m.saveChecklistTemplate(id: edit.listId, role: edit.role, items: edit.items,
+                            // dismiss только на успехе — раньше шторка закрывалась при сбое сети,
+                            // весь введённый шаблон терялся без возможности повторить (аудит 2026-08-04).
+                            let ok = await m.saveChecklistTemplate(id: edit.listId, role: edit.role, items: edit.items,
                                                            kind: edit.kind, targetScope: edit.targetScope,
                                                            assignedStaffId: edit.assignedStaffId, title: edit.title,
                                                            recurrence: edit.recurrence,
                                                            recurrenceWeekdays: edit.recurrence == "weekly" ? Array(edit.recurrenceWeekdays).sorted() : nil,
                                                            recurrenceDayOfMonth: edit.recurrence == "monthly" ? edit.recurrenceDayOfMonth : nil)
-                            dismiss()
+                            if ok { dismiss() }
                         }
                     }.disabled(saving)
                 }

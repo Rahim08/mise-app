@@ -118,41 +118,52 @@ export function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManag
     if (!form.schedule_id || !form.target_id) { toast(tr('pe.selectShiftColleague')); return }
     setSaving(true)
     const sc = sched(form.schedule_id)
-    await db.from('shift_swap_requests').insert({
+    const { error } = await db.from('shift_swap_requests').insert({
       schedule_id: form.schedule_id, requester_id: myId, target_id: form.target_id,
       status: 'pending_peer', note: form.note || null,
     })
+    setSaving(false)
+    if (error) { toast(tr('dash.notSaved') + error.message); return }
     await notify(form.target_id, 'swap_request', tr('pe.swapRequestTitle'), tr('pe.swapRequestBody', { name: me.name || tr('pe.colleague'), date: sc ? dayLabel(sc.date) : '' }),
       { titleKey: 'notify.swapRequestTitle', bodyKey: 'notify.swapRequestBody', bodyParams: { name: me.name || tr('pe.colleague'), date: sc ? dayLabel(sc.date) : '' } })
-    setSaving(false); setShowForm(false); setForm({ schedule_id: '', target_id: '', note: '' })
+    setShowForm(false); setForm({ schedule_id: '', target_id: '', note: '' })
     toast(tr('pe.reportSent')); await load()
   }
 
+  // Ниже — раньше ни одна мутация не проверяла ошибку сети/сервера вообще: сбой проходил
+  // молча, кнопка «Принять»/«Отклонить»/«Утвердить» как будто ничего не делала, юзер не
+  // понимал почему (аудит 2026-08-04).
   const setStatus = async (r: any, patch: any) => {
-    await db.from('shift_swap_requests').update(patch).eq('id', r.id)
+    const { error } = await db.from('shift_swap_requests').update(patch).eq('id', r.id)
+    if (error) { toast(tr('dash.notSaved') + error.message); return }
     await load()
   }
   const peerAccept = async (r: any) => {
-    await db.from('shift_swap_requests').update({ status: 'peer_accepted', peer_responded_at: now() }).eq('id', r.id)
+    const { error } = await db.from('shift_swap_requests').update({ status: 'peer_accepted', peer_responded_at: now() }).eq('id', r.id)
+    if (error) { toast(tr('dash.notSaved') + error.message); return }
     pushNotify({ type: 'swap_request', title: tr('pe.swapPendingTitle'), body: tr('pe.swapPendingBody'), titleKey: 'notify.swapPendingTitle', bodyKey: 'notify.swapPendingBody', audience: { managers: true } })
     await load()
   }
   const peerDecline = async (r: any) => {
-    await db.from('shift_swap_requests').update({ status: 'peer_declined', peer_responded_at: now() }).eq('id', r.id)
+    const { error } = await db.from('shift_swap_requests').update({ status: 'peer_declined', peer_responded_at: now() }).eq('id', r.id)
+    if (error) { toast(tr('dash.notSaved') + error.message); return }
     await notify(r.requester_id, 'swap_result', tr('pe.swapDeclinedTitle'), tr('pe.swapDeclinedByPeerBody'),
       { titleKey: 'notify.swapDeclinedTitle', bodyKey: 'notify.swapDeclinedByPeerBody' })
     await load()
   }
   const managerReject = async (r: any) => {
-    await db.from('shift_swap_requests').update({ status: 'rejected', manager_id: me.is_owner ? null : myId, manager_responded_at: now() }).eq('id', r.id)
+    const { error } = await db.from('shift_swap_requests').update({ status: 'rejected', manager_id: me.is_owner ? null : myId, manager_responded_at: now() }).eq('id', r.id)
+    if (error) { toast(tr('dash.notSaved') + error.message); return }
     await notify(r.requester_id, 'swap_result', tr('pe.swapDeclinedTitle'), tr('pe.swapDeclinedByManagerBody'),
       { titleKey: 'notify.swapDeclinedTitle', bodyKey: 'notify.swapDeclinedByManagerBody' })
     await load()
   }
   const approve = async (r: any) => {
     // Reassign the shift to the target, then mark approved.
-    await db.from('staff_schedules').update({ staff_id: r.target_id }).eq('id', r.schedule_id)
-    await db.from('shift_swap_requests').update({ status: 'approved', manager_id: me.is_owner ? null : myId, manager_responded_at: now() }).eq('id', r.id)
+    const { error: e1 } = await db.from('staff_schedules').update({ staff_id: r.target_id }).eq('id', r.schedule_id)
+    if (e1) { toast(tr('dash.notSaved') + e1.message); return }
+    const { error: e2 } = await db.from('shift_swap_requests').update({ status: 'approved', manager_id: me.is_owner ? null : myId, manager_responded_at: now() }).eq('id', r.id)
+    if (e2) { toast(tr('dash.notSaved') + e2.message); return }
     await notify(r.requester_id, 'swap_result', tr('pe.swapApprovedTitle'), tr('pe.swapApprovedBody'),
       { titleKey: 'notify.swapApprovedTitle', bodyKey: 'notify.swapApprovedBody' })
     toast(tr('pe.swapApprovedToast')); await load()
@@ -321,16 +332,26 @@ export function AttendanceTab({ me, isManager, accent, t, toast, onOpenDisciplin
     if (!pos || dist == null || todayRec) return
     if (!mySched?.published) return
     if (dist > (settings?.geo_radius_m || 150)) { toast(tr('pe.outsideZone')); return }
+    // Порог опоздания — настраиваемый грейс (restaurant_settings.late_grace_min), не
+    // хардкод: раньше 5 мин было зашито в статус/бейдж/пуш «опоздал», хотя в статистике
+    // Дисциплины (DisciplineTab) грейс уже применялся корректно — несостыковка внутри
+    // одной фичи (аудит 2026-08-04).
+    const grace = settings?.late_grace_min ?? 5
     let late: number | null = null, status = 'present'
     if (mySched?.shift_start) {
       const [h, m] = mySched.shift_start.split(':').map(Number)
       const start = new Date(); start.setHours(h, m, 0, 0)
-      late = Math.max(0, Math.round((Date.now() - start.getTime()) / 60000)); status = late > 5 ? 'late' : 'present'
+      late = Math.max(0, Math.round((Date.now() - start.getTime()) / 60000)); status = late > grace ? 'late' : 'present'
     }
-    await db.from('attendance_records').upsert(
+    const { error } = await db.from('attendance_records').upsert(
       { staff_id: myId, date: today, check_in_at: new Date().toISOString(), check_in_lat: pos.lat, check_in_lng: pos.lng, check_in_distance_m: Math.round(dist), late_minutes: late, status, source: 'geo' },
       { onConflict: 'restaurant_id,staff_id,date' }
     )
+    // Раньше ошибка сети/сервера тут не проверялась вообще — кнопка просто не переключалась
+    // в «на смене», без объяснения почему (юзер не понимал, пришла явка или нет). iOS в этом
+    // случае кладёт явку в офлайн-очередь и досылает сама — на вебе такой очереди пока нет
+    // (отдельная тема), но хотя бы явно сообщаем о сбое вместо тишины.
+    if (error) { toast(tr('dash.notSaved') + error.message); return }
     // Уведомляем владельца/менеджеров о приходе сотрудника на смену.
     const lateTxt = status === 'late' ? ` (+${late} мин)` : ''
     const attName = me.name || 'Сотрудник'
@@ -346,7 +367,8 @@ export function AttendanceTab({ me, isManager, accent, t, toast, onOpenDisciplin
 
   const checkOut = async () => {
     if (!pos) return
-    await db.from('attendance_records').update({ check_out_at: new Date().toISOString(), check_out_lat: pos.lat, check_out_lng: pos.lng }).eq('staff_id', myId).eq('date', today)
+    const { error } = await db.from('attendance_records').update({ check_out_at: new Date().toISOString(), check_out_lat: pos.lat, check_out_lng: pos.lng }).eq('staff_id', myId).eq('date', today)
+    if (error) { toast(tr('dash.notSaved') + error.message); return }
     toast(tr('pe.checkedOut')); await load()
   }
 

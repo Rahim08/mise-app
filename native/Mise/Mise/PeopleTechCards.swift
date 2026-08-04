@@ -124,8 +124,10 @@ struct TechCardSheet: View {
                         saving = true
                         Task {
                             defer { saving = false }
-                            await m.saveTechCard(id: edit.cardId, name: edit.name, category: edit.category, items: edit.items)
-                            dismiss()
+                            // dismiss только на успехе — раньше шторка закрывалась при сбое сети,
+                            // техкарта терялась (аудит 2026-08-04).
+                            let ok = await m.saveTechCard(id: edit.cardId, name: edit.name, category: edit.category, items: edit.items)
+                            if ok { dismiss() }
                         }
                     }.disabled(saving)
                 }

@@ -217,8 +217,10 @@ struct PurchaseFormSheet: View {
         saving = true
         let payload = rows.map { (name: $0.name, qty: $0.qty, unit: $0.unit) }
         Task {
-            await m.addPurchase(category: cat, rows: payload, catLabel: purchaseCatLabel(cat))
-            dismiss()
+            defer { saving = false }
+            // dismiss только на успехе — раньше шторка закрывалась при сбое сети, список
+            // закупки терялся (аудит 2026-08-04).
+            if await m.addPurchase(category: cat, rows: payload, catLabel: purchaseCatLabel(cat)) { dismiss() }
         }
     }
 }

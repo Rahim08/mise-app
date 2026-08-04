@@ -43,7 +43,10 @@ export function StopListTab({ canEdit, currency, accent, t, toast }: { canEdit: 
     if (!canEdit) return
     const next = !item.is_available
     setItems(its => its.map(x => x.id === item.id ? { ...x, is_available: next } : x))
-    await db.from('menu_items').update({ is_available: next }).eq('id', item.id)
+    const { error } = await db.from('menu_items').update({ is_available: next }).eq('id', item.id)
+    // Раньше сбой сети не проверялся — переключатель оставался в новом положении локально,
+    // а на сервере ничего не менялось (аудит 2026-08-04). Откат при ошибке.
+    if (error) { setItems(its => its.map(x => x.id === item.id ? { ...x, is_available: item.is_available } : x)); toast(tr('dash.notSaved') + error.message); return }
     toast(next ? tr('pe.backToMenu') : tr('pe.toStopList'))
   }
 
@@ -122,8 +125,10 @@ export function OrdersInbox({ currency, accent, t, toast }: { currency: string; 
   }, [])
 
   const setStatus = async (o: any, status: string) => {
+    const prevStatus = o.status
     setOrders(os => os.map(x => x.id === o.id ? { ...x, status } : x))
-    await db.from('menu_orders').update({ status }).eq('id', o.id)
+    const { error } = await db.from('menu_orders').update({ status }).eq('id', o.id)
+    if (error) { setOrders(os => os.map(x => x.id === o.id ? { ...x, status: prevStatus } : x)); toast(tr('dash.notSaved') + error.message); return }
     toast(tr(ORDER_STATUS[status]?.label || 'pe.updated'))
   }
 
@@ -218,9 +223,14 @@ export function TechCardsView({ isManager, accent, t, toast }: { isManager: bool
     if (!edit || !edit.name.trim()) { toast(tr('pe.enterName')); return }
     const clean = edit.items.map(s => s.trim()).filter(Boolean)
     setSaving(true)
-    if (edit.id) await db.from('tech_cards').update({ name: edit.name.trim(), category: edit.category, items: clean }).eq('id', edit.id)
-    else await db.from('tech_cards').insert({ name: edit.name.trim(), category: edit.category, items: clean })
-    setSaving(false); setEdit(null); toast(tr('pe.saved')); await load()
+    // Раньше ошибка не проверялась вообще — шторка закрывалась как при успехе, техкарта
+    // терялась молча (аудит 2026-08-04).
+    const { error } = edit.id
+      ? await db.from('tech_cards').update({ name: edit.name.trim(), category: edit.category, items: clean }).eq('id', edit.id)
+      : await db.from('tech_cards').insert({ name: edit.name.trim(), category: edit.category, items: clean })
+    setSaving(false)
+    if (error) { toast(tr('dash.notSaved') + error.message); return }
+    setEdit(null); toast(tr('pe.saved')); await load()
   }
   const remove = async (id: string) => {
     setCards(cs => cs.filter(c => c.id !== id))

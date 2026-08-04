@@ -123,7 +123,9 @@ struct WalkEditSheet: View {
                     Button(t("save")) {
                         guard !saving else { return }
                         saving = true
-                        Task { defer { saving = false }; await m.saveWalkTemplate(template); dismiss() }
+                        // dismiss только на успехе — раньше шторка закрывалась при сбое сети,
+                        // весь введённый шаблон терялся (аудит 2026-08-04).
+                        Task { defer { saving = false }; if await m.saveWalkTemplate(template) { dismiss() } }
                     }.disabled(saving)
                 }
             }

@@ -553,6 +553,7 @@ let STRINGS: [String: [Lang: String]] = [
     "pe.type":           tr("Type", "Тип", "Tipo", "Type", "Növ", "Tür", "Тип", "Түрі"),
     "pe.rt.suggestion":  tr("Suggestion", "Предложение", "Suggerimento", "Suggestion", "Təklif", "Öneri", "Пропозиція", "Ұсыныс"),
     "pe.rt.order":       tr("Order", "Заказать", "Ordinare", "Commander", "Sifariş", "Sipariş", "Замовити", "Тапсырыс"),
+    "pe.rt.notice":      tr("Notice", "Замечание", "Segnalazione", "Remarque", "Qeyd", "Uyarı", "Зауваження", "Ескерту"),
     "pe.rt.breakdown":   tr("Breakdown", "Поломка", "Guasto", "Panne", "Nasazlıq", "Arıza", "Поломка", "Ақаулық"),
     "pe.rt.other":       tr("Other", "Другое", "Altro", "Autre", "Digər", "Diğer", "Інше", "Басқа"),
 

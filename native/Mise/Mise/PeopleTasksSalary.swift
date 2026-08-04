@@ -240,19 +240,23 @@ struct TaskFormSheet: View {
 
 // MARK: Заявки менеджеру
 
+// notice («Замечание») — раньше был только на вебе, order («Заказать») — только на iOS:
+// один и тот же тип заявки читался по-разному в зависимости от платформы (аудит 2026-08-04).
+// Теперь оба набора объединены и одинаковы на обеих платформах.
 let REPORT_TYPES: [(String, String, String)] = [
     ("suggestion", "Предложение", "lightbulb"),
     ("order", "Заказать", "cart"),
+    ("notice", "Замечание", "exclamationmark.bubble"),
     ("breakdown", "Поломка", "wrench.and.screwdriver"),
     ("other", "Другое", "text.bubble"),
 ]
 @MainActor func reportTypeLabel(_ code: String?) -> String {
-    let c = ["suggestion", "order", "breakdown", "other"].contains(code ?? "") ? code! : "other"
+    let c = ["suggestion", "order", "notice", "breakdown", "other"].contains(code ?? "") ? code! : "other"
     return t("pe.rt." + c)
 }
 func reportTypeIcon(_ t: String?) -> String { REPORT_TYPES.first { $0.0 == t }?.2 ?? "text.bubble" }
 func reportTypeColor(_ t: String?) -> Color {
-    ["suggestion": BrandKit.analytics, "order": BrandKit.stash, "breakdown": BrandKit.menu][t ?? ""] ?? BrandKit.people
+    ["suggestion": BrandKit.analytics, "order": BrandKit.stash, "notice": BrandKit.manager, "breakdown": BrandKit.menu][t ?? ""] ?? BrandKit.people
 }
 
 struct ReportsTab: View {

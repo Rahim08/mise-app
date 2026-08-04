@@ -554,6 +554,10 @@ final class PeopleModel {
         guard existing.isEmpty else { await loadAttendance(); return }
 
         // Опоздание — как на вебе (checkIn в tabs-shifts.tsx): от начала смены по графику.
+        // Порог — настраиваемый грейс (restaurant_settings.late_grace_min), не хардкод: раньше
+        // 5 мин было зашито в статус/бейдж/пуш «опоздал», хотя в статистике Дисциплины грейс
+        // уже применялся корректно — несостыковка внутри одной фичи (аудит 2026-08-04).
+        let grace = geo?.late_grace_min ?? 5
         var late: Int? = nil, status = "present"
         if let start = mySchedToday?.shift_start, start.count >= 5 {
             let hh = Int(start.prefix(2)) ?? 0, mm = Int(start.dropFirst(3).prefix(2)) ?? 0
@@ -561,7 +565,7 @@ final class PeopleModel {
             comps.hour = hh; comps.minute = mm
             if let startDate = Calendar.current.date(from: comps) {
                 let mins = max(0, Int(Date().timeIntervalSince(startDate) / 60))
-                late = mins; status = mins > 5 ? "late" : "present"
+                late = mins; status = mins > grace ? "late" : "present"
             }
         }
         let payload: [String: Any] = [
@@ -1081,9 +1085,13 @@ final class PeopleModel {
         if remaining.count < queue.count { await loadChecklists(); await loadAudits() }
     }
 
-    func saveChecklistTemplate(id: String?, role: String?, items: [ChecklistItem], kind: String = "shift", targetScope: String = "role", assignedStaffId: String? = nil, title: String? = nil, type: String? = nil, recurrence: String = "none", recurrenceWeekdays: [Int]? = nil, recurrenceDayOfMonth: Int? = nil) async {
+    // -> Bool: раньше Void и вызывающая шторка закрывалась (dismiss()) независимо от
+    // результата — сбой сети молча терял весь введённый шаблон, юзер видел только
+    // мимолётный flash (аудит 2026-08-04). Теперь вызывающая сторона гейтит dismiss на true.
+    @discardableResult
+    func saveChecklistTemplate(id: String?, role: String?, items: [ChecklistItem], kind: String = "shift", targetScope: String = "role", assignedStaffId: String? = nil, title: String? = nil, type: String? = nil, recurrence: String = "none", recurrenceWeekdays: [Int]? = nil, recurrenceDayOfMonth: Int? = nil) async -> Bool {
         let clean = items.map { ChecklistItem(id: $0.id, label: $0.label.trimmingCharacters(in: .whitespaces), photo_required: $0.photo_required, weight: $0.weight) }.filter { !$0.label.isEmpty }
-        guard !clean.isEmpty else { flash(t("pe.addItem")); return }
+        guard !clean.isEmpty else { flash(t("pe.addItem")); return false }
         let roleVal: Any = role ?? NSNull()
         let itemDicts = clean.map { $0.asDict }
         // Расписание имеет смысл только для разовых аудитов — для kind="shift" всегда "none"/NULL.
@@ -1105,9 +1113,10 @@ final class PeopleModel {
                     "recurrence": recurrenceVal, "recurrence_weekdays": weekdaysVal, "recurrence_day_of_month": domVal,
                 ] as [String: Any]).run()
             }
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
         flash(t("pe.checklistSaved"))
         if kind == "audit" { await loadAudits() } else { await loadChecklists() }
+        return true
     }
     func deleteChecklist(_ id: String) async {
         checklists.removeAll { $0.id == id }
@@ -1140,14 +1149,16 @@ final class PeopleModel {
     func relevantWalks() -> [WalkTemplate] { isManager ? walkTemplates : [] }
     func canEditWalk(_ w: WalkTemplate) -> Bool { isManager }
 
-    func saveWalkTemplate(_ template: WalkTemplate) async {
+    // -> Bool: см. saveChecklistTemplate — dismiss на вызывающей стороне гейтится на true.
+    @discardableResult
+    func saveWalkTemplate(_ template: WalkTemplate) async -> Bool {
         let clean = template.blocks
             .map { WalkBlock(id: $0.id, label: $0.label.trimmingCharacters(in: .whitespaces), categories:
                 $0.categories.map { WalkCategory(id: $0.id, label: $0.label.trimmingCharacters(in: .whitespaces), items:
                     $0.items.map { WalkItem(id: $0.id, label: $0.label.trimmingCharacters(in: .whitespaces)) }.filter { !$0.label.isEmpty }) }
                     .filter { !$0.label.isEmpty && !$0.items.isEmpty }) }
             .filter { !$0.label.isEmpty && !$0.categories.isEmpty }
-        guard !clean.isEmpty else { flash(t("pe.addItem")); return }
+        guard !clean.isEmpty else { flash(t("pe.addItem")); return false }
         var t2 = template; t2.blocks = clean
         let isNew = !walkTemplates.contains { $0.id == template.id }
         do {
@@ -1159,9 +1170,10 @@ final class PeopleModel {
             } else {
                 try await DB.from("shift_checklists").update(t2.asUpdateDict).eq("id", t2.id).run()
             }
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
         flash(t("pe.checklistSaved"))
         await loadWalks()
+        return true
     }
 
     func deleteWalkTemplate(_ id: String) async {
@@ -1202,8 +1214,10 @@ final class PeopleModel {
         } else if !techCards.isEmpty { flash(t("refreshFailed")) }
         techLoaded = true
     }
-    func saveTechCard(id: String?, name: String, category: String, items: [String]) async {
-        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { flash(t("pe.needName")); return }
+    // -> Bool: см. saveChecklistTemplate — dismiss на вызывающей стороне гейтится на true.
+    @discardableResult
+    func saveTechCard(id: String?, name: String, category: String, items: [String]) async -> Bool {
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { flash(t("pe.needName")); return false }
         let clean = items.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         do {
             if let id {
@@ -1211,9 +1225,10 @@ final class PeopleModel {
             } else {
                 try await DB.from("tech_cards").insert(["restaurant_id": rid, "name": name, "category": category, "items": clean]).run()
             }
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
         flash(t("pe.saved"))
         await loadTechCards()
+        return true
     }
     func deleteTechCard(_ id: String) async {
         techCards.removeAll { $0.id == id }
@@ -1296,9 +1311,11 @@ final class PeopleModel {
     var purchaseTodo: [PurchaseItem] { purchase.filter { $0.status == "todo" } }
     var purchaseDone: [PurchaseItem] { purchase.filter { $0.status != "todo" } }
 
-    func addPurchase(category: String, rows: [(name: String, qty: String, unit: String)], catLabel: String) async {
+    // -> Bool: см. saveChecklistTemplate — dismiss на вызывающей стороне гейтится на true.
+    @discardableResult
+    func addPurchase(category: String, rows: [(name: String, qty: String, unit: String)], catLabel: String) async -> Bool {
         let valid = rows.map { ($0.name.trimmingCharacters(in: .whitespaces), $0.qty, $0.unit) }.filter { !$0.0.isEmpty }
-        if valid.isEmpty { return }
+        if valid.isEmpty { return false }
         let creator: Any = myId == "owner" ? NSNull() : myId
         let payload: [[String: Any]] = valid.map { r in
             var v: [String: Any] = [
@@ -1314,7 +1331,7 @@ final class PeopleModel {
         }
         do {
             try await DB.from("purchase_items").insert(payload).run()
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
         let who = myName.isEmpty ? "" : "\(myName): "
         let body = valid.count == 1 ? "\(who)\(valid[0].0)" : "\(who)\(t("st.positions", ["n": "\(valid.count)"]))"
         await Notify.send(type: "purchase", title: "\(catLabel) · \(t("pe.pTab"))", body: body,
@@ -1323,6 +1340,7 @@ final class PeopleModel {
                           bodyParams: valid.count > 1 ? ["who": who, "n": "\(valid.count)"] : nil,
                           data: ["category": category])
         await loadPurchase()
+        return true
     }
 
     func setPurchaseStatus(_ it: PurchaseItem, _ status: String) async {
@@ -1497,7 +1515,7 @@ final class PeopleModel {
                    .init(id: "e2", name: "Игорь Петров", role: "kitchen"),
                    .init(id: "e3", name: "Мария Соколова", role: "bar")]
         }
-        geo = .init(attendance_enabled: false, latitude: nil, longitude: nil, geo_radius_m: 150)
+        geo = .init(attendance_enabled: false, latitude: nil, longitude: nil, geo_radius_m: 150, late_grace_min: 5)
         attendance = [
             .init(id: "a1", staff_id: "e1", date: todayKey, check_in_at: "2026-06-15T09:58:00Z", check_out_at: nil, status: "present", late_minutes: 0),
             .init(id: "a2", staff_id: "e2", date: todayKey, check_in_at: "2026-06-15T12:14:00Z", check_out_at: nil, status: "late", late_minutes: 14),

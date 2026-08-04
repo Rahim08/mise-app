@@ -41,20 +41,25 @@ export function ScheduleTab({ restaurantId, accent, t, toast }: { restaurantId: 
   const saveShiftAssign = async () => {
     if (!edit) return
     setSaving(true)
-    await db.from('staff_schedules').upsert(
+    const { error } = await db.from('staff_schedules').upsert(
       { staff_id: edit.staff.id, date: edit.date, shift_start: start || null, shift_end: end || null, note: note || null, published: false },
       { onConflict: 'restaurant_id,staff_id,date' }
     )
-    setSaving(false); setEdit(null); toast(tr('pe.shiftAssigned')); await load()
+    setSaving(false)
+    if (error) { toast(tr('dash.notSaved') + error.message); return }
+    setEdit(null); toast(tr('pe.shiftAssigned')); await load()
   }
   const clearShift = async () => {
     if (!edit) return
     setSaving(true)
-    await db.from('staff_schedules').delete().eq('staff_id', edit.staff.id).eq('date', edit.date)
-    setSaving(false); setEdit(null); toast(tr('pe.shiftRemoved')); await load()
+    const { error } = await db.from('staff_schedules').delete().eq('staff_id', edit.staff.id).eq('date', edit.date)
+    setSaving(false)
+    if (error) { toast(tr('dash.notSaved') + error.message); return }
+    setEdit(null); toast(tr('pe.shiftRemoved')); await load()
   }
   const publishWeek = async () => {
-    await db.from('staff_schedules').update({ published: true }).gte('date', weekStartStr).lte('date', weekEndStr)
+    const { error } = await db.from('staff_schedules').update({ published: true }).gte('date', weekStartStr).lte('date', weekEndStr)
+    if (error) { toast(tr('dash.notSaved') + error.message); return }
     toast(tr('pe.weekPublished')); await load()
   }
 

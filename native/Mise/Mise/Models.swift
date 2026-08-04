@@ -552,6 +552,7 @@ nonisolated struct GeoSettings: Codable, Sendable {
     let latitude: Double?
     let longitude: Double?
     let geo_radius_m: Double?
+    let late_grace_min: Int?
 }
 
 nonisolated struct TechCard: Codable, Identifiable, Sendable {

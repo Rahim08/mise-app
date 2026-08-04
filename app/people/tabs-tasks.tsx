@@ -29,9 +29,13 @@ const PRIO: Record<string, { label: string; color: (t: any) => string }> = {
 const STATUS_ORDER = ['todo', 'in_progress', 'done']
 const STATUS_LABEL: Record<string, string> = { todo: 'pe.stTodo', in_progress: 'pe.stInProgress', done: 'pe.stDone' }
 
+// order («Заказать») — раньше был только на iOS, notice («Замечание») — только на вебе:
+// один и тот же тип заявки читался по-разному в зависимости от платформы (аудит 2026-08-04).
+// Теперь оба набора объединены и одинаковы на обеих платформах.
 const REPORT_TYPE: Record<string, { label: string; color: (t: any) => string }> = {
   breakdown: { label: 'pe.rtBreakdown', color: t => t.red },
   notice: { label: 'pe.rtNotice', color: t => t.orange },
+  order: { label: 'pe.rtOrder', color: t => t.green },
   suggestion: { label: 'pe.rtSuggestion', color: t => t.blue },
   other: { label: 'pe.rtOther', color: t => t.text3 },
 }
@@ -83,32 +87,46 @@ export function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boo
       created_by: myId === 'owner' ? null : myId,
       priority: form.priority, due_date: form.due_date || null, status: 'todo',
     }
-    await Promise.all(targets.map(tid => db.from('staff_tasks').insert({ ...base, assigned_to: tid })))
+    const results = await Promise.all(targets.map(tid => db.from('staff_tasks').insert({ ...base, assigned_to: tid })))
+    setSaving(false)
+    // Раньше ошибка сети/сервера тут не проверялась вообще — форма закрывалась, будто всё
+    // создалось. Если провалились ВСЕ адресаты — не закрываем форму, юзер видит ошибку и не
+    // теряет ввод. Частичный сбой (часть цеха создалась, часть нет) остаётся мягким случаем —
+    // низкая вероятность/impact, список просто покажет то, что реально создалось.
+    if (results.every(r => r.error)) { toast(tr('dash.notSaved') + results[0].error?.message); return }
     const notifyIds = targets.filter(tid => tid !== myId)
     if (notifyIds.length) pushNotify({ type: 'task', title: 'New task', body: form.title.trim(), titleKey: 'notify.newTaskTitle', audience: { staff_ids: notifyIds } })
-    setSaving(false); setShowForm(false); setForm({ title: '', description: '', assigned_to: '', priority: 'medium', due_date: '' })
+    setShowForm(false); setForm({ title: '', description: '', assigned_to: '', priority: 'medium', due_date: '' })
     toast(targets.length > 1 ? tr('pe.taskCreatedFor', { n: targets.length }) : tr('pe.taskCreated')); await load()
   }
   const setStatus = async (task: any, status: string) => {
+    const prevStatus = task.status
     setTasks(ts => ts.map(x => x.id === task.id ? { ...x, status } : x))
-    await db.from('staff_tasks').update({ status, completed_at: status === 'done' ? new Date().toISOString() : null }).eq('id', task.id)
+    const { error } = await db.from('staff_tasks').update({ status, completed_at: status === 'done' ? new Date().toISOString() : null }).eq('id', task.id)
+    if (error) { setTasks(ts => ts.map(x => x.id === task.id ? { ...x, status: prevStatus } : x)); toast(tr('dash.notSaved') + error.message) }
   }
   const removeTask = async (id: string) => {
+    const removed = tasks.find(x => x.id === id)
     setTasks(ts => ts.filter(x => x.id !== id))
-    await db.from('staff_tasks').delete().eq('id', id)
+    const { error } = await db.from('staff_tasks').delete().eq('id', id)
+    if (error && removed) { setTasks(ts => [...ts, removed]); toast(tr('dash.notSaved') + error.message) }
   }
   const canDelete = (task: any) => isManager || task.created_by === myId
 
   const createReport = async () => {
     if (!rform.title.trim()) { toast(tr('pe.describeProblem')); return }
     setSaving(true)
-    await db.from('staff_reports').insert({ type: rform.type, title: rform.title.trim(), description: rform.description.trim() || null, author_id: myId === 'owner' ? null : myId, status: 'new' })
-    setSaving(false); setShowForm(false); setRform({ type: 'breakdown', title: '', description: '' })
+    const { error } = await db.from('staff_reports').insert({ type: rform.type, title: rform.title.trim(), description: rform.description.trim() || null, author_id: myId === 'owner' ? null : myId, status: 'new' })
+    setSaving(false)
+    if (error) { toast(tr('dash.notSaved') + error.message); return }
+    setShowForm(false); setRform({ type: 'breakdown', title: '', description: '' })
     toast(tr('pe.reportSent')); await load()
   }
   const setReportStatus = async (r: any, status: string) => {
+    const prevStatus = r.status
     setReports(rs => rs.map(x => x.id === r.id ? { ...x, status } : x))
-    await db.from('staff_reports').update({ status, resolved_at: status === 'resolved' ? new Date().toISOString() : null }).eq('id', r.id)
+    const { error } = await db.from('staff_reports').update({ status, resolved_at: status === 'resolved' ? new Date().toISOString() : null }).eq('id', r.id)
+    if (error) { setReports(rs => rs.map(x => x.id === r.id ? { ...x, status: prevStatus } : x)); toast(tr('dash.notSaved') + error.message) }
   }
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>

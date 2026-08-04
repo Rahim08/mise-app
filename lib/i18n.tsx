@@ -529,6 +529,7 @@ const STRINGS: Record<string, Row> = {
   'pe.stDone':       { en: 'Done', ru: 'Готово', it: 'Fatto', fr: 'Terminé', az: 'Hazır', tr: 'Tamam', uk: 'Готово', kk: 'Дайын' },
   'pe.rtBreakdown':  { en: 'Breakdown', ru: 'Поломка', it: 'Guasto', fr: 'Panne', az: 'Nasazlıq', tr: 'Arıza', uk: 'Поломка', kk: 'Бұзылу' },
   'pe.rtNotice':     { en: 'Notice', ru: 'Замечание', it: 'Segnalazione', fr: 'Remarque', az: 'Qeyd', tr: 'Uyarı', uk: 'Зауваження', kk: 'Ескерту' },
+  'pe.rtOrder':      { en: 'Order', ru: 'Заказать', it: 'Ordinare', fr: 'Commander', az: 'Sifariş', tr: 'Sipariş', uk: 'Замовити', kk: 'Тапсырыс' },
   'pe.rtSuggestion': { en: 'Suggestion', ru: 'Предложение', it: 'Suggerimento', fr: 'Suggestion', az: 'Təklif', tr: 'Öneri', uk: 'Пропозиція', kk: 'Ұсыныс' },
   'pe.rtOther':      { en: 'Other', ru: 'Другое', it: 'Altro', fr: 'Autre', az: 'Digər', tr: 'Diğer', uk: 'Інше', kk: 'Басқа' },
   'pe.rsNew':        { en: 'New', ru: 'Новый', it: 'Nuovo', fr: 'Nouveau', az: 'Yeni', tr: 'Yeni', uk: 'Новий', kk: 'Жаңа' },
