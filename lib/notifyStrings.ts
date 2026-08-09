@@ -53,6 +53,10 @@ export const NOTIFY_STRINGS: Record<string, Row> = {
   'notify.bookingTitle': { en: 'New booking', ru: 'Новая бронь', it: 'Nuova prenotazione', fr: 'Nouvelle réservation', az: 'Yeni rezervasiya', tr: 'Yeni rezervasyon', uk: 'Нове бронювання', kk: 'Жаңа брондау' },
   'notify.bookingTable': { en: 'Table', ru: 'Стол', it: 'Tavolo', fr: 'Table', az: 'Masa', tr: 'Masa', uk: 'Стіл', kk: 'Үстел' },
   'notify.lowStockTitle': { en: 'Low stock alert', ru: 'Товар заканчивается', it: 'Scorte in esaurimento', fr: 'Stock bas', az: 'Stok azalması', tr: 'Stok uyarısı', uk: 'Запаси закінчуються', kk: 'Қор азаю ескертуі' },
+  'notify.stashInTitle':       { en: 'Stock received', ru: 'Приход товара', it: 'Merce in arrivo', fr: 'Marchandise reçue', az: 'Mal daxil oldu', tr: 'Mal girişi', uk: 'Товар надійшов', kk: 'Тауар келді' },
+  'notify.stashOutTitle':      { en: 'Issued to venue', ru: 'Выдача в зал', it: 'Consegnato alla sala', fr: 'Sorti vers la salle', az: 'Zala verildi', tr: 'Salona verildi', uk: 'Видано в зал', kk: 'Залға берілді' },
+  'notify.stashWriteoffTitle': { en: 'Write-off', ru: 'Списание', it: 'Scarico', fr: 'Radiation', az: 'Silinmə', tr: 'Düşüm', uk: 'Списання', kk: 'Есептен шығару' },
+  'notify.stashMovementBody':  { en: '{n} items', ru: '{n} позиций', it: '{n} voci', fr: '{n} articles', az: '{n} mövqe', tr: '{n} kalem', uk: '{n} позицій', kk: '{n} позиция' },
 
   // Дайджест кассы при закрытии смены (secureBody) — лейблы сегментов, суммы приходят
   // уже отформатированными строками (см. secureBodySegments в lib/notify.ts).

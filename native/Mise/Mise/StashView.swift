@@ -474,27 +474,30 @@ final class StashModel {
         await loadWarehouse()
         // Выдача в зал (out) меняет venueBase — нужно сразу пересчитать смену.
         if mvMode == "out" { await loadShift() }
-        // Проверка минимального остатка — push если включено
-        checkLowStock()
+        // Уведомление о движении — вместо растущего списка «товар1, товар2 +N ещё» на
+        // каждое сохранение (юзер-фидбек 2026-08-09): просто факт что склад тронули.
+        notifyMovement(mode: mvMode, count: filled.count)
         flash(t("st.saved", ["n": "\(filled.count)"]))
         return true
     }
 
-    /// Проверка минимального остатка — отправляет push если включено в настройках.
-    private func checkLowStock() {
+    /// Уведомление о движении склада — приход/выдача/списание, если включено в настройках.
+    private func notifyMovement(mode: String, count: Int) {
         let prefs = UserDefaults.standard.dictionary(forKey: "mise_notif_prefs") as? [String: Bool]
         guard prefs?["low_stock"] ?? true else { return } // по умолчанию включено
-        let lowItems = stock.filter { isLow($0) }
-        guard !lowItems.isEmpty else { return }
-        let names = lowItems.prefix(3).map { "\($0.brand) \($0.flavor)" }.joined(separator: ", ")
-        let suffix = lowItems.count > 3 ? " " + t("st.andMore", ["n": String(lowItems.count - 3)]) : ""
+        let titleKey: String, fallbackTitle: String
+        switch mode {
+        case "in": titleKey = "notify.stashInTitle"; fallbackTitle = t("st.in")
+        case "out": titleKey = "notify.stashOutTitle"; fallbackTitle = t("st.out")
+        default: titleKey = "notify.stashWriteoffTitle"; fallbackTitle = t("st.writeoff")
+        }
         Task {
             await Notify.send(
-                type: "low_stock",
-                title: t("st.lowStock"),
-                body: "\(names)\(suffix)",
+                type: "stash_" + mode,
+                title: fallbackTitle, body: "\(count)",
                 audience: ["managers": true],
-                titleKey: "notify.lowStockTitle"
+                titleKey: titleKey,
+                bodyKey: "notify.stashMovementBody", bodyParams: ["n": "\(count)"]
             )
         }
     }
@@ -603,7 +606,7 @@ final class StashModel {
         guard ok else { flash(t("ai.errGeneric")); await loadWarehouse(); return false }
         await loadWarehouse()
         if mvMode == "out" || old.contains(where: { $0.type == "out" }) { await loadShift() }
-        checkLowStock()
+        notifyMovement(mode: mvMode, count: filled.count)
         flash(t("st.saved", ["n": "\(filled.count)"]))
         return true
     }

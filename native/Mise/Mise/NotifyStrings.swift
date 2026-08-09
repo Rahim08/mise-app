@@ -100,6 +100,10 @@ private let NOTIFY: [String: [String]] = [
     "notify.bookingTitle": ["New booking", "Новая бронь", "Nuova prenotazione", "Nouvelle réservation", "Yeni rezervasiya", "Yeni rezervasyon", "Нове бронювання", "Жаңа брондау"],
     "notify.bookingTable": ["Table", "Стол", "Tavolo", "Table", "Masa", "Masa", "Стіл", "Үстел"],
     "notify.lowStockTitle": ["Low stock alert", "Товар заканчивается", "Scorte in esaurimento", "Stock bas", "Stok azalması", "Stok uyarısı", "Запаси закінчуються", "Қор азаю ескертуі"],
+    "notify.stashInTitle":       ["Stock received", "Приход товара", "Merce in arrivo", "Marchandise reçue", "Mal daxil oldu", "Mal girişi", "Товар надійшов", "Тауар келді"],
+    "notify.stashOutTitle":      ["Issued to venue", "Выдача в зал", "Consegnato alla sala", "Sorti vers la salle", "Zala verildi", "Salona verildi", "Видано в зал", "Залға берілді"],
+    "notify.stashWriteoffTitle": ["Write-off", "Списание", "Scarico", "Radiation", "Silinmə", "Düşüm", "Списання", "Есептен шығару"],
+    "notify.stashMovementBody":  ["{n} items", "{n} позиций", "{n} voci", "{n} articles", "{n} mövqe", "{n} kalem", "{n} позицій", "{n} позиция"],
 
     "notify.dRevenue":    ["Revenue", "Выручка", "Ricavi", "Recettes", "Gəlir", "Ciro", "Виручка", "Түсім"],
     "notify.dCard":       ["card", "карта", "carta", "carte", "kart", "kart", "карта", "карта"],
