@@ -5,6 +5,7 @@
 // insert с priority получит 400 — тогда сохраняем без неё и прячем контрол (см. save()).
 import { useEffect, useState } from 'react'
 import { db } from '@/lib/db'
+import { notify as pushNotify } from '@/lib/notifyClient'
 import { useI18n } from '@/lib/i18n'
 import { Card, Btn, Badge, Field, SectionTitle, Spinner, Container, type Tone } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
@@ -44,12 +45,14 @@ export default function NewsPage() {
 
   const load = async () => {
     setLoading(true)
-    const { data } = await db.from('news_posts').select('*').eq('restaurant_id', restaurantId)
+    const { data, error } = await db.from('news_posts').select('*').eq('restaurant_id', restaurantId)
       .order('created_at', { ascending: false }).limit(100)
+    setLoading(false)
+    // Ошибка сети/RLS не должна стирать уже показанную ленту (была бы ложная "Новостей нет").
+    if (error) { console.error('[news] load failed', error); return }
     const rows = (data || []) as Post[]
     rows.sort((a, b) => (PRIORITY[b.priority || 'normal']?.rank ?? 0) - (PRIORITY[a.priority || 'normal']?.rank ?? 0) || b.created_at.localeCompare(a.created_at))
     setPosts(rows)
-    setLoading(false)
   }
 
   useEffect(() => { if (restaurantId) load() }, [restaurantId])
@@ -57,23 +60,30 @@ export default function NewsPage() {
   const publish = async () => {
     if (!body.trim()) return
     setPublishing(true)
-    const base = { restaurant_id: restaurantId, kind, title: title.trim() || null, body: body.trim() }
-    const { error } = priorityOk
+    // created_by/created_by_name — тот же паттерн, что NewsCompose на iOS (NewsView.swift:195):
+    // owner-дашборд не имеет staff-строки, поэтому фиксированный id "owner".
+    const base = { restaurant_id: restaurantId, kind, title: title.trim() || null, body: body.trim(), created_by: 'owner', created_by_name: tr('role.owner') }
+    let { error } = priorityOk
       ? await db.from('news_posts').insert({ ...base, priority })
       : await db.from('news_posts').insert(base)
     if (error && /priority/.test(error.message)) {
       // Миграция news-priority-2026-06.sql не применена — сохраняем без priority и прячем контрол.
       setPriorityOk(false)
-      await db.from('news_posts').insert(base)
+      ;({ error } = await db.from('news_posts').insert(base))
     }
-    setTitle(''); setBody(''); setKind('info'); setPriority('normal')
     setPublishing(false)
+    if (error) { alert(tr('dash.notSaved') + error.message); return }
+    const pfx = priority === 'urgent' ? tr('nw.pUrgent') + ' · ' : priority === 'important' ? tr('nw.pImportant') + ' · ' : ''
+    const head = pfx + (title.trim() || tr(KIND[kind]?.label || 'nw.kInfo'))
+    pushNotify({ type: 'news', title: head, body: base.body, audience: { all: true }, data: { module: 'news' } })
+    setTitle(''); setBody(''); setKind('info'); setPriority('normal')
     await load()
   }
 
   const removePost = async (id: string) => {
-    await db.from('news_posts').delete().eq('id', id)
+    const { error } = await db.from('news_posts').delete().eq('id', id)
     setDeleteConfirm(null)
+    if (error) { alert(tr('dash.notSaved') + error.message); return }
     await load()
   }
 

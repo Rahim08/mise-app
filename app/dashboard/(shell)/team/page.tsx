@@ -50,12 +50,19 @@ export default function TeamPage() {
   useEffect(() => { if (restaurantId) load() }, [restaurantId])
   useEffect(() => { setOwnerPin(restaurant?.owner_pin || '') }, [restaurant?.owner_pin])
 
+  // Ни ответ /api/auth/pin/hash, ни ошибка update раньше не проверялись: при сбое хеширования
+  // в БД уходил owner_pin: undefined (values {}), UI писал «Сохранено», а владелец не мог войти.
   const saveOwnerPin = async () => {
     if (ownerPinVal.length !== 4 || !/^\d+$/.test(ownerPinVal)) { alert(tr('dash.pin4digits')); return }
     setOwnerSaving(true)
-    const hashRes = await fetch('/api/auth/pin/hash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: ownerPinVal }) })
-    const { hash } = await hashRes.json()
-    await db.from('restaurants').update({ owner_pin: hash }).eq('id', restaurantId)
+    let hash: string | undefined
+    try {
+      const hashRes = await fetch('/api/auth/pin/hash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: ownerPinVal }) })
+      if (hashRes.ok) hash = (await hashRes.json()).hash
+    } catch {}
+    if (!hash) { alert(tr('dash.saveFailed')); setOwnerSaving(false); return }
+    const { error } = await db.from('restaurants').update({ owner_pin: hash }).eq('id', restaurantId)
+    if (error) { alert(tr('dash.notSaved') + error.message); setOwnerSaving(false); return }
     setOwnerPin(ownerPinVal); setOwnerPinEdit(false); setOwnerPinVal('')
     setOwnerSaving(false); setOwnerSaved(true); setTimeout(() => setOwnerSaved(false), 2000)
   }
@@ -77,10 +84,14 @@ export default function TeamPage() {
     const empPayload = { restaurant_id: restaurantId, name, salary: +form.salary || 0, deduct_per_absence: +form.deduct || 0, card_amount: +form.card || 0, is_active: true }
     let empId = editingEmpId
     if (editingEmpId) {
-      await db.from('employees').update(empPayload).eq('id', editingEmpId)
+      const { error } = await db.from('employees').update(empPayload).eq('id', editingEmpId)
+      if (error) { alert(tr('dash.notSaved') + error.message); setSaving(false); return }
     } else {
-      const { data: newEmp } = await db.from('employees').insert(empPayload).select().single()
-      empId = newEmp?.id ?? null
+      const { data: newEmp, error } = await db.from('employees').insert(empPayload).select().single()
+      // Раньше ошибка insert не проверялась: empId оставался null, а staff всё равно
+      // создавался — доступ и PIN выданы «призраку», которого нет в HR-списке (аудит 2026-08-05).
+      if (error || !newEmp?.id) { alert(tr('dash.notSaved') + (error?.message || '')); setSaving(false); return }
+      empId = newEmp.id
     }
 
     const existing = empId ? staffFor({ id: empId, name }) : undefined

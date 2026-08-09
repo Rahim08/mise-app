@@ -194,6 +194,21 @@ enum Notify {
         if let secureBodySegments { payload["secureBodySegments"] = secureBodySegments }
         if let data { payload["data"] = data }
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-        _ = try? await URLSession.shared.data(for: req)
+        do {
+            // MiseSharedSession.session, не URLSession.shared: PIN-сессия (cookie) с фикса
+            // logout()/App Group живёт в групповом cookie-хранилище — с URLSession.shared
+            // запрос уходил БЕЗ авторизации и получал 401 от resolveCaller (apiAuth.ts),
+            // а исход глотался целиком, так что этого никто не видел.
+            let (respData, resp) = try await MiseSharedSession.session.data(for: req)
+            if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                #if DEBUG
+                print("[Notify] send failed \(http.statusCode): \(String(data: respData, encoding: .utf8) ?? "")")
+                #endif
+            }
+        } catch {
+            #if DEBUG
+            print("[Notify] send failed: \(error)")
+            #endif
+        }
     }
 }

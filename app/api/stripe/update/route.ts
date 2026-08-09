@@ -75,6 +75,22 @@ export async function POST(req: NextRequest) {
     }
     const monthly = monthlyRevenue({ ...nextFields, subscription_status: 'active' })
 
+    // metadata — источник правды для вебхука (entitlementFields): именно из неё
+    // customer.subscription.updated переливает состав модулей в restaurants.
+    const metadata = {
+      restaurantId, plan,
+      addon_modules: addonModules.join(','),
+      extra_seats: String(extraSeats),
+      addon_ai: addonAI ? '1' : '0',
+      interval,
+    }
+    // Замена одного аддон-модуля на другой (Stash → Bookings) не меняет ни одну позицию
+    // по lookup_key+quantity — items выходил пустым, subscriptions.update не вызывался,
+    // metadata оставалась старой, и ближайший вебхук откатывал состав модулей обратно.
+    // Поэтому сравниваем ещё и metadata: если она разошлась — апдейтим подписку без items
+    // (только метаданные, на суммы и прорейт это не влияет).
+    const metaChanged = Object.entries(metadata).some(([k, v]) => String(sub.metadata?.[k] ?? '') !== String(v))
+
     if (preview) {
       let amountDue: number | null = null
       if (items.length) {
@@ -85,22 +101,13 @@ export async function POST(req: NextRequest) {
         })
         amountDue = (inv.amount_due ?? 0) / 100
       }
-      return NextResponse.json({ ok: true, preview: true, monthly, amountDue, changed: items.length > 0 })
+      return NextResponse.json({ ok: true, preview: true, monthly, amountDue, changed: items.length > 0 || metaChanged })
     }
 
     if (items.length) {
-      await stripe.subscriptions.update(sub.id, {
-        items,
-        proration_behavior: 'create_prorations',
-        // metadata — источник для вебхука (entitlementFields) и будущих событий
-        metadata: {
-          restaurantId, plan,
-          addon_modules: addonModules.join(','),
-          extra_seats: String(extraSeats),
-          addon_ai: addonAI ? '1' : '0',
-          interval,
-        },
-      })
+      await stripe.subscriptions.update(sub.id, { items, proration_behavior: 'create_prorations', metadata })
+    } else if (metaChanged) {
+      await stripe.subscriptions.update(sub.id, { metadata })
     }
 
     // Пишем в БД сразу — вебхук customer.subscription.updated подтвердит те же значения.

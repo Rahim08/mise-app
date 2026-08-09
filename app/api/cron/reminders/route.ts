@@ -236,9 +236,14 @@ async function runScheduledAudits(admin: any, now: Date, tzMap: Record<string, s
       if (already?.length) { await admin.from('shift_checklists').update({ recurrence_last_run: today }).eq('id', tpl.id); continue }
 
       const { error: compErr } = await admin.from('shift_checklist_completions').insert({
-        checklist_id: tpl.id, date: today, status: 'pending', requested_by: null,
+        checklist_id: tpl.id, restaurant_id: tpl.restaurant_id, date: today, status: 'pending', requested_by: null,
       })
-      if (compErr) continue
+      if (compErr) {
+        // restaurant_id NOT NULL — без него insert 400 молча гасил весь авто-запуск аудитов
+        // (аудит 2026-08-05, раздел 2). Логируем, чтобы сбой был виден, а не «0 запущено» тихо.
+        await admin.from('app_errors').insert({ source: 'cron', message: `runScheduledAudits insert (${tpl.id}): ${compErr.message}` }).catch(() => {})
+        continue
+      }
       await admin.from('shift_checklists').update({ recurrence_last_run: today }).eq('id', tpl.id)
       created++
 

@@ -101,14 +101,54 @@ export interface AltLayoutCtx {
 
 interface CartItem { item: MenuItem; qty: number; opts?: { name: string; price: number }[] }
 
+// Запись общей корзины стола. Сериализуемая (уходит в broadcast), поэтому хранит id
+// позиции, а не саму позицию. `at` — отметка времени последнего изменения ЭТОЙ записи.
+interface CartEntry { id: string; qty: number; opts?: { name: string; price: number }[]; at: number }
+
+function keyOf(itemId: string, opts?: { name: string }[]) {
+  return itemId + '|' + (opts || []).map(o => o.name).join(',')
+}
 function entryKey(c: { item: MenuItem; opts?: { name: string }[] }) {
-  return c.item.id + '|' + (c.opts || []).map(o => o.name).join(',')
+  return keyOf(c.item.id, c.opts)
 }
 function unitPrice(c: CartItem) {
   return (c.item.price || 0) + (c.opts || []).reduce((s, o) => s + (o.price || 0), 0)
 }
-function fv(v: number, currency = '€') {
-  return currency + v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// Формат числа и позиция валюты — по локали интерфейса гостя. Было жёстко 'de-DE' с
+// валютой ПЕРЕД числом, тогда как в дашборде и у персонала валюта идёт после числа.
+function fv(v: number, currency = '€', locale = 'en') {
+  return `${v.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`
+}
+
+// Слияние состояния общей корзины: по КАЖДОЙ записи побеждает более свежая отметка
+// времени. Раньше прилетевшая корзина заменяла локальную целиком, поэтому первый же
+// «чих» одного гостя схлопывал позиции второго. Возвращает исходную карту, если ничего
+// не изменилось — чтобы не гонять эхо по кругу.
+function mergeCart(local: Record<string, CartEntry>, remote: Record<string, CartEntry>) {
+  let changed = false
+  const out = { ...local }
+  for (const [k, e] of Object.entries(remote || {})) {
+    if (!e || typeof e.id !== 'string' || typeof e.qty !== 'number' || typeof e.at !== 'number') continue
+    if (!Number.isFinite(e.qty) || e.qty < 0 || e.qty > 99) continue
+    const cur = out[k]
+    if (!cur || e.at > cur.at) {
+      const opts = Array.isArray(e.opts)
+        ? e.opts.filter(o => o && typeof o.name === 'string').map(o => ({ name: String(o.name), price: Number(o.price) || 0 }))
+        : undefined
+      out[k] = { id: e.id, qty: Math.floor(e.qty), opts: opts && opts.length ? opts : undefined, at: e.at }
+      changed = true
+    }
+  }
+  return changed ? out : local
+}
+
+// Тумбстоны (записи с qty 0) нужны, чтобы удаление не «воскресало» эхом соседа, но
+// вечно их держать незачем.
+function pruneCart(map: Record<string, CartEntry>) {
+  const cutoff = Date.now() - 30 * 60_000
+  const out: Record<string, CartEntry> = {}
+  for (const [k, e] of Object.entries(map)) if (e.qty > 0 || e.at > cutoff) out[k] = e
+  return out
 }
 
 const TIP_PRESETS = [0, 5, 10, 15]
@@ -128,6 +168,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
   const [cart, setCart] = useState<CartItem[]>([])
   const [showCart, setShowCart] = useState(false)
   const [orderSent, setOrderSent] = useState(false)
+  const [orderError, setOrderError] = useState(false)
   const [search, setSearch] = useState('')
   const [showSearch, setShowSearch] = useState(false)
   const [isDark, setIsDark] = useState(false)
@@ -160,6 +201,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
   // когда в ссылке есть ?table= — отдельный тумблер не нужен, это ортогонально allow_orders.
   const tableChannel = useRef<RealtimeChannel | null>(null)
   const applyingRemoteCart = useRef(false)
+  const sendingOrder = useRef(false)
   const [tableGuests, setTableGuests] = useState(1)
 
   // localized resolvers
@@ -240,22 +282,40 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
     else setIsDark(window.matchMedia('(prefers-color-scheme: dark)').matches)
   }, [settings])
 
-  // Общая корзина стола — Realtime broadcast, last-write-wins (приемлемо для этого UX:
-  // конфликт возможен только если два гостя редактируют корзину в один и тот же момент).
+  // Общая корзина стола — Realtime broadcast, слияние по записи с отметкой времени
+  // (mergeCart/pruneCart выше). cartMapRef — источник истины, включая тумбстоны
+  // (qty:0) для уже удалённых позиций; `cart` — только для рендера, тумбстоны в него
+  // не попадают. Раньше приходящая корзина заменяла локальную целиком (last-write-wins
+  // на уровне всей корзины) — первый же чих одного гостя схлопывал позиции второго.
   const itemsRef = useRef<MenuItem[]>([])
   useEffect(() => { itemsRef.current = items }, [items])
   const clientId = useRef(Math.random().toString(36).slice(2))
+  const cartMapRef = useRef<Record<string, CartEntry>>({})
+
+  const renderCart = (map: Record<string, CartEntry>): CartItem[] =>
+    Object.values(map)
+      .filter(e => e.qty > 0)
+      .map(e => { const it = itemsRef.current.find(x => x.id === e.id); return it ? { item: it, qty: e.qty, opts: e.opts } : null })
+      .filter(Boolean) as CartItem[]
+
+  const applyMap = (map: Record<string, CartEntry>, fromRemote: boolean) => {
+    cartMapRef.current = map
+    if (fromRemote) applyingRemoteCart.current = true
+    setCart(renderCart(map))
+  }
 
   useEffect(() => {
     if (!tableN || !settings?.allow_orders) return
     const ch = supabase.channel(`mise-table:${slug}:${tableN}`)
     ch.on('broadcast', { event: 'cart' }, ({ payload }) => {
       if (payload?.sender === clientId.current) return
-      const restored: CartItem[] = (payload?.cart || [])
-        .map((c: any) => { const it = itemsRef.current.find(x => x.id === c.id); return it ? { item: it, qty: c.qty, opts: c.opts } : null })
-        .filter(Boolean) as CartItem[]
-      applyingRemoteCart.current = true
-      setCart(restored)
+      const remote: Record<string, CartEntry> = {}
+      for (const c of (payload?.cart || [])) {
+        if (!c || typeof c.id !== 'string') continue
+        remote[keyOf(c.id, c.opts)] = { id: c.id, qty: c.qty, opts: c.opts, at: c.at }
+      }
+      const merged = pruneCart(mergeCart(cartMapRef.current, remote))
+      if (merged !== cartMapRef.current) applyMap(merged, true)
     })
     ch.on('presence', { event: 'sync' }, () => {
       setTableGuests(Math.max(1, Object.keys(ch.presenceState()).length))
@@ -268,7 +328,8 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
   useEffect(() => {
     if (applyingRemoteCart.current) { applyingRemoteCart.current = false; return }
     if (!tableChannel.current) return
-    tableChannel.current.send({ type: 'broadcast', event: 'cart', payload: { sender: clientId.current, cart: cart.map(c => ({ id: c.item.id, qty: c.qty, opts: c.opts })) } })
+    const payload = Object.values(cartMapRef.current)
+    tableChannel.current.send({ type: 'broadcast', event: 'cart', payload: { sender: clientId.current, cart: payload } })
   }, [cart])
 
   const loadMenu = async () => {
@@ -286,23 +347,29 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
   const addToCart = (item: MenuItem, opts?: { name: string; price: number }[]) => {
     if (!opts && item.modifiers && item.modifiers.length > 0) { openDetail(item); return }
     track('add_to_cart', item.id)
-    const key = entryKey({ item, opts })
-    setCart(prev => {
-      const existing = prev.find(c => entryKey(c) === key)
-      if (existing) return prev.map(c => entryKey(c) === key ? { ...c, qty: c.qty + 1 } : c)
-      return [...prev, { item, qty: 1, opts }]
-    })
+    const key = keyOf(item.id, opts)
+    const existing = cartMapRef.current[key]
+    const next = { ...cartMapRef.current, [key]: { id: item.id, qty: (existing?.qty || 0) + 1, opts, at: Date.now() } }
+    applyMap(next, false)
   }
   const removeFromCart = (itemId: string) => {
-    setCart(prev => {
-      const idx = prev.findIndex(c => c.item.id === itemId)
-      if (idx < 0) return prev
-      const c = prev[idx]
-      if (c.qty === 1) return prev.filter((_, i) => i !== idx)
-      return prev.map((x, i) => i === idx ? { ...x, qty: x.qty - 1 } : x)
-    })
+    const key = Object.keys(cartMapRef.current).find(k => cartMapRef.current[k].id === itemId && cartMapRef.current[k].qty > 0)
+    if (!key) return
+    const e = cartMapRef.current[key]
+    // qty:0 остаётся в карте тумбстоном — иначе просроченный remote-broadcast с прежним
+    // qty «воскресит» только что удалённую позицию (см. mergeCart выше).
+    const next = { ...cartMapRef.current, [key]: { ...e, qty: e.qty - 1, at: Date.now() } }
+    applyMap(next, false)
   }
-  const incEntry = (idx: number, d: number) => setCart(prev => prev.map((c, i) => i === idx ? { ...c, qty: c.qty + d } : c).filter(c => c.qty > 0))
+  const incEntry = (idx: number, d: number) => {
+    const c = cart[idx]
+    if (!c) return
+    const key = entryKey(c)
+    const e = cartMapRef.current[key]
+    if (!e) return
+    const next = { ...cartMapRef.current, [key]: { ...e, qty: Math.max(0, e.qty + d), at: Date.now() } }
+    applyMap(next, false)
+  }
 
   const openDetail = (item: MenuItem) => {
     setDetailSel((item.modifiers || []).map(() => 0))
@@ -316,13 +383,30 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
   const grandTotal = cartTotal + tipAmount
 
   const sendOrder = async () => {
-    if (!restaurant || cart.length === 0) return
+    if (!restaurant || cart.length === 0 || sendingOrder.current) return
+    sendingOrder.current = true
     const orderItems = cart.map(c => ({ id: c.item.id, name: c.item.name, price: unitPrice(c), qty: c.qty, opts: c.opts?.map(o => o.name) }))
-    saveBill([...bill, { items: orderItems, total: grandTotal, at: Date.now() }])
-    track('order')
-    setOrderSent(true); setShowCart(false); setCart([]); setTipPct(0)
-    setTimeout(() => setOrderSent(false), 3000)
-    await fetch('/api/menu/order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, items: orderItems, total: cartTotal, tip: tipAmount, order_type: 'dine_in', table_number: tableN }) })
+    // Раньше счёт сохранялся и корзина чистилась ДО и НЕЗАВИСИМО от ответа сервера:
+    // подписка истекла / allow_orders выключили → 403, гость видел «отправлено», а на кухню
+    // ничего не пришло; при обрыве сети корзина уже пустая — восстановить нечем (аудит
+    // 2026-08-05, раздел 4). Теперь ждём ответ и только на успехе чистим корзину/пишем счёт.
+    try {
+      const res = await fetch('/api/menu/order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, items: orderItems, total: cartTotal, tip: tipAmount, order_type: 'dine_in', table_number: tableN }) })
+      if (!res.ok) throw new Error(String(res.status))
+      track('order')
+      saveBill([...bill, { items: orderItems, total: grandTotal, at: Date.now() }])
+      // Тумбстоним отправленные позиции (не стираем карту) — просроченный remote-broadcast
+      // от соседа по столу не должен воскресить уже оформленный заказ.
+      const cleared = { ...cartMapRef.current }
+      for (const k of Object.keys(cleared)) if (cleared[k].qty > 0) cleared[k] = { ...cleared[k], qty: 0, at: Date.now() }
+      applyMap(cleared, false)
+      setTipPct(0); setShowCart(false)
+      setOrderSent(true); setTimeout(() => setOrderSent(false), 3000)
+    } catch {
+      setOrderError(true); setTimeout(() => setOrderError(false), 4000)
+    } finally {
+      sendingOrder.current = false
+    }
   }
 
   const scrollToCategory = (catId: string) => {
@@ -914,6 +998,9 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
 
       {orderSent && (
         <div style={{ position: 'fixed', bottom: 100, left: '50%', transform: 'translateX(-50%)', background: '#1c1c1e', color: '#fff', padding: '14px 24px', borderRadius: 14, fontSize: 15, fontWeight: 600, zIndex: 600, boxShadow: '0 4px 20px rgba(0,0,0,0.4)', whiteSpace: 'nowrap' }}>{t('menu.orderSent')}</div>
+      )}
+      {orderError && (
+        <div style={{ position: 'fixed', bottom: 100, left: '50%', transform: 'translateX(-50%)', maxWidth: '86vw', background: '#1c1c1e', color: '#fff', padding: '14px 24px', borderRadius: 14, fontSize: 15, fontWeight: 600, zIndex: 600, boxShadow: '0 4px 20px rgba(0,0,0,0.4)', textAlign: 'center' }}>{t('menu.orderFailed')}</div>
       )}
     </div>
   )

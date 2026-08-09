@@ -88,6 +88,15 @@ function Shell({ children }: { children: React.ReactNode }) {
     router.push(isLocked(item.module) ? '/dashboard/billing' : item.href)
   }
 
+  // Гейт по АДРЕСУ, а не только по кнопкам сайдбара: раньше кнопка залоченного модуля
+  // вела в оплату, но прямой URL (закладка, ссылка, «назад») открывал страницу целиком —
+  // модуль работал без тарифа. Образец — app/dashboard/(shell)/menu/page.tsx (init()).
+  // Ждём загрузки ресторана: entitlements(null) даёт минимум прав и выкинул бы владельца зря.
+  const lockedPage = !!restaurant && NAV_MODULES.some(m => isCurrent(m.href) && isLocked(m.module))
+  useEffect(() => {
+    if (lockedPage) router.replace('/dashboard/billing')
+  }, [lockedPage])
+
   if (!authChecked || !user) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system,sans-serif', color: 'var(--tx2)', fontSize: '.9rem', background: 'var(--bg)' }}>
       {/* На первом (холодном) заходе бренд-момент — SplashScreen ниже; на перезаходе — вордмарк+спиннер */}
@@ -256,7 +265,9 @@ function Shell({ children }: { children: React.ReactNode }) {
           <div style={{ padding: '20px 24px' }}>
             {/* key={pathname} перезапускает анимацию проявления при каждом переходе */}
             <main key={pathname} className="dash-fade">
-              {children}
+              {/* Пока идёт редирект залоченной страницы — не монтируем модуль:
+                  иначе он успевает мигнуть и сходить в БД за данными без прав. */}
+              {lockedPage ? <div style={{ padding: '40px 0' }}><Spinner compact /></div> : children}
             </main>
           </div>
         </div>

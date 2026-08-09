@@ -28,13 +28,16 @@ export async function POST(req: NextRequest) {
   }
   if (!restaurantId) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  await admin.from('menu_events').insert({
+  // Ошибку вставки раньше не проверяли — аналитика меню могла молча не писаться
+  // (например, после смены схемы), и это никак не было видно.
+  const { error } = await admin.from('menu_events').insert({
     restaurant_id: restaurantId,
     menu_id: menuId,
     type,
     item_id: item_id || null,
     session_id: typeof session_id === 'string' ? session_id.slice(0, 64) : null,
-    table_number: table_number ? String(table_number).slice(0, 10) : null,
+    table_number: table_number ? String(table_number).replace(/[^0-9a-zA-Zа-яА-Я-]/g, '').slice(0, 10) || null : null,
   })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
 }

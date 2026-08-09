@@ -25,11 +25,34 @@ public let kMiseWidgetLangKey = "mise.widget.lang"
 /// way without a separate login (юзер-фидбог 2026-07-22: восстановление интерактивной
 /// галки «Пришёл» в виджете — раньше было сделано, но не закоммичено и потерялось).
 public enum MiseSharedSession {
+    /// Cookie-хранилище в контейнере App Group.
+    ///
+    /// ВАЖНО: `sharedContainerIdentifier` куки НЕ шарит — он про место для файлов фоновых
+    /// загрузок. Раньше конфиг ограничивался им, и сессия по факту писала cookie в песочницу
+    /// СВОЕГО процесса: расширение виджета уходило в /api/db без PIN-cookie, получало 401,
+    /// `try?` в интенте это глотал — галка «Пришёл» ставилась в виджете, а в БД ничего не
+    /// менялось. Единственный способ разделить cookie между приложением и расширением —
+    /// именно это хранилище.
+    public static let cookies: HTTPCookieStorage =
+        HTTPCookieStorage.sharedCookieStorage(forGroupContainerIdentifier: kMiseAppGroup)
+
     public static let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.sharedContainerIdentifier = kMiseAppGroup
+        migrateLegacyCookies()
+        config.httpCookieStorage = cookies
+        config.httpCookieAcceptPolicy = .always
+        config.httpShouldSetCookies = true
         return URLSession(configuration: config)
     }()
+
+    /// Однократный перенос уже выданной PIN-сессии из процессного хранилища в групповое.
+    /// Без него обновление приложения выкинуло бы всех вошедших на экран PIN: cookie
+    /// лежит в HTTPCookieStorage.shared, а новая сессия читает уже групповое хранилище.
+    private static func migrateLegacyCookies() {
+        guard (cookies.cookies ?? []).isEmpty else { return }
+        for c in HTTPCookieStorage.shared.cookies ?? [] { cookies.setCookie(c) }
+    }
 }
 
 /// A small, self-contained snapshot of the three widget metrics.

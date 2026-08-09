@@ -14,13 +14,23 @@ func parseISO(_ s: String?) -> Date? {
         df.dateFormat = fmt
         if let d = df.date(from: s) { return d }
     }
-    // Строка без смещения — это Postgres "timestamp without time zone" (created_at = now(),
-    // сессия сервера в UTC), а не локальное время. Раньше DateFormatter парсил такую строку
-    // в ТЕКУЩЕЙ таймзоне устройства — движение, сохранённое в 14:00 UTC, показывалось как
-    // «14:00» вместо верных 16:00 в Цюрихе (UTC+2), а рядом с полуночью дата целиком уезжала
-    // на соседний день. Явно фиксируем UTC для этих форматов.
+    // "yyyy-MM-dd" (shifts.date, bookings.booking_date) — календарная дата, не момент
+    // времени. Раньше эта строка парсилась в том же UTC-блоке ниже, а форматтеры вызывающих
+    // мест печатают результат в ЛОКАЛЬНОЙ зоне устройства: полночь UTC западнее Гринвича
+    // (США, Азорские о-ва…) превращается в вечер ПРЕДЫДУЩЕГО дня — дата смены/брони уезжала
+    // на сутки назад. Парсим и форматируем в одной и той же (локальной) зоне — день не плывёт.
+    if s.count == 10, !s.contains("T") {
+        df.timeZone = TimeZone.current
+        df.dateFormat = "yyyy-MM-dd"
+        if let d = df.date(from: s) { return d }
+    }
+    // Строка с временем, но без смещения — это Postgres "timestamp without time zone"
+    // (created_at = now(), сессия сервера в UTC) — момент времени, а не календарная дата.
+    // Раньше DateFormatter парсил такую строку в ТЕКУЩЕЙ таймзоне устройства — движение,
+    // сохранённое в 14:00 UTC, показывалось как «14:00» вместо верных 16:00 в Цюрихе
+    // (UTC+2). Явно фиксируем UTC для этих форматов.
     df.timeZone = TimeZone(identifier: "UTC")
-    for fmt in ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd"] {
+    for fmt in ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss"] {
         df.dateFormat = fmt
         if let d = df.date(from: s) { return d }
     }

@@ -43,11 +43,28 @@ const nextConfig: NextConfig = {
   // только для локальной отладки пушей; .p8 в git нет и в бандл никогда не попадал,
   // поэтому outputFileTracingIncludes для него удалён (2026-07-18).
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // Статические дубли-страницы в public/: /landing.html рендерится внутри iframe на «/»
+      // (canonical уже указывает туда) и сам по себе индексировался как дубликат; остальные —
+      // заброшенные версии секций сайта (mise-landing-v2 — старый лендинг с ценой €9 от июня,
+      // manager/analytics/tobacco.html — старые одностраничники) без canonical и без ссылок
+      // из текущей навигации, но доступные по прямому URL и не закрытые в robots.ts (тот
+      // блокирует только /manager /analytics /tobacco — роуты приложения, не эти .html-файлы).
+      { source: "/landing.html", headers: [{ key: "X-Robots-Tag", value: "noindex" }] },
+      { source: "/mise-landing-v2.html", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+      { source: "/manager.html", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+      { source: "/analytics.html", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+      { source: "/tobacco.html", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+    ];
   },
   async redirects() {
     return [
       { source: "/privacy", destination: "/privacy.html", permanent: false },
+      { source: "/terms", destination: "/terms.html", permanent: false },
+      { source: "/about", destination: "/about.html", permanent: false },
+      { source: "/support", destination: "/support.html", permanent: false },
+      { source: "/contact", destination: "/contact.html", permanent: false },
     ];
   },
 };

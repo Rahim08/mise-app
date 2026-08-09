@@ -51,7 +51,7 @@ describe('staffToken', () => {
   it('rejects an expired token', async () => {
     const { verifyStaffToken } = await mod()
     const crypto = await import('crypto')
-    const b64url = (s: string) => Buffer.from(s).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    const b64url = (s: string | Buffer) => Buffer.from(s as any).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
     const expired = { rid: 'r1', sid: 's1', owner: false, apps: [], iat: 0, exp: 1 } // exp in 1970
     const body = b64url(JSON.stringify(expired))
     const sig = b64url(crypto.createHmac('sha256', process.env.MISE_TOKEN_SECRET!).update(body).digest())
@@ -61,10 +61,34 @@ describe('staffToken', () => {
   it('a token signed with a different secret does not verify', async () => {
     const { verifyStaffToken } = await mod()
     const crypto = await import('crypto')
-    const b64url = (s: string) => Buffer.from(s).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    const b64url = (s: string | Buffer) => Buffer.from(s as any).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
     const payload = { rid: 'r1', sid: 's1', owner: true, apps: ['manager'], iat: 0, exp: 9999999999 }
     const body = b64url(JSON.stringify(payload))
     const sig = b64url(crypto.createHmac('sha256', 'attacker-secret').update(body).digest())
     expect(verifyStaffToken(`${body}.${sig}`)).toBeNull()
+  })
+
+  it('a staff token copied into the admin-view cookie does not verify as admin-view (escalation)', async () => {
+    const { issueStaffToken, verifyAdminViewToken } = await mod()
+    const staffToken = issueStaffToken({ rid: 'r1', sid: 's1', owner: false, apps: ['manager'] })
+    expect(verifyAdminViewToken(staffToken)).toBeNull()
+  })
+
+  it('an admin-view token does not verify as a staff token', async () => {
+    const { issueAdminViewToken, verifyStaffToken } = await mod()
+    const adminToken = issueAdminViewToken('r1')
+    expect(verifyStaffToken(adminToken)).toBeNull()
+  })
+
+  it('a legacy staff token without typ still verifies as staff', async () => {
+    const { verifyStaffToken } = await mod()
+    const crypto = await import('crypto')
+    const b64url = (s: string | Buffer) => Buffer.from(s as any).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    const legacy = { rid: 'r1', sid: 's1', owner: false, apps: ['manager'], iat: 0, exp: 9999999999 }
+    const body = b64url(JSON.stringify(legacy))
+    const sig = b64url(crypto.createHmac('sha256', process.env.MISE_TOKEN_SECRET!).update(body).digest())
+    const payload = verifyStaffToken(`${body}.${sig}`)
+    expect(payload).not.toBeNull()
+    expect(payload!.rid).toBe('r1')
   })
 })

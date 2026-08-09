@@ -42,7 +42,9 @@ export default function RootLayout({
   return (
     <html lang="ru" className={`${geistSans.variable} h-full antialiased`}>
       <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+        {/* user-scalable=no блокировал pinch-zoom на всём сайте, включая юридические страницы
+            (WCAG 1.4.4) — форма PIN и т.п. не требуют такого запрета. */}
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />

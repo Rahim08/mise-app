@@ -34,6 +34,12 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ url: session.url })
   } catch (err: any) {
+    console.error(err)
+    // В app_errors — иначе ошибка видна только в Vercel-логах (как в checkout/update)
+    try {
+      const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+      await admin.from('app_errors').insert({ source: 'server', message: `stripe/portal: ${err.message}`, stack: err.stack?.slice(0, 4000) })
+    } catch {}
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
 }

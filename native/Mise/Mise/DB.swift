@@ -21,6 +21,37 @@ enum DB {
     /// межустройственной слепоты). Оффлайн-поддержка не страдает: после очистки
     /// успешные SELECT-ы тут же перезаполняют кеш.
     static func clearCacheNow() async { await CacheStore.shared.clearAll() }
+
+    /// Отметить/снять признак «отдали устаревший кеш» (см. DBStatus).
+    static func markStale(table: String) async { await MainActor.run { DBStatus.shared.mark(table) } }
+    static func clearStale(table: String) async { await MainActor.run { DBStatus.shared.clear(table) } }
+}
+
+/// Признак «данные пришли из просроченного кеша, сеть не ответила».
+///
+/// Раньше stale-ответ был неотличим от свежего (комментарий в dbRequestResilient обещал
+/// индикатор, но потребителей не существовало): менеджер мог закрыть смену по остатку,
+/// которому уже несколько часов, и не узнать об этом. Теперь любой такой ответ помечает
+/// таблицу здесь, а экраны показывают плашку.
+@MainActor
+@Observable
+final class DBStatus {
+    static let shared = DBStatus()
+
+    /// Таблицы, последнее чтение которых пришло из устаревшего кеша.
+    private(set) var staleTables: Set<String> = []
+    /// Когда в последний раз отдали устаревшие данные (для текста плашки).
+    private(set) var staleAt: Date?
+
+    func mark(_ table: String) { staleTables.insert(table); staleAt = Date() }
+    func clear(_ table: String) {
+        guard staleTables.contains(table) else { return }
+        staleTables.remove(table)
+        if staleTables.isEmpty { staleAt = nil }
+    }
+    func clearAll() { staleTables.removeAll(); staleAt = nil }
+    /// Хоть одна из перечисленных таблиц читалась из устаревшего кеша.
+    func isStale(_ tables: String...) -> Bool { tables.contains { staleTables.contains($0) } }
 }
 
 // MARK: - In-memory cache (оффлайн-поддержка)
@@ -130,7 +161,7 @@ final class DBQuery: @unchecked Sendable {
     /// Сетевая устойчивость: SELECT повторяем при сбое (идемпотентно). Без этого
     /// просадка сети/таймаут показывали «нет данных», пока не перелистнёшь туда-сюда.
     /// Для SELECT-запросов используется кеш: при ошибке сети возвращаем кешированные данные.
-    private func dbRequestResilient() async throws -> Data {
+    private func dbRequestResilient() async throws -> (data: Data, stale: Bool) {
         let p = payload()
         let isRead = op == "select"
         let cacheKey = isRead ? cacheKey(p) : nil
@@ -139,7 +170,7 @@ final class DBQuery: @unchecked Sendable {
         var cachedStale: Data?
         if let key = cacheKey, !bypassCache {
             if let entry = await CacheStore.shared.get(key) {
-                if !entry.stale { return entry.data } // свежий кеш — возвращаем сразу
+                if !entry.stale { return (entry.data, false) } // свежий кеш — возвращаем сразу
                 cachedStale = entry.data // запомнили на случай ошибки сети
             }
         }
@@ -153,7 +184,12 @@ final class DBQuery: @unchecked Sendable {
                 if let key = cacheKey {
                     await CacheStore.shared.set(key, data: data)
                 }
-                return data
+                // Любая запись обесценивает кеш SELECT-ов этой таблицы — иначе следующее
+                // чтение до 5 минут отдаёт состояние ДО мутации (открытая смена «пропадала»,
+                // и повторное открытие ловило unique(restaurant_id,date)).
+                if !isRead { DB.invalidateCache(table: table) }
+                else { await DB.clearStale(table: table) }
+                return (data, false)
             } catch {
                 last = error
                 // не ретраить осмысленные ответы сервера (4xx) — только сетевые/5xx
@@ -167,9 +203,12 @@ final class DBQuery: @unchecked Sendable {
             }
         }
 
-        // Сеть недоступна — возвращаем кеш если есть
+        // Сеть недоступна — возвращаем кеш если есть, но помечаем данные устаревшими:
+        // вызывающий обязан уметь это показать (см. listChecked / DB.staleReads),
+        // иначе менеджер закроет смену по остатку, которому может быть много часов.
         if let stale = cachedStale {
-            return stale // UI покажет "stale" индикатор
+            await DB.markStale(table: table)
+            return (stale, true)
         }
 
         #if DEBUG
@@ -194,14 +233,20 @@ final class DBQuery: @unchecked Sendable {
 
     /// SELECT множества строк (битые строки пропускаются, не роняя весь список).
     func list<T: Decodable>(_ type: T.Type) async throws -> [T] {
-        let data = try await dbRequestResilient()
+        try await listChecked(type).rows
+    }
+
+    /// Как list(), но дополнительно сообщает, что строки пришли из устаревшего кеша
+    /// (сеть не ответила). Для экранов, где по данным принимают денежные решения.
+    func listChecked<T: Decodable>(_ type: T.Type) async throws -> (rows: [T], stale: Bool) {
+        let (data, stale) = try await dbRequestResilient()
         do {
             let wrap = try JSONDecoder().decode(Wrap<[Lossy<T>]>.self, from: data)
             let rows = (wrap.data ?? []).compactMap { $0.value }
             #if DEBUG
             print("[DB] \(table) list filters=\(filters) -> \(rows.count) rows (raw: \(String(data: data, encoding: .utf8)?.prefix(200) ?? ""))")
             #endif
-            return rows
+            return (rows, stale)
         } catch {
             #if DEBUG
             print("[DB] \(table) list DECODE FAILED: \(error) raw: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "")")
@@ -211,9 +256,11 @@ final class DBQuery: @unchecked Sendable {
     }
 
     /// SELECT одной строки (maybeSingle) или INSERT/UPDATE с возвратом строки (single).
+    /// Для записи кеш таблицы инвалидируется внутри dbRequestResilient() — раньше это
+    /// делал только run(), и путь insert().single() оставлял протухший SELECT в кеше.
     func single<T: Decodable>(_ type: T.Type) async throws -> T? {
         returning = op == "select" ? "maybeSingle" : "single"
-        let data = try await dbRequestResilient()
+        let (data, _) = try await dbRequestResilient()
         do {
             return try JSONDecoder().decode(Wrap<T>.self, from: data).data
         } catch {
@@ -224,9 +271,9 @@ final class DBQuery: @unchecked Sendable {
         }
     }
 
-    /// Запись без возврата (INSERT/UPDATE/DELETE). Инвалидирует кеш таблицы.
+    /// Запись без возврата (INSERT/UPDATE/DELETE). Инвалидирует кеш таблицы
+    /// (общий путь dbRequestResilient — как и single() для записи).
     func run() async throws {
-        _ = try await API.dbRequest(payload())
-        DB.invalidateCache(table: table)
+        _ = try await dbRequestResilient()
     }
 }

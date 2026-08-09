@@ -70,17 +70,41 @@ alter table public.menu_events           enable row level security;
 alter table public.menus                 enable row level security;
 alter table public.hookah_types          enable row level security;
 alter table public.hookah_goals          enable row level security;
-alter table public.staff_directory       enable row level security;
+
+-- ВНИМАНИЕ (аудит 2026-08-05): здесь раньше стояла строка
+--   alter table public.staff_directory enable row level security;
+-- `staff_directory` — это НЕ таблица, а VIEW (docs/migrations/people-features.sql:95).
+-- Postgres на такой команде падает с ошибкой 42809 «is not a table», а SQL Editor
+-- выполняет файл одним батчем в транзакции → откатывалось ВСЁ, что ниже (в т.ч. сами
+-- политики). Проверьте фактическое состояние RLS диагностикой в конце файла.
+-- RLS для вьюхи не нужна и не существует: она создана WITH (security_invoker = true),
+-- то есть читается с правами вызывающего и наследует RLS базовой таблицы `staff`
+-- (у неё RLS включена выше). anon через вьюху не получит ни строки.
+
+-- Таблицы, добавленные более поздними миграциями (аудит 2026-08-05). Каждая уже включает
+-- RLS в своей миграции, включая salary_payments (salary-payroll-2026-07.sql). Перечислены
+-- здесь, чтобы полный lockdown по-прежнему жил в одном месте; повторный прогон безвреден.
+alter table public.salary_payments          enable row level security; -- salary-payroll-2026-07.sql
+alter table public.google_reviews           enable row level security; -- google-reviews-2026-07.sql
+alter table public.google_rating_snapshots  enable row level security; -- google-reviews-2026-07.sql
+alter table public.stripe_events            enable row level security; -- stripe-events-2026-07.sql
+alter table public.rate_limits              enable row level security; -- rate-limit-atomic-2026-07.sql
+alter table public.pin_attempts             enable row level security; -- features-2026-06.sql
+alter table public.app_errors               enable row level security; -- features-2026-06.sql
 
 -- ----------------------------------------------------------------------------
 -- Owner self-access (optional but recommended).
 -- Lets a logged-in owner read their own restaurant row directly if ever needed,
 -- without the service role. Safe because it is scoped to auth.uid().
 -- ----------------------------------------------------------------------------
+-- drop перед create — иначе повторный прогон файла падает с «policy already exists»
+-- и (в одном батче SQL Editor) откатывает всё, что было выше.
+drop policy if exists "owner reads own restaurant" on public.restaurants;
 create policy "owner reads own restaurant"
   on public.restaurants for select
   using (owner_id = auth.uid());
 
+drop policy if exists "owner reads own profile" on public.profiles;
 create policy "owner reads own profile"
   on public.profiles for select
   using (id = auth.uid());

@@ -505,6 +505,30 @@ final class AnalyticsModel {
         cardAmounts = arr
     }
 
+    // Кэш shiftsRaw — только текущий просматриваемый месяц (load(), строка 191). Если смена
+    // на нужную дату туда не попала (другой месяц / ещё не подгружена), запрос напрямую в БД —
+    // раньше это место молча пропускало обновление инкассации (аванс уходил из кассы, но
+    // expense/total не менялись, юзер не видел ошибки).
+    private func findShift(forDate date: String) async -> Shift? {
+        if let s = shiftsRaw.first(where: { $0.date == date })
+            ?? shiftsRaw.filter({ $0.date <= date }).sorted(by: { $0.date > $1.date }).first {
+            return s
+        }
+        if let s = try? await DB.from("shifts").select().eq("date", date).limit(1).list(Shift.self).first {
+            return s
+        }
+        return try? await DB.from("shifts").select().lte("date", date).order("date", ascending: false).limit(1).list(Shift.self).first
+    }
+
+    // inkDetails кэш заполняется только для смен текущего месяца (load(), строка 215) — та же
+    // проблема кросс-месячного промаха, что у findShift, но для инкассации.
+    private func findInkassation(forShiftId shiftId: String) async -> Inkassation? {
+        if let cached = inkDetails[shiftId] { return cached }
+        return try? await DB.from("inkassations")
+            .select("shift_id, amount, expense, reason, total, salary, salary_note")
+            .eq("shift_id", shiftId).limit(1).list(Inkassation.self).first
+    }
+
     func addAdvance(empId: String, amount: Double, date: String) async {
         let empName = employees.first { $0.id == empId }?.name ?? ""
 
@@ -520,8 +544,7 @@ final class AnalyticsModel {
         advances.append(inserted)
 
         // 2. Update inkassation for the shift on that date — advance is paid from inkassated money.
-        let shift = shiftsRaw.first { $0.date == date }
-            ?? shiftsRaw.filter { $0.date <= date }.sorted { $0.date > $1.date }.first
+        let shift = await findShift(forDate: date)
         if let shift = shift {
             let ink = inkDetails[shift.id]
             let baseAmount = ink?.amount ?? (shift.inkassation ?? 0)
@@ -544,6 +567,10 @@ final class AnalyticsModel {
             inkDetails[shift.id] = Inkassation(shift_id: shift.id, amount: baseAmount > 0 ? baseAmount : nil,
                 expense: newExpense, reason: newReason, total: newTotal,
                 salary: ink?.salary, salary_note: ink?.salary_note)
+        } else {
+            // Смена на эту дату не найдена нигде (ни в кэше, ни в БД) — аванс в salary_advances
+            // уже создан, но касса не тронута. Раньше это молча проходило без следа.
+            flash(t("bk.advanceInkassationMissing"))
         }
     }
 
@@ -556,9 +583,8 @@ final class AnalyticsModel {
         } catch { advances.append(a); flash(t("bk.saveFailed")); return }
 
         // Reverse the inkassation expense update.
-        let shift = shiftsRaw.first { $0.date == (a.date ?? "") }
-            ?? shiftsRaw.filter { ($0.date) <= (a.date ?? "") }.sorted { $0.date > $1.date }.first
-        if let shift = shift, let ink = inkDetails[shift.id] {
+        let shift = await findShift(forDate: a.date ?? "")
+        if let shift = shift, let ink = await findInkassation(forShiftId: shift.id) {
             let empName = employees.first { $0.id == a.employee_id }?.name ?? ""
             let newExpense = max(0, (ink.expense ?? 0) - (a.amount ?? 0))
             let newReason = (ink.reason ?? "")
@@ -572,6 +598,8 @@ final class AnalyticsModel {
             inkDetails[shift.id] = Inkassation(shift_id: shift.id, amount: ink.amount,
                 expense: newExpense, reason: newReason.isEmpty ? nil : newReason, total: newTotal,
                 salary: ink.salary, salary_note: ink.salary_note)
+        } else if shift != nil {
+            flash(t("bk.advanceInkassationMissing"))
         }
     }
 

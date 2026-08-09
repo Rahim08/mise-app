@@ -97,7 +97,11 @@ final class NewsModel {
         }
     }
 
-    func publish(kind: String, priority: String, title: String?, body: String, author: (String, String)) async {
+    /// Возвращает true при успешной публикации — NewsCompose закрывает шторку только
+    /// в этом случае, иначе набранный текст терялся бы при сбое (dismiss() шёл сразу,
+    /// не дожидаясь ответа сервера).
+    @discardableResult
+    func publish(kind: String, priority: String, title: String?, body: String, author: (String, String)) async -> Bool {
         let values: [String: Any] = [
             "kind": kind,
             "priority": priority,
@@ -106,17 +110,42 @@ final class NewsModel {
             "created_by": author.0,
             "created_by_name": author.1,
         ]
-        try? await DB.from("news_posts").insert(values).run()
+        let inserted: NewsPost?
+        do {
+            inserted = try await DB.from("news_posts").insert(values).single(NewsPost.self)
+        } catch {
+            flash(t("nw.saveFailed"))
+            return false
+        }
+        // Локальная вставка вместо повторного load() — DB.run() чистит кэш fire-and-forget
+        // (DB.swift:14), немедленный re-select мог словить ещё не инвалидированный кэш.
+        if let inserted {
+            posts.insert(inserted, at: 0)
+            posts.sort { a, b in
+                let ra = NewsPriority(rawValue: a.priority ?? "normal")?.rank ?? 0
+                let rb = NewsPriority(rawValue: b.priority ?? "normal")?.rank ?? 0
+                if ra != rb { return ra > rb }
+                return (a.created_at ?? "") > (b.created_at ?? "")
+            }
+        } else {
+            await load()
+        }
         let pfx = priority == "urgent" ? t("nw.pUrgent") + " · " : (priority == "important" ? t("nw.pImportant") + " · " : "")
         let head = pfx + ((title?.isEmpty == false) ? title! : (NewsKind(rawValue: kind)?.label ?? t("nw.post")))
         await Notify.send(type: "news", title: head, body: body,
                           audience: ["all": true], data: ["module": "news"])
-        await load()
+        return true
     }
 
     func delete(_ p: NewsPost) async {
-        try? await DB.from("news_posts").delete().eq("id", p.id).run()
-        await load()
+        let idx = posts.firstIndex(where: { $0.id == p.id })
+        if let idx { posts.remove(at: idx) }
+        do {
+            try await DB.from("news_posts").delete().eq("id", p.id).run()
+        } catch {
+            if let idx { posts.insert(p, at: idx) }
+            flash(t("nw.deleteFailed"))
+        }
     }
 }
 
@@ -139,8 +168,10 @@ struct NewsView: View {
                             SwipeActionRow(trailing: app.isOfficial ? [
                                 SwipeAction(label: t("delete"), systemImage: "trash.fill", tint: BrandKit.menu) { pendingDelete = p }
                             ] : []) {
+                                // "···" в карточке шёл прямиком в m.delete(), минуя подтверждение,
+                                // которое есть у свайпа — маршрутизируем через тот же pendingDelete.
                                 NewsCard(p: p, canDelete: app.isOfficial) {
-                                    Task { await m.delete(p) }
+                                    pendingDelete = p
                                 }
                             }
                         }
@@ -169,7 +200,7 @@ struct NewsView: View {
                 }
                 .sheet(isPresented: $showCompose) {
                     NewsCompose(author: (app.staff?.id ?? "owner", app.staff?.name ?? t("role.owner"))) { kind, priority, title, body in
-                        Task { await m.publish(kind: kind, priority: priority, title: title, body: body, author: (app.staff?.id ?? "owner", app.staff?.name ?? t("role.owner"))) }
+                        await m.publish(kind: kind, priority: priority, title: title, body: body, author: (app.staff?.id ?? "owner", app.staff?.name ?? t("role.owner")))
                     }
                 }
             } else {
@@ -269,27 +300,28 @@ private struct NewsCard: View {
     }
 
     private func when(_ iso: String?) -> String {
-        guard let iso, let d = ISO8601DateFormatter().date(from: iso) ?? flexibleDate(iso) else { return "" }
+        // Раньше свой парсер: ISO8601DateFormatter() без .withFractionalSeconds спотыкался о
+        // микросекунды Postgres, фолбэк отрезал зону и читал UTC-время как локальное — пост,
+        // опубликованный в 20:00 в Цюрихе (UTC+2), показывался как «18:00». parseISO() —
+        // общий корректный парсер (Theme.swift), созданный ровно против этого класса багов.
+        guard let d = parseISO(iso) else { return "" }
         let f = DateFormatter(); f.locale = Locale(identifier: I18n.code)
         f.dateFormat = Calendar.current.isDateInToday(d) ? "HH:mm" : "d MMM, HH:mm"
         return f.string(from: d)
-    }
-    private func flexibleDate(_ s: String) -> Date? {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        return f.date(from: String(s.prefix(19)))
     }
 }
 
 private struct NewsCompose: View {
     let author: (String, String)
-    let onPublish: (String, String, String?, String) -> Void
+    let onPublish: (String, String, String?, String) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
     @State private var kind = "info"
     @State private var priority = "normal"
     @State private var title = ""
     @State private var message = ""
+    @State private var sending = false
+    @State private var error: String?
 
     var body: some View {
         NavigationStack {
@@ -316,6 +348,9 @@ private struct NewsCompose: View {
                     Section(t("nw.body")) {
                         TextField(t("nw.bodyPh"), text: $message, axis: .vertical).lineLimit(3...10)
                     }
+                    if let error {
+                        Section { Text(error).foregroundStyle(.red).font(.system(size: 13)) }
+                    }
                 }
                 .scrollContentBackground(.hidden)
                 .tint(NW_ACCENT)
@@ -323,18 +358,27 @@ private struct NewsCompose: View {
             .navigationTitle(t("nw.new")).navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.miseBg, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() }.disabled(sending) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(t("nw.publish")) {
+                    Button(sending ? t("saving") : t("nw.publish")) {
                         let tt = title.trimmingCharacters(in: .whitespacesAndNewlines)
                         let bb = message.trimmingCharacters(in: .whitespacesAndNewlines)
-                        onPublish(kind, priority, tt.isEmpty ? nil : tt, bb)
-                        dismiss()
+                        // dismiss() раньше шёл сразу, до ответа сервера — сбой сети закрывал
+                        // шторку и стирал набранный текст без следа. Теперь ждём результат
+                        // и закрываемся только при успехе; при сбое текст остаётся в форме.
+                        error = nil
+                        sending = true
+                        Task {
+                            let ok = await onPublish(kind, priority, tt.isEmpty ? nil : tt, bb)
+                            sending = false
+                            if ok { dismiss() } else { error = t("nw.saveFailed") }
+                        }
                     }
                     .bold()
-                    .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(sending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
+        .interactiveDismissDisabled(sending)
     }
 }

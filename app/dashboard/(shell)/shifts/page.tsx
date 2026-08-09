@@ -204,12 +204,20 @@ export default function ShiftsPage() {
     return { inc, card, ink, catTotal, empExtraTotal, totalExp, balance, opening, salary, inkNet }
   }
 
+  // Расходы/инкассация пересобираются целиком: insert-новых → delete-старых-по-id
+  // (НЕ delete-then-insert). Раньше обрыв сети между delete и insert молча стирал все
+  // расходы и инкассацию смены, а ошибки insert не проверялись вовсе — ввод исчезал без следа.
+  // Тот же порядок, что в app/manager/page.tsx (коммит b34d583) и ManagerView.swift.
+  // Если упадёт финальный delete — останутся видимые дубли, следующее успешное сохранение
+  // их подчистит (старые id уже собраны).
   const persistShift = async (sh = shift, dateForInk = currentDate) => {
     if (!sh) return
     const { inc, card, ink, totalExp, balance, salary, inkNet } = calc()
     const { error: upErr } = await db.from('shifts').update({ income: inc, income_card: card, inkassation: ink, total_expense: totalExp, closing_balance: balance }).eq('id', sh.id)
     if (upErr) throw new Error(upErr.message)
-    await db.from('shift_expenses').delete().eq('shift_id', sh.id)
+
+    const { data: oldExpenses, error: oldExpErr } = await db.from('shift_expenses').select('id').eq('shift_id', sh.id)
+    if (oldExpErr) throw new Error(oldExpErr.message)
     const inserts: any[] = []
     categories.forEach(c => {
       const amt = parseFloat(catAmounts[c.id] || '0')
@@ -219,15 +227,24 @@ export default function ShiftsPage() {
       const extra = parseFloat(empExtras[emp.id] || '0')
       if (extra > 0) inserts.push({ shift_id: sh.id, restaurant_id: restaurantId, employee_id: emp.id, category_name: emp.name + ' (экстра)', amount: extra })
     })
-    if (inserts.length > 0) await db.from('shift_expenses').insert(inserts)
-    await db.from('inkassations').delete().eq('shift_id', sh.id)
+    if (inserts.length > 0) {
+      const { error: insErr } = await db.from('shift_expenses').insert(inserts)
+      if (insErr) throw new Error(insErr.message)
+    }
+    if ((oldExpenses || []).length > 0) await db.from('shift_expenses').delete().in('id', (oldExpenses || []).map((e: any) => e.id))
+
+    const { data: oldInk, error: oldInkErr } = await db.from('inkassations').select('id').eq('shift_id', sh.id)
+    if (oldInkErr) throw new Error(oldInkErr.message)
     if (ink > 0 || inkExpense || inkReason || salary > 0 || inkSalaryNote) {
-      await db.from('inkassations').insert({
+      const { error: inkInsErr } = await db.from('inkassations').insert({
         shift_id: sh.id, restaurant_id: restaurantId, date: fmtDate(dateForInk),
         amount: ink, expense: parseFloat(inkExpense) || 0, reason: inkReason,
         salary, salary_note: inkSalaryNote || null, total: inkNet,
       })
+      if (inkInsErr) throw new Error(inkInsErr.message)
     }
+    if ((oldInk || []).length > 0) await db.from('inkassations').delete().in('id', (oldInk || []).map((r: any) => r.id))
+
     await db.from('shift_absences').update({ shift_id: sh.id, source: 'manager' }).eq('restaurant_id', restaurantId).eq('date', fmtDate(dateForInk))
     setAutoAbsences(new Set())
     setShift({ ...sh, income: inc, inkassation: ink, total_expense: totalExp, closing_balance: balance })

@@ -10,8 +10,8 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { resolveCaller, type Caller } from '@/lib/apiAuth'
-import { entitlements } from '@/lib/plans'
+import { resolveCaller, isOfficial, type Caller } from '@/lib/apiAuth'
+import { entitlements, isActiveStatus } from '@/lib/plans'
 
 type AppId = 'manager' | 'analytics' | 'stash' | 'people'
 
@@ -76,6 +76,45 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
 
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'like', 'ilike'])
 
+// Только Stripe webhook / /api/admin (сервис-роль напрямую, минуя этот шлюз) вправе менять
+// биллинг. Иначе owner из консоли браузера: db.from('restaurants').update({subscription_plan:
+// 'pro', staff_limit:999, addon_modules:[...]}) — entitlements() читает ровно эти поля,
+// бессрочный Pro без Stripe (аудит 2026-08-05, раздел 3, приоритет 6).
+const BILLING_ONLY_COLUMNS = new Set([
+  'subscription_plan', 'subscription_status', 'subscription_id', 'subscription_ends_at',
+  'staff_limit', 'addon_modules', 'extra_seats', 'addon_ai', 'ai_enabled', 'billing_interval',
+  'discount_pct', 'comp_apps', 'stripe_customer_id',
+])
+
+// Plain column list only — no PostgREST embedding syntax (`(`, `!`, `:`, `.`), which lets a
+// client select through a foreign key into an owner-only table (e.g. staff.pin_hash via a
+// shifts→staff FK) even though POLICY only checks the root table.
+const SAFE_COLUMNS_RE = /^[a-zA-Z0-9_,\s*]+$/
+function safeColumns(columns: unknown): string {
+  if (typeof columns !== 'string' || !columns.trim()) return '*'
+  return SAFE_COLUMNS_RE.test(columns) ? columns : '*'
+}
+
+// Columns readable by owner only, even when the table itself is open to staff apps for
+// other columns. Stripped from the response post-fetch — robust regardless of what the
+// client asked for (including '*').
+const OWNER_ONLY_COLUMNS: Record<string, string[]> = {
+  restaurants: ['owner_pin', 'stripe_customer_id', 'subscription_id'],
+  restaurant_settings: ['google_places_api_key'],
+}
+function stripOwnerOnlyColumns(table: string, data: any, caller: Caller): any {
+  if (caller.owner) return data
+  const secret = OWNER_ONLY_COLUMNS[table]
+  if (!secret || !data) return data
+  const strip = (row: any) => {
+    if (!row || typeof row !== 'object') return row
+    const copy = { ...row }
+    for (const k of secret) delete copy[k]
+    return copy
+  }
+  return Array.isArray(data) ? data.map(strip) : strip(data)
+}
+
 // Granting app access on `staff` is the billable action: «место» = сотрудник с доступом.
 // Лимиты и состав модулей считает entitlements() из lib/plans.ts (тариф + addon_modules +
 // extra_seats + comp_apps/staff_limit супер-админа). Enforced server-side so the UI gate
@@ -126,6 +165,17 @@ export async function POST(req: NextRequest) {
   const caller = await resolveCaller(req)
   if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // Ни PIN-логин, ни этот шлюз раньше не сверялись с subscription_status: после
+  // canceled/past_due сотрудники работали бессрочно (аудит 2026-08-05, раздел 3).
+  // Owner исключён — иначе не смог бы дойти до /dashboard/billing чтобы починить оплату.
+  if (!caller.owner) {
+    const admin0 = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    const { data: rest0 } = await admin0.from('restaurants').select('subscription_status').eq('id', caller.rid).single()
+    if (!isActiveStatus(rest0?.subscription_status)) {
+      return NextResponse.json({ error: 'Subscription inactive', code: 'subscription_inactive' }, { status: 403 })
+    }
+  }
+
   let body: any
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Bad request' }, { status: 400 }) }
 
@@ -143,6 +193,12 @@ export async function POST(req: NextRequest) {
   if (!graceOnlyUpdate && !authorized(caller, isWrite ? policy.write : policy.read)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  if (table === 'restaurants' && isWrite) {
+    const rows = Array.isArray(values) ? values : [values]
+    if (rows.some(v => v && typeof v === 'object' && Object.keys(v).some(k => BILLING_ONLY_COLUMNS.has(k)))) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+  }
 
   const scope = policy.scope || 'restaurant_id'
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
@@ -150,6 +206,13 @@ export async function POST(req: NextRequest) {
   if (table === 'staff' && (op === 'insert' || op === 'update' || op === 'upsert')) {
     const limitErr = await checkStaffPlanLimit(admin, caller.rid, op, values, filters)
     if (limitErr) return NextResponse.json({ error: limitErr, code: 'plan_limit' }, { status: 403 })
+  }
+
+  // news_posts write открыт всему people/manager/analytics/stash в POLICY (любой сотрудник
+  // может дёрнуть шлюз напрямую) — публикация «от всего заведения» и удаление чужих постов
+  // ограничены только UI, поэтому проверяются здесь дополнительно (аудит 2026-08-05, №5).
+  if (table === 'news_posts' && isWrite && !(await isOfficial(admin, caller))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const applyFilters = (q: any) => {
@@ -166,7 +229,7 @@ export async function POST(req: NextRequest) {
   try {
     let q: any
     if (op === 'select') {
-      q = admin.from(table).select(columns || '*').eq(scope, caller.rid)
+      q = admin.from(table).select(safeColumns(columns)).eq(scope, caller.rid)
       q = applyFilters(q)
       for (const o of (order || [])) q = q.order(o.col, { ascending: o.ascending !== false })
       if (limit) q = q.limit(limit)
@@ -181,6 +244,13 @@ export async function POST(req: NextRequest) {
       if (returning) q = q.select()
       if (returning === 'single') q = q.single()
     } else if (op === 'update') {
+      // Без фильтра .eq(scope, rid) — единственное условие, значит update бьёт по ВСЕМ
+      // строкам ресторана в один запрос. Единственная легитимная безфильтровая запись —
+      // restaurant_settings (одна строка на ресторан, tabs-shifts.tsx saveGrace); везде
+      // ещё явный фильтр требуется (аудит 2026-08-05, п.8 сводного приоритета).
+      if (!(filters || []).length && table !== 'restaurant_settings') {
+        return NextResponse.json({ error: 'Filter required for update' }, { status: 400 })
+      }
       // Скоуп-колонку менять нельзя: иначе update может «перекинуть» строку в чужой ресторан.
       let safeValues = values
       if (safeValues && typeof safeValues === 'object' && !Array.isArray(safeValues)) {
@@ -192,6 +262,11 @@ export async function POST(req: NextRequest) {
       if (returning) q = q.select()
       if (returning === 'single') q = q.single()
     } else if (op === 'delete') {
+      // Тот же риск, ещё необратимее: {table:'shifts',op:'delete'} без фильтра стирает
+      // всю историю смен ресторана одним запросом.
+      if (!(filters || []).length) {
+        return NextResponse.json({ error: 'Filter required for delete' }, { status: 400 })
+      }
       q = admin.from(table).delete().eq(scope, caller.rid)
       q = applyFilters(q)
     } else {
@@ -200,7 +275,7 @@ export async function POST(req: NextRequest) {
 
     const { data, error } = await q
     if (error) return NextResponse.json({ error: error.message, code: (error as any).code }, { status: 400 })
-    return NextResponse.json({ data })
+    return NextResponse.json({ data: stripOwnerOnlyColumns(table, data, caller) })
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
   }

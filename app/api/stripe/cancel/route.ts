@@ -27,9 +27,18 @@ export async function POST(req: NextRequest) {
     }
 
     await stripe.subscriptions.update(data.subscription_id, { cancel_at_period_end: true })
-    await supabase.from('restaurants').update({ subscription_status: 'canceling' }).eq('id', restaurantId)
+    // Ошибку записи проверяем явно: иначе в Stripe отмена оформлена, а в БД статус остаётся
+    // active — владелец видит «подписка активна» и повторно жмёт «Отменить».
+    const { error: dbErr } = await supabase.from('restaurants').update({ subscription_status: 'canceling' }).eq('id', restaurantId)
+    if (dbErr) throw new Error(`restaurants update: ${dbErr.message}`)
     return NextResponse.json({ success: true })
   } catch (err: any) {
+    console.error(err)
+    // В app_errors — иначе ошибка видна только в Vercel-логах (как в checkout/update)
+    try {
+      const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+      await admin.from('app_errors').insert({ source: 'server', message: `stripe/cancel: ${err.message}`, stack: err.stack?.slice(0, 4000) })
+    } catch {}
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
 }

@@ -1245,6 +1245,8 @@ const STRINGS: Record<string, Row> = {
   'nw.publish':    { en: 'Publish', ru: 'Опубликовать', it: 'Pubblica', fr: 'Publier', az: 'Dərc et', tr: 'Yayınla', uk: 'Опублікувати', kk: 'Жариялау' },
   'nw.empty':      { en: 'No news yet', ru: 'Новостей пока нет', it: 'Ancora nessuna notizia', fr: "Pas encore d'actualités", az: 'Hələ xəbər yoxdur', tr: 'Henüz haber yok', uk: 'Новин поки немає', kk: 'Әзірге жаңалық жоқ' },
   'nw.deleteConfirm': { en: 'Delete this post?', ru: 'Удалить эту новость?', it: 'Eliminare questo post?', fr: 'Supprimer cette publication ?', az: 'Bu xəbər silinsin?', tr: 'Bu haber silinsin mi?', uk: 'Видалити цю новину?', kk: 'Бұл жаңалық жойылсын ба?' },
+  'role.owner':    { en: 'Owner', ru: 'Владелец', it: 'Titolare', fr: 'Propriétaire', az: 'Sahib', tr: 'Sahip', uk: 'Власник', kk: 'Иесі' },
+  'nw.loadFailed': { en: 'Couldn’t load news — showing last known list', ru: 'Не удалось обновить ленту — показан прежний список', it: 'Aggiornamento non riuscito — mostro l’ultimo elenco', fr: 'Échec de l’actualisation — dernière liste affichée', az: 'Yenilənmədi — son siyahı göstərilir', tr: 'Güncellenemedi — son liste gösteriliyor', uk: 'Не вдалося оновити — показано попередній список', kk: 'Жаңартылмады — соңғы тізім көрсетілді' },
 
   // ── common ──
   'common.or':      { en: 'or', ru: 'или', it: 'oppure', fr: 'ou', az: 'və ya', tr: 'veya', uk: 'або', kk: 'немесе' },
@@ -1367,6 +1369,7 @@ const STRINGS: Record<string, Row> = {
   'menu.payAtTable':   { en: 'Pay at the table — the waiter takes payment on serving', ru: 'Оплата за столом — официант примет оплату при подаче', it: 'Pagamento al tavolo — il cameriere incassa alla consegna', fr: 'Paiement à table — le serveur encaisse au service', az: 'Masada ödəniş — ofisiant verərkən ödənişi alır', tr: 'Masada ödeme — garson servis sırasında alır', uk: 'Оплата за столом — офіціант прийме оплату при подачі', kk: 'Үстелде төлеу — даяшы әкелгенде төлемді қабылдайды' },
   'menu.sendOrder':    { en: 'Send order', ru: 'Отправить заказ', it: 'Invia ordine', fr: 'Envoyer la commande', az: 'Sifarişi göndər', tr: 'Siparişi gönder', uk: 'Надіслати замовлення', kk: 'Тапсырысты жіберу' },
   'menu.orderSent':    { en: '✓ Order sent', ru: '✓ Заказ отправлен', it: '✓ Ordine inviato', fr: '✓ Commande envoyée', az: '✓ Sifariş göndərildi', tr: '✓ Sipariş gönderildi', uk: '✓ Замовлення надіслано', kk: '✓ Тапсырыс жіберілді' },
+  'menu.orderFailed':  { en: 'Could not send the order — check your connection and try again', ru: 'Не удалось отправить заказ — проверьте связь и повторите', it: 'Impossibile inviare l’ordine — controlla la connessione e riprova', fr: 'Impossible d’envoyer la commande — vérifiez votre connexion et réessayez', az: 'Sifariş göndərilmədi — bağlantını yoxlayıb yenidən cəhd edin', tr: 'Sipariş gönderilemedi — bağlantınızı kontrol edip tekrar deneyin', uk: 'Не вдалося надіслати замовлення — перевірте з’єднання і спробуйте ще раз', kk: 'Тапсырыс жіберілмеді — байланысты тексеріп қайталаңыз' },
 
   // ── Menu platform — guest ──────────────────────────────────────────────────
   'menu.filters':      { en: 'Filters', ru: 'Фильтры', it: 'Filtri', fr: 'Filtres', az: 'Filtrlər', tr: 'Filtreler', uk: 'Фільтри', kk: 'Сүзгілер' },

@@ -836,6 +836,7 @@ let STRINGS: [String: [Lang: String]] = [
     "bk.notePh":          tr("Comment…", "Комментарий…", "Commento…", "Commentaire…", "Şərh…", "Yorum…", "Коментар…", "Пікір…"),
     "bk.delete":          tr("Delete booking", "Удалить бронь", "Elimina prenotazione", "Supprimer", "Rezervi sil", "Rezervasyonu sil", "Видалити бронювання", "Брондауды жою"),
     "bk.saveFailed":      tr("Couldn't save", "Не удалось сохранить", "Salvataggio non riuscito", "Échec de l’enregistrement", "Saxlanmadı", "Kaydedilemedi", "Не вдалося зберегти", "Сақталмады"),
+    "bk.advanceInkassationMissing": tr("Advance saved, but cash register wasn't updated — check manually", "Аванс сохранён, но касса не обновлена — проверьте вручную", "Anticipo salvato, ma la cassa non è stata aggiornata — controlla manualmente", "Avance enregistrée, mais la caisse n'a pas été mise à jour — vérifiez manuellement", "Avans saxlanıldı, lakin kassa yenilənmədi — əl ilə yoxlayın", "Avans kaydedildi, ancak kasa güncellenmedi — manuel kontrol edin", "Аванс збережено, але каса не оновлена — перевірте вручну", "Аванс сақталды, бірақ касса жаңартылмады — қолмен тексеріңіз"),
 
     // News
     "nw.kInfo":           tr("Info", "Информация", "Info", "Info", "Məlumat", "Bilgi", "Інформація", "Ақпарат"),
@@ -858,6 +859,8 @@ let STRINGS: [String: [Lang: String]] = [
     "nw.new":             tr("New post", "Новый пост", "Nuovo post", "Nouveau post", "Yeni paylaşım", "Yeni gönderi", "Новий допис", "Жаңа жазба"),
     "nw.publish":         tr("Publish", "Опубликовать", "Pubblica", "Publier", "Yerləşdir", "Yayınla", "Опублікувати", "Жариялау"),
     "nw.post":            tr("News", "Новость", "Novità", "Actualité", "Xəbər", "Haber", "Новина", "Жаңалық"),
+    "nw.saveFailed":      tr("Couldn't save", "Не удалось сохранить", "Salvataggio non riuscito", "Échec de l’enregistrement", "Saxlanmadı", "Kaydedilemedi", "Не вдалося зберегти", "Сақталмады"),
+    "nw.deleteFailed":    tr("Couldn't delete", "Не удалось удалить", "Eliminazione non riuscita", "Échec de la suppression", "Silinmədi", "Silinemedi", "Не вдалося видалити", "Жойылмады"),
 
     // People — дополнительные (свайп-действия, офлайн-явка)
     "pe.cancelOrder":       tr("Cancel order?", "Отменить заказ?", "Annullare l’ordine?", "Annuler la commande ?", "Sifariş ləğv edilsin?", "Siparişi iptal et?", "Скасувати замовлення?", "Тапсырысты болдырмау?"),
@@ -974,6 +977,17 @@ let STRINGS: [String: [Lang: String]] = [
     "qa.todayBookings":   tr("Today's bookings", "Брони на сегодня", "Prenotazioni oggi", "Réservations du jour", "Bu günün rezervləri", "Bugünün rezervasyonları", "Бронювання на сьогодні", "Бүгінгі брондау"),
     "qa.openShift":       tr("Open shift", "Открыть смену", "Apri turno", "Ouvrir le service", "Növbəni aç", "Vardiyayı aç", "Відкрити зміну", "Ауысымды ашу"),
     "qa.addExpense":      tr("Add expense", "Добавить расход", "Aggiungi spesa", "Ajouter une dépense", "Xərc əlavə et", "Gider ekle", "Додати витрату", "Шығыс қосу"),
+    // Siri Shortcuts (MiseShortcuts.swift) dialog-тексты — только те, что перевод произносит
+    // ВНУТРИ perform() (@MainActor, доступ к t()/L10n есть). title/description/phrases —
+    // static var протокола AppIntent, они nonisolated (система индексирует их до/без MainActor),
+    // поэтому используют отдельную небольшую nonisolated-таблицу прямо в MiseShortcuts.swift
+    // (тот же архитектурный приём, что WidgetLocalization.swift для расширения-виджета).
+    "sc.revenueNoShift":  tr("No open shift right now.", "Сейчас нет открытой смены.", "Nessun turno aperto al momento.", "Aucun service ouvert actuellement.", "Hazırda açıq növbə yoxdur.", "Şu anda açık vardiya yok.", "Зараз немає відкритої зміни.", "Қазір ашық ауысым жоқ."),
+    "sc.revenueDialog":   tr("Income {income}, balance {closing}.", "Приход {income}, остаток {closing}.", "Incasso {income}, saldo {closing}.", "Recettes {income}, solde {closing}.", "Gəlir {income}, qalıq {closing}.", "Gelir {income}, bakiye {closing}.", "Прихід {income}, залишок {closing}.", "Кіріс {income}, қалдық {closing}."),
+    "sc.bookingNone":     tr("No bookings today.", "Броней на сегодня нет.", "Nessuna prenotazione per oggi.", "Aucune réservation aujourd'hui.", "Bu gün üçün rezerv yoxdur.", "Bugün için rezervasyon yok.", "На сьогодні броней немає.", "Бүгінге брондау жоқ."),
+    "sc.bookingDialogTable": tr(", table {table}", ", стол {table}", ", tavolo {table}", ", table {table}", ", masa {table}", ", masa {table}", ", стіл {table}", ", үстел {table}"),
+    "sc.bookingDialog":   tr("Nearest booking: {time}, {guest}, {party} guests{extra}. Total bookings: {count}.", "Ближайшая бронь: {time}, {guest}, {party} гост.{extra}. Всего броней: {count}.", "Prenotazione più vicina: {time}, {guest}, {party} ospiti{extra}. Totale prenotazioni: {count}.", "Réservation la plus proche : {time}, {guest}, {party} pers.{extra}. Total : {count}.", "Yaxın rezerv: {time}, {guest}, {party} qonaq{extra}. Cəmi rezerv: {count}.", "En yakın rezervasyon: {time}, {guest}, {party} kişi{extra}. Toplam rezervasyon: {count}.", "Найближче бронювання: {time}, {guest}, {party} гостей{extra}. Всього броней: {count}.", "Жақын брондау: {time}, {guest}, {party} қонақ{extra}. Барлығы: {count}."),
+    "sc.countDialog":     tr("{count} bookings. Nearest: {time}, {guest}{extra}.", "{count} броней. Ближайшая: {time}, {guest}{extra}.", "{count} prenotazioni. Più vicina: {time}, {guest}{extra}.", "{count} réservations. La plus proche : {time}, {guest}{extra}.", "{count} rezerv. Yaxın: {time}, {guest}{extra}.", "{count} rezervasyon. En yakın: {time}, {guest}{extra}.", "{count} броней. Найближче: {time}, {guest}{extra}.", "{count} брондау. Жақыны: {time}, {guest}{extra}."),
     // Notification settings
     "ns.lowStock":        tr("Low stock alerts", "Остатки заканчиваются", "Scorte in esaurimento", "Stock bas", "Stok azalması", "Stok uyarısı", "Сповіщення про запаси", "Қор азаю хабарландырулары"),
     "ns.shiftReminder":   tr("Shift end reminder", "Напоминание о конце смены", "Promemoria fine turno", "Rappel fin de service", "Növbə sonu xatırlatması", "Vardiya sonu hatırlatması", "Нагадування про кінець зміни", "Ауысым соңы еске салу"),

@@ -1,7 +1,7 @@
 // Client helper for triggering a notification via /api/notify.
 // Best-effort: push не должен ломать основной сценарий, поэтому ошибки глотаем.
 
-export interface NotifyAudience { staff_ids?: string[]; owner?: boolean; managers?: boolean }
+export interface NotifyAudience { staff_ids?: string[]; owner?: boolean; managers?: boolean; all?: boolean }
 
 export interface NotifyPayload {
   type: string

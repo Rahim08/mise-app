@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @MainActor
 @Observable
@@ -44,6 +45,9 @@ final class AppModel {
     var currentApp: String?
     var deviceMismatch = false
     var deviceLimitReached = false
+    /// Непустое = PIN проверить НЕ удалось (сеть/сервер), а не «PIN неверный».
+    /// Без этого различия любой сбой связи выглядел как ошибка ввода (тряска точек).
+    var pinCheckError: String?
     var scanError: String?   // непустое = показать плашку «Неверный QR» и продолжить скан
 
     struct ResolvedStaff: Codable, Sendable {
@@ -185,9 +189,11 @@ final class AppModel {
         }
     }
 
-    /// true — PIN верный (перешли дальше); false — неверный (показать тряску).
+    /// true — PIN верный (перешли дальше); false — неверный (показать тряску) ЛИБО
+    /// проверка не состоялась — тогда заполнен pinCheckError и показывается алерт.
     func checkPin(_ pin: String) async -> Bool {
         guard let r = restaurant else { return false }
+        pinCheckError = nil
         do {
             let resp = try await API.postJSON("/api/auth/pin/check",
                                               body: ["restaurantId": r.id, "pin": pin, "deviceId": deviceId],
@@ -209,7 +215,15 @@ final class AppModel {
             if case APIError.http(403, let msg) = error {
                 if msg == "device_limit_reached" { deviceLimitReached = true }
                 else { deviceMismatch = true }
+                return false
             }
+            // Неверный PIN сервер отдаёт как 200 с match=false — сюда доходят ТОЛЬКО сбои
+            // (нет сети, 5xx, битый ответ). Показывать их как «неверный PIN» — врать
+            // пользователю: он начинает перебирать цифры вместо проверки связи.
+            let ns = error as NSError
+            pinCheckError = ns.domain == NSURLErrorDomain
+                ? t("pin.errOfflineMsg")
+                : t("pin.errServerMsg", ["err": error.localizedDescription])
             return false
         }
     }
@@ -347,17 +361,34 @@ final class AppModel {
 
     // MARK: выход
 
-    func logout() {
+    func logout() async {
+        // Отписка от пушей — ПЕРВЫМ делом, пока cookie PIN-сессии ещё жива: restaurant_id
+        // сервер берёт из сессии, после стирания cookie DELETE уже не пройдёт.
+        await unsubscribePush()
+
         d.removeObject(forKey: "mise_restaurant")
         d.removeObject(forKey: "mise_staff")
         d.removeObject(forKey: "mise_token_until")
         if let cookies = HTTPCookieStorage.shared.cookies {
             for c in cookies { HTTPCookieStorage.shared.deleteCookie(c) }
         }
+        // Групповое хранилище — то, из которого реально ходят и приложение, и виджет
+        // (см. MiseSharedSession). Без его очистки виджет продолжал бы писать в БД
+        // от имени вышедшего пользователя.
+        for c in MiseSharedSession.cookies.cookies ?? [] { MiseSharedSession.cookies.deleteCookie(c) }
         restaurant = nil
         staff = nil
         currentApp = nil
         isReauth = false
+        // Журнал уведомлений жил в AppModel всю жизнь процесса, а MainView грузит его
+        // только при notifsLoaded == false: после смены пользователя на том же телефоне
+        // официант видел уведомления владельца, включая суммы кассы.
+        notifs = []
+        notifsLoaded = false
+        notifsUnread = 0
+        pendingPeopleRoute = nil
+        pendingBookingsDate = nil
+        pendingAnalyticsDate = nil
         // mise_device_onboarded НЕ трогаем: у каждого сотрудника свой личный телефон (не
         // общее устройство на смену), поэтому OS-разрешения (Face ID/гео/уведомления) уже
         // выданы этому приложению на этом телефоне и после выхода/повторного входа спрашивать
@@ -367,5 +398,26 @@ final class AppModel {
         DB.clearCache()   // кеш SELECT-ов не ключуется по ресторану/сессии — иначе следующий
                            // вход (другой ресторан или тот же после сбоя) до 5 минут читает
                            // чужие/пустые данные из CacheStore вместо свежего запроса
+        DBStatus.shared.clearAll()
+    }
+
+    /// Отвязать это устройство от пушей вышедшего пользователя.
+    /// Раньше logout() этого не делал: строка push_subscriptions оставалась на сервере,
+    /// APNs-токен и настройки уведомлений — в UserDefaults. Уволенный сотрудник продолжал
+    /// получать пуши с суммами кассы, а после входа в другое заведение устройство получало
+    /// пуши обоих сразу (upsert по (restaurant_id, device_token) добавляет вторую строку).
+    private func unsubscribePush() async {
+        if let token = d.string(forKey: "mise_apns_token"), !token.isEmpty {
+            try? await DB.from("push_subscriptions").delete().eq("device_token", token).run()
+        }
+        d.removeObject(forKey: "mise_apns_token")
+        d.removeObject(forKey: "mise_push_upload_pending")
+        // Настройки уведомлений прошлого пользователя читают локально ShiftReminder.isEnabled
+        // и StashView.checkLowStock — следующему вошедшему они не принадлежат.
+        d.removeObject(forKey: "mise_notif_prefs")
+        ShiftReminder.cancel()
+        let center = UNUserNotificationCenter.current()
+        center.removeAllDeliveredNotifications()
+        try? await center.setBadgeCount(0)
     }
 }

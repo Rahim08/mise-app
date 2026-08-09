@@ -4,7 +4,10 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Mise — Платформа управления рестораном</title>
-<meta name="description" content="Пять приложений для ресторана в одном аккаунте: смены и касса, аналитика, склад, команда и QR-меню. 7 дней бесплатно."/>
+<meta name="description" content="Пять приложений для ресторана в одном аккаунте: смены и касса, аналитика, склад, команда и QR-меню. 14 дней бесплатно."/>
+<!-- Страница отдаётся во фрейме на «/». Канонический адрес — корень сайта, сам файл закрыт
+     от индексации заголовком X-Robots-Tag: noindex (next.config.ts). -->
+<link rel="canonical" href="https://misesuite.com/"/>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 :root{
@@ -55,6 +58,11 @@ body{
 .nav-drop-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
 .nav-drop-name{font-size:.84rem;font-weight:600;color:#fff;letter-spacing:-.01em;}
 .nav-right{display:flex;align-items:center;gap:12px;}
+.nav-hamburger{display:none;flex-direction:column;justify-content:center;gap:4px;width:34px;height:34px;background:none;border:none;cursor:pointer;padding:0;}
+.nav-hamburger span{display:block;width:20px;height:1.6px;background:#fff;border-radius:2px;transition:transform .2s var(--ease),opacity .2s var(--ease);}
+.nav-hamburger.open span:nth-child(1){transform:translateY(5.6px) rotate(45deg);}
+.nav-hamburger.open span:nth-child(2){opacity:0;}
+.nav-hamburger.open span:nth-child(3){transform:translateY(-5.6px) rotate(-45deg);}
 .lang-tog{position:relative;}
 .lang-cur{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.07);border:none;border-radius:8px;padding:6px 11px;cursor:pointer;color:var(--text-2);font-family:inherit;font-size:.72rem;font-weight:700;letter-spacing:.04em;transition:all .2s;}
 .lang-cur:hover{color:#fff;background:rgba(255,255,255,.12);}
@@ -332,7 +340,24 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
 
 /* ── MOBILE ──────────────────────────────────────── */
 @media(max-width:960px){
-  .nav-links{display:none;}
+  .nav-hamburger{display:flex;}
+  /* Раньше .nav-links просто скрывался целиком без замены — на телефоне пропадали
+     ВСЕ ссылки навигации, включая «Тарифы». Теперь гамбургер открывает те же ссылки
+     полноширинной панелью под шапкой. */
+  .nav-links{display:flex;flex-direction:column;gap:2px;position:fixed;top:52px;left:0;right:0;z-index:998;
+    padding:10px 20px 22px;background:rgba(10,10,12,.92);backdrop-filter:blur(24px) saturate(160%);
+    -webkit-backdrop-filter:blur(24px) saturate(160%);border-bottom:.5px solid var(--border);
+    max-height:0;overflow:hidden;opacity:0;pointer-events:none;
+    transition:max-height .28s var(--ease),opacity .2s var(--ease);}
+  .nav-links.open{max-height:calc(100vh - 52px);opacity:1;pointer-events:auto;overflow-y:auto;}
+  .nav-links li{width:100%;}
+  .nav-links a{display:block;padding:13px 4px;font-size:.95rem;}
+  /* На тач-устройстве hover недоступен — подменю «Приложения» просто всегда развёрнуто
+     внутри мобильной панели, отдельного тоггла не требуется. */
+  .nav-drop-menu{position:static;transform:none;opacity:1;pointer-events:auto;background:none;
+    backdrop-filter:none;-webkit-backdrop-filter:none;border:none;box-shadow:none;
+    padding:2px 0 4px 14px;display:flex;flex-direction:column;min-width:0;}
+  .nav-drop-item{padding:9px 4px;}
   .app-row{grid-template-columns:1fr;gap:36px;padding:64px 24px;}
   .app-row.flip .app-copy{order:0;}
   .app-copy{max-width:none;margin:0 auto;text-align:center;}
@@ -363,8 +388,8 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
 
 <!-- NAV -->
 <nav class="nav">
-  <a href="/" class="nav-logo">mis<span style="color:#8e8e93;margin-left:-.045em">e</span></a>
-  <ul class="nav-links">
+  <a href="/" class="nav-logo" target="_top">mis<span style="color:#8e8e93;margin-left:-.045em">e</span></a>
+  <ul class="nav-links" id="navLinks">
     <li class="nav-drop">
       <a href="#apps" data-i18n="n.apps">Приложения</a>
       <div class="nav-drop-menu">
@@ -388,6 +413,9 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
       <div class="lang-menu" id="langMenu"></div>
     </div>
     <a href="/auth/login" class="nav-cta" data-i18n="n.cta" target="_top">Войти</a>
+    <button class="nav-hamburger" id="navHamburger" onclick="toggleMobileNav(event)" aria-expanded="false" aria-controls="navLinks" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
   </div>
 </nav>
 
@@ -700,7 +728,7 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
     <div class="steps">
       <div class="steps-line"></div>
       <div class="step reveal d1"><div class="step-n">1</div><p class="step-t" data-i18n="step1.t">Регистрация</p><p class="step-d" data-i18n="step1.d">Создайте аккаунт за 30 секунд.</p></div>
-      <div class="step reveal d2"><div class="step-n">2</div><p class="step-t" data-i18n="step2.t">Подписка</p><p class="step-d" data-i18n="step2.d">7 дней бесплатно.</p></div>
+      <div class="step reveal d2"><div class="step-n">2</div><p class="step-t" data-i18n="step2.t">Подписка</p><p class="step-d" data-i18n="step2.d">14 дней бесплатно.</p></div>
       <div class="step reveal d3"><div class="step-n">3</div><p class="step-t" data-i18n="step3.t">Команда</p><p class="step-d" data-i18n="step3.d">Доступ через QR-код и PIN.</p></div>
       <div class="step reveal d4" style="transition-delay:.34s;"><div class="step-n">4</div><p class="step-t" data-i18n="step4.t">Контроль</p><p class="step-d" data-i18n="step4.d">Аналитика и отчёты в любое время.</p></div>
     </div>
@@ -722,11 +750,11 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
       <div class="feat-list-p">
         <div class="feat-p-item"><div class="feat-p-check">✓</div><span>Mise Manager</span></div>
         <div class="feat-p-item"><div class="feat-p-check">✓</div><span>Mise Analytics</span></div>
-        <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p1.f1">До 2 пользователей</span></div>
+        <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p1.f1">До 3 пользователей</span></div>
         <div class="feat-p-item"><div class="feat-p-check" style="background:transparent;color:transparent;border:.5px solid var(--border);">—</div><span class="feat-p-off">Stash · People · Menu</span></div>
         <div class="feat-p-item"><div class="feat-p-check" style="background:transparent;color:transparent;border:.5px solid var(--border);">—</div><span class="feat-p-off" data-i18n="p1.f2">AI-аналитика</span></div>
       </div>
-      <button class="plan-btn" onclick="window.location.href='/auth/register'" data-i18n="p1.btn">Выбрать</button>
+      <button class="plan-btn" onclick="window.top.location.href='/auth/register'" data-i18n="p1.btn">Выбрать</button>
     </div>
 
     <div class="plan featured reveal d2">
@@ -735,13 +763,13 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
       <div class="plan-price"><sup>€</sup>24</div>
       <p class="plan-day" data-i18n="p2.d">€0.79 в день</p>
       <div class="feat-list-p">
-        <div class="feat-p-item"><div class="feat-p-check" style="background:rgba(0,122,255,.2);color:var(--blue);">✓</div><span data-i18n="p2.f1">Все пять приложений</span></div>
+        <div class="feat-p-item"><div class="feat-p-check" style="background:rgba(0,122,255,.2);color:var(--blue);">✓</div><span data-i18n="p2.f1">Все приложения</span></div>
         <div class="feat-p-item"><div class="feat-p-check" style="background:rgba(0,122,255,.2);color:var(--blue);">✓</div><span data-i18n="p2.f3">QR-меню для гостей</span></div>
-        <div class="feat-p-item"><div class="feat-p-check" style="background:rgba(0,122,255,.2);color:var(--blue);">✓</div><span data-i18n="p2.f2">До 5 пользователей</span></div>
+        <div class="feat-p-item"><div class="feat-p-check" style="background:rgba(0,122,255,.2);color:var(--blue);">✓</div><span data-i18n="p2.f2">До 7 пользователей</span></div>
         <div class="feat-p-item"><div class="feat-p-check" style="background:rgba(0,122,255,.2);color:var(--blue);">✓</div><span data-i18n="p2.f4">Приоритетная поддержка</span></div>
         <div class="feat-p-item"><div class="feat-p-check" style="background:transparent;color:transparent;border:.5px solid var(--border);">—</div><span class="feat-p-off" data-i18n="p2.f5">AI-аналитика</span></div>
       </div>
-      <button class="plan-btn main" onclick="window.location.href='/auth/register'" data-i18n="p2.btn">Начать бесплатно</button>
+      <button class="plan-btn main" onclick="window.top.location.href='/auth/register'" data-i18n="p2.btn">Начать бесплатно</button>
     </div>
 
     <div class="plan glass reveal d3">
@@ -751,17 +779,17 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
       <div class="feat-list-p">
         <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f1">Всё из Business</span></div>
         <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f3">AI-аналитика</span></div>
-        <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f2">До 10 пользователей</span></div>
+        <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f2">До 15 пользователей</span></div>
         <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f4">Интеграции: касса · банк</span></div>
       </div>
-      <button class="plan-btn" onclick="window.location.href='/auth/register'" data-i18n="p3.btn">Выбрать</button>
+      <button class="plan-btn" onclick="window.top.location.href='/auth/register'" data-i18n="p3.btn">Выбрать</button>
     </div>
   </div>
   <div class="pay-row">
     <div class="pay-b">Apple Pay</div>
     <div class="pay-b">Visa · Mastercard</div>
     <div class="pay-b">Stripe</div>
-    <div class="pay-b" data-i18n="pay.free">7 дней бесплатно</div>
+    <div class="pay-b" data-i18n="pay.free">14 дней бесплатно</div>
   </div>
 </div>
 
@@ -769,8 +797,8 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
 <section class="big-cta">
   <div class="big-cta-aurora"></div>
   <div class="big-cta-word" id="cta-word" data-i18n="cta.w">Готовы?</div>
-  <p class="big-cta-sub" id="cta-sub" data-i18n="cta.s">Первые 7 дней бесплатно.</p>
-  <button class="btn-primary" onclick="window.location.href='/auth/register'" data-i18n="cta.b">Создать аккаунт</button>
+  <p class="big-cta-sub" id="cta-sub" data-i18n="cta.s">Первые 14 дней бесплатно.</p>
+  <button class="btn-primary" onclick="window.top.location.href='/auth/register'" data-i18n="cta.b">Создать аккаунт</button>
 </section>
 
 <!-- FOOTER -->
@@ -792,22 +820,22 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
         </div>
         <div class="ft-col">
           <h4 data-i18n="ft.c">Компания</h4>
-          <a href="/about.html" data-i18n="ft.about">О нас</a>
-          <a href="/support.html" data-i18n="ft.sup">Поддержка</a>
-          <a href="/contact.html" data-i18n="ft.cont">Контакты</a>
+          <a href="/about.html" target="_top" data-i18n="ft.about">О нас</a>
+          <a href="/support.html" target="_top" data-i18n="ft.sup">Поддержка</a>
+          <a href="/contact.html" target="_top" data-i18n="ft.cont">Контакты</a>
         </div>
         <div class="ft-col">
           <h4 data-i18n="ft.l">Правовое</h4>
-          <a href="/privacy.html" data-i18n="ft.priv">Конфиденциальность</a>
-          <a href="/terms.html" data-i18n="ft.terms">Условия</a>
+          <a href="/privacy.html" target="_top" data-i18n="ft.priv">Конфиденциальность</a>
+          <a href="/terms.html" target="_top" data-i18n="ft.terms">Условия</a>
         </div>
       </div>
     </div>
     <div class="ft-bottom">
       <p class="ft-copy">© 2025 Mise.</p>
       <div class="ft-links">
-        <a href="/privacy.html" data-i18n="ft.priv">Конфиденциальность</a>
-        <a href="/terms.html" data-i18n="ft.terms">Условия</a>
+        <a href="/privacy.html" target="_top" data-i18n="ft.priv">Конфиденциальность</a>
+        <a href="/terms.html" target="_top" data-i18n="ft.terms">Условия</a>
       </div>
     </div>
   </div>
@@ -890,13 +918,13 @@ const T = {
     'cc2.t':'PIN-доступ','cc2.d':'4-значный PIN задаёт владелец. Каждому — свой код и свой набор приложений.',
     'cc3.t':'Единый вход','cc3.d':'Один PIN открывает все доступные сотруднику разделы. Переключение между ними — без повторного входа.',
     'hw.l':'Как это работает','hw.t':'Запуск за минуты.','hw.s':'Четыре шага — и весь ресторан под контролем.',
-    'step1.t':'Регистрация','step1.d':'Аккаунт за 30 секунд.','step2.t':'Подписка','step2.d':'7 дней бесплатно.','step3.t':'Команда','step3.d':'Доступ по QR и PIN.','step4.t':'Контроль','step4.d':'Аналитика и отчёты в любое время.',
+    'step1.t':'Регистрация','step1.d':'Аккаунт за 30 секунд.','step2.t':'Подписка','step2.d':'14 дней бесплатно.','step3.t':'Команда','step3.d':'Доступ по QR и PIN.','step4.t':'Контроль','step4.d':'Аналитика и отчёты в любое время.',
     'pr.l':'Тарифы','pr.t':'Прозрачные цены.','pr.s':'Сменить или отменить тариф — в любой момент.',
-    'p1.d':'€0.47 в день','p1.f1':'До 2 пользователей','p1.f2':'AI-аналитика','p1.btn':'Выбрать',
-    'p2.d':'€0.79 в день','p2.f1':'Все пять приложений','p2.f2':'До 5 пользователей','p2.f3':'QR-меню для гостей','p2.f4':'Приоритетная поддержка','p2.f5':'AI-аналитика','p2.btn':'Начать бесплатно',
-    'p3.d':'€1.29 в день','p3.f1':'Всё из Business','p3.f2':'До 10 пользователей','p3.f3':'AI-аналитика','p3.f4':'Интеграции: касса · банк','p3.btn':'Выбрать',
-    'pop':'Популярный','pay.free':'7 дней бесплатно',
-    'cta.w':'Готовы?','cta.s':'Первые 7 дней бесплатно.','cta.b':'Создать аккаунт',
+    'p1.d':'€0.47 в день','p1.f1':'До 3 пользователей','p1.f2':'AI-аналитика','p1.btn':'Выбрать',
+    'p2.d':'€0.79 в день','p2.f1':'Все приложения','p2.f2':'До 7 пользователей','p2.f3':'QR-меню для гостей','p2.f4':'Приоритетная поддержка','p2.f5':'AI-аналитика','p2.btn':'Начать бесплатно',
+    'p3.d':'€1.29 в день','p3.f1':'Всё из Business','p3.f2':'До 15 пользователей','p3.f3':'AI-аналитика','p3.f4':'Интеграции: касса · банк','p3.btn':'Выбрать',
+    'pop':'Популярный','pay.free':'14 дней бесплатно',
+    'cta.w':'Готовы?','cta.s':'Первые 14 дней бесплатно.','cta.b':'Создать аккаунт',
     'ft.tag':'Платформа управления рестораном. Пять приложений в одном аккаунте.','ft.p':'Приложения','ft.c':'Компания','ft.l':'Правовое','ft.about':'О нас','ft.sup':'Поддержка','ft.cont':'Контакты','ft.priv':'Конфиденциальность','ft.terms':'Условия',
   },
   en:{
@@ -921,13 +949,13 @@ const T = {
     'cc2.t':'PIN access','cc2.d':'A 4-digit PIN, set by the owner. Each person gets their own code and their own apps.',
     'cc3.t':'One sign-in','cc3.d':'One PIN opens every section the staff member can access. Switching between them needs no repeat login.',
     'hw.l':'How it works','hw.t':'Live in minutes.','hw.s':'Four steps, and your whole restaurant is under control.',
-    'step1.t':'Register','step1.d':'An account in 30 seconds.','step2.t':'Subscribe','step2.d':'7 days free.','step3.t':'Team','step3.d':'Access by QR and PIN.','step4.t':'Control','step4.d':'Analytics and reports, anytime.',
+    'step1.t':'Register','step1.d':'An account in 30 seconds.','step2.t':'Subscribe','step2.d':'14 days free.','step3.t':'Team','step3.d':'Access by QR and PIN.','step4.t':'Control','step4.d':'Analytics and reports, anytime.',
     'pr.l':'Pricing','pr.t':'Transparent pricing.','pr.s':'Switch or cancel anytime.',
-    'p1.d':'€0.47 per day','p1.f1':'Up to 2 users','p1.f2':'AI analytics','p1.btn':'Choose',
-    'p2.d':'€0.79 per day','p2.f1':'All five apps','p2.f2':'Up to 5 users','p2.f3':'Guest QR menu','p2.f4':'Priority support','p2.f5':'AI analytics','p2.btn':'Start free',
-    'p3.d':'€1.29 per day','p3.f1':'Everything in Business','p3.f2':'Up to 10 users','p3.f3':'AI analytics','p3.f4':'Integrations: POS · bank','p3.btn':'Choose',
-    'pop':'Most popular','pay.free':'7 days free',
-    'cta.w':'Ready?','cta.s':'Your first 7 days are free.','cta.b':'Create account',
+    'p1.d':'€0.47 per day','p1.f1':'Up to 3 users','p1.f2':'AI analytics','p1.btn':'Choose',
+    'p2.d':'€0.79 per day','p2.f1':'All apps','p2.f2':'Up to 7 users','p2.f3':'Guest QR menu','p2.f4':'Priority support','p2.f5':'AI analytics','p2.btn':'Start free',
+    'p3.d':'€1.29 per day','p3.f1':'Everything in Business','p3.f2':'Up to 15 users','p3.f3':'AI analytics','p3.f4':'Integrations: POS · bank','p3.btn':'Choose',
+    'pop':'Most popular','pay.free':'14 days free',
+    'cta.w':'Ready?','cta.s':'Your first 14 days are free.','cta.b':'Create account',
     'ft.tag':'Restaurant management platform. Five apps in one account.','ft.p':'Apps','ft.c':'Company','ft.l':'Legal','ft.about':'About','ft.sup':'Support','ft.cont':'Contact','ft.priv':'Privacy','ft.terms':'Terms',
   },
   it:{
@@ -952,13 +980,13 @@ const T = {
     'cc2.t':"Accesso PIN",'cc2.d':"Un PIN di 4 cifre, impostato dal titolare. A ciascuno il proprio codice e le proprie app.",
     'cc3.t':"Accesso unico",'cc3.d':"Un solo PIN apre tutte le sezioni a cui il dipendente ha accesso. Passare dall'una all'altra non richiede un nuovo accesso.",
     'hw.l':"Come funziona",'hw.t':"Operativo in pochi minuti.",'hw.s':"Quattro passi, e tutto il ristorante è sotto controllo.",
-    'step1.t':"Registrazione",'step1.d':"Un account in 30 secondi.",'step2.t':"Abbonamento",'step2.d':"7 giorni gratis.",'step3.t':"Team",'step3.d':"Accesso con QR e PIN.",'step4.t':"Controllo",'step4.d':"Analisi e report, sempre.",
+    'step1.t':"Registrazione",'step1.d':"Un account in 30 secondi.",'step2.t':"Abbonamento",'step2.d':"14 giorni gratis.",'step3.t':"Team",'step3.d':"Accesso con QR e PIN.",'step4.t':"Controllo",'step4.d':"Analisi e report, sempre.",
     'pr.l':"Prezzi",'pr.t':"Prezzi trasparenti.",'pr.s':"Cambia o annulla quando vuoi.",
-    'p1.d':"€0.47 al giorno",'p1.f1':"Fino a 2 utenti",'p1.f2':"Analisi AI",'p1.btn':"Scegli",
-    'p2.d':"€0.79 al giorno",'p2.f1':"Tutte e cinque le app",'p2.f2':"Fino a 5 utenti",'p2.f3':"Menu QR per gli ospiti",'p2.f4':"Supporto prioritario",'p2.f5':"Analisi AI",'p2.btn':"Inizia gratis",
-    'p3.d':"€1.29 al giorno",'p3.f1':"Tutto di Business",'p3.f2':"Fino a 10 utenti",'p3.f3':"Analisi AI",'p3.f4':"Integrazioni: cassa · banca",'p3.btn':"Scegli",
-    'pop':"Più scelto",'pay.free':"7 giorni gratis",
-    'cta.w':"Pronto?",'cta.s':"I primi 7 giorni sono gratis.",'cta.b':"Crea un account",
+    'p1.d':"€0.47 al giorno",'p1.f1':"Fino a 3 utenti",'p1.f2':"Analisi AI",'p1.btn':"Scegli",
+    'p2.d':"€0.79 al giorno",'p2.f1':"Tutte le app",'p2.f2':"Fino a 7 utenti",'p2.f3':"Menu QR per gli ospiti",'p2.f4':"Supporto prioritario",'p2.f5':"Analisi AI",'p2.btn':"Inizia gratis",
+    'p3.d':"€1.29 al giorno",'p3.f1':"Tutto di Business",'p3.f2':"Fino a 15 utenti",'p3.f3':"Analisi AI",'p3.f4':"Integrazioni: cassa · banca",'p3.btn':"Scegli",
+    'pop':"Più scelto",'pay.free':"14 giorni gratis",
+    'cta.w':"Pronto?",'cta.s':"I primi 14 giorni sono gratis.",'cta.b':"Crea un account",
     'ft.tag':"La piattaforma per gestire il ristorante. Cinque app in un solo account.",'ft.p':"App",'ft.c':"Azienda",'ft.l':"Note legali",'ft.about':"Chi siamo",'ft.sup':"Supporto",'ft.cont':"Contatti",'ft.priv':"Privacy",'ft.terms':"Termini",
   },
   fr:{
@@ -983,12 +1011,12 @@ const T = {
     'cc2.t':"Accès PIN",'cc2.d':"Un PIN à 4 chiffres, défini par le gérant. À chacun son code et ses apps.",
     'cc3.t':"Connexion unique",'cc3.d':"Un seul PIN ouvre toutes les sections autorisées. Passer de l'une à l'autre ne demande aucune reconnexion.",
     'hw.l':"Fonctionnement",'hw.t':"Opérationnel en minutes.",'hw.s':"Quatre étapes, et tout le restaurant est sous contrôle.",
-    'step1.t':"Inscription",'step1.d':"Un compte en 30 secondes.",'step2.t':"Abonnement",'step2.d':"7 jours gratuits.",'step3.t':"Équipe",'step3.d':"Accès par QR et PIN.",'step4.t':"Contrôle",'step4.d':"Analyses et rapports, à tout moment.",
+    'step1.t':"Inscription",'step1.d':"Un compte en 30 secondes.",'step2.t':"Abonnement",'step2.d':"14 jours gratuits.",'step3.t':"Équipe",'step3.d':"Accès par QR et PIN.",'step4.t':"Contrôle",'step4.d':"Analyses et rapports, à tout moment.",
     'pr.l':"Tarifs",'pr.t':"Des tarifs transparents.",'pr.s':"Changez ou annulez à tout moment.",
-    'p1.d':"€0.47 par jour",'p1.f1':"Jusqu'à 2 utilisateurs",'p1.f2':"Analyses IA",'p1.btn':"Choisir",
-    'p2.d':"€0.79 par jour",'p2.f1':"Les cinq apps",'p2.f2':"Jusqu'à 5 utilisateurs",'p2.f3':"Menu QR pour les clients",'p2.f4':"Support prioritaire",'p2.f5':"Analyses IA",'p2.btn':"Commencer gratuitement",
-    'p3.d':"€1.29 par jour",'p3.f1':"Tout Business",'p3.f2':"Jusqu'à 10 utilisateurs",'p3.f3':"Analyses IA",'p3.f4':"Intégrations : caisse · banque",'p3.btn':"Choisir",
-    'pop':"Le plus choisi",'pay.free':"7 jours gratuits",
+    'p1.d':"€0.47 par jour",'p1.f1':"Jusqu'à 3 utilisateurs",'p1.f2':"Analyses IA",'p1.btn':"Choisir",
+    'p2.d':"€0.79 par jour",'p2.f1':"Toutes les apps",'p2.f2':"Jusqu'à 7 utilisateurs",'p2.f3':"Menu QR pour les clients",'p2.f4':"Support prioritaire",'p2.f5':"Analyses IA",'p2.btn':"Commencer gratuitement",
+    'p3.d':"€1.29 par jour",'p3.f1':"Tout Business",'p3.f2':"Jusqu'à 15 utilisateurs",'p3.f3':"Analyses IA",'p3.f4':"Intégrations : caisse · banque",'p3.btn':"Choisir",
+    'pop':"Le plus choisi",'pay.free':"14 jours gratuits",
     'cta.w':"Prêt ?",'cta.s':"Vos 7 premiers jours sont gratuits.",'cta.b':"Créer un compte",
     'ft.tag':"La plateforme de gestion de restaurant. Cinq apps dans un seul compte.",'ft.p':"Apps",'ft.c':"Entreprise",'ft.l':"Mentions légales",'ft.about':"À propos",'ft.sup':"Support",'ft.cont':"Contact",'ft.priv':"Confidentialité",'ft.terms':"Conditions",
   },
@@ -1014,13 +1042,13 @@ const T = {
     'cc2.t':"PIN-giriş",'cc2.d':"4 rəqəmli PIN sahib tərəfindən təyin olunur. Hər kəsə öz kodu və öz tətbiqləri.",
     'cc3.t':"Vahid giriş",'cc3.d':"Bir PIN işçinin icazəli bütün bölmələrini açır. Onlar arasında keçid təkrar giriş tələb etmir.",
     'hw.l':"Necə işləyir",'hw.t':"Dəqiqələrdə işə hazır.",'hw.s':"Dörd addım — və bütün restoran nəzarətdədir.",
-    'step1.t':"Qeydiyyat",'step1.d':"30 saniyəyə hesab.",'step2.t':"Abunəlik",'step2.d':"7 gün pulsuz.",'step3.t':"Komanda",'step3.d':"QR və PIN ilə giriş.",'step4.t':"Nəzarət",'step4.d':"Analitika və hesabatlar istənilən vaxt.",
+    'step1.t':"Qeydiyyat",'step1.d':"30 saniyəyə hesab.",'step2.t':"Abunəlik",'step2.d':"14 gün pulsuz.",'step3.t':"Komanda",'step3.d':"QR və PIN ilə giriş.",'step4.t':"Nəzarət",'step4.d':"Analitika və hesabatlar istənilən vaxt.",
     'pr.l':"Qiymətlər",'pr.t':"Şəffaf qiymətlər.",'pr.s':"İstənilən vaxt dəyiş və ya ləğv et.",
-    'p1.d':"gündə €0.47",'p1.f1':"2 istifadəçiyə qədər",'p1.f2':"AI-analitika",'p1.btn':"Seç",
-    'p2.d':"gündə €0.79",'p2.f1':"Beş tətbiqin hamısı",'p2.f2':"5 istifadəçiyə qədər",'p2.f3':"Qonaqlar üçün QR-menyu",'p2.f4':"Prioritet dəstək",'p2.f5':"AI-analitika",'p2.btn':"Pulsuz başla",
-    'p3.d':"gündə €1.29",'p3.f1':"Business-in hamısı",'p3.f2':"10 istifadəçiyə qədər",'p3.f3':"AI-analitika",'p3.f4':"İnteqrasiyalar: kassa · bank",'p3.btn':"Seç",
-    'pop':"Populyar",'pay.free':"7 gün pulsuz",
-    'cta.w':"Hazırsınız?",'cta.s':"İlk 7 gün pulsuz.",'cta.b':"Hesab yarat",
+    'p1.d':"gündə €0.47",'p1.f1':"3 istifadəçiyə qədər",'p1.f2':"AI-analitika",'p1.btn':"Seç",
+    'p2.d':"gündə €0.79",'p2.f1':"Bütün tətbiqlər",'p2.f2':"7 istifadəçiyə qədər",'p2.f3':"Qonaqlar üçün QR-menyu",'p2.f4':"Prioritet dəstək",'p2.f5':"AI-analitika",'p2.btn':"Pulsuz başla",
+    'p3.d':"gündə €1.29",'p3.f1':"Business-in hamısı",'p3.f2':"15 istifadəçiyə qədər",'p3.f3':"AI-analitika",'p3.f4':"İnteqrasiyalar: kassa · bank",'p3.btn':"Seç",
+    'pop':"Populyar",'pay.free':"14 gün pulsuz",
+    'cta.w':"Hazırsınız?",'cta.s':"İlk 14 gün pulsuz.",'cta.b':"Hesab yarat",
     'ft.tag':"Restoran idarəetmə platforması. Bir hesabda beş tətbiq.",'ft.p':"Tətbiqlər",'ft.c':"Şirkət",'ft.l':"Hüquqi",'ft.about':"Haqqımızda",'ft.sup':"Dəstək",'ft.cont':"Əlaqə",'ft.priv':"Məxfilik",'ft.terms':"Şərtlər",
   },
   tr:{
@@ -1045,13 +1073,13 @@ const T = {
     'cc2.t':"PIN erişimi",'cc2.d':"Sahibin belirlediği 4 haneli PIN. Herkese kendi kodu ve kendi uygulamaları.",
     'cc3.t':"Tek giriş",'cc3.d':"Tek PIN, çalışanın erişebildiği tüm bölümleri açar. Aralarında geçiş için tekrar giriş gerekmez.",
     'hw.l':"Nasıl çalışır",'hw.t':"Dakikalar içinde hazır.",'hw.s':"Dört adım — ve tüm restoran kontrol altında.",
-    'step1.t':"Kayıt",'step1.d':"30 saniyede hesap.",'step2.t':"Abonelik",'step2.d':"7 gün ücretsiz.",'step3.t':"Ekip",'step3.d':"QR ve PIN ile erişim.",'step4.t':"Kontrol",'step4.d':"Her an analiz ve rapor.",
+    'step1.t':"Kayıt",'step1.d':"30 saniyede hesap.",'step2.t':"Abonelik",'step2.d':"14 gün ücretsiz.",'step3.t':"Ekip",'step3.d':"QR ve PIN ile erişim.",'step4.t':"Kontrol",'step4.d':"Her an analiz ve rapor.",
     'pr.l':"Fiyatlar",'pr.t':"Şeffaf fiyatlar.",'pr.s':"İstediğin zaman değiştir ya da iptal et.",
-    'p1.d':"günde €0.47",'p1.f1':"2 kullanıcıya kadar",'p1.f2':"AI analizi",'p1.btn':"Seç",
-    'p2.d':"günde €0.79",'p2.f1':"Beş uygulamanın tümü",'p2.f2':"5 kullanıcıya kadar",'p2.f3':"Misafirler için QR menü",'p2.f4':"Öncelikli destek",'p2.f5':"AI analizi",'p2.btn':"Ücretsiz başla",
-    'p3.d':"günde €1.29",'p3.f1':"Business'taki her şey",'p3.f2':"10 kullanıcıya kadar",'p3.f3':"AI analizi",'p3.f4':"Entegrasyonlar: kasa · banka",'p3.btn':"Seç",
-    'pop':"En popüler",'pay.free':"7 gün ücretsiz",
-    'cta.w':"Hazır mısınız?",'cta.s':"İlk 7 gün ücretsiz.",'cta.b':"Hesap oluştur",
+    'p1.d':"günde €0.47",'p1.f1':"3 kullanıcıya kadar",'p1.f2':"AI analizi",'p1.btn':"Seç",
+    'p2.d':"günde €0.79",'p2.f1':"Tüm uygulamalar",'p2.f2':"7 kullanıcıya kadar",'p2.f3':"Misafirler için QR menü",'p2.f4':"Öncelikli destek",'p2.f5':"AI analizi",'p2.btn':"Ücretsiz başla",
+    'p3.d':"günde €1.29",'p3.f1':"Business'taki her şey",'p3.f2':"15 kullanıcıya kadar",'p3.f3':"AI analizi",'p3.f4':"Entegrasyonlar: kasa · banka",'p3.btn':"Seç",
+    'pop':"En popüler",'pay.free':"14 gün ücretsiz",
+    'cta.w':"Hazır mısınız?",'cta.s':"İlk 14 gün ücretsiz.",'cta.b':"Hesap oluştur",
     'ft.tag':"Restoran yönetim platformu. Tek hesapta beş uygulama.",'ft.p':"Uygulamalar",'ft.c':"Şirket",'ft.l':"Yasal",'ft.about':"Hakkımızda",'ft.sup':"Destek",'ft.cont':"İletişim",'ft.priv':"Gizlilik",'ft.terms':"Koşullar",
   },
   uk:{
@@ -1076,13 +1104,13 @@ const T = {
     'cc2.t':"PIN-доступ",'cc2.d':"4-значний PIN задає власник. Кожному — свій код і свій набір застосунків.",
     'cc3.t':"Єдиний вхід",'cc3.d':"Один PIN відкриває всі доступні працівнику розділи. Перемикання між ними не потребує повторного входу.",
     'hw.l':"Як це працює",'hw.t':"Запуск за хвилини.",'hw.s':"Чотири кроки — і весь ресторан під контролем.",
-    'step1.t':"Реєстрація",'step1.d':"Акаунт за 30 секунд.",'step2.t':"Підписка",'step2.d':"7 днів безкоштовно.",'step3.t':"Команда",'step3.d':"Доступ через QR і PIN.",'step4.t':"Контроль",'step4.d':"Аналітика та звіти будь-коли.",
+    'step1.t':"Реєстрація",'step1.d':"Акаунт за 30 секунд.",'step2.t':"Підписка",'step2.d':"14 днів безкоштовно.",'step3.t':"Команда",'step3.d':"Доступ через QR і PIN.",'step4.t':"Контроль",'step4.d':"Аналітика та звіти будь-коли.",
     'pr.l':"Ціни",'pr.t':"Прозорі ціни.",'pr.s':"Змінити чи скасувати тариф — будь-коли.",
-    'p1.d':"€0.47 на день",'p1.f1':"До 2 користувачів",'p1.f2':"AI-аналітика",'p1.btn':"Обрати",
-    'p2.d':"€0.79 на день",'p2.f1':"Усі п'ять застосунків",'p2.f2':"До 5 користувачів",'p2.f3':"QR-меню для гостей",'p2.f4':"Пріоритетна підтримка",'p2.f5':"AI-аналітика",'p2.btn':"Почати безкоштовно",
-    'p3.d':"€1.29 на день",'p3.f1':"Усе з Business",'p3.f2':"До 10 користувачів",'p3.f3':"AI-аналітика",'p3.f4':"Інтеграції: каса · банк",'p3.btn':"Обрати",
-    'pop':"Популярний",'pay.free':"7 днів безкоштовно",
-    'cta.w':"Готові?",'cta.s':"Перші 7 днів безкоштовно.",'cta.b':"Створити акаунт",
+    'p1.d':"€0.47 на день",'p1.f1':"До 3 користувачів",'p1.f2':"AI-аналітика",'p1.btn':"Обрати",
+    'p2.d':"€0.79 на день",'p2.f1':"Усі застосунки",'p2.f2':"До 7 користувачів",'p2.f3':"QR-меню для гостей",'p2.f4':"Пріоритетна підтримка",'p2.f5':"AI-аналітика",'p2.btn':"Почати безкоштовно",
+    'p3.d':"€1.29 на день",'p3.f1':"Усе з Business",'p3.f2':"До 15 користувачів",'p3.f3':"AI-аналітика",'p3.f4':"Інтеграції: каса · банк",'p3.btn':"Обрати",
+    'pop':"Популярний",'pay.free':"14 днів безкоштовно",
+    'cta.w':"Готові?",'cta.s':"Перші 14 днів безкоштовно.",'cta.b':"Створити акаунт",
     'ft.tag':"Платформа керування рестораном. П'ять застосунків в одному акаунті.",'ft.p':"Застосунки",'ft.c':"Компанія",'ft.l':"Правове",'ft.about':"Про нас",'ft.sup':"Підтримка",'ft.cont':"Контакти",'ft.priv':"Конфіденційність",'ft.terms':"Умови",
   },
   kk:{
@@ -1107,26 +1135,26 @@ const T = {
     'cc2.t':"PIN-қолжетім",'cc2.d':"4 таңбалы PIN-ді иесі белгілейді. Әрқайсысына — өз коды мен өз қолданбалары.",
     'cc3.t':"Бірыңғай кіру",'cc3.d':"Бір PIN қызметкерге қолжетімді барлық бөлімдерді ашады. Олардың арасында ауысу қайта кіруді қажет етпейді.",
     'hw.l':"Қалай жұмыс істейді",'hw.t':"Минут ішінде іске қосу.",'hw.s':"Төрт қадам — және бүкіл мейрамхана бақылауда.",
-    'step1.t':"Тіркелу",'step1.d':"30 секундта аккаунт.",'step2.t':"Жазылым",'step2.d':"7 күн тегін.",'step3.t':"Команда",'step3.d':"QR және PIN арқылы қолжетім.",'step4.t':"Бақылау",'step4.d':"Аналитика мен есептер кез келген уақытта.",
+    'step1.t':"Тіркелу",'step1.d':"30 секундта аккаунт.",'step2.t':"Жазылым",'step2.d':"14 күн тегін.",'step3.t':"Команда",'step3.d':"QR және PIN арқылы қолжетім.",'step4.t':"Бақылау",'step4.d':"Аналитика мен есептер кез келген уақытта.",
     'pr.l':"Бағалар",'pr.t':"Айқын бағалар.",'pr.s':"Кез келген уақытта ауыстыр немесе бас тарт.",
-    'p1.d':"күніне €0.47",'p1.f1':"2 пайдаланушыға дейін",'p1.f2':"AI-аналитика",'p1.btn':"Таңдау",
-    'p2.d':"күніне €0.79",'p2.f1':"Бес қолданбаның бәрі",'p2.f2':"5 пайдаланушыға дейін",'p2.f3':"Қонақтарға арналған QR-мәзір",'p2.f4':"Басым қолдау",'p2.f5':"AI-аналитика",'p2.btn':"Тегін бастау",
-    'p3.d':"күніне €1.29",'p3.f1':"Business-тегі бәрі",'p3.f2':"10 пайдаланушыға дейін",'p3.f3':"AI-аналитика",'p3.f4':"Интеграциялар: касса · банк",'p3.btn':"Таңдау",
-    'pop':"Танымал",'pay.free':"7 күн тегін",
-    'cta.w':"Дайынсыз ба?",'cta.s':"Алғашқы 7 күн тегін.",'cta.b':"Аккаунт жасау",
+    'p1.d':"күніне €0.47",'p1.f1':"3 пайдаланушыға дейін",'p1.f2':"AI-аналитика",'p1.btn':"Таңдау",
+    'p2.d':"күніне €0.79",'p2.f1':"Барлық қолданбалар",'p2.f2':"7 пайдаланушыға дейін",'p2.f3':"Қонақтарға арналған QR-мәзір",'p2.f4':"Басым қолдау",'p2.f5':"AI-аналитика",'p2.btn':"Тегін бастау",
+    'p3.d':"күніне €1.29",'p3.f1':"Business-тегі бәрі",'p3.f2':"15 пайдаланушыға дейін",'p3.f3':"AI-аналитика",'p3.f4':"Интеграциялар: касса · банк",'p3.btn':"Таңдау",
+    'pop':"Танымал",'pay.free':"14 күн тегін",
+    'cta.w':"Дайынсыз ба?",'cta.s':"Алғашқы 14 күн тегін.",'cta.b':"Аккаунт жасау",
     'ft.tag':"Мейрамхананы басқару платформасы. Бір аккаунтта бес қолданба.",'ft.p':"Қолданбалар",'ft.c':"Компания",'ft.l':"Құқықтық",'ft.about':"Біз туралы",'ft.sup':"Қолдау",'ft.cont':"Байланыс",'ft.priv':"Құпиялылық",'ft.terms':"Шарттар",
   }
 };
 // ─ MARQUEE TRUST SIGNALS (per language) ─
 const MARQUEE = {
-  ru:['7 дней бесплатно','Смены и касса','Аналитика в реальном времени','Склад и кальянная смена','Расписание команды','QR-меню для гостей','Вход по QR и PIN','Данные зашифрованы','Оплата через Stripe'],
-  en:['7 days free','Shifts & register','Real-time analytics','Inventory & hookah shift','Team scheduling','Guest QR menu','QR + PIN sign-in','Encrypted data','Stripe payments'],
-  it:['7 giorni gratis','Turni e cassa','Analisi in tempo reale','Magazzino e turno narghilè','Turni del team','Menu QR per gli ospiti','Accesso con QR e PIN','Dati crittografati','Pagamenti Stripe'],
-  fr:['7 jours gratuits','Services et caisse','Analyses en temps réel','Stock et service chicha','Planning d\'équipe','Menu QR pour les clients','Connexion QR et PIN','Données chiffrées','Paiements Stripe'],
-  az:['7 gün pulsuz','Növbələr və kassa','Real-vaxt analitika','Anbar və qəlyan növbəsi','Komanda cədvəli','Qonaqlar üçün QR-menyu','QR və PIN ilə giriş','Şifrələnmiş data','Stripe ödənişləri'],
-  tr:['7 gün ücretsiz','Vardiya ve kasa','Gerçek zamanlı analiz','Stok ve nargile vardiyası','Ekip planlaması','Misafir QR menüsü','QR ve PIN ile giriş','Şifreli veri','Stripe ödemeleri'],
-  uk:['7 днів безкоштовно','Зміни та каса','Аналітика в реальному часі','Склад і кальянна зміна','Розклад команди','QR-меню для гостей','Вхід за QR і PIN','Дані зашифровані','Оплата через Stripe'],
-  kk:['7 күн тегін','Ауысымдар мен касса','Нақты уақыттағы аналитика','Қойма және қалян ауысымы','Команда кестесі','Қонаққа арналған QR-мәзір','QR және PIN арқылы кіру','Шифрланған дерек','Stripe төлемдері']
+  ru:['14 дней бесплатно','Смены и касса','Аналитика в реальном времени','Склад и кальянная смена','Расписание команды','QR-меню для гостей','Вход по QR и PIN','Данные зашифрованы','Оплата через Stripe'],
+  en:['14 days free','Shifts & register','Real-time analytics','Inventory & hookah shift','Team scheduling','Guest QR menu','QR + PIN sign-in','Encrypted data','Stripe payments'],
+  it:['14 giorni gratis','Turni e cassa','Analisi in tempo reale','Magazzino e turno narghilè','Turni del team','Menu QR per gli ospiti','Accesso con QR e PIN','Dati crittografati','Pagamenti Stripe'],
+  fr:['14 jours gratuits','Services et caisse','Analyses en temps réel','Stock et service chicha','Planning d\'équipe','Menu QR pour les clients','Connexion QR et PIN','Données chiffrées','Paiements Stripe'],
+  az:['14 gün pulsuz','Növbələr və kassa','Real-vaxt analitika','Anbar və qəlyan növbəsi','Komanda cədvəli','Qonaqlar üçün QR-menyu','QR və PIN ilə giriş','Şifrələnmiş data','Stripe ödənişləri'],
+  tr:['14 gün ücretsiz','Vardiya ve kasa','Gerçek zamanlı analiz','Stok ve nargile vardiyası','Ekip planlaması','Misafir QR menüsü','QR ve PIN ile giriş','Şifreli veri','Stripe ödemeleri'],
+  uk:['14 днів безкоштовно','Зміни та каса','Аналітика в реальному часі','Склад і кальянна зміна','Розклад команди','QR-меню для гостей','Вхід за QR і PIN','Дані зашифровані','Оплата через Stripe'],
+  kk:['14 күн тегін','Ауысымдар мен касса','Нақты уақыттағы аналитика','Қойма және қалян ауысымы','Команда кестесі','Қонаққа арналған QR-мәзір','QR және PIN арқылы кіру','Шифрланған дерек','Stripe төлемдері']
 };
 function renderMarquee(lang){
   const track = document.getElementById('marquee');
@@ -1148,6 +1176,26 @@ document.addEventListener('click', () => {
   const m = document.getElementById('langMenu');
   if (m) m.classList.remove('open');
 });
+
+// ─ MOBILE NAV (гамбургер) ─
+// Раньше .nav-links на <=960px просто скрывался целиком без замены — на телефоне
+// пропадали ВСЕ ссылки навигации, включая «Тарифы». Кнопка ниже открывает те же
+// ссылки полноширинной панелью под шапкой.
+function toggleMobileNav(e){
+  e.stopPropagation();
+  const open = document.getElementById('navLinks').classList.toggle('open');
+  document.getElementById('navHamburger').classList.toggle('open', open);
+  document.getElementById('navHamburger').setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+function closeMobileNav(){
+  document.getElementById('navLinks').classList.remove('open');
+  document.getElementById('navHamburger').classList.remove('open');
+  document.getElementById('navHamburger').setAttribute('aria-expanded', 'false');
+}
+document.getElementById('navLinks').addEventListener('click', (e) => {
+  if (e.target.tagName === 'A') closeMobileNav();
+});
+window.addEventListener('resize', () => { if (window.innerWidth > 960) closeMobileNav(); });
 
 function setLang(lang) {
   if (!T[lang]) lang = 'en';

@@ -352,9 +352,14 @@ export default function MenuEditor() {
   const deleteMenu = async () => {
     if (!settings.id) return
     if (!confirm(tr('me.delMenuConfirm'))) return
-    await db.from('menu_items').delete().eq('menu_id', settings.id)
-    await db.from('menu_categories').delete().eq('menu_id', settings.id)
-    await db.from('menus').delete().eq('id', settings.id)
+    // Ни один из трёх шагов раньше не проверял ошибку: сбой посреди удаления оставлял
+    // меню в БД, но UI уже рисовал «удалено» (аудит 2026-08-05, раздел 4).
+    const { error: e1 } = await db.from('menu_items').delete().eq('menu_id', settings.id)
+    if (e1) { showToast(tr('dash.notSaved') + e1.message); return }
+    const { error: e2 } = await db.from('menu_categories').delete().eq('menu_id', settings.id)
+    if (e2) { showToast(tr('dash.notSaved') + e2.message); return }
+    const { error: e3 } = await db.from('menus').delete().eq('id', settings.id)
+    if (e3) { showToast(tr('dash.notSaved') + e3.message); return }
     const rest = menus.filter(m => m.id !== settings.id)
     setMenus(rest); setShowMenuActions(false)
     if (rest.length > 0) await switchMenu(rest[0].id!)
@@ -365,8 +370,9 @@ export default function MenuEditor() {
   const addCategory = async () => {
     if (!newCatName.trim() || !activeMenuId) { setShowAddCat(false); return }
     const pos = categories.length
-    const { data } = await db.from('menu_categories').insert({ restaurant_id: restaurantId, menu_id: activeMenuId, name: newCatName.trim(), position: pos, is_visible: true }).select().single()
-    if (data) { setCategories(c => [...c, data]); setSelectedCat(data.id) }
+    const { data, error } = await db.from('menu_categories').insert({ restaurant_id: restaurantId, menu_id: activeMenuId, name: newCatName.trim(), position: pos, is_visible: true }).select().single()
+    if (error || !data) { showToast(tr('dash.notSaved') + (error?.message || '')); setShowAddCat(false); return }
+    setCategories(c => [...c, data]); setSelectedCat(data.id)
     setNewCatName(''); setShowAddCat(false)
   }
 
@@ -432,14 +438,19 @@ export default function MenuEditor() {
 
   const toggleCatVisibility = async (catId: string) => {
     const cat = categories.find(c => c.id === catId); if (!cat) return
-    await db.from('menu_categories').update({ is_visible: !cat.is_visible }).eq('id', catId)
+    const { error } = await db.from('menu_categories').update({ is_visible: !cat.is_visible }).eq('id', catId)
+    if (error) { showToast(tr('dash.notSaved') + error.message); return }
     setCategories(cs => cs.map(c => c.id === catId ? { ...c, is_visible: !c.is_visible } : c))
   }
 
   const deleteCategory = async (catId: string) => {
     if (!confirm(tr('me.delCatConfirm'))) return
-    await db.from('menu_items').delete().eq('category_id', catId)
-    await db.from('menu_categories').delete().eq('id', catId)
+    // Раньше позиции удалялись, а сама категория — нет при сбое второго запроса (худший
+    // случай аудита: категория остаётся пустой и «зависшей»). Останавливаемся на первой ошибке.
+    const { error: e1 } = await db.from('menu_items').delete().eq('category_id', catId)
+    if (e1) { showToast(tr('dash.notSaved') + e1.message); return }
+    const { error: e2 } = await db.from('menu_categories').delete().eq('id', catId)
+    if (e2) { showToast(tr('dash.notSaved') + e2.message); return }
     setCategories(cs => cs.filter(c => c.id !== catId))
     setItems(is => is.filter(i => i.category_id !== catId))
     setSelectedCat(categories.find(c => c.id !== catId)?.id || null)
@@ -530,7 +541,9 @@ export default function MenuEditor() {
       name: itemForm.name.trim(),
       description: itemForm.description.trim() || null,
       i18n: buildI18n(),
-      price: parseFloat(itemForm.price) || null,
+      // `|| null` роняло цену 0 (позиция «комплимент») в null — falsy 0 неотличим от
+      // «поле пустое» (аудит 2026-08-05, раздел 4).
+      price: (() => { const p = parseFloat(itemForm.price); return Number.isFinite(p) ? p : null })(),
       image_url: itemForm.image_url.trim() || null,
       calories: parseInt(itemForm.calories) || null,
       allergens: itemForm.allergens ? itemForm.allergens.split(',').map(a => a.trim()).filter(Boolean) : null,
@@ -552,23 +565,29 @@ export default function MenuEditor() {
       position: editItem ? editItem.position : items.filter(i => i.category_id === selectedCat).length,
       updated_at: new Date().toISOString(),
     }
+    // Ни update, ни insert раньше не проверяли ошибку — тост «Позиция обновлена» шёл при
+    // любом исходе (аудит 2026-08-05, раздел 4).
     if (editItem) {
-      await db.from('menu_items').update(payload).eq('id', editItem.id)
+      const { error } = await db.from('menu_items').update(payload).eq('id', editItem.id)
+      if (error) { showToast(tr('dash.notSaved') + error.message); setSaving(false); return }
       setItems(is => is.map(i => i.id === editItem.id ? { ...i, ...payload } : i))
     } else {
-      const { data } = await db.from('menu_items').insert(payload).select().single()
-      if (data) setItems(is => [...is, data])
+      const { data, error } = await db.from('menu_items').insert(payload).select().single()
+      if (error || !data) { showToast(tr('dash.notSaved') + (error?.message || '')); setSaving(false); return }
+      setItems(is => [...is, data])
     }
     setSaving(false); setShowAddItem(false)
     showToast(editItem ? tr('me.itemUpdated') : tr('me.itemAdded'))
   }
 
   const deleteItem = async (itemId: string) => {
-    await db.from('menu_items').delete().eq('id', itemId)
+    const { error } = await db.from('menu_items').delete().eq('id', itemId)
+    if (error) { showToast(tr('dash.notSaved') + error.message); return }
     setItems(is => is.filter(i => i.id !== itemId)); showToast(tr('me.deleted'))
   }
   const toggleItemVisibility = async (item: MenuItem) => {
-    await db.from('menu_items').update({ is_visible: !item.is_visible }).eq('id', item.id)
+    const { error } = await db.from('menu_items').update({ is_visible: !item.is_visible }).eq('id', item.id)
+    if (error) { showToast(tr('dash.notSaved') + error.message); return }
     setItems(is => is.map(i => i.id === item.id ? { ...i, is_visible: !i.is_visible } : i))
   }
 

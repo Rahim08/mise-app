@@ -15,6 +15,7 @@ const COOKIE_NAME = 'mise_staff_token'
 const TTL_SECONDS = 60 * 60 * 24 * 365 * 10 // 10 years
 
 export interface StaffTokenPayload {
+  typ?: 'staff'         // absent on tokens issued before 2026-08-05 — treated as 'staff'
   rid: string          // restaurant_id
   sid: string          // staff id, or 'owner'
   owner: boolean
@@ -40,7 +41,7 @@ function sign(data: string, key: string): string {
 export function issueStaffToken(input: { rid: string; sid: string; owner: boolean; apps: string[] }): string {
   const now = Math.floor(Date.now() / 1000)
   const payload: StaffTokenPayload = {
-    rid: input.rid, sid: input.sid, owner: input.owner, apps: input.apps,
+    typ: 'staff', rid: input.rid, sid: input.sid, owner: input.owner, apps: input.apps,
     iat: now, exp: now + TTL_SECONDS,
   }
   const body = b64url(JSON.stringify(payload))
@@ -58,6 +59,9 @@ export function verifyStaffToken(token: string | undefined | null): StaffTokenPa
   try {
     const payload = JSON.parse(Buffer.from(body.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString()) as StaffTokenPayload
     if (!payload.rid || typeof payload.exp !== 'number') return null
+    // typ absent = legacy token issued before 2026-08-05, still valid as staff.
+    // typ present must be 'staff' — rejects an admin-view token copied into this cookie.
+    if (payload.typ !== undefined && payload.typ !== 'staff') return null
     if (Math.floor(Date.now() / 1000) > payload.exp) return null
     return payload
   } catch {
@@ -75,11 +79,11 @@ export const STAFF_COOKIE_MAXAGE = TTL_SECONDS
 const ADMIN_VIEW_COOKIE = 'mise_admin_view'
 const ADMIN_VIEW_TTL_SECONDS = 60 * 60 // 1 hour
 
-export interface AdminViewPayload { rid: string; iat: number; exp: number }
+export interface AdminViewPayload { typ: 'admin_view'; rid: string; iat: number; exp: number }
 
 export function issueAdminViewToken(rid: string): string {
   const now = Math.floor(Date.now() / 1000)
-  const payload: AdminViewPayload = { rid, iat: now, exp: now + ADMIN_VIEW_TTL_SECONDS }
+  const payload: AdminViewPayload = { typ: 'admin_view', rid, iat: now, exp: now + ADMIN_VIEW_TTL_SECONDS }
   const body = b64url(JSON.stringify(payload))
   return `${body}.${sign(body, secret())}`
 }
@@ -93,6 +97,9 @@ export function verifyAdminViewToken(token: string | undefined | null): AdminVie
   try {
     const payload = JSON.parse(Buffer.from(body.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString()) as AdminViewPayload
     if (!payload.rid || typeof payload.exp !== 'number') return null
+    // Strict — 1h TTL means no legacy tokens outlive a deploy, unlike the staff cookie.
+    // Rejects a staff token (typ 'staff' or absent) copied into this cookie to escalate to owner.
+    if (payload.typ !== 'admin_view') return null
     if (Math.floor(Date.now() / 1000) > payload.exp) return null
     return payload
   } catch {

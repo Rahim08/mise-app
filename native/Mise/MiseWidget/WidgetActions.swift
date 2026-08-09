@@ -14,12 +14,28 @@ struct MarkBookingArrivedIntent: AppIntent {
     init(bookingID: String) { self.bookingID = bookingID }
 
     func perform() async throws -> some IntentResult {
+        var removed: SnapBooking?
         if var snap = MiseSnapshotStore.read() {
+            removed = snap.bookings.first { $0.id == bookingID }
             snap.bookings.removeAll { $0.id == bookingID }
             MiseSnapshotStore.write(snap)
         }
         WidgetCenter.shared.reloadTimelines(ofKind: "MiseWidget")
-        try? await WidgetAPI.setBookingArrived(id: bookingID)
+        do {
+            try await WidgetAPI.setBookingArrived(id: bookingID)
+        } catch {
+            // Раньше исход глотался через try?: в виджете гость «пришёл», в БД — нет
+            // (типовая причина — 401, у расширения не было PIN-cookie). Возвращаем бронь
+            // на место и пробрасываем ошибку, чтобы провал был видим, а не молчал.
+            if let removed, var snap = MiseSnapshotStore.read(),
+               !snap.bookings.contains(where: { $0.id == bookingID }) {
+                snap.bookings.append(removed)
+                snap.bookings.sort { $0.time < $1.time }
+                MiseSnapshotStore.write(snap)
+                WidgetCenter.shared.reloadTimelines(ofKind: "MiseWidget")
+            }
+            throw error
+        }
         return .result()
     }
 }

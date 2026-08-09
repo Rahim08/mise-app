@@ -25,3 +25,4 @@ CREATE TABLE IF NOT EXISTS salary_payments (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS salary_payments_lookup ON salary_payments (restaurant_id, employee_id, period);
+ALTER TABLE salary_payments ENABLE ROW LEVEL SECURITY;

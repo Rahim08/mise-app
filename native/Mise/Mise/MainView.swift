@@ -406,7 +406,9 @@ struct SettingsView: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(t("done")) { dismiss() } } }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
             .confirmationDialog(t("logout.confirm"), isPresented: $confirmLogout, titleVisibility: .visible) {
-                Button(t("logout"), role: .destructive) { app.logout(); dismiss() }
+                // logout() стал async: отписка от пушей должна успеть уйти на сервер,
+                // пока cookie PIN-сессии ещё не стёрта.
+                Button(t("logout"), role: .destructive) { Task { await app.logout() }; dismiss() }
                 Button(t("cancel"), role: .cancel) {}
             } message: { Text(t("logout.msg")) }
         }
@@ -446,6 +448,10 @@ struct NotificationSettingsView: View {
 
     @State private var loaded = false
     @State private var saving = false
+    /// Тумблер щёлкнули, пока предыдущее сохранение ещё в полёте — сохранить ещё раз
+    /// по завершении. Раньше такое изменение просто выбрасывалось (guard !saving), и
+    /// второй быстрый тумблер не доезжал ни до сервера, ни до зеркала в UserDefaults.
+    @State private var saveAgain = false
     @State private var rowId: String?
     @State private var shiftReminder = true
     @State private var task = true
@@ -529,7 +535,10 @@ struct NotificationSettingsView: View {
     }
 
     private func save() {
-        guard loaded, !saving else { return }
+        guard loaded else { return }
+        // Коалесценция последнего значения: пока идёт запись, новые щелчки не теряются —
+        // после её завершения сохраняем АКТУАЛЬНОЕ состояние тумблеров ещё раз.
+        guard !saving else { saveAgain = true; return }
         saving = true
         let prefs: [String: Any] = [
             "shift_reminder": shiftReminder, "task": task, "swap": swap, "attendance": attendance,
@@ -543,13 +552,14 @@ struct NotificationSettingsView: View {
         // читатели кастят словарь как [String: Bool], строковый purchase_digest сломал бы каст.
         UserDefaults.standard.set(prefs.filter { $0.value is Bool }, forKey: "mise_notif_prefs")
         Task {
-            defer { saving = false }
             if let id = rowId {
                 try? await DB.from("notification_prefs").update(["prefs": prefs, "updated_at": ISO8601DateFormatter().string(from: Date())]).eq("id", id).run()
             } else {
                 let values: [String: Any] = isOwner ? ["to_owner": true, "prefs": prefs] : ["staff_id": app.staff?.id ?? "", "prefs": prefs]
                 if let row = try? await DB.from("notification_prefs").insert(values).single(NotifPrefRow.self) { rowId = row.id }
             }
+            saving = false
+            if saveAgain { saveAgain = false; save() }
         }
     }
 }

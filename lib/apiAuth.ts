@@ -8,7 +8,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { verifyStaffToken, STAFF_COOKIE, verifyAdminViewToken, ADMIN_VIEW_COOKIE_NAME } from '@/lib/staffToken'
 
-export interface Caller { rid: string; owner: boolean; apps: string[] }
+export interface Caller { rid: string; owner: boolean; apps: string[]; sid?: string }
 
 export async function resolveCaller(req: NextRequest): Promise<Caller | null> {
   // Super-admin "view as client" — unconditional priority so it works even when the
@@ -22,7 +22,7 @@ export async function resolveCaller(req: NextRequest): Promise<Caller | null> {
   // Owner может тестировать PIN-приложения в том же браузере → есть и staff-кука, и
   // Supabase-сессия. Если Supabase-куки нет — это точно сотрудник.
   const hasSbSession = req.cookies.getAll().some(c => c.name.startsWith('sb-') && c.name.includes('auth-token'))
-  if (staff && !hasSbSession) return { rid: staff.rid, owner: staff.owner, apps: staff.apps || [] }
+  if (staff && !hasSbSession) return { rid: staff.rid, owner: staff.owner, apps: staff.apps || [], sid: staff.sid }
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -30,9 +30,19 @@ export async function resolveCaller(req: NextRequest): Promise<Caller | null> {
     { cookies: { getAll: () => req.cookies.getAll(), setAll: () => {} } }
   )
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return staff ? { rid: staff.rid, owner: staff.owner, apps: staff.apps || [] } : null
+  if (!user) return staff ? { rid: staff.rid, owner: staff.owner, apps: staff.apps || [], sid: staff.sid } : null
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
   const { data } = await admin.from('restaurants').select('id').eq('owner_id', user.id).single()
-  if (!data?.id) return staff ? { rid: staff.rid, owner: staff.owner, apps: staff.apps || [] } : null
+  if (!data?.id) return staff ? { rid: staff.rid, owner: staff.owner, apps: staff.apps || [], sid: staff.sid } : null
   return { rid: data.id, owner: true, apps: ['manager', 'analytics', 'stash', 'people'] }
+}
+
+// «Должностное лицо» — owner или staff.role в manager/admin (то же правило, что iOS
+// AppModel.isOfficial). Требует запроса к staff, поэтому вызывается только там, где UI-гейта
+// недостаточно (News: публикация/удаление от чужого имени, широковещательный пуш).
+export async function isOfficial(admin: any, caller: Caller): Promise<boolean> {
+  if (caller.owner) return true
+  if (!caller.sid) return false
+  const { data } = await admin.from('staff').select('role').eq('id', caller.sid).eq('restaurant_id', caller.rid).single()
+  return data?.role === 'manager' || data?.role === 'admin'
 }

@@ -12,6 +12,64 @@ const XIcon = ({ size = 11 }: { size?: number }) => (
   <svg width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" /></svg>
 )
 
+// ── ЕДИНАЯ СТРОКА restaurant_settings ─────────────────────────────────────────
+// Раньше каждая карточка сама читала `restaurant_settings ... limit(1)` и сама вставляла
+// строку, если её нет. UNIQUE(restaurant_id) в схеме нет → две карточки, сохранённые
+// почти одновременно на «пустом» ресторане, создавали ДВЕ строки, и дальнейшие чтения
+// брали произвольную (настройки «терялись»). Теперь чтение и создание — одна точка входа
+// на всю страницу: строка читается один раз и вставляется один раз (общий промис).
+type SettingsRow = any
+type SettingsCtl = {
+  row: SettingsRow | null
+  loaded: boolean
+  save: (payload: Record<string, any>) => Promise<{ error: any }>
+}
+
+function useSettingsRow(): SettingsCtl {
+  const [row, setRow] = useState<SettingsRow | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  const rowRef = useRef<SettingsRow | null>(null)
+  const creating = useRef<Promise<{ data: any; error: any }> | null>(null)
+
+  const apply = (r: SettingsRow | null) => { rowRef.current = r; setRow(r) }
+
+  useEffect(() => {
+    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
+      apply((Array.isArray(data) ? data[0] : data) || null)
+      setLoaded(true)
+    })
+  }, [])
+
+  // Гарантируем ровно одну строку. Промис создания общий: две карточки, сохранённые
+  // одновременно, дождутся одной вставки вместо двух конкурирующих.
+  const ensure = async (): Promise<{ data: any; error: any }> => {
+    if (rowRef.current?.id) return { data: rowRef.current, error: null }
+    if (!creating.current) creating.current = (async () => {
+      // Перечитываем перед вставкой: строку мог создать другой таб или iOS-клиент.
+      const { data } = await db.from('restaurant_settings').select('*').limit(1)
+      const existing = Array.isArray(data) ? data[0] : data
+      if (existing?.id) return { data: existing, error: null }
+      const res = await db.from('restaurant_settings').insert({}).select().single()
+      return { data: res.data, error: res.error }
+    })()
+    const res = await creating.current
+    if (res.error || !res.data) { creating.current = null; return { data: null, error: res.error || { message: 'restaurant_settings' } } }
+    apply(res.data)
+    return res
+  }
+
+  const save = async (payload: Record<string, any>): Promise<{ error: any }> => {
+    const ensured = await ensure()
+    if (ensured.error || !ensured.data?.id) return { error: ensured.error || { message: 'restaurant_settings' } }
+    const res = await db.from('restaurant_settings').update(payload).eq('id', ensured.data.id)
+    if (res.error) return { error: res.error }
+    apply({ ...ensured.data, ...payload })
+    return { error: null }
+  }
+
+  return { row, loaded, save }
+}
+
 // ── CATEGORIES ────────────────────────────────────────────────────────────────
 function CategoriesCard({ restaurantId }: { restaurantId: string }) {
   const { t: tr } = useI18n()
@@ -93,7 +151,7 @@ function CategoriesCard({ restaurantId }: { restaurantId: string }) {
 // ── HOOKAH TYPES ──────────────────────────────────────────────────────────────
 // Виды кальянов: у каждого своё имя, цена, граммовка и допустимые бренды
 // (пусто = любые). Кальянщик в Stash отмечает продажи по этим видам.
-function HookahSettingsCard() {
+function HookahSettingsCard({ s }: { s: SettingsCtl }) {
   const { t: tr } = useI18n()
   const [types, setTypes] = useState<any[]>([])
   const [edit, setEdit] = useState<{ id?: string; name: string; price: string; portion: string; brands: string } | null>(null)
@@ -103,15 +161,20 @@ function HookahSettingsCard() {
 
   const load = () => {
     db.from('hookah_types').select('*').eq('is_active', true).order('created_at').then(({ data }: any) => setTypes(data || []))
-    db.from('restaurant_settings').select('free_hookah_categories').then(({ data }: any) => setCats(data?.[0]?.free_hookah_categories || []))
   }
   useEffect(() => { load() }, [])
+  // Категории приходят из общей строки настроек (одно чтение на страницу)
+  useEffect(() => { if (s.loaded) setCats(s.row?.free_hookah_categories || []) }, [s.loaded])
 
   // Категории бесплатных кальянов — кальянщик выбирает из них в Stash.
+  // Раньше здесь был update БЕЗ ветки insert: если строки настроек ещё нет, обновлялось
+  // 0 строк с error=null — категории молча не сохранялись. Теперь через общий save(),
+  // который сам создаёт строку, и с откатом оптимистичного списка при ошибке.
   const saveCats = async (next: string[]) => {
+    const prev = cats
     setCats(next)
-    const res = await db.from('restaurant_settings').update({ free_hookah_categories: next })
-    if (res.error) { alert(tr('dash.notSaved') + res.error.message); load() }
+    const { error } = await s.save({ free_hookah_categories: next })
+    if (error) { alert(tr('dash.notSaved') + error.message); setCats(prev) }
   }
   const addCat = () => {
     const v = newCat.trim()
@@ -209,22 +272,18 @@ function HookahSettingsCard() {
 // ── ANALYTICS SETTING ─────────────────────────────────────────────────────────
 // Безнал в аналитике: менеджер не видит расходов по карте, поэтому включённый безнал
 // раздувает итог. По умолчанию выкл — владелец видит реальные (наличные) показатели.
-function AnalyticsSettingsCard() {
+function AnalyticsSettingsCard({ s }: { s: SettingsCtl }) {
   const { t: tr } = useI18n()
-  const [row, setRow] = useState<any>(null)
   const [includeCard, setIncludeCard] = useState(false)
 
-  useEffect(() => {
-    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
-      const r = Array.isArray(data) ? data[0] : data
-      if (r) { setRow(r); setIncludeCard(!!r.include_card_in_analytics) }
-    })
-  }, [])
+  useEffect(() => { if (s.loaded) setIncludeCard(!!s.row?.include_card_in_analytics) }, [s.loaded])
 
+  // Ошибку проверяем и откатываем тумблер: раньше сбой записи молча оставлял
+  // включённый вид, а после перезагрузки настройка «сама выключалась».
   const toggle = async (v: boolean) => {
     setIncludeCard(v)
-    if (row?.id) await db.from('restaurant_settings').update({ include_card_in_analytics: v }).eq('id', row.id)
-    else { const { data } = await db.from('restaurant_settings').insert({ include_card_in_analytics: v }).select().single(); if (data) setRow(data) }
+    const { error } = await s.save({ include_card_in_analytics: v })
+    if (error) { alert(tr('dash.notSaved') + error.message); setIncludeCard(!v) }
   }
 
   return (
@@ -246,30 +305,20 @@ function AnalyticsSettingsCard() {
 // День месяца, когда выдаётся ЗП за прошлый месяц (обычно 10-15 число следующего).
 // Используется только для напоминания и группировки «срочно»/«накопление» в People→Зарплата —
 // сам период начисления ЗП остаётся календарным месяцем (не меняется).
-function SalaryPayoutSettingsCard() {
+function SalaryPayoutSettingsCard({ s }: { s: SettingsCtl }) {
   const { t: tr } = useI18n()
-  const [row, setRow] = useState<any>(null)
   const [day, setDay] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  useEffect(() => {
-    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
-      const r = Array.isArray(data) ? data[0] : data
-      if (r) { setRow(r); setDay(r.salary_payout_day != null ? String(r.salary_payout_day) : '') }
-    })
-  }, [])
+  useEffect(() => { if (s.loaded) setDay(s.row?.salary_payout_day != null ? String(s.row.salary_payout_day) : '') }, [s.loaded])
 
   const save = async () => {
     if (saving) return
     setSaving(true)
     const n = day ? Math.min(31, Math.max(1, parseInt(day) || 1)) : null
-    const payload = { salary_payout_day: n }
-    const res = row?.id
-      ? await db.from('restaurant_settings').update(payload).eq('id', row.id)
-      : await db.from('restaurant_settings').insert(payload).select().single()
-    if (res.error) { alert(tr('dash.notSaved') + res.error.message); setSaving(false); return }
-    if (!row?.id && res.data) setRow(res.data)
+    const { error } = await s.save({ salary_payout_day: n })
+    if (error) { alert(tr('dash.notSaved') + error.message); setSaving(false); return }
     setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000)
   }
 
@@ -288,33 +337,29 @@ function SalaryPayoutSettingsCard() {
 }
 
 // ── GEO / ATTENDANCE (mise People) ────────────────────────────────────────────
-function GeoSettingsCard() {
+function GeoSettingsCard({ s }: { s: SettingsCtl }) {
   const { t: tr } = useI18n()
-  const [row, setRow] = useState<any>(null)
   const [f, setF] = useState({ attendance_enabled: false, latitude: '', longitude: '', geo_radius_m: '150', reminder_mode: 'hours_before', reminder_hours: '12', reminder_time: '18:00', timezone: 'UTC' })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [locating, setLocating] = useState(false)
 
   useEffect(() => {
-    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
-      const r = Array.isArray(data) ? data[0] : data
-      if (r) {
-        setRow(r)
-        setF({
-          attendance_enabled: !!r.attendance_enabled,
-          latitude: r.latitude != null ? String(r.latitude) : '',
-          longitude: r.longitude != null ? String(r.longitude) : '',
-          geo_radius_m: String(r.geo_radius_m ?? 150),
-          reminder_mode: r.reminder_mode || 'hours_before',
-          reminder_hours: String(r.reminder_hours ?? 12),
-          reminder_time: (r.reminder_time || '18:00').slice(0, 5),
-          // До миграции restaurant-timezone-2026-07.sql колонки нет — дефолт с устройства владельца.
-          timezone: r.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-        })
-      }
+    if (!s.loaded) return
+    const r = s.row
+    if (!r) return
+    setF({
+      attendance_enabled: !!r.attendance_enabled,
+      latitude: r.latitude != null ? String(r.latitude) : '',
+      longitude: r.longitude != null ? String(r.longitude) : '',
+      geo_radius_m: String(r.geo_radius_m ?? 150),
+      reminder_mode: r.reminder_mode || 'hours_before',
+      reminder_hours: String(r.reminder_hours ?? 12),
+      reminder_time: (r.reminder_time || '18:00').slice(0, 5),
+      // До миграции restaurant-timezone-2026-07.sql колонки нет — дефолт с устройства владельца.
+      timezone: r.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
     })
-  }, [])
+  }, [s.loaded])
 
   const useMyLocation = () => {
     if (!navigator.geolocation) return
@@ -339,11 +384,8 @@ function GeoSettingsCard() {
       reminder_time: f.reminder_time || '18:00',
       timezone: f.timezone || 'UTC',
     }
-    const res = row?.id
-      ? await db.from('restaurant_settings').update(payload).eq('id', row.id)
-      : await db.from('restaurant_settings').insert(payload).select().single()
-    if (res.error) { alert(tr('dash.notSaved') + res.error.message); setSaving(false); return }
-    if (!row?.id && res.data) setRow(res.data)
+    const { error } = await s.save(payload)
+    if (error) { alert(tr('dash.notSaved') + error.message); setSaving(false); return }
     setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000)
   }
 
@@ -387,30 +429,24 @@ function GeoSettingsCard() {
 // Владелец вписывает свой Place ID + Google Cloud API-ключ (Places API (New), без OAuth
 // в бизнес-аккаунт). После сохранения сразу дёргаем /api/google-reviews/sync-now — рейтинг
 // и последние отзывы появляются мгновенно, не дожидаясь ночного cron.
-function GoogleReviewsSettingsCard() {
+function GoogleReviewsSettingsCard({ s }: { s: SettingsCtl }) {
   const { t: tr } = useI18n()
-  const [row, setRow] = useState<any>(null)
   const [placeId, setPlaceId] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
   useEffect(() => {
-    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
-      const r = Array.isArray(data) ? data[0] : data
-      if (r) { setRow(r); setPlaceId(r.google_place_id || ''); setApiKey(r.google_places_api_key || '') }
-    })
-  }, [])
+    if (!s.loaded || !s.row) return
+    setPlaceId(s.row.google_place_id || ''); setApiKey(s.row.google_places_api_key || '')
+  }, [s.loaded])
 
   const saveAndSync = async () => {
     if (saving) return
     setSaving(true); setResult(null)
     const payload = { google_place_id: placeId.trim() || null, google_places_api_key: apiKey.trim() || null }
-    const res = row?.id
-      ? await db.from('restaurant_settings').update(payload).eq('id', row.id)
-      : await db.from('restaurant_settings').insert(payload).select().single()
-    if (res.error) { setResult({ ok: false, msg: res.error.message }); setSaving(false); return }
-    if (!row?.id && res.data) setRow(res.data)
+    const { error } = await s.save(payload)
+    if (error) { setResult({ ok: false, msg: error.message }); setSaving(false); return }
 
     try {
       const r = await fetch('/api/google-reviews/sync-now', { method: 'POST' })
@@ -446,6 +482,8 @@ function GoogleReviewsSettingsCard() {
 export default function SettingsPage() {
   const { t: tr, locale, setLocale } = useI18n()
   const { restaurant, theme, reload } = useDash()
+  // Одна строка restaurant_settings на всю страницу — см. useSettingsRow выше
+  const settings = useSettingsRow()
   const [name, setName] = useState(restaurant?.name || '')
   const [currency, setCurrency] = useState(restaurant?.currency || '€')
   const [saving, setSaving] = useState(false)
@@ -466,17 +504,21 @@ export default function SettingsPage() {
     setLogoPreview(URL.createObjectURL(file))
   }
 
+  // Ошибки загрузки логотипа раньше глотались: превью оставалось новым, в БД — старый URL,
+  // владелец видел «логотип загружен» до первой перезагрузки страницы.
   const uploadLogo = async () => {
     if (!logoFile || !restaurant) return
     setLogoUploading(true)
     const ext = logoFile.name.split('.').pop()
     const path = `logos/${restaurant.id}.${ext}`
+    const revert = () => { setLogoPreview(restaurant.logo_url || ''); setLogoFile(null) }
     const { error } = await supabase.storage.from('restaurant-assets').upload(path, logoFile, { upsert: true })
-    if (!error) {
-      const { data: { publicUrl } } = supabase.storage.from('restaurant-assets').getPublicUrl(path)
-      await db.from('restaurants').update({ logo_url: publicUrl }).eq('id', restaurant.id)
-      reload()
-    }
+    if (error) { alert(tr('dash.notSaved') + error.message); revert(); setLogoUploading(false); return }
+    const { data: { publicUrl } } = supabase.storage.from('restaurant-assets').getPublicUrl(path)
+    const { error: dbErr } = await db.from('restaurants').update({ logo_url: publicUrl }).eq('id', restaurant.id)
+    if (dbErr) { alert(tr('dash.notSaved') + dbErr.message); revert(); setLogoUploading(false); return }
+    setLogoFile(null)
+    reload()
     setLogoUploading(false)
   }
 
@@ -539,15 +581,15 @@ export default function SettingsPage() {
 
       {restaurant && <CategoriesCard restaurantId={restaurant.id} />}
 
-      <HookahSettingsCard />
+      <HookahSettingsCard s={settings} />
 
-      <AnalyticsSettingsCard />
+      <AnalyticsSettingsCard s={settings} />
 
-      <SalaryPayoutSettingsCard />
+      <SalaryPayoutSettingsCard s={settings} />
 
-      <GeoSettingsCard />
+      <GeoSettingsCard s={settings} />
 
-      <GoogleReviewsSettingsCard />
+      <GoogleReviewsSettingsCard s={settings} />
 
       <Card>
         <div style={{ marginBottom: 12 }}>
