@@ -36,6 +36,9 @@ nonisolated struct ShiftExpense: Codable, Identifiable, Sendable {
     let amount: Double?
     let note: String?
     let shift_id: String?
+    var is_paid: Bool? = true
+    var paid_at: String? = nil
+    var paid_shift_id: String? = nil
 }
 
 nonisolated struct CardAmount: Codable, Sendable {

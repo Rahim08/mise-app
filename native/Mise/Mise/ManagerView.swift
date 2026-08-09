@@ -23,6 +23,12 @@ final class ManagerModel {
     var empExtras: [String: String] = [:]
     var catAmounts: [String: String] = [:]
     var catNotes: [String: String] = [:]
+    // «В долг» (Б, 2026-08-09): расход вписан, но наличных в кассе не хватило — не уменьшает
+    // c.catTotal/empExtraTotal сегодня (кассы физически не покидал), но всё равно попадает в
+    // shift_expenses с реальной датой (is_paid=false) — Analytics уже суммирует по датам,
+    // так что месячный итог категории видит долг сразу, а не в день погашения.
+    var catUnpaid: [String: Bool] = [:]
+    var empUnpaid: [String: Bool] = [:]
     var income = ""
     var incomeCard = ""
     var inkSum = ""
@@ -77,8 +83,9 @@ final class ManagerModel {
     var calc: Calc {
         var c = Calc()
         c.inc = num(income); c.card = num(incomeCard); c.ink = num(inkSum)
-        c.catTotal = categories.reduce(0) { $0 + num(catAmounts[$1.id] ?? "") }
-        c.empExtraTotal = employees.reduce(0) { $0 + num(empExtras[$1.id] ?? "") }
+        // «В долг» — не покидал кассу сегодня, не входит в дневной расход/баланс.
+        c.catTotal = categories.reduce(0) { catUnpaid[$1.id] == true ? $0 : $0 + num(catAmounts[$1.id] ?? "") }
+        c.empExtraTotal = employees.reduce(0) { empUnpaid[$1.id] == true ? $0 : $0 + num(empExtras[$1.id] ?? "") }
         c.totalExp = c.catTotal + c.empExtraTotal + c.ink
         c.opening = shift?.opening_balance ?? 0
         c.balance = c.opening + c.inc - c.totalExp
@@ -160,6 +167,7 @@ final class ManagerModel {
             income = ""; incomeCard = ""; inkSum = ""; inkExpense = ""; inkReason = ""
             loadedInkExpense = ""; loadedInkReason = ""
             catAmounts = [:]; catNotes = [:]; empExtras = [:]; absences = []; autoAbsences = []
+            catUnpaid = [:]; empUnpaid = [:]
             return
         }
         if let opening { sh.opening_balance = opening }
@@ -178,13 +186,19 @@ final class ManagerModel {
 
         let exps = await expsTask
         var amounts: [String: String] = [:], notes: [String: String] = [:], extras: [String: String] = [:]
+        var catUn: [String: Bool] = [:], empUn: [String: Bool] = [:]
         for e in exps {
-            if let emp = e.employee_id { extras[emp] = trimNum(e.amount ?? 0) }
-            else if let cat = e.category_id {
+            let unpaid = e.is_paid == false
+            if let emp = e.employee_id {
+                extras[emp] = trimNum(e.amount ?? 0)
+                if unpaid { empUn[emp] = true }
+            } else if let cat = e.category_id {
                 amounts[cat] = trimNum(e.amount ?? 0); if let n = e.note, !n.isEmpty { notes[cat] = n }
+                if unpaid { catUn[cat] = true }
             }
         }
         catAmounts = amounts; catNotes = notes; empExtras = extras
+        catUnpaid = catUn; empUnpaid = empUn
 
         let inks = await inksTask
         await absencesTask
@@ -294,7 +308,8 @@ final class ManagerModel {
             let amt = num(catAmounts[cat.id] ?? "")
             if amt > 0 {
                 catInserts.append(["shift_id": shiftId, "restaurant_id": rid, "category_id": cat.id,
-                                   "category_name": cat.name, "amount": amt, "note": catNotes[cat.id] ?? ""])
+                                   "category_name": cat.name, "amount": amt, "note": catNotes[cat.id] ?? "",
+                                   "is_paid": catUnpaid[cat.id] != true])
             }
         }
         if !catInserts.isEmpty { try await DB.from("shift_expenses").insert(catInserts).run() }
@@ -306,7 +321,8 @@ final class ManagerModel {
             let extra = num(empExtras[emp.id] ?? "")
             if extra > 0 {
                 empInserts.append(["shift_id": shiftId, "restaurant_id": rid, "employee_id": emp.id,
-                                   "category_name": emp.name + " (экстра)", "amount": extra])
+                                   "category_name": emp.name + " (экстра)", "amount": extra,
+                                   "is_paid": empUnpaid[emp.id] != true])
             }
         }
         if !empInserts.isEmpty { try? await DB.from("shift_expenses").insert(empInserts).run() }
@@ -663,7 +679,13 @@ private struct ManagerBody: View {
                     sectionTitle(t("mg.expenses"))
                     card {
                         ForEach(Array(m.categories.enumerated()), id: \.element.id) { i, cat in
-                            fieldRow(cat.name, text: binding(\.catAmounts, cat.id))
+                            HStack {
+                                Text(cat.name).font(.system(size: 15)).foregroundStyle(.primary)
+                                Spacer()
+                                debtToggle(unpaidBinding(\.catUnpaid, cat.id))
+                                amountField(binding(\.catAmounts, cat.id))
+                            }
+                            .padding(.vertical, 11).padding(.horizontal, 14)
                             if i < m.categories.count - 1 { divider }
                         }
                     }
@@ -750,6 +772,7 @@ private struct ManagerBody: View {
                                     .background(BrandKit.stash.opacity(0.16), in: RoundedRectangle(cornerRadius: 5))
                             }
                             Spacer()
+                            debtToggle(unpaidBinding(\.empUnpaid, emp.id))
                             amountField(binding(\.empExtras, emp.id))
                         }
                         .padding(.vertical, 11).padding(.horizontal, 14)
@@ -815,6 +838,21 @@ private struct ManagerBody: View {
 
     private func binding(_ kp: ReferenceWritableKeyPath<ManagerModel, [String: String]>, _ id: String) -> Binding<String> {
         Binding(get: { m[keyPath: kp][id] ?? "" }, set: { m[keyPath: kp][id] = $0 })
+    }
+
+    private func unpaidBinding(_ kp: ReferenceWritableKeyPath<ManagerModel, [String: Bool]>, _ id: String) -> Binding<Bool> {
+        Binding(get: { m[keyPath: kp][id] == true }, set: { m[keyPath: kp][id] = $0 ? true : nil })
+    }
+
+    // «В долг» (Б, 2026-08-09) — расход вписан, но наличных не хватило: не покидает кассу
+    // сегодня, попадает в shift_expenses как is_paid=false с реальной датой.
+    private func debtToggle(_ unpaid: Binding<Bool>) -> some View {
+        Button { unpaid.wrappedValue.toggle() } label: {
+            Image(systemName: unpaid.wrappedValue ? "exclamationmark.circle.fill" : "exclamationmark.circle")
+                .font(.system(size: 18))
+                .foregroundStyle(unpaid.wrappedValue ? BrandKit.stash : Color.primary.opacity(0.2))
+        }
+        .accessibilityLabel(t("mg.debtToggle"))
     }
 
     private func sectionTitle(_ s: String) -> some View {

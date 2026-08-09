@@ -307,6 +307,7 @@ let STRINGS: [String: [Lang: String]] = [
     "mg.cashIncome":     tr("Cash", "Наличные", "Contanti", "Espèces", "Nağd", "Nakit", "Готівка", "Қолма-қол"),
     "mg.cardIncome":     tr("Card (cashless)", "Безнал (карта)", "Carta (elettronico)", "Carte (sans espèces)", "Kart (nağdsız)", "Kart (nakitsiz)", "Безгот. (картка)", "Картамен"),
     "mg.expenses":       tr("Expenses", "Расходы", "Spese", "Dépenses", "Xərclər", "Giderler", "Витрати", "Шығындар"),
+    "mg.debtToggle":     tr("Mark as debt — not paid from register today", "В долг — не оплачено из кассы сегодня", "Segna come debito — non pagato dalla cassa oggi", "Marquer comme dette — non payé de la caisse aujourd'hui", "Borc kimi qeyd et — bu gün kassadan ödənilməyib", "Borç olarak işaretle — bugün kasadan ödenmedi", "Позначити як борг — не оплачено з каси сьогодні", "Борыш деп белгілеу — бүгін кассадан төленбеді"),
     "mg.inkass":         tr("Cash collection", "Инкассация", "Prelievo cassa", "Encaisse", "İnkassasiya", "Tahsilat", "Інкасація", "Инкассация"),
     "mg.inkSum":         tr("Collection amount", "Сумма инкассации", "Importo prelievo", "Montant encaissé", "İnkassasiya məbləği", "Tahsilat tutarı", "Сума інкасації", "Инкассация сомасы"),
     "mg.inkExpense":     tr("Expense from collection", "Расход из инкассации", "Spesa dal prelievo", "Dépense du prélèvement", "İnkassasiyadan xərc", "Tahsilattan gider", "Витрата з інкасації", "Инкассациядан шығыс"),
@@ -447,6 +448,10 @@ let STRINGS: [String: [Lang: String]] = [
     "an.inkShort":       tr("Collect.", "Инкасс.", "Prelievo", "Encaisse", "İnkass.", "Tahsilat", "Інкас.", "Инкасс."),
     "an.advance":        tr("Advance", "Аванс", "Anticipo", "Avance", "Avans", "Avans", "Аванс", "Аванс"),
     "an.addAdvance":     tr("Add advance", "Добавить аванс", "Aggiungi anticipo", "Ajouter avance", "Avans əlavə et", "Avans ekle", "Додати аванс", "Аванс қосу"),
+    "an.debts":          tr("Debts", "Долги", "Debiti", "Dettes", "Borclar", "Borçlar", "Борги", "Борыштар"),
+    "an.debtSettle":     tr("Settle", "Погасить", "Salda", "Régler", "Ödə", "Öde", "Погасити", "Өтеу"),
+    "an.debtSettleNote": tr("Debt repayment", "Погашение долга", "Rimborso debito", "Remboursement de dette", "Borcun ödənilməsi", "Borç ödemesi", "Погашення боргу", "Борышты өтеу"),
+    "an.debtNoShiftToday": tr("Open today's shift first", "Сначала откройте смену на сегодня", "Apri prima il turno di oggi", "Ouvrez d'abord le service d'aujourd'hui", "Əvvəlcə bugünkü növbəni açın", "Önce bugünkü vardiyayı açın", "Спочатку відкрийте зміну на сьогодні", "Алдымен бүгінгі ауысымды ашыңыз"),
     "pe.theirShift":     tr("Their shift", "Смена коллеги", "Turno del collega", "Service du collègue", "Həmkarın növbəsi", "Meslektaşın vardiyası", "Зміна колеги", "Әріптестің ауысымы"),
 
     // AI

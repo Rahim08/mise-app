@@ -252,6 +252,7 @@ final class AnalyticsModel {
             if let mv = await movs { issuedG = mv.filter { $0.type == "out" }.reduce(0) { $0 + $1.quantity_g } }
             stockG = stockRows.reduce(0) { $0 + $1.quantity_g }
             types = (await tps) ?? types
+            await loadDebts()
             histLoaded = true
         }
 
@@ -610,6 +611,74 @@ final class AnalyticsModel {
         } else if shift != nil {
             flash(t("bk.advanceInkassationMissing"))
         }
+    }
+
+    // MARK: Долги по расходам (Б, 2026-08-09)
+    // shift_expenses с is_paid=false — расход вписан (правильная дата для месячного итога
+    // категории, Analytics и так суммирует по датам независимо от статуса оплаты), но кассу
+    // в день возникновения не тронул. Не месяц-scoped (в отличие от expenses/advances) —
+    // долг может висеть неоплаченным несколько месяцев, должен быть виден всегда.
+    struct DebtRow: Identifiable, Sendable {
+        let id: String; let shiftId: String; let date: String
+        let categoryName: String; let amount: Double
+    }
+    var debts: [DebtRow] = []
+    var debtTotal: Double { debts.reduce(0) { $0 + $1.amount } }
+
+    func loadDebts() async {
+        nonisolated struct UnpaidExp: Codable, Sendable {
+            let id: String; let shift_id: String?; let category_name: String?; let amount: Double?
+        }
+        guard let unpaid = try? await DB.from("shift_expenses").select("id, shift_id, category_name, amount")
+            .eq("is_paid", false).list(UnpaidExp.self), !unpaid.isEmpty else { debts = []; return }
+        let shiftIds = Array(Set(unpaid.compactMap { $0.shift_id }))
+        nonisolated struct ShiftDateRow: Codable, Sendable { let id: String; let date: String }
+        let shiftDates = (try? await DB.from("shifts").select("id, date").in("id", shiftIds).list(ShiftDateRow.self)) ?? []
+        let dateById = Dictionary(uniqueKeysWithValues: shiftDates.map { ($0.id, $0.date) })
+        debts = unpaid.compactMap { e -> DebtRow? in
+            guard let sid = e.shift_id, let date = dateById[sid] else { return nil }
+            return DebtRow(id: e.id, shiftId: sid, date: date, categoryName: e.category_name ?? "—", amount: e.amount ?? 0)
+        }.sorted { $0.date < $1.date }
+    }
+
+    // Погасить выбранные долги (любых дат/категорий разом) — переиспользует findShift/
+    // findInkassation из addAdvance: одна запись в кассу дня погашения, БЕЗ повторной вставки
+    // в shift_expenses (уже учтено в месячном итоге на дату возникновения — задвоило бы).
+    func settleDebts(_ ids: Set<String>) async {
+        let selected = debts.filter { ids.contains($0.id) }
+        guard !selected.isEmpty else { return }
+        let total = selected.reduce(0) { $0 + $1.amount }
+        let today = key(Date())
+        guard let shift = await findShift(forDate: today) else {
+            flash(t("an.debtNoShiftToday")); return
+        }
+        guard (try? await DB.from("shift_expenses").update([
+            "is_paid": true, "paid_at": today, "paid_shift_id": shift.id,
+        ] as [String: Any]).in("id", Array(ids)).run()) != nil else {
+            flash(t("bk.saveFailed")); return
+        }
+        let labels = Array(Set(selected.map { $0.categoryName })).sorted().joined(separator: ", ")
+        let reasonNote = t("an.debtSettleNote") + ": " + labels
+        let ink = await findInkassation(forShiftId: shift.id)
+        let baseAmount = ink?.amount ?? (shift.inkassation ?? 0)
+        let newExpense = (ink?.expense ?? 0) + total
+        let reasonParts = [ink?.reason?.isEmpty == false ? ink?.reason : nil, reasonNote].compactMap { $0 }
+        let newReason = reasonParts.joined(separator: ", ")
+        let newTotal = baseAmount - newExpense - (ink?.salary ?? 0)
+        if ink != nil {
+            try? await DB.from("inkassations").update([
+                "expense": newExpense, "reason": newReason, "total": newTotal,
+            ] as [String: Any]).eq("shift_id", shift.id).run()
+        } else {
+            try? await DB.from("inkassations").insert([
+                "shift_id": shift.id, "restaurant_id": rid, "date": shift.date,
+                "amount": baseAmount, "expense": newExpense, "reason": newReason,
+                "salary": 0, "total": newTotal,
+            ] as [String: Any]).run()
+        }
+        inkDetails[shift.id] = Inkassation(shift_id: shift.id, amount: baseAmount > 0 ? baseAmount : nil,
+            expense: newExpense, reason: newReason, total: newTotal, salary: ink?.salary, salary_note: ink?.salary_note)
+        debts.removeAll { ids.contains($0.id) }
     }
 
     // кальян
@@ -1252,6 +1321,8 @@ private struct SalaryTab: View {
     @State private var expanded: String?
     @State private var showAdvanceSheet = false
     @State private var advEmpId = ""
+    @State private var selectedDebtIds: Set<String> = []
+    @State private var settlingDebts = false
 
     var body: some View {
         VStack(spacing: 10) {
@@ -1266,6 +1337,7 @@ private struct SalaryTab: View {
         .frame(maxWidth: .infinity).padding(.vertical, 18)
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
 
+        Group {
         ForEach(m.salaryRows) { r in
             VStack(spacing: 0) {
                 Button { withAnimation(.easeInOut(duration: 0.18)) { expanded = expanded == r.id ? nil : r.id } } label: {
@@ -1318,6 +1390,11 @@ private struct SalaryTab: View {
             }
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
         }
+
+        if !m.debts.isEmpty {
+            debtsSection
+        }
+        }
         .sheet(isPresented: $showAdvanceSheet) {
             let cal = Calendar.current
             let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: m.currentDate)) ?? m.currentDate
@@ -1340,6 +1417,65 @@ private struct SalaryTab: View {
             Text(l).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.45))
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // «Долги» (Б, 2026-08-09) — расходы, вписанные при закрытии смены, но не оплаченные из
+    // кассы в моменте (не хватило наличных). Не месяц-scoped — висят, пока не погасят.
+    private var debtsSection: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(t("an.debts")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
+                Spacer()
+                Text(cur(m.debtTotal)).font(.system(size: 13, weight: .bold)).foregroundStyle(BrandKit.stash)
+            }
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
+
+            ForEach(m.debts) { d in
+                Button {
+                    if selectedDebtIds.contains(d.id) { selectedDebtIds.remove(d.id) } else { selectedDebtIds.insert(d.id) }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: selectedDebtIds.contains(d.id) ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 18))
+                            .foregroundStyle(selectedDebtIds.contains(d.id) ? BrandKit.stash : Color.primary.opacity(0.25))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(d.categoryName).font(.system(size: 14, weight: .medium)).foregroundStyle(.primary)
+                            Text(dayLabelRu(d.date)).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.45))
+                        }
+                        Spacer()
+                        Text(cur(d.amount)).font(.system(size: 14, weight: .semibold)).foregroundStyle(BrandKit.stash)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+                if d.id != m.debts.last?.id { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 42) }
+            }
+
+            if !selectedDebtIds.isEmpty {
+                let sum = m.debts.filter { selectedDebtIds.contains($0.id) }.reduce(0) { $0 + $1.amount }
+                Button {
+                    guard !settlingDebts else { return }
+                    settlingDebts = true
+                    let ids = selectedDebtIds
+                    Task {
+                        await m.settleDebts(ids)
+                        selectedDebtIds = []
+                        settlingDebts = false
+                    }
+                } label: {
+                    HStack {
+                        if settlingDebts { ProgressView().tint(.white) }
+                        Text("\(t("an.debtSettle")) · \(cur(sum))")
+                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+                    .background(BrandKit.stash, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(settlingDebts)
+                .padding(12)
+            }
+        }
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
