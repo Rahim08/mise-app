@@ -796,9 +796,6 @@ private struct ManagerBody: View {
                     .lineLimit(1).minimumScaleFactor(0.7)
             }
             .padding(.top, 2)
-            if c.inkNet != 0 {
-                sumRow(t("mg.inkNet"), money(c.inkNet)).padding(.top, 6)
-            }
         }
         .padding(16)
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))

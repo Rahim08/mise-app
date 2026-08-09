@@ -300,7 +300,7 @@ export default function ShiftsPage() {
     await loadHistory()
   }
 
-  const { ink, catTotal, empExtraTotal, balance, inkNet } = calc()
+  const { ink, catTotal, empExtraTotal, balance } = calc()
   const netExpense = catTotal + empExtraTotal
   const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
   const dowRaw = currentDate.toLocaleDateString(locale, { weekday: 'long' })
@@ -422,10 +422,6 @@ export default function ShiftsPage() {
                 <div style={{ padding: '8px 0', borderBottom: 'var(--hairline)' }}>
                   <div style={{ ...fieldLabel, marginBottom: 5 }}>{tr('mg.inkReason')}</div>
                   <input value={inkReason} disabled={locked} onChange={e => setInkReason(e.target.value)} placeholder={tr('mg.phPurpose')} className="ui-input" style={{ ...inputStyle, minHeight: 34 }} />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 10 }}>
-                  <span style={{ fontSize: '.8rem', fontWeight: 600, color: 'var(--warn)' }}>{tr('mg.inkNet')}</span>
-                  <span style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--warn)' }}>€{fv(inkNet)}</span>
                 </div>
                 {inkReserve !== null && (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, borderTop: 'var(--hairline)', marginTop: 8 }}>

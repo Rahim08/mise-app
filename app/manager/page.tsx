@@ -351,7 +351,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     setSaving(false)
   }
 
-  const { inc, card, ink, catTotal, empExtraTotal, totalExp, balance, opening, inkNet } = calc()
+  const { inc, card, ink, catTotal, empExtraTotal, totalExp, balance, opening } = calc()
   const netExpense = catTotal + empExtraTotal
   const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
   const dowRaw = currentDate.toLocaleDateString(locale, { weekday: 'long' })
@@ -533,13 +533,6 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                     style={{ width: '100%', padding: '10px 12px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 14, color: t.text, fontFamily: 'inherit', outline: 'none', background: inkReason ? t.fill2 : t.fill2 }}
                   />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: `${t.orange}12` }}>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: t.orange }}>{tr('mg.inkNet')}</div>
-                    {parseFloat(inkExpense) > 0 && <div style={{ fontSize: 11, color: t.orange, opacity: 0.7, marginTop: 2 }}>{tr('mg.inkNetHint')}</div>}
-                  </div>
-                  <div style={{ fontSize: 20, fontWeight: 700, color: t.orange }}>€{fv(inkNet)}</div>
-                </div>
                 {inkReserve !== null && (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderTop: `0.5px solid ${t.sep2}` }}>
                     <div>
@@ -643,7 +636,6 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
               ))}
               {parseFloat(inkSum) > 0 && <SRow label={tr('mg.secCollection')} value={`−€${fv(parseFloat(inkSum))}`} color={t.orange} t={t} />}
               {parseFloat(inkExpense) > 0 && <SRow label={`${tr('mg.inkExpenseShort')}${inkReason ? ` (${inkReason})` : ''}`} value={`−€${fv(parseFloat(inkExpense))}`} color={t.red} t={t} />}
-              {parseFloat(inkExpense) > 0 && parseFloat(inkSum) > 0 && <SRow label={tr('mg.inkNet')} value={`€${fv(inkNet)}`} color={t.orange} bold t={t} />}
               <div style={{ borderTop: `1.5px solid ${t.sep}`, marginTop: 10, paddingTop: 10 }}>
                 <SRow label={tr('mg.sumTotalExpense')} value={`−€${fv(totalExp)}`} color={t.red} bold t={t} />
                 <SRow label={tr('mg.secRegister')} value={`€${fv(balance)}`} color={balance < 0 ? t.red : t.blue} bold t={t} />
