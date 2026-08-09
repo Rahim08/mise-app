@@ -449,10 +449,10 @@ let STRINGS: [String: [Lang: String]] = [
     "an.advance":        tr("Advance", "Аванс", "Anticipo", "Avance", "Avans", "Avans", "Аванс", "Аванс"),
     "an.addAdvance":     tr("Add advance", "Добавить аванс", "Aggiungi anticipo", "Ajouter avance", "Avans əlavə et", "Avans ekle", "Додати аванс", "Аванс қосу"),
     "an.debts":          tr("Debts", "Долги", "Debiti", "Dettes", "Borclar", "Borçlar", "Борги", "Борыштар"),
-    "an.debtSettle":     tr("Settle", "Погасить", "Salda", "Régler", "Ödə", "Öde", "Погасити", "Өтеу"),
     "an.debtSettleNote": tr("Debt repayment", "Погашение долга", "Rimborso debito", "Remboursement de dette", "Borcun ödənilməsi", "Borç ödemesi", "Погашення боргу", "Борышты өтеу"),
-    "an.debtNoShiftToday": tr("Open today's shift first", "Сначала откройте смену на сегодня", "Apri prima il turno di oggi", "Ouvrez d'abord le service d'aujourd'hui", "Əvvəlcə bugünkü növbəni açın", "Önce bugünkü vardiyayı açın", "Спочатку відкрийте зміну на сьогодні", "Алдымен бүгінгі ауысымды ашыңыз"),
     "an.debtHistory":    tr("Paid debts history", "История погашённых долгов", "Storico debiti pagati", "Historique des dettes payées", "Ödənilmiş borclar tarixçəsi", "Ödenen borç geçmişi", "Історія погашених боргів", "Төленген борыштар тарихы"),
+    "an.debtTotalHint":  tr("All open debts, all time", "Все открытые долги, за всё время", "Tutti i debiti aperti, di sempre", "Toutes les dettes ouvertes, depuis toujours", "Bütün açıq borclar, bütün dövr", "Tüm açık borçlar, tüm zamanlar", "Усі відкриті борги, за весь час", "Барлық ашық борыштар, барлық уақыт"),
+    "an.debtsNonePeriod": tr("No debts in this period", "За этот период долгов нет", "Nessun debito in questo periodo", "Aucune dette sur cette période", "Bu dövrdə borc yoxdur", "Bu dönemde borç yok", "За цей період боргів немає", "Бұл кезеңде борыш жоқ"),
     "pe.theirShift":     tr("Their shift", "Смена коллеги", "Turno del collega", "Service du collègue", "Həmkarın növbəsi", "Meslektaşın vardiyası", "Зміна колеги", "Әріптестің ауысымы"),
 
     // AI

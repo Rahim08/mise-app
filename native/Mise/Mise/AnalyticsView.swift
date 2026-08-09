@@ -405,6 +405,28 @@ final class AnalyticsModel {
         default: return shifts
         }
     }
+    // Диапазон текущего периода (день/неделя/месяц) как строки дат — для фильтрации долгов,
+    // которые (в отличие от shifts) не грузятся заново при листании периода/месяца.
+    var periodDateRange: (String, String) {
+        let cal = Calendar.current
+        switch periodMode {
+        case "day": return (key(currentDate), key(currentDate))
+        case "week": let (mon, sun) = weekRange; return (key(mon), key(sun))
+        default:
+            let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: currentDate)) ?? currentDate
+            let monthEnd = cal.date(byAdding: DateComponents(month: 1, day: -1), to: monthStart) ?? monthStart
+            return (key(monthStart), key(monthEnd))
+        }
+    }
+    var periodDebts: [DebtRow] {
+        let (start, end) = periodDateRange
+        return debts.filter { $0.date >= start && $0.date <= end }
+    }
+    var periodDebtHistory: [DebtRow] {
+        let (start, end) = periodDateRange
+        return debtHistory.filter { $0.date >= start && $0.date <= end }
+    }
+
     var pIncome: Double { periodShifts.reduce(0) { $0 + ($1.income ?? 0) } }
     var pExpense: Double { periodShifts.reduce(0) { $0 + ($1.total_expense ?? 0) } }
     var pInkass: Double { periodShifts.reduce(0) { $0 + ($1.inkassation ?? 0) } }
@@ -680,62 +702,6 @@ final class AnalyticsModel {
         }
         debts = unpaid.compactMap(toRow).sorted { $0.date < $1.date }
         debtHistory = settled.compactMap(toRow).sorted { $0.date > $1.date }
-    }
-
-    // Погасить выбранные долги (любых дат/категорий разом) — переиспользует findShift/
-    // findInkassation из addAdvance.
-    func settleDebts(_ ids: Set<String>) async {
-        let selected = debts.filter { ids.contains($0.id) }
-        guard !selected.isEmpty else { return }
-        let total = selected.reduce(0) { $0 + $1.amount }
-        let today = key(Date())
-        guard let shift = await findShift(forDate: today) else {
-            flash(t("an.debtNoShiftToday")); return
-        }
-        // 1. Исходные строки — статус «оплачено», исключить из подсчёта их родного дня навсегда.
-        guard (try? await DB.from("shift_expenses").update([
-            "is_paid": true, "paid_at": today, "paid_shift_id": shift.id,
-        ] as [String: Any]).in("id", Array(ids)).run()) != nil else {
-            flash(t("bk.saveFailed")); return
-        }
-        // 2. Новые строки — в день погашения, считаются в его расходах (shift_id == paid_shift_id).
-        let empName: (String) -> String = { id in self.employees.first { $0.id == id }?.name ?? "" }
-        let newRows: [[String: Any]] = selected.map { d in
-            var row: [String: Any] = [
-                "shift_id": shift.id, "restaurant_id": rid, "amount": d.amount,
-                "category_name": d.categoryName, "is_paid": true, "paid_shift_id": shift.id,
-                "note": t("an.debtSettleNote") + " (\(dayLabelRu(d.date)))",
-            ]
-            if let cid = d.categoryId { row["category_id"] = cid }
-            if let eid = d.employeeId { row["employee_id"] = eid }
-            return row
-        }
-        guard (try? await DB.from("shift_expenses").insert(newRows).run()) != nil else {
-            flash(t("bk.saveFailed")); return
-        }
-        // 3. Реальные наличные — из инкассационного резерва дня погашения (как авансы).
-        let labels = Array(Set(selected.map { $0.categoryName.isEmpty ? empName($0.employeeId ?? "") : $0.categoryName })).sorted().joined(separator: ", ")
-        let reasonNote = t("an.debtSettleNote") + ": " + labels
-        let ink = await findInkassation(forShiftId: shift.id)
-        let baseAmount = ink?.amount ?? (shift.inkassation ?? 0)
-        let newExpense = (ink?.expense ?? 0) + total
-        let reasonParts = [ink?.reason?.isEmpty == false ? ink?.reason : nil, reasonNote].compactMap { $0 }
-        let newReason = reasonParts.joined(separator: ", ")
-        let newTotal = baseAmount - newExpense - (ink?.salary ?? 0)
-        if ink != nil {
-            try? await DB.from("inkassations").update([
-                "expense": newExpense, "reason": newReason, "total": newTotal,
-            ] as [String: Any]).eq("shift_id", shift.id).run()
-        } else {
-            try? await DB.from("inkassations").insert([
-                "shift_id": shift.id, "restaurant_id": rid, "date": shift.date,
-                "amount": baseAmount, "expense": newExpense, "reason": newReason,
-                "salary": 0, "total": newTotal,
-            ] as [String: Any]).run()
-        }
-        inkDetails[shift.id] = Inkassation(shift_id: shift.id, amount: baseAmount > 0 ? baseAmount : nil,
-            expense: newExpense, reason: newReason, total: newTotal, salary: ink?.salary, salary_note: ink?.salary_note)
-        await loadDebts()
     }
 
     // кальян
@@ -1138,10 +1104,12 @@ private struct AnalyticsBody: View {
                             .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
                         AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { HookahTab(m: m) }
                             .tabItem { Label(t("tab.hookah"), systemImage: "flame.fill") }.tag("hookah")
+                        AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { DebtsTab(m: m) }
+                            .tabItem { Label(t("an.debts"), systemImage: "exclamationmark.circle.fill") }.tag("debts")
                     }
                     .tint(BrandKit.analytics)
                     .sensoryFeedback(.selection, trigger: m.tab)
-                    .tabEdgeSwipe(tabs: ["period", "kassa", "forecast", "salary", "hookah"],
+                    .tabEdgeSwipe(tabs: ["period", "kassa", "forecast", "salary", "hookah", "debts"],
                                   selection: $m.tab,
                                   onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
                 }
@@ -1378,9 +1346,6 @@ private struct SalaryTab: View {
     @State private var expanded: String?
     @State private var showAdvanceSheet = false
     @State private var advEmpId = ""
-    @State private var selectedDebtIds: Set<String> = []
-    @State private var settlingDebts = false
-    @State private var showDebtHistory = false
 
     var body: some View {
         VStack(spacing: 10) {
@@ -1395,7 +1360,6 @@ private struct SalaryTab: View {
         .frame(maxWidth: .infinity).padding(.vertical, 18)
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
 
-        Group {
         ForEach(m.salaryRows) { r in
             VStack(spacing: 0) {
                 Button { withAnimation(.easeInOut(duration: 0.18)) { expanded = expanded == r.id ? nil : r.id } } label: {
@@ -1448,11 +1412,6 @@ private struct SalaryTab: View {
             }
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
         }
-
-        if !m.debts.isEmpty || !m.debtHistory.isEmpty {
-            debtsSection
-        }
-        }
         .sheet(isPresented: $showAdvanceSheet) {
             let cal = Calendar.current
             let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: m.currentDate)) ?? m.currentDate
@@ -1477,25 +1436,34 @@ private struct SalaryTab: View {
         .frame(maxWidth: .infinity)
     }
 
-    // «Долги» (Б, 2026-08-09) — расходы, вписанные при закрытии смены, но не оплаченные из
-    // кассы в моменте (не хватило наличных). Не месяц-scoped — висят, пока не погасят.
-    private var debtsSection: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(t("an.debts")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
-                Spacer()
-                Text(cur(m.debtTotal)).font(.system(size: 13, weight: .bold)).foregroundStyle(BrandKit.stash)
-            }
-            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
+}
 
-            ForEach(m.debts) { d in
-                Button {
-                    if selectedDebtIds.contains(d.id) { selectedDebtIds.remove(d.id) } else { selectedDebtIds.insert(d.id) }
-                } label: {
+// MARK: Долги (только просмотр — оплата теперь в Manager, прямо при закрытии смены)
+
+private struct DebtsTab: View {
+    @Bindable var m: AnalyticsModel
+    @State private var showHistory = false
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text(t("an.debts")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
+            Text(cur(m.debtTotal)).font(.system(size: 30, weight: .heavy)).foregroundStyle(BrandKit.stash)
+            Text(t("an.debtTotalHint")).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 18)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+
+        if m.periodDebts.isEmpty {
+            VStack(spacing: 6) {
+                Image(systemName: "checkmark.circle").font(.system(size: 28)).foregroundStyle(.primary.opacity(0.25))
+                Text(t("an.debtsNonePeriod")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.45))
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 28)
+        } else {
+            VStack(spacing: 0) {
+                ForEach(m.periodDebts) { d in
                     HStack(spacing: 10) {
-                        Image(systemName: selectedDebtIds.contains(d.id) ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 18))
-                            .foregroundStyle(selectedDebtIds.contains(d.id) ? BrandKit.stash : Color.primary.opacity(0.25))
+                        Image(systemName: "exclamationmark.circle.fill").font(.system(size: 14)).foregroundStyle(BrandKit.stash)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(d.categoryName).font(.system(size: 14, weight: .medium)).foregroundStyle(.primary)
                             Text(dayLabelRu(d.date)).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.45))
@@ -1504,48 +1472,26 @@ private struct SalaryTab: View {
                         Text(cur(d.amount)).font(.system(size: 14, weight: .semibold)).foregroundStyle(BrandKit.stash)
                     }
                     .padding(.horizontal, 14).padding(.vertical, 10)
+                    if d.id != m.periodDebts.last?.id { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 38) }
                 }
-                .buttonStyle(.plain)
-                if d.id != m.debts.last?.id { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 42) }
             }
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        }
 
-            if !selectedDebtIds.isEmpty {
-                let sum = m.debts.filter { selectedDebtIds.contains($0.id) }.reduce(0) { $0 + $1.amount }
-                Button {
-                    guard !settlingDebts else { return }
-                    settlingDebts = true
-                    let ids = selectedDebtIds
-                    Task {
-                        await m.settleDebts(ids)
-                        selectedDebtIds = []
-                        settlingDebts = false
-                    }
-                } label: {
-                    HStack {
-                        if settlingDebts { ProgressView().tint(.white) }
-                        Text("\(t("an.debtSettle")) · \(cur(sum))")
-                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-                    }
-                    .frame(maxWidth: .infinity).padding(.vertical, 12)
-                    .background(BrandKit.stash, in: RoundedRectangle(cornerRadius: 12))
-                }
-                .disabled(settlingDebts)
-                .padding(12)
-            }
-
-            if !m.debtHistory.isEmpty {
-                Button { withAnimation(.easeInOut(duration: 0.18)) { showDebtHistory.toggle() } } label: {
+        if !m.periodDebtHistory.isEmpty {
+            VStack(spacing: 0) {
+                Button { withAnimation(.easeInOut(duration: 0.18)) { showHistory.toggle() } } label: {
                     HStack {
                         Text(t("an.debtHistory")).font(.system(size: 12, weight: .medium)).foregroundStyle(.primary.opacity(0.5))
                         Spacer()
-                        Image(systemName: showDebtHistory ? "chevron.up" : "chevron.down")
+                        Image(systemName: showHistory ? "chevron.up" : "chevron.down")
                             .font(.system(size: 10)).foregroundStyle(.primary.opacity(0.4))
                     }
-                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .padding(14)
                 }
                 .buttonStyle(.plain)
-                if showDebtHistory {
-                    ForEach(m.debtHistory) { d in
+                if showHistory {
+                    ForEach(m.periodDebtHistory) { d in
                         HStack(spacing: 10) {
                             Image(systemName: "checkmark.circle.fill").font(.system(size: 14)).foregroundStyle(.green)
                             VStack(alignment: .leading, spacing: 1) {
@@ -1557,13 +1503,13 @@ private struct SalaryTab: View {
                             Text(cur(d.amount)).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary.opacity(0.5))
                         }
                         .padding(.horizontal, 14).padding(.vertical, 8)
-                        if d.id != m.debtHistory.last?.id { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 38) }
+                        if d.id != m.periodDebtHistory.last?.id { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 38) }
                     }
                     .padding(.bottom, 8)
                 }
             }
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
         }
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
@@ -2062,7 +2008,7 @@ private struct HookahBreakdownSheet: View {
     }
 }
 
-private func dayLabelRu(_ ymd: String) -> String {
+func dayLabelRu(_ ymd: String) -> String {
     let inF = DateFormatter(); inF.dateFormat = "yyyy-MM-dd"; inF.locale = Locale(identifier: "en_US_POSIX")
     guard let d = inF.date(from: ymd) else { return ymd }
     let f = DateFormatter(); f.locale = appLocale(); f.dateFormat = "EEE, d MMM"

@@ -29,6 +29,19 @@ final class ManagerModel {
     // так что месячный итог категории видит долг сразу, а не в день погашения.
     var catUnpaid: [String: Bool] = [:]
     var empUnpaid: [String: Bool] = [:]
+
+    // Долги (Б, 2026-08-09, переработано по фидбоку юзера — оплата долга происходит ПРЯМО
+    // здесь, при закрытии текущей смены, а не отдельным действием в Analytics). Список — ВСЕ
+    // открытые долги ресторана (не только за текущий день): менеджер мог не смочь заплатить
+    // неделю назад, долг всё ещё висит и должен быть виден сегодня.
+    struct DebtRow: Identifiable, Sendable {
+        let id: String; let shiftId: String; let date: String
+        let categoryId: String?; let categoryName: String; let employeeId: String?; let amount: Double
+    }
+    var openDebts: [DebtRow] = []
+    var selectedDebtIds: Set<String> = []
+    var debtSettleTotal: Double { openDebts.filter { selectedDebtIds.contains($0.id) }.reduce(0) { $0 + $1.amount } }
+
     var income = ""
     var incomeCard = ""
     var inkSum = ""
@@ -75,7 +88,7 @@ final class ManagerModel {
 
     struct Calc {
         var inc = 0.0, card = 0.0, ink = 0.0
-        var catTotal = 0.0, empExtraTotal = 0.0, totalExp = 0.0
+        var catTotal = 0.0, empExtraTotal = 0.0, debtTotal = 0.0, totalExp = 0.0
         var opening = 0.0, balance = 0.0, inkNet = 0.0
     }
 
@@ -85,7 +98,9 @@ final class ManagerModel {
         // «В долг» — не покидал кассу сегодня, не входит в дневной расход/баланс.
         c.catTotal = categories.reduce(0) { catUnpaid[$1.id] == true ? $0 : $0 + num(catAmounts[$1.id] ?? "") }
         c.empExtraTotal = employees.reduce(0) { empUnpaid[$1.id] == true ? $0 : $0 + num(empExtras[$1.id] ?? "") }
-        c.totalExp = c.catTotal + c.empExtraTotal + c.ink
+        // Погашение отмеченных долгов — реальные наличные уходят из кассы ИМЕННО сегодня.
+        c.debtTotal = debtSettleTotal
+        c.totalExp = c.catTotal + c.empExtraTotal + c.debtTotal + c.ink
         c.opening = shift?.opening_balance ?? 0
         c.balance = c.opening + c.inc - c.totalExp
         c.inkNet = c.ink - num(inkExpense)
@@ -107,6 +122,26 @@ final class ManagerModel {
         employees = await emps
         categories = await cats
         await loadDay(currentDate)
+        await loadOpenDebts()
+    }
+
+    func loadOpenDebts() async {
+        nonisolated struct DebtExp: Codable, Sendable {
+            let id: String; let shift_id: String?; let category_id: String?; let category_name: String?
+            let employee_id: String?; let amount: Double?
+        }
+        guard let unpaid = try? await DB.from("shift_expenses")
+            .select("id, shift_id, category_id, category_name, employee_id, amount")
+            .eq("is_paid", false).list(DebtExp.self), !unpaid.isEmpty else { openDebts = []; return }
+        let shiftIds = Array(Set(unpaid.compactMap { $0.shift_id }))
+        nonisolated struct ShiftDateRow: Codable, Sendable { let id: String; let date: String }
+        let shiftDates = (try? await DB.from("shifts").select("id, date").in("id", shiftIds).list(ShiftDateRow.self)) ?? []
+        let dateById = Dictionary(uniqueKeysWithValues: shiftDates.map { ($0.id, $0.date) })
+        openDebts = unpaid.compactMap { e -> DebtRow? in
+            guard let sid = e.shift_id, let date = dateById[sid] else { return nil }
+            return DebtRow(id: e.id, shiftId: sid, date: date, categoryId: e.category_id,
+                categoryName: e.category_name ?? "—", employeeId: e.employee_id, amount: e.amount ?? 0)
+        }.sorted { $0.date < $1.date }
     }
 
     // Последняя смена НЕ ПОЗЖЕ вчера (не обязательно ровно вчера) — пропущенный день
@@ -364,6 +399,33 @@ final class ManagerModel {
         }
     }
 
+    // Погашение отмеченных долгов — прямо здесь, в текущей смене (не отдельным действием
+    // в Analytics): 1) новая строка расхода датой ТЕКУЩЕЙ смены (считается в кассе/отчётах
+    // именно сегодня) — вставляем ПЕРВОЙ, чтобы при сбое сети старый долг остался открытым
+    // (видимо и безопасно), а не тихо потерялся; 2) исходная строка помечается «оплачено» —
+    // статус для истории, paid_shift_id ≠ её собственный shift_id → навсегда исключена из
+    // подсчёта своего родного дня (Analytics.countsInRollup).
+    private func persistDebtSettlements(shiftId: String) async throws {
+        let ids = selectedDebtIds
+        guard !ids.isEmpty else { return }
+        let selected = openDebts.filter { ids.contains($0.id) }
+        guard !selected.isEmpty else { return }
+        let newRows: [[String: Any]] = selected.map { d in
+            var row: [String: Any] = [
+                "shift_id": shiftId, "restaurant_id": rid, "amount": d.amount,
+                "category_name": d.categoryName, "is_paid": true, "paid_shift_id": shiftId,
+                "note": t("an.debtSettleNote") + " (\(d.date))",
+            ]
+            if let cid = d.categoryId { row["category_id"] = cid }
+            if let eid = d.employeeId { row["employee_id"] = eid }
+            return row
+        }
+        try await DB.from("shift_expenses").insert(newRows).run()
+        try await DB.from("shift_expenses").update([
+            "is_paid": true, "paid_at": key(currentDate), "paid_shift_id": shiftId,
+        ] as [String: Any]).in("id", Array(ids)).run()
+    }
+
     @discardableResult
     private func persist() async throws -> Double? {
         guard let sh = shift else { return nil }
@@ -378,6 +440,7 @@ final class ManagerModel {
         ]).eq("id", sh.id).run()
         async let expensesResult: () = persistExpenses(shiftId: sh.id)
         async let inkResult: () = persistInkassation(shiftId: sh.id, c)
+        async let debtResult: () = persistDebtSettlements(shiftId: sh.id)
         // best-effort: подтвердить прогулы дня (привязать к смене, снять авто-черновик)
         async let absResult: Void = { _ = try? await DB.from("shift_absences").update(["shift_id": sh.id, "source": "manager"])
             .eq("date", key(currentDate)).run() }()
@@ -385,8 +448,13 @@ final class ManagerModel {
         try await shiftUpdate
         try await expensesResult
         try await inkResult
+        try await debtResult
         await absResult
         autoAbsences = []
+        if !selectedDebtIds.isEmpty {
+            openDebts.removeAll { selectedDebtIds.contains($0.id) }
+            selectedDebtIds = []
+        }
         return c.balance
     }
 
@@ -538,6 +606,7 @@ private struct ManagerBody: View {
     let aiEnabled: Bool
     private let accent = BrandKit.manager
     @State private var showDatePicker = false
+    @State private var showDebts = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -673,6 +742,9 @@ private struct ManagerBody: View {
         ZStack(alignment: .top) {
             VStack(spacing: 14) {
                 staffSection
+                if !m.openDebts.isEmpty {
+                    debtsBadge
+                }
                 if !m.categories.isEmpty {
                     sectionTitle(t("mg.expenses"))
                     card {
@@ -772,10 +844,62 @@ private struct ManagerBody: View {
         }
     }
 
+    // Долги (Б, 2026-08-09) — плашка со счётчиком между сотрудниками и категориями расходов.
+    // Раскрывается в список ВСЕХ открытых долгов ресторана (любых дат), галочки отмечают, что
+    // менеджер гасит сегодня — сумма сразу входит в c.debtTotal/расчёт кассы, никакой отдельной
+    // кнопки «Погасить» нет: сохраняется вместе с обычным «Сохранить смену».
+    @ViewBuilder private var debtsBadge: some View {
+        VStack(spacing: 0) {
+            Button { withAnimation(.easeInOut(duration: 0.18)) { showDebts.toggle() } } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 16)).foregroundStyle(BrandKit.stash)
+                    Text(t("an.debts")).font(.system(size: 15, weight: .medium)).foregroundStyle(.primary)
+                    Text("\(m.openDebts.count)")
+                        .font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(BrandKit.stash, in: Capsule())
+                    Spacer()
+                    if m.debtSettleTotal > 0 {
+                        Text("−" + money(m.debtSettleTotal)).font(.system(size: 13, weight: .semibold)).foregroundStyle(BrandKit.stash)
+                    }
+                    Image(systemName: showDebts ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
+                }
+                .padding(14)
+            }
+            .buttonStyle(.plain)
+            if showDebts {
+                ForEach(Array(m.openDebts.enumerated()), id: \.element.id) { i, d in
+                    Button {
+                        if m.selectedDebtIds.contains(d.id) { m.selectedDebtIds.remove(d.id) } else { m.selectedDebtIds.insert(d.id) }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: m.selectedDebtIds.contains(d.id) ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 18))
+                                .foregroundStyle(m.selectedDebtIds.contains(d.id) ? BrandKit.stash : Color.primary.opacity(0.25))
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(d.categoryName).font(.system(size: 14, weight: .medium)).foregroundStyle(.primary)
+                                Text(dayLabelRu(d.date)).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.45))
+                            }
+                            Spacer()
+                            Text(money(d.amount)).font(.system(size: 14, weight: .semibold)).foregroundStyle(BrandKit.stash)
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                    }
+                    .buttonStyle(.plain)
+                    if i < m.openDebts.count - 1 { divider }
+                }
+                .padding(.bottom, 8)
+            }
+        }
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
     private func summary(_ c: ManagerModel.Calc) -> some View {
         VStack(spacing: 0) {
             sumRow(t("mg.cashRevenue"), money(c.inc))
-            sumRow(t("mg.expenses"), "−" + money(c.catTotal + c.empExtraTotal).replacingOccurrences(of: "−", with: ""))
+            sumRow(t("mg.expenses"), "−" + money(c.catTotal + c.empExtraTotal + c.debtTotal).replacingOccurrences(of: "−", with: ""))
             sumRow(t("mg.cellInk"), money(c.ink))
             Divider().overlay(Color.primary.opacity(0.12)).padding(.vertical, 4)
             HStack {
