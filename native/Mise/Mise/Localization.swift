@@ -452,6 +452,7 @@ let STRINGS: [String: [Lang: String]] = [
     "an.debtSettle":     tr("Settle", "Погасить", "Salda", "Régler", "Ödə", "Öde", "Погасити", "Өтеу"),
     "an.debtSettleNote": tr("Debt repayment", "Погашение долга", "Rimborso debito", "Remboursement de dette", "Borcun ödənilməsi", "Borç ödemesi", "Погашення боргу", "Борышты өтеу"),
     "an.debtNoShiftToday": tr("Open today's shift first", "Сначала откройте смену на сегодня", "Apri prima il turno di oggi", "Ouvrez d'abord le service d'aujourd'hui", "Əvvəlcə bugünkü növbəni açın", "Önce bugünkü vardiyayı açın", "Спочатку відкрийте зміну на сьогодні", "Алдымен бүгінгі ауысымды ашыңыз"),
+    "an.debtHistory":    tr("Paid debts history", "История погашённых долгов", "Storico debiti pagati", "Historique des dettes payées", "Ödənilmiş borclar tarixçəsi", "Ödenen borç geçmişi", "Історія погашених боргів", "Төленген борыштар тарихы"),
     "pe.theirShift":     tr("Their shift", "Смена коллеги", "Turno del collega", "Service du collègue", "Həmkarın növbəsi", "Meslektaşın vardiyası", "Зміна колеги", "Әріптестің ауысымы"),
 
     // AI

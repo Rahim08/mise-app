@@ -188,6 +188,12 @@ final class ManagerModel {
         var amounts: [String: String] = [:], notes: [String: String] = [:], extras: [String: String] = [:]
         var catUn: [String: Bool] = [:], empUn: [String: Bool] = [:]
         for e in exps {
+            // paid_shift_id != nil — строка прошла через погашение долга (Analytics→Долги):
+            // либо это историческая запись «долг был здесь, погашен в другой день» (не должна
+            // всплывать как редактируемое поле и не должна попасть под persistExpenses'
+            // delete-цикл), либо сама запись погашения (считается в отчёте на день погашения,
+            // а не здесь). Форма закрытия смены их не трогает вообще.
+            guard e.paid_shift_id == nil else { continue }
             let unpaid = e.is_paid == false
             if let emp = e.employee_id {
                 extras[emp] = trimNum(e.amount ?? 0)
@@ -301,8 +307,11 @@ final class ManagerModel {
     // все расходы смены. Если теперь упадёт delete — будут видимые дубли,
     // которые следующее успешное сохранение само подчистит (старые id уже собраны).
     private func persistExpenses(shiftId: String) async throws {
-        let oldExpenses = try await DB.from("shift_expenses").select("id")
+        // paid_shift_id != nil — строка управляется экраном «Долги» (Analytics), не формой
+        // закрытия смены: удалять/пересоздавать её здесь нельзя (см. loadDay).
+        let oldExpenses = try await DB.from("shift_expenses").select("id, paid_shift_id")
             .eq("shift_id", shiftId).list(ShiftExpense.self)
+            .filter { $0.paid_shift_id == nil }
         var catInserts: [[String: Any]] = []
         for cat in categories {
             let amt = num(catAmounts[cat.id] ?? "")

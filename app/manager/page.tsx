@@ -161,7 +161,9 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       ])
       const amounts: Record<string, string> = {}; const notes: Record<string, string> = {}
       const extras: Record<string, string> = {}
-      ;(exps || []).forEach((e: any) => {
+      // paid_shift_id != null — строка управляется экраном «Долги» (Analytics), не формой
+      // закрытия смены: не должна всплывать как редактируемое поле (см. persistShift ниже).
+      ;(exps || []).filter((e: any) => !e.paid_shift_id).forEach((e: any) => {
         if (e.employee_id) { extras[e.employee_id] = String(e.amount) }
         else if (e.category_id) { amounts[e.category_id] = String(e.amount); if (e.note) notes[e.category_id] = e.note }
       })
@@ -267,8 +269,10 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     const { error: upErr } = await db.from('shifts').update({ income: inc, income_card: card, inkassation: ink, total_expense: totalExp, closing_balance: balance }).eq('id', sh.id)
     if (upErr) throw new Error(upErr.message)
 
-    const { data: oldExpenses, error: oldExpErr } = await db.from('shift_expenses').select('id').eq('shift_id', sh.id)
+    // paid_shift_id != null — строка управляется экраном «Долги» (Analytics), не трогаем.
+    const { data: oldExpensesAll, error: oldExpErr } = await db.from('shift_expenses').select('id, paid_shift_id').eq('shift_id', sh.id)
     if (oldExpErr) throw new Error(oldExpErr.message)
+    const oldExpenses = (oldExpensesAll || []).filter((e: any) => !e.paid_shift_id)
     const inserts: any[] = []
     categories.forEach(c => {
       const amt = parseFloat(catAmounts[c.id] || '0')

@@ -585,9 +585,12 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const prevExpense = prevShifts.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
   const pct = (cur: number, prev: number) => prev ? ((cur - prev) / prev * 100) : null
 
+  // Долги (Б, 2026-08-09): is_paid=false — ещё не оплачен; paid_shift_id на ДРУГУЮ смену —
+  // историческая пометка «здесь был долг», уже посчитан в дне погашения.
+  const countsInRollup = (e: any) => e.is_paid !== false && (!e.paid_shift_id || e.paid_shift_id === e.shift_id)
   const getCatMap = (exps: any[]) => {
     const m: Record<string, number> = {}
-    exps.filter((e: any) => !e.employee_id).forEach((e: any) => { m[e.category_name] = (m[e.category_name] || 0) + e.amount })
+    exps.filter((e: any) => !e.employee_id && countsInRollup(e)).forEach((e: any) => { m[e.category_name] = (m[e.category_name] || 0) + e.amount })
     return Object.entries(m).sort((a, b) => {
       const pa = pinnedCats.has(a[0]) ? 1 : 0, pb = pinnedCats.has(b[0]) ? 1 : 0
       return pb - pa || b[1] - a[1]
@@ -596,7 +599,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
 
   const buildContext = () => {
     const catMap: Record<string, number> = {}
-    allExpenses.filter((e: any) => !e.employee_id).forEach((e: any) => { catMap[e.category_name] = (catMap[e.category_name] || 0) + e.amount })
+    allExpenses.filter((e: any) => !e.employee_id && countsInRollup(e)).forEach((e: any) => { catMap[e.category_name] = (catMap[e.category_name] || 0) + e.amount })
     const topCats = Object.entries(catMap).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, v]) => `${n}: ${currency}${fv(v)}`).join(', ')
     const totalAllIncome = allShifts.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
     const totalAllExpense = allShifts.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
@@ -656,7 +659,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const sessionData = () => {
     const dayStr = fmtDate(currentDate)
     const dayShift = shifts.find((s: any) => s.date === dayStr)
-    const dayExps = (dayShift ? expenses.filter((e: any) => e.shift_id === dayShift.id && !e.employee_id) : [])
+    const dayExps = (dayShift ? expenses.filter((e: any) => e.shift_id === dayShift.id && !e.employee_id && countsInRollup(e)) : [])
       .sort((a: any, b: any) => ((pinnedCats.has(b.category_name) ? 1 : 0) - (pinnedCats.has(a.category_name) ? 1 : 0)) || b.amount - a.amount)
     return { dayStr, dayShift, dayExps }
   }
@@ -744,7 +747,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const renderPeriod = () => {
     const dayStr = fmtDate(currentDate)
     const dayShift = shifts.find((s: any) => s.date === dayStr)
-    const dayExps = (dayShift ? expenses.filter((e: any) => e.shift_id === dayShift.id && !e.employee_id) : [])
+    const dayExps = (dayShift ? expenses.filter((e: any) => e.shift_id === dayShift.id && !e.employee_id && countsInRollup(e)) : [])
       .sort((a: any, b: any) => ((pinnedCats.has(b.category_name) ? 1 : 0) - (pinnedCats.has(a.category_name) ? 1 : 0)) || b.amount - a.amount)
     const inkAmt = dayShift?.inkassation || 0
     const dayInk = inkAmt > 0 ? { amount: inkAmt, expense: 0, reason: null, balance: inkAmt } : null

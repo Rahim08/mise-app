@@ -57,7 +57,7 @@ final class AnalyticsModel {
     func handleAI(_ message: String) async -> String? {
         // expenses by category (current period)
         var catTotals: [String: Double] = [:]
-        for e in expenses { catTotals[e.category_name ?? "—", default: 0] += e.amount ?? 0 }
+        for e in expenses where countsInRollup(e) { catTotals[e.category_name ?? "—", default: 0] += e.amount ?? 0 }
         let catLines = catTotals.sorted { $0.value > $1.value }
             .map { "\($0.key): \(Money.s($0.value))" }.joined(separator: ", ")
 
@@ -318,6 +318,7 @@ final class AnalyticsModel {
             if let sid = e.shift_id, !ids.contains(sid) { continue }
             // Авансы — расход инкассации, не кассы; не показываем в расходах периода.
             if e.category_name?.hasPrefix("Аванс") == true { continue }
+            guard countsInRollup(e) else { continue }
             m[e.category_name ?? "—", default: 0] += e.amount ?? 0
         }
         return m.sorted {
@@ -613,37 +614,76 @@ final class AnalyticsModel {
         }
     }
 
-    // MARK: Долги по расходам (Б, 2026-08-09)
-    // shift_expenses с is_paid=false — расход вписан (правильная дата для месячного итога
-    // категории, Analytics и так суммирует по датам независимо от статуса оплаты), но кассу
-    // в день возникновения не тронул. Не месяц-scoped (в отличие от expenses/advances) —
-    // долг может висеть неоплаченным несколько месяцев, должен быть виден всегда.
+    // MARK: Долги по расходам (Б, 2026-08-09; переработано по фидбеку юзера — касса дня
+    // возникновения долга и дня погашения не должны задним числом пересчитываться)
+    //
+    // Правило подсчёта в отчётах (см. countsInRollup): строка считается расходом, только если
+    // paid_shift_id пуст (обычная, сразу оплаченная запись) ИЛИ paid_shift_id == её же shift_id
+    // (запись погашения — см. ниже). Строка с paid_shift_id, указывающим на ДРУГУЮ смену —
+    // историческая пометка «здесь был долг», НИКОГДА не считается в тратах.
+    //
+    // При создании долга (ManagerView, тогл «в долг»): is_paid=false, paid_shift_id=nil —
+    // не считается в кассе/отчётах дня возникновения (уже сделано в ManagerView.calc).
+    //
+    // При погашении (settleDebts):
+    //   1. Исходная строка (день возникновения) помечается is_paid=true, paid_at=день
+    //      погашения, paid_shift_id=смена погашения — статус «оплачено», но paid_shift_id
+    //      теперь ≠ её собственный shift_id → навсегда исключена из подсчёта (день
+    //      возникновения не меняется задним числом).
+    //   2. Новая строка вставляется В ДЕНЬ ПОГАШЕНИЯ: та же категория/сотрудник, та же сумма,
+    //      shift_id = paid_shift_id = смена погашения (совпадают) → считается в расходах ИМЕННО
+    //      этого дня. ManagerView её не видит и не трогает (loadDay/persistExpenses фильтруют
+    //      paid_shift_id != nil) — живёт только в отчётах Analytics.
+    //   3. inkassations.expense дня погашения увеличивается на сумму — реальные наличные
+    //      физически ушли из инкассационного резерва в этот день (как и авансы).
     struct DebtRow: Identifiable, Sendable {
         let id: String; let shiftId: String; let date: String
-        let categoryName: String; let amount: Double
+        let categoryId: String?; let categoryName: String; let employeeId: String?
+        let amount: Double; let paidAt: String?
     }
     var debts: [DebtRow] = []
+    var debtHistory: [DebtRow] = []
     var debtTotal: Double { debts.reduce(0) { $0 + $1.amount } }
 
+    // Считается ли строка расходом в отчётах — см. правило выше.
+    func countsInRollup(_ e: ShiftExpense) -> Bool {
+        if e.is_paid == false { return false }
+        guard let paidShiftId = e.paid_shift_id else { return true }
+        return paidShiftId == e.shift_id
+    }
+
     func loadDebts() async {
-        nonisolated struct UnpaidExp: Codable, Sendable {
-            let id: String; let shift_id: String?; let category_name: String?; let amount: Double?
+        nonisolated struct DebtExp: Codable, Sendable {
+            let id: String; let shift_id: String?; let category_id: String?; let category_name: String?
+            let employee_id: String?; let amount: Double?; let is_paid: Bool?; let paid_at: String?
+            let paid_shift_id: String?
         }
-        guard let unpaid = try? await DB.from("shift_expenses").select("id, shift_id, category_name, amount")
-            .eq("is_paid", false).list(UnpaidExp.self), !unpaid.isEmpty else { debts = []; return }
-        let shiftIds = Array(Set(unpaid.compactMap { $0.shift_id }))
+        // Долг = ещё не оплачен (is_paid=false) ИЛИ историческая запись погашённого долга
+        // (paid_shift_id указывает на ДРУГУЮ смену, не свою — п.1 выше). Два отдельных запроса,
+        // «или» по paid_shift_id != shift_id нельзя выразить в PostgREST-фильтре напрямую.
+        async let unpaidQ = (try? await DB.from("shift_expenses").select("id, shift_id, category_id, category_name, employee_id, amount, is_paid, paid_at, paid_shift_id").eq("is_paid", false).list(DebtExp.self)) ?? []
+        // DB.swift не даёт IS NOT NULL — neq на заведомо невозможный uuid даёт тот же результат
+        // (NULL≠X в SQL не true, такие строки не пройдут фильтр — ровно то, что нужно).
+        async let settledQ = (try? await DB.from("shift_expenses").select("id, shift_id, category_id, category_name, employee_id, amount, is_paid, paid_at, paid_shift_id").neq("paid_shift_id", "00000000-0000-0000-0000-000000000000").list(DebtExp.self)) ?? []
+        let unpaid = await unpaidQ
+        let settled = (await settledQ).filter { $0.paid_shift_id != $0.shift_id }
+        let all = unpaid + settled
+        guard !all.isEmpty else { debts = []; debtHistory = []; return }
+        let shiftIds = Array(Set(all.compactMap { $0.shift_id }))
         nonisolated struct ShiftDateRow: Codable, Sendable { let id: String; let date: String }
         let shiftDates = (try? await DB.from("shifts").select("id, date").in("id", shiftIds).list(ShiftDateRow.self)) ?? []
         let dateById = Dictionary(uniqueKeysWithValues: shiftDates.map { ($0.id, $0.date) })
-        debts = unpaid.compactMap { e -> DebtRow? in
+        func toRow(_ e: DebtExp) -> DebtRow? {
             guard let sid = e.shift_id, let date = dateById[sid] else { return nil }
-            return DebtRow(id: e.id, shiftId: sid, date: date, categoryName: e.category_name ?? "—", amount: e.amount ?? 0)
-        }.sorted { $0.date < $1.date }
+            return DebtRow(id: e.id, shiftId: sid, date: date, categoryId: e.category_id,
+                categoryName: e.category_name ?? "—", employeeId: e.employee_id, amount: e.amount ?? 0, paidAt: e.paid_at)
+        }
+        debts = unpaid.compactMap(toRow).sorted { $0.date < $1.date }
+        debtHistory = settled.compactMap(toRow).sorted { $0.date > $1.date }
     }
 
     // Погасить выбранные долги (любых дат/категорий разом) — переиспользует findShift/
-    // findInkassation из addAdvance: одна запись в кассу дня погашения, БЕЗ повторной вставки
-    // в shift_expenses (уже учтено в месячном итоге на дату возникновения — задвоило бы).
+    // findInkassation из addAdvance.
     func settleDebts(_ ids: Set<String>) async {
         let selected = debts.filter { ids.contains($0.id) }
         guard !selected.isEmpty else { return }
@@ -652,12 +692,29 @@ final class AnalyticsModel {
         guard let shift = await findShift(forDate: today) else {
             flash(t("an.debtNoShiftToday")); return
         }
+        // 1. Исходные строки — статус «оплачено», исключить из подсчёта их родного дня навсегда.
         guard (try? await DB.from("shift_expenses").update([
             "is_paid": true, "paid_at": today, "paid_shift_id": shift.id,
         ] as [String: Any]).in("id", Array(ids)).run()) != nil else {
             flash(t("bk.saveFailed")); return
         }
-        let labels = Array(Set(selected.map { $0.categoryName })).sorted().joined(separator: ", ")
+        // 2. Новые строки — в день погашения, считаются в его расходах (shift_id == paid_shift_id).
+        let empName: (String) -> String = { id in self.employees.first { $0.id == id }?.name ?? "" }
+        let newRows: [[String: Any]] = selected.map { d in
+            var row: [String: Any] = [
+                "shift_id": shift.id, "restaurant_id": rid, "amount": d.amount,
+                "category_name": d.categoryName, "is_paid": true, "paid_shift_id": shift.id,
+                "note": t("an.debtSettleNote") + " (\(dayLabelRu(d.date)))",
+            ]
+            if let cid = d.categoryId { row["category_id"] = cid }
+            if let eid = d.employeeId { row["employee_id"] = eid }
+            return row
+        }
+        guard (try? await DB.from("shift_expenses").insert(newRows).run()) != nil else {
+            flash(t("bk.saveFailed")); return
+        }
+        // 3. Реальные наличные — из инкассационного резерва дня погашения (как авансы).
+        let labels = Array(Set(selected.map { $0.categoryName.isEmpty ? empName($0.employeeId ?? "") : $0.categoryName })).sorted().joined(separator: ", ")
         let reasonNote = t("an.debtSettleNote") + ": " + labels
         let ink = await findInkassation(forShiftId: shift.id)
         let baseAmount = ink?.amount ?? (shift.inkassation ?? 0)
@@ -678,7 +735,7 @@ final class AnalyticsModel {
         }
         inkDetails[shift.id] = Inkassation(shift_id: shift.id, amount: baseAmount > 0 ? baseAmount : nil,
             expense: newExpense, reason: newReason, total: newTotal, salary: ink?.salary, salary_note: ink?.salary_note)
-        debts.removeAll { ids.contains($0.id) }
+        await loadDebts()
     }
 
     // кальян
@@ -1323,6 +1380,7 @@ private struct SalaryTab: View {
     @State private var advEmpId = ""
     @State private var selectedDebtIds: Set<String> = []
     @State private var settlingDebts = false
+    @State private var showDebtHistory = false
 
     var body: some View {
         VStack(spacing: 10) {
@@ -1391,7 +1449,7 @@ private struct SalaryTab: View {
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
         }
 
-        if !m.debts.isEmpty {
+        if !m.debts.isEmpty || !m.debtHistory.isEmpty {
             debtsSection
         }
         }
@@ -1473,6 +1531,36 @@ private struct SalaryTab: View {
                 }
                 .disabled(settlingDebts)
                 .padding(12)
+            }
+
+            if !m.debtHistory.isEmpty {
+                Button { withAnimation(.easeInOut(duration: 0.18)) { showDebtHistory.toggle() } } label: {
+                    HStack {
+                        Text(t("an.debtHistory")).font(.system(size: 12, weight: .medium)).foregroundStyle(.primary.opacity(0.5))
+                        Spacer()
+                        Image(systemName: showDebtHistory ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10)).foregroundStyle(.primary.opacity(0.4))
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+                if showDebtHistory {
+                    ForEach(m.debtHistory) { d in
+                        HStack(spacing: 10) {
+                            Image(systemName: "checkmark.circle.fill").font(.system(size: 14)).foregroundStyle(.green)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(d.categoryName).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary.opacity(0.8))
+                                Text(d.paidAt.map { dayLabelRu(d.date) + " · " + t("pe.paidOn", ["date": dayLabelRu($0)]) } ?? dayLabelRu(d.date))
+                                    .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
+                            }
+                            Spacer()
+                            Text(cur(d.amount)).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary.opacity(0.5))
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        if d.id != m.debtHistory.last?.id { Divider().overlay(Color.primary.opacity(0.08)).padding(.leading, 38) }
+                    }
+                    .padding(.bottom, 8)
+                }
             }
         }
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
