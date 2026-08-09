@@ -28,9 +28,12 @@ final class ManagerModel {
     var inkSum = ""
     var inkExpense = ""
     var inkReason = ""
-    var inkSalary = ""
-    var inkSalaryNote = ""
     var inkReserve: Double? = nil
+    // Снэпшот значений на момент loadDay — на persist() переносим только правку менеджера
+    // (дельту), а не затираем то, что параллельно записал addAdvance/settleDebt в Analytics
+    // (A2, аудит 2026-08-09: delete+insert без этого стирал чужие правки инкассации).
+    private var loadedInkExpense = ""
+    private var loadedInkReason = ""
 
     var locked = false
     var saving = false
@@ -68,7 +71,7 @@ final class ManagerModel {
     struct Calc {
         var inc = 0.0, card = 0.0, ink = 0.0
         var catTotal = 0.0, empExtraTotal = 0.0, totalExp = 0.0
-        var opening = 0.0, balance = 0.0, salary = 0.0, inkNet = 0.0
+        var opening = 0.0, balance = 0.0, inkNet = 0.0
     }
 
     var calc: Calc {
@@ -79,8 +82,7 @@ final class ManagerModel {
         c.totalExp = c.catTotal + c.empExtraTotal + c.ink
         c.opening = shift?.opening_balance ?? 0
         c.balance = c.opening + c.inc - c.totalExp
-        c.salary = num(inkSalary)
-        c.inkNet = c.ink - num(inkExpense) - c.salary
+        c.inkNet = c.ink - num(inkExpense)
         return c
     }
 
@@ -156,7 +158,7 @@ final class ManagerModel {
         guard var sh = best else {
             shift = nil; locked = false
             income = ""; incomeCard = ""; inkSum = ""; inkExpense = ""; inkReason = ""
-            inkSalary = ""; inkSalaryNote = ""
+            loadedInkExpense = ""; loadedInkReason = ""
             catAmounts = [:]; catNotes = [:]; empExtras = [:]; absences = []; autoAbsences = []
             return
         }
@@ -189,11 +191,10 @@ final class ManagerModel {
         if let ink = inks.first {
             inkExpense = (ink.expense ?? 0) > 0 ? trimNum(ink.expense!) : ""
             inkReason = ink.reason ?? ""
-            inkSalary = (ink.salary ?? 0) > 0 ? trimNum(ink.salary!) : ""
-            inkSalaryNote = ink.salary_note ?? ""
         } else {
-            inkExpense = ""; inkReason = ""; inkSalary = ""; inkSalaryNote = ""
+            inkExpense = ""; inkReason = ""
         }
+        loadedInkExpense = inkExpense; loadedInkReason = inkReason
     }
 
     private func loadAbsences(_ dateStr: String) async {
@@ -314,22 +315,37 @@ final class ManagerModel {
         }
     }
 
-    // Как в persistExpenses: СНАЧАЛА вставить новую строку, удалить старые по id — ПОТОМ.
-    // Обрыв сети между delete и insert стирал инкассацию смены (Analytics читает
-    // inkassations.total → неверный нетто). Дубль при упавшем delete подчистится
-    // следующим успешным сохранением (старые id уже собраны).
+    // UPDATE по id вместо delete+insert (A2, аудит 2026-08-09) — раньше окно между delete и
+    // insert теряло инкассацию при обрыве сети, а сам delete+insert затирал expense/reason
+    // значениями, загруженными в форму ДО того как Analytics (addAdvance/settleDebt) успел
+    // дописать туда свою правку. Delta-merge: переносим именно то, что поменял МЕНЕДЖЕР
+    // (разницу между текущим полем формы и снэпшотом на момент loadDay), поверх АКТУАЛЬНОГО
+    // значения в БД на момент сохранения — а не поверх устаревшего снэпшота.
     private func persistInkassation(shiftId: String, _ c: Calc) async throws {
-        struct InkRow: Codable, Sendable { let id: String }
-        let old = try await DB.from("inkassations").select("id").eq("shift_id", shiftId).list(InkRow.self)
-        if c.ink > 0 || !inkExpense.isEmpty || !inkReason.isEmpty || c.salary > 0 || !inkSalaryNote.isEmpty {
-            try await DB.from("inkassations").insert([
-                "shift_id": shiftId, "restaurant_id": rid, "date": key(currentDate),
-                "amount": c.ink, "expense": num(inkExpense), "reason": inkReason,
-                "salary": c.salary, "salary_note": inkSalaryNote, "total": c.inkNet,
-            ]).run()
+        struct InkRow: Codable, Sendable { let id: String; let expense: Double?; let reason: String? }
+        let current = try await DB.from("inkassations").select("id, expense, reason")
+            .eq("shift_id", shiftId).limit(1).list(InkRow.self).first
+
+        let finalExpense = (current?.expense ?? 0) + (num(inkExpense) - num(loadedInkExpense))
+        let currentReason = current?.reason ?? ""
+        // Если ни менеджер, ни параллельная запись не трогали reason — берём как есть; если
+        // менеджер сам не редактировал поле, а в БД оно уже другое — не затираем чужую правку.
+        let finalReason = (currentReason == loadedInkReason || inkReason != loadedInkReason)
+            ? inkReason : currentReason
+        let finalTotal = c.ink - finalExpense
+
+        guard c.ink > 0 || finalExpense != 0 || !finalReason.isEmpty else {
+            if let id = current?.id { try await DB.from("inkassations").delete().eq("id", id).run() }
+            return
         }
-        if !old.isEmpty {
-            try await DB.from("inkassations").delete().in("id", old.map(\.id)).run()
+        let values: [String: Any] = [
+            "restaurant_id": rid, "date": key(currentDate),
+            "amount": c.ink, "expense": finalExpense, "reason": finalReason, "total": finalTotal,
+        ]
+        if let id = current?.id {
+            try await DB.from("inkassations").update(values).eq("id", id).run()
+        } else {
+            try await DB.from("inkassations").insert(values.merging(["shift_id": shiftId]) { a, _ in a }).run()
         }
     }
 
@@ -379,6 +395,9 @@ final class ManagerModel {
         do {
             try await persist()
             locked = true
+            // Новая база для delta-merge (A2) — если в этой же сессии откроют смену на правку
+            // ещё раз, дельта должна считаться от того, что менеджер сам только что сохранил.
+            loadedInkExpense = inkExpense; loadedInkReason = inkReason
             ShiftReminder.cancel() // отменить напоминание — смена закрыта
             flash(t("mg.shiftSaved"))
             Task { await loadInkReserve() }
@@ -438,7 +457,7 @@ final class ManagerModel {
         catAmounts = ["c1": "320", "c2": "90"]
         empExtras = ["e2": "40"]
         absences = ["e3"]; autoAbsences = ["e3"]
-        inkSum = "1500"; inkSalary = "200"; inkSalaryNote = "Аванс Анне"
+        inkSum = "1500"
         loading = false
     }
     #endif
@@ -458,7 +477,6 @@ final class ManagerModel {
             if !str("inkSum").isEmpty      { inkSum = str("inkSum") }
             if !str("inkExpense").isEmpty  { inkExpense = str("inkExpense") }
             if !str("inkReason").isEmpty   { inkReason = str("inkReason") }
-            if !str("inkSalary").isEmpty   { inkSalary = str("inkSalary") }
             flash(t("ai.applied"))
         } catch {
             flash(aiErrorMessage(error))
@@ -657,8 +675,6 @@ private struct ManagerBody: View {
                     fieldRow(t("mg.inkExpense"), text: $m.inkExpense)
                     divider
                     textRow(t("mg.inkReason"), text: $m.inkReason)
-                    divider
-                    fieldRow(t("mg.salary"), text: $m.inkSalary)
                     if let reserve = m.inkReserve {
                         divider
                         VStack(alignment: .leading, spacing: 2) {

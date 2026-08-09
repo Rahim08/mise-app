@@ -27,7 +27,7 @@ Rules: grams is a number string (digits only, no units). Multiple items allowed.
 
 const MANAGER_SYSTEM = `You extract restaurant shift financial data from speech or text.
 Return ONLY valid JSON with any subset of these fields (empty string if not mentioned):
-{"income":"","incomeCard":"","inkSum":"","inkExpense":"","inkReason":"","inkSalary":""}
+{"income":"","incomeCard":"","inkSum":"","inkExpense":"","inkReason":""}
 Numbers as digit strings only (no currency symbols).`
 
 export async function POST(req: NextRequest) {

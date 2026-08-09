@@ -80,8 +80,10 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const [inkSum, setInkSum] = useState('')
   const [inkExpense, setInkExpense] = useState('')
   const [inkReason, setInkReason] = useState('')
-  const [inkSalary, setInkSalary] = useState('')    // выплата зарплаты — вычитается из итога инкассации
-  const [inkSalaryNote, setInkSalaryNote] = useState('')
+  // Снэпшот на момент loadDay — A2 (аудит 2026-08-09): на сохранении переносим только правку
+  // менеджера (дельту), не затираем то, что параллельно записал addAdvance/settleDebt в Analytics.
+  const [loadedInkExpense, setLoadedInkExpense] = useState('')
+  const [loadedInkReason, setLoadedInkReason] = useState('')
   const [showSummary, setShowSummary] = useState(false)
   const [checklistWarn, setChecklistWarn] = useState(false)
   const [locked, setLocked] = useState(false) // сохранённая смена закрыта «матовым стеклом» до Редактировать
@@ -165,12 +167,13 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       })
       setCatAmounts(amounts); setCatNotes(notes); setEmpExtras(extras)
       const ink = Array.isArray(inkList) ? inkList[0] : inkList
-      if (ink) {
-        setInkExpense(ink.expense > 0 ? String(ink.expense) : ''); setInkReason(ink.reason || '')
-        setInkSalary(ink.salary > 0 ? String(ink.salary) : ''); setInkSalaryNote(ink.salary_note || '')
-      } else { setInkExpense(''); setInkReason(''); setInkSalary(''); setInkSalaryNote('') }
+      const nextExpense = ink && ink.expense > 0 ? String(ink.expense) : ''
+      const nextReason = ink?.reason || ''
+      setInkExpense(nextExpense); setInkReason(nextReason)
+      setLoadedInkExpense(nextExpense); setLoadedInkReason(nextReason)
     } else {
-      setShift(null); setLocked(false); setIncome(''); setIncomeCard(''); setInkSum(''); setInkExpense(''); setInkReason(''); setInkSalary(''); setInkSalaryNote('')
+      setShift(null); setLocked(false); setIncome(''); setIncomeCard(''); setInkSum(''); setInkExpense(''); setInkReason('')
+      setLoadedInkExpense(''); setLoadedInkReason('')
       setCatAmounts({}); setCatNotes({}); setEmpExtras({})
     }
     setLoading(false)
@@ -245,9 +248,8 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     const totalExp = catTotal + empExtraTotal + ink
     const opening = shift?.opening_balance || 0
     const balance = opening + inc - totalExp
-    const salary = parseFloat(inkSalary) || 0
-    const inkNet = ink - (parseFloat(inkExpense) || 0) - salary // итог инкассации после расхода и зарплаты
-    return { inc, card, ink, catTotal, empExtraTotal, totalExp, balance, opening, salary, inkNet }
+    const inkNet = ink - (parseFloat(inkExpense) || 0) // итог инкассации после расхода
+    return { inc, card, ink, catTotal, empExtraTotal, totalExp, balance, opening, inkNet }
   }
 
   // Core DB write — used by explicit save AND auto-save on day switch.
@@ -259,7 +261,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   // подчистит (старые id уже собраны).
   const persistShift = async (sh = shift, dateForInk = currentDate) => {
     if (!sh) return
-    const { inc, card, ink, totalExp, balance, salary, inkNet } = calc()
+    const { inc, card, ink, totalExp, balance } = calc()
     // db.from не бросает исключений — ошибку надо проверять явно, иначе ввод молча теряется
     // (например, если миграция features-2026-06 не применена и колонки income_card нет).
     const { error: upErr } = await db.from('shifts').update({ income: inc, income_card: card, inkassation: ink, total_expense: totalExp, closing_balance: balance }).eq('id', sh.id)
@@ -282,18 +284,29 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     }
     if ((oldExpenses || []).length > 0) await db.from('shift_expenses').delete().in('id', (oldExpenses || []).map((e: any) => e.id))
 
-    // Inkassation extra/reason — single row per shift.
-    const { data: oldInk, error: oldInkErr } = await db.from('inkassations').select('id').eq('shift_id', sh.id)
-    if (oldInkErr) throw new Error(oldInkErr.message)
-    if (ink > 0 || inkExpense || inkReason || salary > 0 || inkSalaryNote) {
-      const { error: inkInsErr } = await db.from('inkassations').insert({
-        shift_id: sh.id, restaurant_id: restaurantId, date: fmtDate(dateForInk),
-        amount: ink, expense: parseFloat(inkExpense) || 0, reason: inkReason,
-        salary, salary_note: inkSalaryNote || null, total: inkNet
-      })
-      if (inkInsErr) throw new Error(inkInsErr.message)
+    // Inkassation — UPDATE по id вместо delete+insert (A2, аудит 2026-08-09): раньше окно
+    // между delete и insert теряло инкассацию при обрыве сети, а сам delete+insert затирал
+    // expense/reason значениями, загруженными в форму ДО того как Analytics (addAdvance/
+    // settleDebt) успел дописать туда свою правку. Delta-merge: переносим то, что поменял
+    // МЕНЕДЖЕР (разницу между текущим полем формы и снэпшотом на момент loadDay), поверх
+    // АКТУАЛЬНОГО значения в БД на момент сохранения.
+    const { data: curInkList, error: curInkErr } = await db.from('inkassations').select('id, expense, reason').eq('shift_id', sh.id).limit(1)
+    if (curInkErr) throw new Error(curInkErr.message)
+    const curInk = Array.isArray(curInkList) ? curInkList[0] : curInkList
+    const finalExpense = (curInk?.expense || 0) + ((parseFloat(inkExpense) || 0) - (parseFloat(loadedInkExpense) || 0))
+    const curReason = curInk?.reason || ''
+    const finalReason = (curReason === loadedInkReason || inkReason !== loadedInkReason) ? inkReason : curReason
+    const finalTotal = ink - finalExpense
+    if (ink > 0 || finalExpense !== 0 || finalReason) {
+      const values = { restaurant_id: restaurantId, date: fmtDate(dateForInk), amount: ink, expense: finalExpense, reason: finalReason, total: finalTotal }
+      const { error: inkErr } = curInk
+        ? await db.from('inkassations').update(values).eq('id', curInk.id)
+        : await db.from('inkassations').insert({ shift_id: sh.id, ...values })
+      if (inkErr) throw new Error(inkErr.message)
+    } else if (curInk) {
+      await db.from('inkassations').delete().eq('id', curInk.id)
     }
-    if ((oldInk || []).length > 0) await db.from('inkassations').delete().in('id', (oldInk || []).map((r: any) => r.id))
+    setLoadedInkExpense(inkExpense); setLoadedInkReason(inkReason)
 
     // Подтверждаем прогулы этого дня: привязываем к смене и снимаем «черновик» (source→manager),
     // только теперь авто-прогулы попадают в вычет ЗП в Аналитике. До миграции колонки source нет —
@@ -338,7 +351,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     setSaving(false)
   }
 
-  const { inc, card, ink, catTotal, empExtraTotal, totalExp, balance, opening, salary, inkNet } = calc()
+  const { inc, card, ink, catTotal, empExtraTotal, totalExp, balance, opening, inkNet } = calc()
   const netExpense = catTotal + empExtraTotal
   const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
   const dowRaw = currentDate.toLocaleDateString(locale, { weekday: 'long' })
@@ -520,26 +533,10 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                     style={{ width: '100%', padding: '10px 12px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 14, color: t.text, fontFamily: 'inherit', outline: 'none', background: inkReason ? t.fill2 : t.fill2 }}
                   />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `0.5px solid ${t.sep2}` }}>
-                  <div>
-                    <div style={{ fontSize: 15, color: t.text }}>{tr('mg.inkSalary')}</div>
-                    <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>{tr('mg.inkSalaryHint')}</div>
-                  </div>
-                  <input type="number" value={inkSalary} onChange={e => setInkSalary(e.target.value)} placeholder="€ 0"
-                    style={{ width: 130, textAlign: 'right', padding: '8px 10px', border: 'none', borderRadius: 10, fontSize: 14, fontFamily: 'inherit', outline: 'none', background: salary > 0 ? `${t.purple}14` : t.fill, color: salary > 0 ? t.purple : t.text, fontWeight: salary > 0 ? 600 : 400 }}
-                  />
-                </div>
-                {salary > 0 && (
-                  <div style={{ padding: '4px 16px 12px', borderBottom: `0.5px solid ${t.sep2}` }}>
-                    <input value={inkSalaryNote} onChange={e => setInkSalaryNote(e.target.value)} placeholder={tr('mg.phPaidTo')}
-                      style={{ width: '100%', padding: '8px 12px', borderRadius: 10, border: `1px solid ${t.sep2}`, fontSize: 13, color: t.text3, fontFamily: 'inherit', outline: 'none', background: t.fill2 }}
-                    />
-                  </div>
-                )}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: `${t.orange}12` }}>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 600, color: t.orange }}>{tr('mg.inkNet')}</div>
-                    {(parseFloat(inkExpense) > 0 || salary > 0) && <div style={{ fontSize: 11, color: t.orange, opacity: 0.7, marginTop: 2 }}>{tr('mg.inkNetHint')}</div>}
+                    {parseFloat(inkExpense) > 0 && <div style={{ fontSize: 11, color: t.orange, opacity: 0.7, marginTop: 2 }}>{tr('mg.inkNetHint')}</div>}
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 700, color: t.orange }}>€{fv(inkNet)}</div>
                 </div>
@@ -646,8 +643,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
               ))}
               {parseFloat(inkSum) > 0 && <SRow label={tr('mg.secCollection')} value={`−€${fv(parseFloat(inkSum))}`} color={t.orange} t={t} />}
               {parseFloat(inkExpense) > 0 && <SRow label={`${tr('mg.inkExpenseShort')}${inkReason ? ` (${inkReason})` : ''}`} value={`−€${fv(parseFloat(inkExpense))}`} color={t.red} t={t} />}
-              {salary > 0 && <SRow label={`${tr('mg.salaryShort')}${inkSalaryNote ? ` (${inkSalaryNote})` : ''}`} value={`−€${fv(salary)}`} color={t.purple} t={t} />}
-              {(parseFloat(inkExpense) > 0 || salary > 0) && parseFloat(inkSum) > 0 && <SRow label={tr('mg.inkNet')} value={`€${fv(inkNet)}`} color={t.orange} bold t={t} />}
+              {parseFloat(inkExpense) > 0 && parseFloat(inkSum) > 0 && <SRow label={tr('mg.inkNet')} value={`€${fv(inkNet)}`} color={t.orange} bold t={t} />}
               <div style={{ borderTop: `1.5px solid ${t.sep}`, marginTop: 10, paddingTop: 10 }}>
                 <SRow label={tr('mg.sumTotalExpense')} value={`−€${fv(totalExp)}`} color={t.red} bold t={t} />
                 <SRow label={tr('mg.secRegister')} value={`€${fv(balance)}`} color={balance < 0 ? t.red : t.blue} bold t={t} />

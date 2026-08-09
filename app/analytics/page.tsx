@@ -446,6 +446,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [cardAmounts, setCardAmounts] = useState<any[]>([])
   const [absences, setAbsences] = useState<any[]>([])
   const [advances, setAdvances] = useState<any[]>([])
+  const [payments, setPayments] = useState<any[]>([])
   const [prevAbsences, setPrevAbsences] = useState<any[]>([])
   const [prevAdvances, setPrevAdvances] = useState<any[]>([])
   const [prevCardAmounts, setPrevCardAmounts] = useState<any[]>([])
@@ -503,7 +504,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     const prevStart = fmtDate(new Date(date.getFullYear(), date.getMonth() - 1, 1))
     const prevEnd = fmtDate(new Date(date.getFullYear(), date.getMonth(), 0))
 
-    const [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10] = await Promise.all([
+    const [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] = await Promise.all([
       db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd).order('date'),
       db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', prevStart).lte('date', prevEnd).order('date'),
       db.from('employees').select('*').eq('restaurant_id', rid).eq('is_active', true).order('name'),
@@ -516,8 +517,12 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       db.from('shift_absences').select('*').eq('restaurant_id', rid).gte('date', prevStart).lte('date', prevEnd),
       db.from('salary_advances').select('*').gte('date', prevStart).lte('date', prevEnd),
       db.from('monthly_card_amounts').select('*').eq('restaurant_id', rid).eq('month', prevStart.slice(0, 7)),
+      // Паритет с PeopleModel.computeSalary (canon-расчёт 2026-07-28) — без этого Analytics
+      // показывала «к выплате» без учёта уже выданного (аудит 2026-08-09).
+      db.from('salary_payments').select('*').eq('period', fmtDate(date).slice(0, 7) + '-01'),
     ])
     setAdvances(s7.data || [])
+    setPayments(s11.data || [])
     setHookahRows(s6.data || [])
     setPrevAbsences((s8.data || []).filter((a: any) => a.source !== 'auto'))
     setPrevAdvances(s9.data || [])
@@ -704,6 +709,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     return m ? Number(m.card_amount || 0) : 0
   }
   const advanceOf = (emp: any) => advances.filter((a: any) => a.employee_id === emp.id).reduce((s: number, a: any) => s + Number(a.amount || 0), 0)
+  const paidOf = (emp: any) => payments.filter((p: any) => p.employee_id === emp.id).reduce((s: number, p: any) => s + Number(p.amount || 0), 0)
 
   const exportSalary = () => {
     const rows: (string | number)[][] = [[tr('an.csvEmployee'), tr('an.csvSalary'), tr('an.csvAbsences'), tr('an.csvDeduct'), tr('an.csvCard'), tr('an.csvCashPay'), tr('an.csvTotal')]]
@@ -1128,6 +1134,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
             const advance = advanceOf(emp)
             const total = Math.max(0, (emp.salary || 0) - deduct)
             const cash = Math.max(0, total - advance - card)
+            const paid = paidOf(emp)
+            const remaining = Math.max(0, cash - paid)
 
             const open = expSalary === emp.id
 
@@ -1154,8 +1162,9 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
                       {abs > 0 && <div style={{ marginBottom: 8, height: 3, background: t.fill2, borderRadius: 2, overflow: 'hidden' }}>
                         <div style={{ height: '100%', width: `${Math.min(abs / 22 * 100, 100).toFixed(1)}%`, background: t.red, borderRadius: 2 }} />
                       </div>}
+                      {paid > 0 && <div style={{ fontSize: 12, color: t.green, marginBottom: 6 }}>{tr('pe.paidStatus')} −{currency}{fv(paid)}</div>}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: 13, color: t.orange, fontWeight: 600 }}>{tr('an.cashShort')} {currency}{fv(cash)}</span>
+                        <span style={{ fontSize: 13, color: t.orange, fontWeight: 600 }}>{tr('an.cashShort')} {currency}{fv(remaining)}</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <span style={{ fontSize: 12, color: t.text3 }}>{tr('an.toCard')} {currency}</span>
                           <input

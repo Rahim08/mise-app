@@ -47,6 +47,7 @@ final class AnalyticsModel {
 
     var inkDetails: [String: Inkassation] = [:]
     var advances: [SalaryAdvance] = []
+    var payments: [SalaryPayment] = []
     // Прошлый месяц — для «Начислено» до payout_day (см. cycleTotalCash в карточке кассы):
     // до дня выплаты карточка ещё показывает не выплаченную ЗП за прошлый месяц.
     var prevCardAmounts: [CardAmount] = []
@@ -226,6 +227,8 @@ final class AnalyticsModel {
 
         if let adv = try? await DB.from("salary_advances").select()
             .gte("date", key(monthStart)).lte("date", key(monthEnd)).list(SalaryAdvance.self) { advances = adv }
+        if let pays = try? await DB.from("salary_payments").select()
+            .eq("period", String(key(monthStart).prefix(7)) + "-01").list(SalaryPayment.self) { payments = pays }
 
         // Закреплённые категории расходов — показываются первыми в разбивке.
         nonisolated struct CatPin: Codable, Sendable { let name: String?; let is_pinned: Bool? }
@@ -429,7 +432,11 @@ final class AnalyticsModel {
         let id: String; let name: String; let salary: Double; let abs: Int
         let deduct: Double; let card: Double; let cash: Double; let total: Double
         let advance: Double; let advanceList: [SalaryAdvance]
+        let paid: Double; let remaining: Double
     }
+    // paid/remaining — паритет с PeopleModel.computeSalary (canon-расчёт 2026-07-28): без
+    // вычета salary_payments Analytics показывала «к выплате» без учёта уже выданного, расходясь
+    // с People после первой частичной выплаты за месяц (аудит 2026-08-09).
     var salaryRows: [SalaryRow] {
         employees.map { e in
             let absN = absences.filter { $0.employee_id == e.id }.count
@@ -439,7 +446,9 @@ final class AnalyticsModel {
             let advance = advList.reduce(0) { $0 + ($1.amount ?? 0) }
             let total = max(0, (e.salary ?? 0) - deduct)
             let cash = max(0, total - advance - card)
-            return SalaryRow(id: e.id, name: e.name, salary: e.salary ?? 0, abs: absN, deduct: deduct, card: card, cash: cash, total: total, advance: advance, advanceList: advList)
+            let paid = payments.filter { $0.employee_id == e.id }.reduce(0) { $0 + ($1.amount ?? 0) }
+            let remaining = max(0, cash - paid)
+            return SalaryRow(id: e.id, name: e.name, salary: e.salary ?? 0, abs: absN, deduct: deduct, card: card, cash: cash, total: total, advance: advance, advanceList: advList, paid: paid, remaining: remaining)
         }
     }
     var payrollTotal: Double { employees.reduce(0) { $0 + ($1.salary ?? 0) } }
@@ -1264,8 +1273,8 @@ private struct SalaryTab: View {
                         Text(r.name).font(.system(size: 15, weight: .medium)).foregroundStyle(.primary)
                         Spacer()
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text(cur(r.cash)).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
-                            if r.advance > 0 || r.card > 0 {
+                            Text(cur(r.remaining)).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
+                            if r.advance > 0 || r.card > 0 || r.paid > 0 {
                                 Text(t("byCash")).font(.system(size: 10)).foregroundStyle(.primary.opacity(0.35))
                             }
                         }
@@ -1298,6 +1307,7 @@ private struct SalaryTab: View {
                                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(BrandKit.analytics)
                         }
                         detail(t("byCash"), cur(r.cash))
+                        if r.paid > 0 { detail(t("pe.paidStatus"), "−" + cur(r.paid)) }
                         CardInputRow(empId: r.id, current: r.card) { amt in
                             Task { await m.saveMonthlyCard(r.id, amt) }
                         }

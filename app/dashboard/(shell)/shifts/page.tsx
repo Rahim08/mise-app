@@ -71,8 +71,10 @@ export default function ShiftsPage() {
   const [inkSum, setInkSum] = useState('')
   const [inkExpense, setInkExpense] = useState('')
   const [inkReason, setInkReason] = useState('')
-  const [inkSalary, setInkSalary] = useState('')
-  const [inkSalaryNote, setInkSalaryNote] = useState('')
+  // Снэпшот на момент loadDay — A2 (аудит 2026-08-09): на сохранении переносим только правку
+  // менеджера (дельту), не затираем то, что параллельно записал addAdvance/settleDebt в Analytics.
+  const [loadedInkExpense, setLoadedInkExpense] = useState('')
+  const [loadedInkReason, setLoadedInkReason] = useState('')
   const [locked, setLocked] = useState(false)
   const [saving, setSaving] = useState(false)
   const [loadingDay, setLoadingDay] = useState(true)
@@ -120,12 +122,13 @@ export default function ShiftsPage() {
       await loadAbsencesByDate(dateStr)
       const { data: inkList } = await db.from('inkassations').select('*').eq('shift_id', sh.id).limit(1)
       const ink = Array.isArray(inkList) ? inkList[0] : inkList
-      if (ink) {
-        setInkExpense(ink.expense > 0 ? String(ink.expense) : ''); setInkReason(ink.reason || '')
-        setInkSalary(ink.salary > 0 ? String(ink.salary) : ''); setInkSalaryNote(ink.salary_note || '')
-      } else { setInkExpense(''); setInkReason(''); setInkSalary(''); setInkSalaryNote('') }
+      const nextExpense = ink && ink.expense > 0 ? String(ink.expense) : ''
+      const nextReason = ink?.reason || ''
+      setInkExpense(nextExpense); setInkReason(nextReason)
+      setLoadedInkExpense(nextExpense); setLoadedInkReason(nextReason)
     } else {
-      setShift(null); setLocked(false); setIncome(''); setIncomeCard(''); setInkSum(''); setInkExpense(''); setInkReason(''); setInkSalary(''); setInkSalaryNote('')
+      setShift(null); setLocked(false); setIncome(''); setIncomeCard(''); setInkSum(''); setInkExpense(''); setInkReason('')
+      setLoadedInkExpense(''); setLoadedInkReason('')
       setCatAmounts({}); setCatNotes({}); setAbsences([]); setAutoAbsences(new Set()); setEmpExtras({})
     }
     setLoadingDay(false)
@@ -199,9 +202,8 @@ export default function ShiftsPage() {
     const totalExp = catTotal + empExtraTotal + ink
     const opening = shift?.opening_balance || 0
     const balance = opening + inc - totalExp
-    const salary = parseFloat(inkSalary) || 0
-    const inkNet = ink - (parseFloat(inkExpense) || 0) - salary
-    return { inc, card, ink, catTotal, empExtraTotal, totalExp, balance, opening, salary, inkNet }
+    const inkNet = ink - (parseFloat(inkExpense) || 0)
+    return { inc, card, ink, catTotal, empExtraTotal, totalExp, balance, opening, inkNet }
   }
 
   // Расходы/инкассация пересобираются целиком: insert-новых → delete-старых-по-id
@@ -212,7 +214,7 @@ export default function ShiftsPage() {
   // их подчистит (старые id уже собраны).
   const persistShift = async (sh = shift, dateForInk = currentDate) => {
     if (!sh) return
-    const { inc, card, ink, totalExp, balance, salary, inkNet } = calc()
+    const { inc, card, ink, totalExp, balance } = calc()
     const { error: upErr } = await db.from('shifts').update({ income: inc, income_card: card, inkassation: ink, total_expense: totalExp, closing_balance: balance }).eq('id', sh.id)
     if (upErr) throw new Error(upErr.message)
 
@@ -233,17 +235,25 @@ export default function ShiftsPage() {
     }
     if ((oldExpenses || []).length > 0) await db.from('shift_expenses').delete().in('id', (oldExpenses || []).map((e: any) => e.id))
 
-    const { data: oldInk, error: oldInkErr } = await db.from('inkassations').select('id').eq('shift_id', sh.id)
-    if (oldInkErr) throw new Error(oldInkErr.message)
-    if (ink > 0 || inkExpense || inkReason || salary > 0 || inkSalaryNote) {
-      const { error: inkInsErr } = await db.from('inkassations').insert({
-        shift_id: sh.id, restaurant_id: restaurantId, date: fmtDate(dateForInk),
-        amount: ink, expense: parseFloat(inkExpense) || 0, reason: inkReason,
-        salary, salary_note: inkSalaryNote || null, total: inkNet,
-      })
-      if (inkInsErr) throw new Error(inkInsErr.message)
+    // UPDATE по id вместо delete+insert (A2, аудит 2026-08-09) — delta-merge поверх актуального
+    // значения в БД, чтобы не затирать то, что параллельно записал addAdvance/settleDebt.
+    const { data: curInkList, error: curInkErr } = await db.from('inkassations').select('id, expense, reason').eq('shift_id', sh.id).limit(1)
+    if (curInkErr) throw new Error(curInkErr.message)
+    const curInk = Array.isArray(curInkList) ? curInkList[0] : curInkList
+    const finalExpense = (curInk?.expense || 0) + ((parseFloat(inkExpense) || 0) - (parseFloat(loadedInkExpense) || 0))
+    const curReason = curInk?.reason || ''
+    const finalReason = (curReason === loadedInkReason || inkReason !== loadedInkReason) ? inkReason : curReason
+    const finalTotal = ink - finalExpense
+    if (ink > 0 || finalExpense !== 0 || finalReason) {
+      const values = { restaurant_id: restaurantId, date: fmtDate(dateForInk), amount: ink, expense: finalExpense, reason: finalReason, total: finalTotal }
+      const { error: inkErr } = curInk
+        ? await db.from('inkassations').update(values).eq('id', curInk.id)
+        : await db.from('inkassations').insert({ shift_id: sh.id, ...values })
+      if (inkErr) throw new Error(inkErr.message)
+    } else if (curInk) {
+      await db.from('inkassations').delete().eq('id', curInk.id)
     }
-    if ((oldInk || []).length > 0) await db.from('inkassations').delete().in('id', (oldInk || []).map((r: any) => r.id))
+    setLoadedInkExpense(inkExpense); setLoadedInkReason(inkReason)
 
     await db.from('shift_absences').update({ shift_id: sh.id, source: 'manager' }).eq('restaurant_id', restaurantId).eq('date', fmtDate(dateForInk))
     setAutoAbsences(new Set())
@@ -290,7 +300,7 @@ export default function ShiftsPage() {
     await loadHistory()
   }
 
-  const { ink, catTotal, empExtraTotal, balance, salary, inkNet } = calc()
+  const { ink, catTotal, empExtraTotal, balance, inkNet } = calc()
   const netExpense = catTotal + empExtraTotal
   const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
   const dowRaw = currentDate.toLocaleDateString(locale, { weekday: 'long' })
@@ -413,15 +423,6 @@ export default function ShiftsPage() {
                   <div style={{ ...fieldLabel, marginBottom: 5 }}>{tr('mg.inkReason')}</div>
                   <input value={inkReason} disabled={locked} onChange={e => setInkReason(e.target.value)} placeholder={tr('mg.phPurpose')} className="ui-input" style={{ ...inputStyle, minHeight: 34 }} />
                 </div>
-                <div style={row}>
-                  <span style={fieldLabel}>{tr('mg.inkSalary')}</span>
-                  <input type="number" value={inkSalary} disabled={locked} onChange={e => setInkSalary(e.target.value)} placeholder="€ 0" className="ui-input" style={numInput} />
-                </div>
-                {salary > 0 && (
-                  <div style={{ padding: '8px 0', borderBottom: 'var(--hairline)' }}>
-                    <input value={inkSalaryNote} disabled={locked} onChange={e => setInkSalaryNote(e.target.value)} placeholder={tr('mg.phPaidTo')} className="ui-input" style={{ ...inputStyle, minHeight: 34 }} />
-                  </div>
-                )}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 10 }}>
                   <span style={{ fontSize: '.8rem', fontWeight: 600, color: 'var(--warn)' }}>{tr('mg.inkNet')}</span>
                   <span style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--warn)' }}>€{fv(inkNet)}</span>
