@@ -91,21 +91,11 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
   const [mounted, setMounted] = useState(false)
-  const [inkReserve, setInkReserve] = useState<number | null>(null)
 
   useEffect(() => {
     setMounted(true)
     init()
-    loadInkReserve()
   }, [])
-
-  // Остаток инкассации (ЗП-долг 2026-07-28): сумма (инкассация − расход − зарплата) по ВСЕМ
-  // дням с начала учёта, не только за месяц — что физически должно лежать в загашнике/сейфе.
-  // Списания «увезли в банк» и т.п. — через уже существующее поле «Расход по инкассации».
-  const loadInkReserve = async () => {
-    const { data } = await db.from('inkassations').select('total').eq('restaurant_id', restaurantId)
-    setInkReserve((data || []).reduce((s: number, r: any) => s + (r.total || 0), 0))
-  }
 
   const init = async () => {
     const [empsRes, catsRes] = await Promise.all([
@@ -340,7 +330,6 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     setShowSummary(false)
     setLocked(true)
     showToast(tr('mg.shiftSaved'))
-    loadInkReserve()
     const c = calc()
     pushNotify({
       type: 'cash_close', title: tr('mg.pushCashClosed'), body: tr('mg.pushShiftClosed'),
@@ -537,15 +526,6 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                     style={{ width: '100%', padding: '10px 12px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 14, color: t.text, fontFamily: 'inherit', outline: 'none', background: inkReason ? t.fill2 : t.fill2 }}
                   />
                 </div>
-                {inkReserve !== null && (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderTop: `0.5px solid ${t.sep2}` }}>
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: t.text2 }}>{tr('mg.inkReserve')}</div>
-                      <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>{tr('mg.inkReserveHint')}</div>
-                    </div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: t.text }}>€{fv(inkReserve)}</div>
-                  </div>
-                )}
               </div>
 
               {/* КАССА */}

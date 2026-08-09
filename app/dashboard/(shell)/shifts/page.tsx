@@ -81,16 +81,7 @@ export default function ShiftsPage() {
   const [closeConfirm, setCloseConfirm] = useState(false)
   const [closing, setClosing] = useState(false)
   const [err, setErr] = useState('')
-  const [inkReserve, setInkReserve] = useState<number | null>(null)
   const [checklistWarn, setChecklistWarn] = useState(false)
-
-  // Остаток инкассации (ЗП-долг 2026-07-28): сумма (инкассация − расход − зарплата) по ВСЕМ
-  // дням с начала учёта — что физически должно лежать в загашнике/сейфе. Списания «увезли
-  // в банк» и т.п. — через уже существующее поле «Расход по инкассации».
-  const loadInkReserve = async () => {
-    const { data } = await db.from('inkassations').select('total').eq('restaurant_id', restaurantId)
-    setInkReserve((data || []).reduce((s: number, r: any) => s + (r.total || 0), 0))
-  }
 
   const loadAbsencesByDate = async (dateStr: string) => {
     const { data: abs } = await db.from('shift_absences').select('*').eq('restaurant_id', restaurantId).eq('date', dateStr)
@@ -144,7 +135,6 @@ export default function ShiftsPage() {
       ])
       setEmployees(empsRes.data || []); setCategories(catsRes.data || [])
       await loadDay(currentDate)
-      await loadInkReserve()
     })()
   }, [restaurantId])
 
@@ -291,7 +281,6 @@ export default function ShiftsPage() {
     })
     setSaving(false)
     await loadHistory()
-    await loadInkReserve()
   }
 
   const forceClose = async () => {
@@ -426,15 +415,6 @@ export default function ShiftsPage() {
                   <div style={{ ...fieldLabel, marginBottom: 5 }}>{tr('mg.inkReason')}</div>
                   <input value={inkReason} disabled={locked} onChange={e => setInkReason(e.target.value)} placeholder={tr('mg.phPurpose')} className="ui-input" style={{ ...inputStyle, minHeight: 34 }} />
                 </div>
-                {inkReserve !== null && (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8, borderTop: 'var(--hairline)', marginTop: 8 }}>
-                    <div>
-                      <div style={{ fontSize: '.8rem', fontWeight: 600, color: 'var(--tx2)' }}>{tr('mg.inkReserve')}</div>
-                      <div style={{ fontSize: '.68rem', color: 'var(--tx3)', marginTop: 1 }}>{tr('mg.inkReserveHint')}</div>
-                    </div>
-                    <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--tx)' }}>€{fv(inkReserve)}</span>
-                  </div>
-                )}
               </Card>
 
               <Card>

@@ -34,7 +34,6 @@ final class ManagerModel {
     var inkSum = ""
     var inkExpense = ""
     var inkReason = ""
-    var inkReserve: Double? = nil
     // Снэпшот значений на момент loadDay — на persist() переносим только правку менеджера
     // (дельту), а не затираем то, что параллельно записал addAdvance/settleDebt в Analytics
     // (A2, аудит 2026-08-09: delete+insert без этого стирал чужие правки инкассации).
@@ -108,15 +107,6 @@ final class ManagerModel {
         employees = await emps
         categories = await cats
         await loadDay(currentDate)
-        await loadInkReserve()
-    }
-
-    // Остаток инкассации (ЗП-долг 2026-07-28): сумма (инкассация − расход − зарплата) по ВСЕМ
-    // дням с начала учёта — что физически должно лежать в загашнике/сейфе. Списания «увезли
-    // в банк» и т.п. — через уже существующее поле «Расход по инкассации».
-    func loadInkReserve() async {
-        let rows = (try? await DB.from("inkassations").select("total").list(InkTotalOnly.self)) ?? []
-        inkReserve = rows.reduce(0) { $0 + ($1.total ?? 0) }
     }
 
     // Последняя смена НЕ ПОЗЖЕ вчера (не обязательно ровно вчера) — пропущенный день
@@ -425,7 +415,6 @@ final class ManagerModel {
             loadedInkExpense = inkExpense; loadedInkReason = inkReason
             ShiftReminder.cancel() // отменить напоминание — смена закрыта
             flash(t("mg.shiftSaved"))
-            Task { await loadInkReserve() }
             let c = calc
             // Дайджест дня: сводка в защищённом теле (показывается, если включён show_cash_amount).
             nonisolated struct HkSale: Codable, Sendable { let quantity: Double?; let price: Double?; let is_free: Bool? }
@@ -706,14 +695,6 @@ private struct ManagerBody: View {
                     fieldRow(t("mg.inkExpense"), text: $m.inkExpense)
                     divider
                     textRow(t("mg.inkReason"), text: $m.inkReason)
-                    if let reserve = m.inkReserve {
-                        divider
-                        VStack(alignment: .leading, spacing: 2) {
-                            sumRow(t("mg.inkReserve"), money(reserve))
-                            Text(t("mg.inkReserveHint")).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
-                        }
-                        .padding(.horizontal, 14).padding(.vertical, 6)
-                    }
                 }
                 sectionTitle(t("mg.cash"))
                 card {
