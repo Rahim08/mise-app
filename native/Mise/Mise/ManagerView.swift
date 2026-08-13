@@ -61,6 +61,9 @@ final class ManagerModel {
     var showChecklistWarn = false
     private var loadGen = 0       // поколение загрузки — защита от гонок при быстрой смене даты
 
+    // Вкладки Manager (реструктура 2026-08-13): Смена/Зарплата/Настройки/Дисциплина.
+    var tab = "shift"
+
     init(rid: String, dayStartHour: Int = 6) {
         self.rid = rid
         self.currentDate = AppModel.businessDate(dayStartHour: dayStartHour)
@@ -581,7 +584,7 @@ struct ManagerView: View {
     var body: some View {
         Group {
             if let m {
-                ManagerBody(m: m, aiEnabled: app.aiEnabled)
+                ManagerTabs(m: m, aiEnabled: app.aiEnabled)
                     .transition(.opacity)
             } else {
                 ManagerSkeleton()
@@ -589,8 +592,6 @@ struct ManagerView: View {
             }
         }
         .animation(.easeOut(duration: 0.3), value: m == nil)
-        .tabEdgeSwipe(tabs: ["only"], selection: .constant("only"),
-                      onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
         .task {
             if m == nil {
                 let model = ManagerModel(rid: app.restaurant?.id ?? "", dayStartHour: app.dayStartHour)
@@ -598,6 +599,46 @@ struct ManagerView: View {
                 await model.start()
             }
         }
+    }
+}
+
+// Вкладки Manager (реструктура 2026-08-13). «Смена» = прежнее тело ManagerView без
+// изменений в логике. Зарплата/Настройки/Дисциплина — заглушки, контент переезжает
+// сюда из People отдельными блоками (см. docs/MANAGER-PEOPLE-RESTRUCTURE-2026-08-13.md).
+private struct ManagerTabs: View {
+    @Environment(AppModel.self) private var app
+    @Bindable var m: ManagerModel
+    let aiEnabled: Bool
+
+    var body: some View {
+        TabView(selection: $m.tab) {
+            ManagerBody(m: m, aiEnabled: aiEnabled)
+                .tabItem { Label(t("tab.shift"), systemImage: "cart.fill") }.tag("shift")
+            AppTabPage { ManagerSalaryTab(rid: m.rid) }
+                .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
+            ManagerSettingsTab(rid: m.rid)
+                .tabItem { Label(t("tab.settings"), systemImage: "gearshape.fill") }.tag("settings")
+            NavigationStack { ManagerDisciplineTab(rid: m.rid).navigationTitle(t("tab.discipline")) }
+                .tabItem { Label(t("tab.discipline"), systemImage: "exclamationmark.shield.fill") }.tag("discipline")
+        }
+        .tint(BrandKit.manager)
+        .sensoryFeedback(.selection, trigger: m.tab)
+        .tabEdgeSwipe(tabs: ["shift", "salary", "settings", "discipline"], selection: $m.tab,
+                      onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
+    }
+}
+
+private struct ManagerComingSoon: View {
+    let title: String
+    let icon: String
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon).font(.system(size: 34)).foregroundStyle(.secondary)
+            Text(title).font(.system(size: 17, weight: .semibold))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 80)
+        .foregroundStyle(.secondary)
     }
 }
 

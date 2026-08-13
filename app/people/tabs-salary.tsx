@@ -13,21 +13,20 @@ import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
 import { tCurrent } from '@/lib/i18n'
 import { ScheduleTab } from '@/components/people/ScheduleTab'
-import { btnB2, inp, lbl, clock, hoursOf, fmtHours, HistoryList } from './shared'
-import { mondayOf, addDays, hhmm, timeRange, dayLabel, navBtn, roleLabel, getMe, Sheet, Placeholder, DOW_SHORT, DOW_FULL, MON } from '@/components/people/helpers'
+import { hoursOf, fmtHours } from './shared'
 
 
-// Зарплата, Уведомления, настройки уведомлений
+// Зарплата — личный вид (одинаковый у сотрудника и менеджера, реструктура 2026-08-13,
+// см. docs/MANAGER-PEOPLE-RESTRUCTURE-2026-08-13.md). Фонд ЗП, долг и оплата всех
+// сотрудников — Manager→Зарплата (app/manager/tabs-salary.tsx).
 // Распил page.tsx (Д2, 2026-07-18): секция вынесена без изменений логики.
-// ── SALARY TAB ───────────────────────────────────────────────────────────────────
-// Сотрудник видит свой расчёт; менеджер — фонд ЗП и разбивку по каждому.
 // Источники: employees.salary/deduct_per_absence, shift_absences (даты пропусков),
 // monthly_card_amounts (на карту), attendance_records (отработанные часы).
 // Связь attendance(staff)↔employees — по имени (как в остальном коде; настоящий FK — в плане автоматизации).
 const eur = (n: number) => `€${Math.round(n).toLocaleString('de-DE')}`
 const absDate = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
 
-export function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: boolean; accent: string; t: any }) {
+export function SalaryTab({ me, accent, t }: { me: any; accent: string; t: any }) {
   const { t: tr } = useI18n()
   const [viewDate, setViewDate] = useState(new Date())
   const ym = fmtDate(viewDate).slice(0, 7)
@@ -35,10 +34,6 @@ export function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: bo
   const monthLabel = viewDate.toLocaleDateString(tr('dash.locale'), { month: 'long', year: 'numeric' })
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<any[]>([])
-  const [open, setOpen] = useState<string | null>(null)
-  const [payFor, setPayFor] = useState<any | null>(null)
-  const [debt, setDebt] = useState<{ total: number; byId: Record<string, number> }>({ total: 0, byId: {} })
-  const [payoutDay, setPayoutDay] = useState<number | null>(null)
 
   // Расчёт зарплаты за произвольный месяц (targetYm) — канон = iOS (PeopleView.loadSalary,
   // решение 2026-07-17): авансы вычитаются, карта строго помесячная (БЕЗ fallback на
@@ -87,76 +82,22 @@ export function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: bo
   const load = async () => {
     setLoading(true)
     const list = await computeMonth(ym)
-    setRows(isManager ? list : list.filter((r: any) => r.name === me.name))
+    setRows(list.filter((r: any) => r.name === me.name))
     setLoading(false)
   }
   useEffect(() => { load() }, [ym])
 
-  // Буфер до реального дня выплаты (salary_payout_day, ЗП-долг 2026-07-28): ЗП за месяц
-  // выдаётся 10-15 числа СЛЕДУЮЩЕГО месяца, поэтому 100% начисления должно достигаться не
-  // в конце текущего месяца, а на payout_day следующего — иначе владелец видит «нехватку»
-  // инкассации задолго до реального срока выплаты.
-  useEffect(() => {
-    db.from('restaurant_settings').select('salary_payout_day').limit(1).then(({ data }: any) => {
-      const r = Array.isArray(data) ? data[0] : data
-      setPayoutDay(r?.salary_payout_day ?? null)
-    })
-  }, [])
-
-  // Задолженность = сумма непокрытого остатка по всем ЗАКРЫТЫМ месяцам (строго раньше
-  // текущего), окно 6 месяцев назад — дальше долг копить маловероятно, а пересчёт дороже
-  // (7 запросов на каждый месяц).
-  // DEBT_TRACKING_START: до этой фичи (2026-07-28) факт выплаты нигде не фиксировался,
-  // поэтому по умолчанию «не оплачено» = вся история месяцев за 6 лет назад — ложный
-  // многотысячный долг сразу при первом включении (юзер-фидбек 2026-07-29). Долг честно
-  // считаем только с месяцев ПОСЛЕ этой даты — легаси-месяцы (до и включая июль 2026)
-  // в подсчёт никогда не попадают.
-  const DEBT_TRACKING_START = new Date(2026, 7, 1) // 2026-08-01
-  const loadDebt = async () => {
-    if (!isManager) return
-    const now = new Date()
-    let total = 0; const byId: Record<string, number> = {}
-    for (let i = 1; i <= 6; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      if (d < DEBT_TRACKING_START) continue
-      const list = await computeMonth(fmtDate(d).slice(0, 7))
-      list.forEach((r: any) => { if (r.remaining > 0) { total += r.remaining; byId[r.id] = (byId[r.id] || 0) + r.remaining } })
-    }
-    setDebt({ total, byId })
-  }
-  useEffect(() => { loadDebt() }, [isManager])
-
   const changeMonth = (dir: number) => { const d = new Date(viewDate); d.setDate(1); d.setMonth(d.getMonth() + dir); setViewDate(d) }
 
-  const savePayment = async () => {
-    if (!payFor) return
-    const amount = Number(payFor.amount) || 0
-    if (amount <= 0) return
-    await db.from('salary_payments').insert({
-      employee_id: payFor.id, period: `${ym}-01`, amount, method: payFor.method || 'cash',
-      paid_at: new Date(payFor.date || fmtDate(new Date())).toISOString(),
-      note: payFor.note || null, created_by: me.id || null,
-    })
-    setPayFor(null)
-    await load(); await loadDebt()
-  }
-
-  // Статус выплаты для карточки сотрудника: только если начисление в этом месяце вообще есть.
-  // Если remaining === total (ничего не платили/не авансировали) — сумма уже видна в
-  // заголовке строки, повторять её в статусе не надо (юзер-фидбек: «дублируется») — вместо
-  // числа нейтральная пометка «Не выплачено». Строка и кнопка «Отметить выплату» при этом
-  // остаются — только текст без повторного числа.
+  // Статус выплаты: только если начисление в этом месяце вообще есть. Если
+  // remaining === total (ничего не платили/не авансировали) — сумма уже видна в
+  // заголовке, повторять её в статусе не надо (юзер-фидбок: «дублируется») — нейтральная
+  // пометка «Не выплачено» вместо числа.
   const payStatus = (r: any) => {
     if (r.total <= 0) return null
     if (r.remaining <= 0) return { label: r.lastPaidAt ? tr('pe.paidOn', { date: absDate(r.lastPaidAt) }) : tr('pe.paidStatus'), color: t.green }
     if (r.remaining === r.total) return { label: tr('pe.notPaidYet'), color: t.orange }
     return { label: tr('pe.oweAmount', { amount: eur(r.remaining) }), color: t.orange }
-  }
-  const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate()
-  const accruedToday = (total: number) => {
-    if (!isCurrentMonth) return total
-    const denom = payoutDay ? daysInMonth + payoutDay : daysInMonth
-    return total * Math.min(new Date().getDate(), denom) / denom
   }
 
   const MonthNav = () => (
@@ -182,7 +123,7 @@ export function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: bo
     </div>
   )
 
-  // Детальная разбивка одного сотрудника (используется и у сотрудника, и в раскрытой карточке менеджера).
+  // Детальная разбивка личного расчёта.
   const Breakdown = ({ r }: { r: any }) => {
     const st = payStatus(r)
     return (
@@ -191,9 +132,9 @@ export function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: bo
           { _l: tr('pe.salaryBase'), v: eur(r.salary), c: t.text, hide: false },
           { _l: tr('pe.worked'), v: fmtHours(r.hours, tr), c: t.text2, hide: r.hours <= 0 },
           { _l: tr('pe.absencesN', { n: r.absences }), v: r.dates.map(absDate).join(', '), c: t.text2, small: true, hide: r.absences === 0 },
-          { _l: tr('pe.absenceDeduct'), v: `−${eur(r.deduct)}`, c: t.red, hide: r.deduct === 0 },
+          { _l: tr('pe.absenceDeduct'), v: `\u2212${eur(r.deduct)}`, c: t.red, hide: r.deduct === 0 },
           { _l: tr('pe.toCard'), v: eur(r.card), c: t.blue, hide: r.card === 0 },
-          { _l: tr('pe.advances'), v: `−${eur(r.advance)}`, c: t.orange, hide: !r.advance },
+          { _l: tr('pe.advances'), v: `\u2212${eur(r.advance)}`, c: t.orange, hide: !r.advance },
           { _l: tr('pe.inCash'), v: eur(r.cash), c: t.green, hide: false },
         ].filter((x: any) => !x.hide).map((x: any, i, arr) => (
           <div key={x._l} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 16px', borderBottom: i < arr.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
@@ -208,110 +149,28 @@ export function SalaryTab({ me, isManager, accent, t }: { me: any; isManager: bo
         {st && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderTop: `0.5px solid ${t.sep2}` }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: st.color }}>{st.label}</span>
-            {isManager && r.remaining > 0 && (
-              <button onClick={() => setPayFor({ id: r.id, name: r.name, amount: String(Math.round(r.remaining)), method: 'cash', date: fmtDate(new Date()), note: '' })}
-                style={{ padding: '6px 12px', borderRadius: 980, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                {tr('pe.markPaid')}
-              </button>
-            )}
           </div>
         )}
       </div>
     )
   }
 
-  // ── Сотрудник: свой расчёт ──
-  if (!isManager) {
-    const r = rows[0]
-    const st = payStatus(r)
-    return (
-      <div>
-        <MonthNav />
-        <div style={{ background: `linear-gradient(135deg, ${accent}, ${accent}cc)`, borderRadius: 20, padding: '22px 20px', marginBottom: 12, color: '#fff', boxShadow: `0 8px 28px ${accent}3a` }}>
-          <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>{tr('pe.toPayout')}</div>
-          <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: -1, marginTop: 2 }}>{eur(r.total)}</div>
-          <div style={{ display: 'flex', gap: 16, marginTop: 10, fontSize: 13, fontWeight: 600, opacity: 0.92 }}>
-            {r.card > 0 && <span>{tr('pe.toCard')} {eur(r.card)}</span>}
-            <span>{tr('pe.inCash')} {eur(r.cash)}</span>
-          </div>
-          {st && <div style={{ marginTop: 10, fontSize: 13, fontWeight: 700, opacity: 0.95 }}>{st.label}</div>}
-        </div>
-        <Breakdown r={r} />
-        <div style={{ fontSize: 12, color: t.text4, textAlign: 'center', padding: '4px 16px' }}>{tr('pe.salaryCalcNote', { month: monthLabel })}</div>
-      </div>
-    )
-  }
-
-  // ── Менеджер: фонд ЗП + разбивка по каждому ──
-  const fund = rows.reduce((s, r) => s + r.total, 0)
-  const cardTotal = rows.reduce((s, r) => s + r.card, 0)
+  const r = rows[0]
+  const st = payStatus(r)
   return (
     <div>
       <MonthNav />
-      {debt.total > 0 && (
-        <div style={{ background: `${t.red}12`, borderRadius: 16, padding: '14px 16px', marginBottom: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: t.red, textTransform: 'uppercase', letterSpacing: 0.4 }}>{tr('pe.debtTitle')}</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: t.red, marginTop: 2 }}>{eur(debt.total)}</div>
-          <div style={{ fontSize: 12, color: t.text3, marginTop: 3 }}>{tr('pe.debtHint')}</div>
+      <div style={{ background: `linear-gradient(135deg, ${accent}, ${accent}cc)`, borderRadius: 20, padding: '22px 20px', marginBottom: 12, color: '#fff', boxShadow: `0 8px 28px ${accent}3a` }}>
+        <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>{tr('pe.toPayout')}</div>
+        <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: -1, marginTop: 2 }}>{eur(r.total)}</div>
+        <div style={{ display: 'flex', gap: 16, marginTop: 10, fontSize: 13, fontWeight: 600, opacity: 0.92 }}>
+          {r.card > 0 && <span>{tr('pe.toCard')} {eur(r.card)}</span>}
+          <span>{tr('pe.inCash')} {eur(r.cash)}</span>
         </div>
-      )}
-      <div style={{ background: `linear-gradient(135deg, ${accent}, ${accent}cc)`, borderRadius: 20, padding: '20px', marginBottom: 14, color: '#fff', boxShadow: `0 8px 28px ${accent}3a` }}>
-        <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>{tr('pe.toPayoutTotal')}</div>
-        <div style={{ fontSize: 34, fontWeight: 800, letterSpacing: -1, marginTop: 2 }}>{eur(fund)}</div>
-        <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 13, fontWeight: 600, opacity: 0.92 }}>
-          <span>{tr('pe.staffCountShort', { n: rows.length })}</span>
-          {cardTotal > 0 && <span>{tr('pe.toCard')} {eur(cardTotal)}</span>}
-          <span>{tr('pe.inCash')} {eur(fund - cardTotal)}</span>
-        </div>
-        {isCurrentMonth && (
-          <div style={{ marginTop: 10, fontSize: 12, opacity: 0.85 }}>
-            {tr('pe.accruedToday')} {eur(accruedToday(fund))} · {tr('pe.accruedTodayHint')}
-          </div>
-        )}
+        {st && <div style={{ marginTop: 10, fontSize: 13, fontWeight: 700, opacity: 0.95 }}>{st.label}</div>}
       </div>
-      {rows.map(r => {
-        const st = payStatus(r)
-        return (
-          <div key={r.id} style={{ marginBottom: 8 }}>
-            <button onClick={() => setOpen(open === r.id ? null : r.id)} style={{ width: '100%', textAlign: 'left', background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh, border: 'none', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{r.name}</div>
-                <div style={{ fontSize: 12, color: t.text3, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {tr('pe.salaryBase')} {eur(r.salary)}{r.absences > 0 ? ` · −${r.absences} ${tr('pe.absShort')}` : ''}{r.card > 0 ? ` · ${tr('pe.cardWord')} ${eur(r.card)}` : ''}
-                </div>
-                {st && <div style={{ fontSize: 12, fontWeight: 600, color: st.color, marginTop: 3 }}>{st.label}</div>}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                <span style={{ fontSize: 16, fontWeight: 800, color: accent }}>{eur(r.total)}</span>
-                <svg width="14" height="14" fill="none" stroke={t.text3} strokeWidth="2.2" viewBox="0 0 24 24" style={{ transform: open === r.id ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}><path d="M9 6l6 6-6 6" /></svg>
-              </div>
-            </button>
-            {open === r.id && <div style={{ marginTop: 8, animation: 'fadeUp .18s ease' }}><Breakdown r={r} /></div>}
-          </div>
-        )
-      })}
-      {payFor && (
-        <Sheet onClose={() => setPayFor(null)} t={t}>
-          <div style={{ padding: '4px 20px 24px' }}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 14 }}>{tr('pe.markPaid')} · {payFor.name}</div>
-            <label style={lbl(t)}>{tr('pe.paymentAmount')}</label>
-            <input type="number" inputMode="decimal" value={payFor.amount} onChange={e => setPayFor({ ...payFor, amount: e.target.value })} style={inp(t)} />
-            <label style={{ ...lbl(t), marginTop: 12 }}>{tr('pe.paymentMethod')}</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {(['cash', 'card'] as const).map(m => (
-                <button key={m} onClick={() => setPayFor({ ...payFor, method: m })} style={{ flex: 1, padding: '10px 0', borderRadius: 12, border: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: payFor.method === m ? 700 : 500, cursor: 'pointer', background: payFor.method === m ? accent : t.fill, color: payFor.method === m ? '#fff' : t.text3 }}>
-                  {tr(m === 'cash' ? 'pe.methodCash' : 'pe.methodCard')}
-                </button>
-              ))}
-            </div>
-            <label style={{ ...lbl(t), marginTop: 12 }}>{tr('pe.paymentDate')}</label>
-            <input type="date" value={payFor.date} onChange={e => setPayFor({ ...payFor, date: e.target.value })} style={inp(t)} />
-            <label style={{ ...lbl(t), marginTop: 12 }}>{tr('pe.paymentNote')}</label>
-            <input type="text" value={payFor.note} onChange={e => setPayFor({ ...payFor, note: e.target.value })} style={inp(t)} />
-            <button onClick={savePayment} style={{ width: '100%', marginTop: 18, padding: '14px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${accent}44` }}>{tr('pe.savePayment')}</button>
-          </div>
-        </Sheet>
-      )}
+      <Breakdown r={r} />
+      <div style={{ fontSize: 12, color: t.text4, textAlign: 'center', padding: '4px 16px' }}>{tr('pe.salaryCalcNote', { month: monthLabel })}</div>
     </div>
   )
 }

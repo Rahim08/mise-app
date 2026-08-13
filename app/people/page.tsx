@@ -118,7 +118,7 @@ export function PeopleApp({ restaurantId, embedded = false }: { restaurantId: st
           {tab === 'tasks' && <TasksTab isManager={isManager} myId={me.id || ''} accent={accent} t={t} toast={showToast} />}
           {tab === 'ops' && <OpsTab me={me} isManager={isManager} restaurantId={restaurantId} accent={accent} t={t} toast={showToast} />}
           {tab === 'purchase' && <PurchaseTab me={me} isManager={isManager} accent={accent} t={t} toast={showToast} />}
-          {tab === 'salary' && <SalaryTab me={me} isManager={isManager} accent={accent} t={t} />}
+          {tab === 'salary' && <SalaryTab me={me} accent={accent} t={t} />}
         </div>
       </div>
 

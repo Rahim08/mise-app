@@ -26,7 +26,7 @@ import { mondayOf, addDays, hhmm, timeRange, dayLabel, navBtn, roleLabel, getMe,
 // форматах — обратная совместимость, миграция данных не требуется (см. normItem/normState).
 
 // Цеха для чек-листов (role=null → общий, виден всем).
-const CHECKLIST_ROLES: { val: string | null; label: string }[] = [
+export const CHECKLIST_ROLES: { val: string | null; label: string }[] = [
   { val: null, label: 'pe.clAll' },
   { val: 'kitchen', label: 'pe.roleKitchen' },
   { val: 'bar', label: 'pe.roleBar' },
@@ -37,7 +37,7 @@ const CHECKLIST_ROLES: { val: string | null; label: string }[] = [
 ]
 
 // Готовые шаблоны под общепит — добавляются кнопкой, не автоматически.
-const PRESET_TEMPLATES: { type: 'open' | 'close'; role: string | null; items: string[] }[] = [
+export const PRESET_TEMPLATES: { type: 'open' | 'close'; role: string | null; items: string[] }[] = [
   { type: 'open', role: null, items: ['Свет и музыка включены', 'Столы и стулья расставлены', 'Меню в наличии на всех столах', 'Кассовая смена открыта'] },
   { type: 'close', role: null, items: ['Столы протёрты', 'Мусор вынесен', 'Касса закрыта и сверена', 'Свет и техника выключены'] },
   { type: 'open', role: 'bar', items: ['Барная стойка чистая', 'Лёд заготовлен', 'Остатки алкоголя сверены'] },
@@ -318,6 +318,10 @@ export function ChecklistCard({ title, items, state, canFill, restaurantId, comp
   )
 }
 
+// Редактирование шаблона (создание/роль/пункты) переехало в Manager→Настройки→Чек-листы
+// (app/manager/tabs-checklists.tsx, реструктура 2026-08-14) — здесь только прохождение и
+// менеджерская pass/fail-верификация чужих прогонов (Д4 2026-07-31, личное операционное
+// действие, не тронуто).
 export function ShiftChecklistsView({ isManager, myId, myRole, canFill, openShiftId, staff, restaurantId, accent, t, toast }: {
   isManager: boolean; myId: string; myRole?: string; canFill: boolean; openShiftId: string | null; staff: any[]; restaurantId: string; accent: string; t: any; toast: (m: string) => void
 }) {
@@ -330,8 +334,6 @@ export function ShiftChecklistsView({ isManager, myId, myRole, canFill, openShif
   const [lists, setLists] = useState<any[]>([])
   const [completions, setCompletions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [editing, setEditing] = useState<{ id?: string; role: string | null; items: string[] } | null>(null)
-  const [saving, setSaving] = useState(false)
 
   const load = async () => {
     const [{ data: cl }, { data: cm }] = await Promise.all([
@@ -371,24 +373,6 @@ export function ShiftChecklistsView({ isManager, myId, myRole, canFill, openShif
     if (allDone) toast(type === 'open' ? tr('pe.openDone') : tr('pe.closeDone'))
   }
 
-  const saveTemplate = async () => {
-    if (!editing) return
-    const clean = editing.items.map(s => s.trim()).filter(Boolean)
-    if (clean.length === 0) { toast(tr('pe.addAtLeastOneItem')); return }
-    setSaving(true)
-    if (editing.id) await db.from('shift_checklists').update({ items: clean, role: editing.role }).eq('id', editing.id)
-    else await db.from('shift_checklists').insert({ type, items: clean, role: editing.role, kind: 'shift' })
-    setSaving(false); setEditing(null); toast(tr('pe.checklistSaved')); await load()
-  }
-  const removeList = async (id: string) => {
-    setLists(ls => ls.filter(l => l.id !== id))
-    await db.from('shift_checklists').delete().eq('id', id)
-  }
-  const addPresets = async () => {
-    await Promise.all(PRESET_TEMPLATES.map(p => db.from('shift_checklists').insert({ type: p.type, role: p.role, items: p.items, kind: 'shift' })))
-    toast(tr('pe.presetsAdded')); await load()
-  }
-
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
 
   return (
@@ -417,25 +401,11 @@ export function ShiftChecklistsView({ isManager, myId, myRole, canFill, openShif
         const items = (Array.isArray(list.items) ? list.items : []).map((x: any, i: number) => normItem(x, i))
         const completion = completions.find(c => c.checklist_id === list.id)
         const state = (Array.isArray(completion?.items_state) ? completion.items_state : []).map(normState)
-        // Менеджерская верификация (Д4, 2026-07-31): когда сотрудники дожали прогон до
-        // status='done', карточка менеджера автоматически переключается в grading-режим
-        // (pass/fail/N/A поверх готового чек-листа) — тот же механизм, что у разовых
-        // аудитов, ничего нового не строим. canFill=true в этом режиме: менеджер проверяет
-        // независимо от своей гео-явки (владелец может смотреть удалённо).
-        const gradingNow = isManager && completion?.status === 'done'
         return (
           <div key={list.id}>
-            {isManager && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginBottom: 2 }}>
-                <button onClick={() => setEditing({ id: list.id, role: list.role ?? null, items: items.length ? items.map(x => x.label) : [''] })} style={{ background: 'none', border: 'none', color: accent, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, padding: 0 }}>{tr('pe.edit')}</button>
-                <button onClick={() => removeList(list.id)} style={{ background: 'none', border: 'none', color: t.text4, cursor: 'pointer', padding: 0, display: 'flex' }}>
-                  <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /></svg>
-                </button>
-              </div>
-            )}
             <ChecklistCard
               title={list.role ? tr(roleLabel(list.role)) : tr('pe.general')}
-              items={items} state={state} canFill={gradingNow ? true : canFillShift} grading={gradingNow}
+              items={items} state={state} canFill={canFillShift}
               restaurantId={restaurantId} completionId={completion?.id} staff={staff} myId={myId}
               accent={accent} t={t} toast={toast}
               onSetItem={(idx, next) => setItem(list, idx, next)}
@@ -444,38 +414,6 @@ export function ShiftChecklistsView({ isManager, myId, myRole, canFill, openShif
         )
       })}
 
-      {isManager && (
-        <>
-          <button onClick={() => setEditing({ role: null, items: [''] })} style={{ width: '100%', padding: '13px', borderRadius: 14, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: accent, fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer', marginTop: 4 }}>
-            {tr('pe.addChecklistForRole')}
-          </button>
-          <button onClick={addPresets} style={{ width: '100%', padding: '11px', borderRadius: 14, border: 'none', background: 'transparent', color: t.text3, fontFamily: 'inherit', fontSize: 13, cursor: 'pointer', marginTop: 8 }}>
-            {tr('pe.presetTemplates')}
-          </button>
-        </>
-      )}
-
-      {editing != null && (
-        <Sheet onClose={() => setEditing(null)} t={t}>
-          <div style={{ padding: '14px 20px 32px' }}>
-            <div style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', color: t.text, marginBottom: 18 }}>{type === 'open' ? tr('pe.checklistOpenTitle') : tr('pe.checklistCloseTitle')}</div>
-            <label style={lbl(t)}>{tr('pe.workshop')}</label>
-            <select value={editing.role ?? ''} onChange={e => setEditing(ed => ({ ...ed!, role: e.target.value || null }))} style={inp(t)}>
-              {CHECKLIST_ROLES.map(r => <option key={r.val ?? 'all'} value={r.val ?? ''}>{tr(r.label)}</option>)}
-            </select>
-            {editing.items.map((v, i) => (
-              <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                <input value={v} onChange={e => setEditing(ed => ({ ...ed!, items: ed!.items.map((x, j) => j === i ? e.target.value : x) }))} placeholder={tr('pe.itemN', { n: i + 1 })} style={{ ...inp(t), marginBottom: 0, flex: 1 }} />
-                <button onClick={() => setEditing(ed => ({ ...ed!, items: ed!.items.filter((_, j) => j !== i) }))} style={{ width: 44, borderRadius: 12, border: 'none', background: `${t.red}14`, color: t.red, cursor: 'pointer', fontSize: 18, fontFamily: 'inherit' }}>−</button>
-              </div>
-            ))}
-            <button onClick={() => setEditing(ed => ({ ...ed!, items: [...ed!.items, ''] }))} style={{ width: '100%', padding: '11px', borderRadius: 12, border: `1.5px dashed ${t.sep}`, background: 'transparent', color: t.text3, fontFamily: 'inherit', fontSize: 14, cursor: 'pointer', marginBottom: 14 }}>{tr('pe.addItem')}</button>
-            <button onClick={saveTemplate} disabled={saving} style={{ width: '100%', padding: '15px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${accent}44` }}>
-              {saving ? '...' : tr('pe.save')}
-            </button>
-          </div>
-        </Sheet>
-      )}
     </div>
   )
 }

@@ -120,14 +120,16 @@ export function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boo
     setSaving(false)
     if (error) { toast(tr('dash.notSaved') + error.message); return }
     setShowForm(false); setRform({ type: 'breakdown', title: '', description: '' })
-    toast(tr('pe.reportSent')); await load()
+    toast(tr('pe.reportSent'))
+    // Юзер-фидбок 2026-08-14: менеджер видел новую заявку только зайдя сам — пуш, тот же
+    // паттерн, что покупки/явка (audience managers).
+    pushNotify({ type: 'report', title: tr('pe.newReport'), body: rform.title.trim(), titleKey: 'notify.newReportTitle', audience: { managers: true } })
+    await load()
   }
-  const setReportStatus = async (r: any, status: string) => {
-    const prevStatus = r.status
-    setReports(rs => rs.map(x => x.id === r.id ? { ...x, status } : x))
-    const { error } = await db.from('staff_reports').update({ status, resolved_at: status === 'resolved' ? new Date().toISOString() : null }).eq('id', r.id)
-    if (error) { setReports(rs => rs.map(x => x.id === r.id ? { ...x, status: prevStatus } : x)); toast(tr('dash.notSaved') + error.message) }
-  }
+  // Разбор заявок (смена статуса/конвертация в задачу или закуп) переехал в
+  // Manager→Настройки→Заявки (app/manager/tabs-reports.tsx, реструктура 2026-08-14) —
+  // здесь, в People, видно только свои заявки, личный вид как у сотрудника.
+  const visibleReports = reports.filter(r => r.author_id === myId)
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
 
@@ -186,14 +188,14 @@ export function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boo
           )
         })
       ) : (
-        reports.length === 0 ? (
+        visibleReports.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
             <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.noReports')}</div>
             <div style={{ fontSize: 13, marginTop: 4 }}>{tr('pe.reportHint')}</div>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {reports.map(r => {
+            {visibleReports.map(r => {
               const rt = REPORT_TYPE[r.type] || REPORT_TYPE.other
               return (
                 <div key={r.id} style={{ background: t.surface, borderRadius: 16, padding: '14px 16px', boxShadow: t.sh }}>
@@ -204,12 +206,6 @@ export function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boo
                   <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{r.title}</div>
                   {r.description && <div style={{ fontSize: 13, color: t.text3, marginTop: 2 }}>{r.description}</div>}
                   <div style={{ fontSize: 11, color: t.text4, marginTop: 6 }}>{staffName(r.author_id)} · {new Date(r.created_at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}</div>
-                  {isManager && r.status !== 'resolved' && (
-                    <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                      {r.status === 'new' && <button onClick={() => setReportStatus(r, 'reviewed')} style={btnB2(t)}>{tr('pe.markReviewed')}</button>}
-                      <button onClick={() => setReportStatus(r, 'resolved')} style={{ ...btnB2(t), color: '#fff', background: accent }}>{tr('pe.markResolved')}</button>
-                    </div>
-                  )}
                 </div>
               )
             })}

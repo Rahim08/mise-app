@@ -11,9 +11,11 @@ private let WALK_ACCENT = BrandKit.people
 
 // MARK: - Список шаблонов
 
+// Редактирование шаблонов (создание/пункты/удаление) переехало в Manager→Настройки
+// (реструктура 2026-08-13, ManagerSettings.swift, ManagerWalkTab/WalkEditSheet) — здесь,
+// в People, менеджер только ЗАПУСКАЕТ обход и смотрит историю, как рядовое личное действие.
 struct WalkTab: View {
     @Bindable var m: PeopleModel
-    @State private var edit: WalkTemplate?
     @State private var running: WalkTemplate?
     @State private var showHistory = false
 
@@ -22,16 +24,6 @@ struct WalkTab: View {
             if !m.walksLoaded {
                 RowListSkeleton(rows: 3)
             } else {
-                Button {
-                    edit = WalkTemplate()
-                } label: {
-                    Label(t("pe.newWalkTemplate"), systemImage: "plus")
-                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(WALK_ACCENT)
-                        .frame(maxWidth: .infinity).padding(.vertical, 13)
-                        .background(RoundedRectangle(cornerRadius: 14).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5])).foregroundStyle(.primary.opacity(0.2)))
-                }
-                .padding(.bottom, 4)
-
                 let list = m.relevantWalks()
                 if list.isEmpty {
                     Text(t("pe.noChecklists")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 40)
@@ -49,7 +41,6 @@ struct WalkTab: View {
             }
         }
         .task { if !m.walksLoaded { await m.loadWalks() } }
-        .sheet(item: $edit) { w in WalkEditSheet(m: m, template: w) }
         .fullScreenCover(item: $running) { w in WalkRunnerView(m: m, template: w) }
         .sheet(isPresented: $showHistory) { WalkHistorySheet(m: m) }
     }
@@ -69,110 +60,8 @@ struct WalkTab: View {
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(WALK_ACCENT, in: Capsule())
             }.buttonStyle(.plain)
-            if m.canEditWalk(w) {
-                Button { edit = w } label: { Image(systemName: "pencil").font(.system(size: 13)).foregroundStyle(WALK_ACCENT) }
-                Button { Task { await m.deleteWalkTemplate(w.id) } } label: {
-                    Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3))
-                }
-            }
         }
         .padding(12).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 16))
-    }
-}
-
-// MARK: - Конструктор шаблона (блок → категория → пункт)
-
-struct WalkEditSheet: View {
-    @Bindable var m: PeopleModel
-    @Environment(\.dismiss) private var dismiss
-    @State var template: WalkTemplate
-    @State private var saving = false
-
-    private var isNew: Bool { !m.walkTemplates.contains { $0.id == template.id } }
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.miseBg.ignoresSafeArea()
-                Form {
-                    Section(t("pe.walkTitleLabel")) {
-                        TextField(t("pe.walkTitlePh"), text: Binding(get: { template.title ?? "" }, set: { template.title = $0 }))
-                    }
-                    Section(t("pe.walkPauseMode")) {
-                        Picker(t("pe.walkPauseMode"), selection: $template.walk_pause_mode) {
-                            Text(t("pe.walkPauseModePause")).tag("pause")
-                            Text(t("pe.walkPauseModeContinuous")).tag("continuous")
-                        }.pickerStyle(.segmented)
-                    }
-                    ForEach($template.blocks) { $block in
-                        blockSection($block)
-                    }
-                    Section {
-                        Button { template.blocks.append(WalkBlock(label: "")) } label: {
-                            Label(t("pe.walkAddBlock"), systemImage: "plus")
-                        }
-                    }
-                }
-                .scrollContentBackground(.hidden)
-            }
-            .navigationTitle(template.title?.isEmpty == false ? template.title! : t("pe.newWalkTemplate"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(t("save")) {
-                        guard !saving else { return }
-                        saving = true
-                        // dismiss только на успехе — раньше шторка закрывалась при сбое сети,
-                        // весь введённый шаблон терялся (аудит 2026-08-04).
-                        Task { defer { saving = false }; if await m.saveWalkTemplate(template) { dismiss() } }
-                    }.disabled(saving)
-                }
-            }
-            .toolbarBackground(Color.miseBg, for: .navigationBar)
-        }
-    }
-
-    @ViewBuilder private func blockSection(_ block: Binding<WalkBlock>) -> some View {
-        Section {
-            HStack {
-                TextField(t("pe.walkBlockPh"), text: block.label)
-                    .font(.system(size: 15, weight: .bold))
-                Spacer()
-                Button {
-                    template.blocks.removeAll { $0.id == block.wrappedValue.id }
-                } label: { Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3)) }
-            }
-            ForEach(block.categories) { $cat in
-                categoryBlock($cat, in: block)
-            }
-            Button {
-                block.wrappedValue.categories.append(WalkCategory(label: ""))
-            } label: { Label(t("pe.walkAddCategory"), systemImage: "plus").font(.system(size: 13)) }
-        }
-    }
-
-    @ViewBuilder private func categoryBlock(_ cat: Binding<WalkCategory>, in block: Binding<WalkBlock>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                TextField(t("pe.walkCategoryPh"), text: cat.label)
-                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(WALK_ACCENT)
-                Spacer()
-                Button {
-                    block.wrappedValue.categories.removeAll { $0.id == cat.wrappedValue.id }
-                } label: { Image(systemName: "xmark").font(.system(size: 11)).foregroundStyle(.primary.opacity(0.3)) }
-            }
-            ForEach(cat.items.indices, id: \.self) { i in
-                HStack {
-                    Text("•").foregroundStyle(.primary.opacity(0.3))
-                    TextField(t("pe.walkItemPh"), text: cat.items[i].label)
-                }
-            }
-            Button {
-                cat.wrappedValue.items.append(WalkItem(label: ""))
-            } label: { Label(t("pe.walkAddItem"), systemImage: "plus").font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5)) }
-        }
-        .padding(.leading, 8)
     }
 }
 

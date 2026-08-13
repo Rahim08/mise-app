@@ -15,7 +15,7 @@ struct TasksTab: View {
     var body: some View {
         Picker("", selection: $m.tasksSeg) {
             Text(t("tab.tasks")).tag("tasks")
-            Text(m.newReportsCount > 0 ? t("pe.reportsN", ["n": "\(m.newReportsCount)"]) : t("pe.reports")).tag("reports")
+            Text(t("pe.reports")).tag("reports")
         }.pickerStyle(.segmented)
 
         if m.tasksSeg == "reports" {
@@ -312,14 +312,6 @@ struct ReportsTab: View {
             HStack(spacing: 10) {
                 Text(m.staffName(r.author_id)).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
                 Spacer()
-                if m.isManager && !resolved {
-                    if (r.status ?? "new") == "new" {
-                        Button(t("pe.reviewed")) { Task { await m.setReportStatus(r, "reviewed") } }
-                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
-                    }
-                    Button(t("pe.resolved")) { Task { await m.setReportStatus(r, "resolved") } }
-                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(BrandKit.analytics)
-                }
                 if m.canDeleteReport(r) {
                     Button { Task { await m.deleteReport(r.id) } } label: {
                         Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3))
@@ -375,61 +367,24 @@ struct ReportFormSheet: View {
     }
 }
 
-// MARK: Зарплата
+// MARK: Зарплата — личный вид (одинаковый у сотрудника и менеджера, реструктура
+// 2026-08-13). Фонд/долг/список всех сотрудников/оплата — Manager→Зарплата (ManagerSalary.swift).
 
 struct PeopleSalaryTab: View {
     @Bindable var m: PeopleModel
-    @State private var open: String?
-    @State private var payFor: PeopleModel.SalRow?
 
     var body: some View {
         VStack(spacing: 12) {
             monthNav
             if !m.salaryLoaded {
                 RowListSkeleton(rows: 3)
-            } else if m.salaryRows.isEmpty {
-                Text(t("pe.noSalary")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)
-            } else if !m.isManager, let r = m.salaryRows.first {
+            } else if let r = m.salaryRows.first {
                 staffCard(r)
                 staffBreakdown(r)
             } else {
-                if m.salaryDebtTotal > 0 { debtCard }
-                heroCard
-                ForEach(m.salaryRows) { r in
-                    VStack(spacing: 0) {
-                        Button { withAnimation(.easeInOut(duration: 0.18)) { open = open == r.id ? nil : r.id } } label: {
-                            HStack(spacing: 10) {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(r.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
-                                    rowSubtitle(r)
-                                    if let st = payStatus(r) {
-                                        Text(st.0).font(.system(size: 11, weight: .semibold)).foregroundStyle(st.1)
-                                    }
-                                }
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text(eur(r.cash)).font(.system(size: 16, weight: .bold)).foregroundStyle(PEOPLE_ACCENT)
-                                    if r.card > 0 {
-                                        Text(t("pe.cardShort") + " " + eur(r.card))
-                                            .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
-                                    }
-                                }
-                                Image(systemName: open == r.id ? "chevron.up" : "chevron.down")
-                                    .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
-                            }
-                            .padding(14)
-                        }
-                        .buttonStyle(.plain)
-                        if open == r.id {
-                            staffBreakdown(r)
-                                .padding(.horizontal, 14).padding(.bottom, 14)
-                        }
-                    }
-                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
-                }
+                Text(t("pe.noSalary")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 50)
             }
         }
-        .sheet(item: $payFor) { r in MarkPaidSheet(m: m, row: r) }
     }
 
     // MARK: месяц-навигация («‹ Июль 2026 ›», как в Manager)
@@ -455,18 +410,6 @@ struct PeopleSalaryTab: View {
         return f.string(from: d)
     }
 
-    // MARK: задолженность (сумма непокрытого остатка за прошлые закрытые месяцы)
-    private var debtCard: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(t("pe.debtTitle")).font(.system(size: 11, weight: .bold)).foregroundStyle(.red.opacity(0.85)).kerning(0.4).textCase(.uppercase)
-            Text(eur(m.salaryDebtTotal)).font(.system(size: 22, weight: .heavy)).foregroundStyle(.red)
-            Text(t("pe.debtHint")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
     // MARK: статус выплаты — «Выплачено»/«Осталось X€», только если начисление в месяце есть.
     // Если remaining == total (ничего не платили/не авансировали) — сумма уже видна в
     // заголовке строки, повторять её тут не надо (юзер-фидбек: «дублируется») — нейтральная
@@ -486,36 +429,6 @@ struct PeopleSalaryTab: View {
     private func shortDate2(_ d: Date) -> String {
         let f = DateFormatter(); f.locale = appLocale(); f.dateFormat = "d MMM"
         return f.string(from: d)
-    }
-
-    // MARK: hero (manager only)
-    private var heroCard: some View {
-        let totalCash = m.salaryRows.reduce(0) { $0 + $1.cash }
-        let totalCard = m.salaryRows.reduce(0) { $0 + $1.card }
-        return VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(t("an.payrollFund")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.75)).kerning(0.4)
-                Text(eur(m.salaryFund)).font(.system(size: 34, weight: .heavy)).foregroundStyle(.white)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 14)
-            Divider().overlay(Color.white.opacity(0.15))
-            HStack(spacing: 0) {
-                heroMini(t("byCash"), eur(totalCash), .white)
-                Divider().frame(height: 28).overlay(Color.white.opacity(0.15))
-                heroMini(t("toCard"), eur(totalCard), .white.opacity(0.85))
-            }
-            .padding(.vertical, 10)
-            if m.salaryIsCurrentMonth {
-                Divider().overlay(Color.white.opacity(0.15))
-                Text("\(t("pe.accruedToday")) \(eur(m.salaryAccruedToday)) · \(t("pe.accruedTodayHint"))")
-                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.75))
-                    .padding(.horizontal, 18).padding(.vertical, 10)
-            }
-        }
-        .background(LinearGradient(colors: [PEOPLE_ACCENT, PEOPLE_ACCENT.opacity(0.75)],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing),
-                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     // MARK: staff view — personal hero card
@@ -575,17 +488,7 @@ struct PeopleSalaryTab: View {
 
             if let st = payStatus(r) {
                 Divider().overlay(Color.primary.opacity(0.07)).padding(.vertical, 4)
-                HStack {
-                    Text(st.0).font(.system(size: 13, weight: .semibold)).foregroundStyle(st.1)
-                    Spacer()
-                    if m.isManager, r.remaining > 0 {
-                        Button { payFor = r } label: {
-                            Text(t("pe.markPaid")).font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
-                                .padding(.horizontal, 12).padding(.vertical, 6)
-                                .background(PEOPLE_ACCENT, in: Capsule())
-                        }
-                    }
-                }
+                Text(st.0).font(.system(size: 13, weight: .semibold)).foregroundStyle(st.1)
             }
         }
         .padding(14)
@@ -593,13 +496,6 @@ struct PeopleSalaryTab: View {
     }
 
     // MARK: helpers
-    private func rowSubtitle(_ r: PeopleModel.SalRow) -> some View {
-        var parts: [String] = [t("baseSalary") + " " + eur(r.salary)]
-        if r.absences > 0 { parts.append(t("absencesN", ["n": "\(r.absences)"])) }
-        if r.advance > 0  { parts.append(t("an.advance") + " " + eur(r.advance)) }
-        return Text(parts.joined(separator: " · ")).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4)).lineLimit(1)
-    }
-
     private func sectionHeader(_ label: String, _ color: Color) -> some View {
         Text(label.uppercased()).font(.system(size: 10, weight: .semibold)).foregroundStyle(color.opacity(0.8)).kerning(0.5)
             .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 10).padding(.bottom, 2)
@@ -612,71 +508,11 @@ struct PeopleSalaryTab: View {
         }
         .padding(.vertical, 5)
     }
-    private func heroMini(_ label: String, _ value: String, _ color: Color) -> some View {
-        VStack(spacing: 2) {
-            Text(value).font(.system(size: 15, weight: .bold)).foregroundStyle(color)
-            Text(label).font(.system(size: 11)).foregroundStyle(color.opacity(0.7))
-        }.frame(maxWidth: .infinity)
-    }
     private func shortDate(_ ymd: String) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX")
         guard let d = f.date(from: ymd) else { return ymd }
         let out = DateFormatter(); out.locale = appLocale(); out.dateFormat = "d MMM"
         return out.string(from: d)
-    }
-}
-
-// MARK: — Отметить выплату ЗП (People→Зарплата, ЗП-долг 2026-07-28)
-
-private struct MarkPaidSheet: View {
-    let m: PeopleModel
-    let row: PeopleModel.SalRow
-    @Environment(\.dismiss) private var dismiss
-    @State private var amount: String
-    @State private var method: String = "cash"
-    @State private var date = Date()
-    @State private var note = ""
-    @State private var saving = false
-
-    init(m: PeopleModel, row: PeopleModel.SalRow) {
-        self.m = m; self.row = row
-        _amount = State(initialValue: String(Int(row.remaining.rounded())))
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    HStack {
-                        Text(t("pe.paymentAmount"))
-                        Spacer()
-                        TextField("0", text: $amount).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
-                    }
-                    Picker(t("pe.paymentMethod"), selection: $method) {
-                        Text(t("pe.methodCash")).tag("cash")
-                        Text(t("pe.methodCard")).tag("card")
-                    }.pickerStyle(.segmented)
-                    DatePicker(t("pe.paymentDate"), selection: $date, displayedComponents: .date)
-                    TextField(t("pe.paymentNote"), text: $note)
-                }
-            }
-            .navigationTitle(t("pe.markPaid") + " · " + row.name)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(t("pe.savePayment")) {
-                        saving = true
-                        Task {
-                            await m.markSalaryPaid(employeeId: row.id, amount: Double(amount.replacingOccurrences(of: ",", with: ".")) ?? 0,
-                                                    method: method, date: date, note: note)
-                            saving = false; dismiss()
-                        }
-                    }.disabled(saving || (Double(amount) ?? 0) <= 0)
-                }
-            }
-            .toolbarBackground(Color.miseBg, for: .navigationBar)
-        }
     }
 }
 

@@ -107,27 +107,16 @@ struct ShiftsCalendar: View {
                 }
             }
 
-            // Inline detail for selected day
+            // Inline detail for selected day — личный вид, всегда своя смена (имя не нужно).
             if let sel = m.selectedCalDate {
                 let items = m.schedules.filter { $0.date == sel }
                 if !items.isEmpty {
                     VStack(spacing: 0) {
                         ForEach(Array(items.enumerated()), id: \.element.id) { idx, s in
                             HStack {
-                                if m.isManager {
-                                    Text(m.staffName(s.staff_id))
-                                        .font(.system(size: 14)).foregroundStyle(.primary)
-                                }
                                 Spacer()
                                 Text("\(hhmm(s.shift_start))–\(hhmm(s.shift_end))")
                                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
-                                if m.isManager {
-                                    Button { Task { await m.deleteSchedule(s.id) } } label: {
-                                        Image(systemName: "trash")
-                                            .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.3))
-                                    }
-                                    .padding(.leading, 8)
-                                }
                             }
                             .padding(.vertical, 10).padding(.horizontal, 14)
                             if idx < items.count - 1 {
@@ -145,18 +134,19 @@ struct ShiftsCalendar: View {
     }
 }
 
+// Редактирование графика (добавление/удаление смен, копирование недели) переехало в
+// Manager→Настройки→Расписание (реструктура 2026-08-13, ManagerSchedule.swift) — здесь,
+// в People, менеджер видит только СВОЙ график, как рядовой сотрудник.
 struct ShiftsTab: View {
     @Bindable var m: PeopleModel
-    @State private var showAdd = false
 
     var body: some View {
         if !m.schedLoaded {
             RowListSkeleton(rows: 3)
         } else {
             ShiftsCalendar(m: m)
-            if m.isManager { managerControls }
             if m.schedByDate.isEmpty {
-                Text(m.isManager ? t("pe.scheduleEmptyMgr") : t("pe.scheduleEmptyStaff"))
+                Text(t("pe.scheduleEmptyStaff"))
                     .font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4))
                     .multilineTextAlignment(.center).padding(.top, 20)
             } else {
@@ -169,18 +159,9 @@ struct ShiftsTab: View {
                         VStack(spacing: 0) {
                             ForEach(Array(items.enumerated()), id: \.element.id) { idx, s in
                                 HStack {
-                                    Text(m.staffName(s.staff_id))
-                                        .font(.system(size: 15)).foregroundStyle(.primary)
-                                    Spacer()
                                     Text("\(hhmm(s.shift_start))–\(hhmm(s.shift_end))")
                                         .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
-                                    if m.isManager {
-                                        Button { Task { await m.deleteSchedule(s.id) } } label: {
-                                            Image(systemName: "trash")
-                                                .font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3))
-                                        }
-                                        .padding(.leading, 8)
-                                    }
+                                    Spacer()
                                 }
                                 .padding(.vertical, 11).padding(.horizontal, 14)
                                 if idx < items.count - 1 {
@@ -193,83 +174,6 @@ struct ShiftsTab: View {
                     .padding(.bottom, 4)
                 }
             }
-        }
-    }
-
-    private var managerControls: some View {
-        HStack(spacing: 10) {
-            Button { showAdd = true } label: {
-                Label(t("pe.addShift"), systemImage: "plus")
-                    .font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
-                    .minimumScaleFactor(0.7).lineLimit(1)
-                    .frame(maxWidth: .infinity).padding(.vertical, 12)
-                    .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 12))
-            }
-            Button { Task { await m.copyLastWeek() } } label: {
-                Label(t("pe.lastWeek"), systemImage: "doc.on.doc")
-                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
-                    .minimumScaleFactor(0.7).lineLimit(1)
-                    .frame(maxWidth: .infinity).padding(.vertical, 12)
-                    .background(PEOPLE_ACCENT.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
-            }
-        }
-        .sheet(isPresented: $showAdd) { ScheduleEditSheet(m: m) }
-    }
-}
-
-struct ScheduleEditSheet: View {
-    @Bindable var m: PeopleModel
-    @Environment(\.dismiss) private var dismiss
-    @State private var staffId = ""
-    @State private var dates: Set<DateComponents> = []
-    @State private var start = Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: Date()) ?? Date()
-    @State private var end = Calendar.current.date(bySettingHour: 22, minute: 0, second: 0, of: Date()) ?? Date()
-    @State private var note = ""
-
-    private let timeFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; f.locale = Locale(identifier: "en_US_POSIX"); return f
-    }()
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.miseBg.ignoresSafeArea()
-                Form {
-                    Section(t("pe.staffOne")) {
-                        Picker(t("pe.who"), selection: $staffId) {
-                            Text("—").tag("")
-                            ForEach(m.dir) { Text($0.name).tag($0.id) }
-                        }
-                    }
-                    // Несколько дат сразу: выбрать сотрудника → отметить дни → одно время на все.
-                    Section(dates.isEmpty ? t("pe.dates") : t("pe.datesN", ["n": "\(dates.count)"])) {
-                        MultiDatePicker(t("pe.dates"), selection: $dates)
-                            .frame(maxHeight: 320)
-                    }
-                    Section(t("pe.time")) {
-                        DatePicker(t("pe.start"), selection: $start, displayedComponents: .hourAndMinute)
-                        DatePicker(t("pe.end"), selection: $end, displayedComponents: .hourAndMinute)
-                    }
-                    Section(t("pe.note")) {
-                        TextField(t("pe.optional"), text: $note)
-                    }
-                }
-                .scrollContentBackground(.hidden)
-            }
-            .navigationTitle(t("pe.newShift")).navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(t("save")) {
-                        let s = timeFmt.string(from: start), e = timeFmt.string(from: end)
-                        let keys = dates.compactMap { Calendar.current.date(from: $0).map { m.key($0) } }.sorted()
-                        Task {
-                            if await m.createSchedules(staffId: staffId, dates: keys, start: s, end: e, note: note) { dismiss() }
-                        }
-                    }
-                }
-            }
-            .toolbarBackground(Color.miseBg, for: .navigationBar)
         }
     }
 }

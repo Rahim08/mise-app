@@ -516,125 +516,9 @@ final class AnalyticsModel {
             return max(0, (prevSalCash / Double(prevDaysInMonth) * Double(prevDaysInMonth - cycleStart + today + 1)).rounded())
         }
     }
-    /// Сохранить сумму «на карту» за выбранный месяц.
-    func saveMonthlyCard(_ empId: String, _ amount: Double) async {
-        var saved: CardAmount?
-        if let ex = cardAmounts.first(where: { $0.employee_id == empId }), let cid = ex.id {
-            try? await DB.from("monthly_card_amounts").update(["card_amount": amount]).eq("id", cid).run()
-            saved = CardAmount(id: cid, employee_id: empId, card_amount: amount)
-        } else {
-            // .single() возвращает реальный id вставленной строки — без него локальная запись
-            // оставалась с id=nil, второе редактирование той же карты в этой же сессии снова
-            // уходило в insert вместо update и падало на unique-constraint (restaurant_id,
-            // employee_id, month), ошибка глоталась try?, а значение молча откатывалось при
-            // следующей полной загрузке.
-            saved = try? await DB.from("monthly_card_amounts").insert([
-                "restaurant_id": rid, "employee_id": empId, "month": ymKey, "card_amount": amount,
-            ]).single(CardAmount.self)
-        }
-        guard let saved else { flash(t("bk.saveFailed")); return }
-        var arr = cardAmounts.filter { $0.employee_id != empId }
-        arr.append(saved)
-        cardAmounts = arr
-    }
+    // Аванс/сумма-на-карту (запись) — переехали в Manager→Зарплата (ManagerSalary.swift,
+    // реструктура 2026-08-14). advances/cardAmounts здесь остаются read-only для отображения.
 
-    // Кэш shiftsRaw — только текущий просматриваемый месяц (load(), строка 191). Если смена
-    // на нужную дату туда не попала (другой месяц / ещё не подгружена), запрос напрямую в БД —
-    // раньше это место молча пропускало обновление инкассации (аванс уходил из кассы, но
-    // expense/total не менялись, юзер не видел ошибки).
-    private func findShift(forDate date: String) async -> Shift? {
-        if let s = shiftsRaw.first(where: { $0.date == date })
-            ?? shiftsRaw.filter({ $0.date <= date }).sorted(by: { $0.date > $1.date }).first {
-            return s
-        }
-        if let s = try? await DB.from("shifts").select().eq("date", date).limit(1).list(Shift.self).first {
-            return s
-        }
-        return try? await DB.from("shifts").select().lte("date", date).order("date", ascending: false).limit(1).list(Shift.self).first
-    }
-
-    // inkDetails кэш заполняется только для смен текущего месяца (load(), строка 215) — та же
-    // проблема кросс-месячного промаха, что у findShift, но для инкассации.
-    private func findInkassation(forShiftId shiftId: String) async -> Inkassation? {
-        if let cached = inkDetails[shiftId] { return cached }
-        return try? await DB.from("inkassations")
-            .select("shift_id, amount, expense, reason, total, salary, salary_note")
-            .eq("shift_id", shiftId).limit(1).list(Inkassation.self).first
-    }
-
-    func addAdvance(empId: String, amount: Double, date: String) async {
-        let empName = employees.first { $0.id == empId }?.name ?? ""
-
-        // 1. Write to salary_advances for per-employee salary tracking.
-        // If insert fails (e.g. table missing) — bail out, don't touch inkassation.
-        // .single() returns the inserted row directly (real id) — avoids a follow-up
-        // select() that could race the fire-and-forget cache invalidation in DB.run()
-        // (DB.swift:14) and read stale cached data missing this advance.
-        guard let inserted = try? await DB.from("salary_advances").insert([
-            "restaurant_id": rid, "employee_id": empId,
-            "amount": amount, "date": date, "note": empName + " аванс",
-        ] as [String: Any]).single(SalaryAdvance.self) else { flash(t("bk.saveFailed")); return }
-        advances.append(inserted)
-
-        // 2. Update inkassation for the shift on that date — advance is paid from inkassated money.
-        let shift = await findShift(forDate: date)
-        if let shift = shift {
-            let ink = inkDetails[shift.id]
-            let baseAmount = ink?.amount ?? (shift.inkassation ?? 0)
-            let newExpense = (ink?.expense ?? 0) + amount
-            let reasonParts = [ink?.reason?.isEmpty == false ? ink?.reason : nil, empName + " аванс"]
-                .compactMap { $0 }
-            let newReason = reasonParts.joined(separator: ", ")
-            let newTotal = baseAmount - newExpense - (ink?.salary ?? 0)
-            if ink != nil {
-                try? await DB.from("inkassations").update([
-                    "expense": newExpense, "reason": newReason, "total": newTotal,
-                ] as [String: Any]).eq("shift_id", shift.id).run()
-            } else {
-                try? await DB.from("inkassations").insert([
-                    "shift_id": shift.id, "restaurant_id": rid, "date": shift.date,
-                    "amount": baseAmount, "expense": newExpense, "reason": newReason,
-                    "salary": 0, "total": newTotal,
-                ] as [String: Any]).run()
-            }
-            inkDetails[shift.id] = Inkassation(shift_id: shift.id, amount: baseAmount > 0 ? baseAmount : nil,
-                expense: newExpense, reason: newReason, total: newTotal,
-                salary: ink?.salary, salary_note: ink?.salary_note)
-        } else {
-            // Смена на эту дату не найдена нигде (ни в кэше, ни в БД) — аванс в salary_advances
-            // уже создан, но касса не тронута. Раньше это молча проходило без следа.
-            flash(t("bk.advanceInkassationMissing"))
-        }
-    }
-
-    func deleteAdvance(_ a: SalaryAdvance) async {
-        // Убрать локально СРАЗУ (как deleteReport/removeTask) — раньше строка висела до
-        // ответа сервера, что читалось как «удаление не показывает»/«поздно». Откат при ошибке.
-        advances.removeAll { $0.id == a.id }
-        do {
-            try await DB.from("salary_advances").delete().eq("id", a.id).run()
-        } catch { advances.append(a); flash(t("bk.saveFailed")); return }
-
-        // Reverse the inkassation expense update.
-        let shift = await findShift(forDate: a.date ?? "")
-        if let shift = shift, let ink = await findInkassation(forShiftId: shift.id) {
-            let empName = employees.first { $0.id == a.employee_id }?.name ?? ""
-            let newExpense = max(0, (ink.expense ?? 0) - (a.amount ?? 0))
-            let newReason = (ink.reason ?? "")
-                .components(separatedBy: ", ")
-                .filter { !$0.hasPrefix(empName + " аванс") || advances.contains { $0.employee_id == a.employee_id } }
-                .joined(separator: ", ")
-            let newTotal = (ink.amount ?? (shift.inkassation ?? 0)) - newExpense - (ink.salary ?? 0)
-            try? await DB.from("inkassations").update([
-                "expense": newExpense, "reason": newReason, "total": newTotal,
-            ] as [String: Any]).eq("shift_id", shift.id).run()
-            inkDetails[shift.id] = Inkassation(shift_id: shift.id, amount: ink.amount,
-                expense: newExpense, reason: newReason.isEmpty ? nil : newReason, total: newTotal,
-                salary: ink.salary, salary_note: ink.salary_note)
-        } else if shift != nil {
-            flash(t("bk.advanceInkassationMissing"))
-        }
-    }
 
     // MARK: Долги по расходам (Б, 2026-08-09; переработано по фидбеку юзера — касса дня
     // возникновения долга и дня погашения не должны задним числом пересчитываться)
@@ -1341,11 +1225,11 @@ private struct PeriodTab: View {
 
 // MARK: Зарплата
 
+// Read-only (реструктура 2026-08-14, паритет с Долгами 92f6076) — редактирование аванса/
+// карты переехало в Manager→Зарплата (ManagerSalary.swift), единая точка правки.
 private struct SalaryTab: View {
     @Bindable var m: AnalyticsModel
     @State private var expanded: String?
-    @State private var showAdvanceSheet = false
-    @State private var advEmpId = ""
 
     var body: some View {
         VStack(spacing: 10) {
@@ -1383,42 +1267,16 @@ private struct SalaryTab: View {
                         detail(t("baseSalary"), cur(r.salary))
                         if r.abs > 0 { detail(t("absencesN", ["n": "\(r.abs)"]), "−" + cur(r.deduct)) }
                         ForEach(r.advanceList.sorted { ($0.date ?? "") < ($1.date ?? "") }) { a in
-                            HStack {
-                                Text(a.date.map { dayLabelRu($0) + " · " + t("an.advance") } ?? t("an.advance"))
-                                    .font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5))
-                                Spacer()
-                                Text("−" + cur(a.amount ?? 0)).font(.system(size: 13, weight: .medium)).foregroundStyle(BrandKit.stash)
-                                Button { Task { await m.deleteAdvance(a) } } label: {
-                                    Image(systemName: "xmark.circle").font(.system(size: 14)).foregroundStyle(.primary.opacity(0.3))
-                                }
-                            }
-                        }
-                        Button {
-                            advEmpId = r.id
-                            showAdvanceSheet = true
-                        } label: {
-                            Label(t("an.addAdvance"), systemImage: "plus")
-                                .font(.system(size: 13, weight: .semibold)).foregroundStyle(BrandKit.analytics)
+                            detail(a.date.map { dayLabelRu($0) + " · " + t("an.advance") } ?? t("an.advance"), "−" + cur(a.amount ?? 0))
                         }
                         detail(t("byCash"), cur(r.cash))
                         if r.paid > 0 { detail(t("pe.paidStatus"), "−" + cur(r.paid)) }
-                        CardInputRow(empId: r.id, current: r.card) { amt in
-                            Task { await m.saveMonthlyCard(r.id, amt) }
-                        }
-                        .id(m.ymKey + r.id)
+                        if r.card > 0 { detail(t("an.cardThisMonth"), cur(r.card)) }
                     }
                     .padding(.horizontal, 14).padding(.bottom, 14)
                 }
             }
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
-        }
-        .sheet(isPresented: $showAdvanceSheet) {
-            let cal = Calendar.current
-            let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: m.currentDate)) ?? m.currentDate
-            let monthEnd = cal.date(byAdding: DateComponents(month: 1, day: -1), to: monthStart) ?? monthStart
-            AdvanceAddSheet(monthRange: monthStart...monthEnd) { amount, date in
-                Task { await m.addAdvance(empId: advEmpId, amount: amount, date: date) }
-            }
         }
     }
     private func detail(_ l: String, _ v: String) -> some View {
@@ -1514,7 +1372,8 @@ private struct DebtsTab: View {
 }
 
 /// Поле ввода суммы «на карту в этом месяце».
-private struct CardInputRow: View {
+// Не private — переиспользуется Manager→Зарплата (ManagerSalary.swift, реструктура 2026-08-14).
+struct CardInputRow: View {
     let empId: String
     let current: Double
     let onSave: (Double) -> Void
@@ -1548,7 +1407,8 @@ private struct CardInputRow: View {
     }
 }
 
-private struct AdvanceAddSheet: View {
+// Не private — переиспользуется Manager→Зарплата (ManagerSalary.swift, реструктура 2026-08-14).
+struct AdvanceAddSheet: View {
     let monthRange: ClosedRange<Date>
     let onSave: (Double, String) -> Void
     @State private var amount = ""

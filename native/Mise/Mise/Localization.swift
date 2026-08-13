@@ -203,6 +203,11 @@ let STRINGS: [String: [Lang: String]] = [
     "tab.salary":   tr("Salary", "Зарплата", "Stipendio", "Salaire", "Maaş", "Maaş", "Зарплата", "Жалақы"),
     "tab.hookah":   tr("Sessions", "Сессии", "Sessioni", "Sessions", "Seanslar", "Seanslar", "Сесії", "Сеанстар"),
 
+    // Вкладки Manager
+    "tab.shift":     tr("Shift", "Смена", "Turno", "Service", "Növbə", "Vardiya", "Зміна", "Ауысым"),
+    "tab.settings":  tr("Settings", "Настройки", "Impostazioni", "Paramètres", "Ayarlar", "Ayarlar", "Налаштування", "Баптаулар"),
+    "tab.discipline": tr("Discipline", "Дисциплина", "Disciplina", "Discipline", "İntizam", "Disiplin", "Дисципліна", "Тәртіп"),
+
     // Вкладки People
     "tab.shifts": tr("Shifts", "Смены", "Turni", "Services", "Növbələr", "Vardiyalar", "Зміни", "Ауысымдар"),
     "tab.tasks":  tr("Tasks", "Задачи", "Attività", "Tâches", "Tapşırıqlar", "Görevler", "Завдання", "Тапсырмалар"),
@@ -506,6 +511,12 @@ let STRINGS: [String: [Lang: String]] = [
     "pe.noRoleStaff":    tr("No active staff in this role", "Нет активных сотрудников этой роли", "Nessun dipendente attivo per questo ruolo", "Aucun employé actif pour ce rôle", "Bu rolda aktiv işçi yoxdur", "Bu rolde aktif personel yok", "Немає активних співробітників цієї ролі", "Бұл рөлде белсенді қызметкер жоқ"),
     "pe.reportNeedTitle": tr("Enter a title", "Введите заголовок", "Inserisci un titolo", "Saisissez un titre", "Başlıq daxil edin", "Başlık girin", "Введіть заголовок", "Тақырып енгізіңіз"),
     "pe.reportSent":     tr("Request sent", "Заявка отправлена", "Richiesta inviata", "Demande envoyée", "Sorğu göndərildi", "Talep gönderildi", "Заявку надіслано", "Өтініш жіберілді"),
+    "pe.convertToTask":  tr("To task", "В задачу", "In attività", "En tâche", "Tapşırığa", "Göreve", "У завдання", "Тапсырмаға"),
+    "pe.convertToPurchase": tr("To purchase list", "В закуп", "Nella lista acquisti", "Vers la liste d'achats", "Satınalma siyahısına", "Satın alma listesine", "У список закупівлі", "Сатып алу тізіміне"),
+    "pe.reportConverted": tr("Request processed", "Заявка обработана", "Richiesta elaborata", "Demande traitée", "Sorğu işləndi", "Talep işlendi", "Заявку опрацьовано", "Өтініш өңделді"),
+    "pe.category":       tr("Category", "Категория", "Categoria", "Catégorie", "Kateqoriya", "Kategori", "Категорія", "Санат"),
+    "pe.qty":            tr("Quantity", "Количество", "Quantità", "Quantité", "Miqdar", "Miktar", "Кількість", "Саны"),
+    "pe.unit":           tr("Unit", "Единица", "Unità", "Unité", "Vahid", "Birim", "Одиниця", "Бірлік"),
     "pe.pickStaff":      tr("Select an employee", "Выберите сотрудника", "Seleziona un dipendente", "Choisissez un employé", "İşçi seçin", "Personel seçin", "Виберіть співробітника", "Қызметкерді таңдаңыз"),
     "pe.shiftAdded":     tr("Shift added", "Смена добавлена", "Turno aggiunto", "Service ajouté", "Növbə əlavə edildi", "Vardiya eklendi", "Зміну додано", "Ауысым қосылды"),
     "pe.noPrevWeek":     tr("No shifts last week", "На прошлой неделе смен нет", "Nessun turno la settimana scorsa", "Aucun service la semaine dernière", "Keçən həftə növbə yoxdur", "Geçen hafta vardiya yok", "Минулого тижня змін немає", "Өткен аптада ауысым жоқ"),
@@ -584,6 +595,7 @@ let STRINGS: [String: [Lang: String]] = [
     "pe.paymentNote":    tr("Note", "Заметка", "Nota", "Note", "Qeyd", "Not", "Нотатка", "Ескертпе"),
     "pe.savePayment":    tr("Save payment", "Сохранить выплату", "Salva pagamento", "Enregistrer le paiement", "Ödənişi yadda saxla", "Ödemeyi kaydet", "Зберегти виплату", "Төлемді сақтау"),
     "pe.paymentSaved":   tr("Payment saved", "Выплата сохранена", "Pagamento salvato", "Paiement enregistré", "Ödəniş yadda saxlanıldı", "Ödeme kaydedildi", "Виплату збережено", "Төлем сақталды"),
+    "pe.insufficientInkassation": tr("Not enough cash in the register for {date}: available {avail}", "Недостаточно инкассации за {date}: доступно {avail}", "Cassa insufficiente per il {date}: disponibile {avail}", "Caisse insuffisante pour le {date} : disponible {avail}", "{date} üçün kassada kifayət qədər nağd pul yoxdur: mövcud {avail}", "{date} için kasada yeterli nakit yok: mevcut {avail}", "Недостатньо інкасації за {date}: доступно {avail}", "{date} үшін кассада қолма-қол ақша жеткіліксіз: қолжетімді {avail}"),
 
     // People — смены / явка / обмены
     "pe.swaps":          tr("Swaps", "Обмены", "Scambi", "Échanges", "Dəyişmələr", "Takaslar", "Обміни", "Алмасулар"),
@@ -636,6 +648,8 @@ let STRINGS: [String: [Lang: String]] = [
     "pe.ordersN":        tr("Orders · {n}", "Заказы · {n}", "Ordini · {n}", "Commandes · {n}", "Sifarişlər · {n}", "Siparişler · {n}", "Замовлення · {n}", "Тапсырыстар · {n}"),
     "pe.checklists":     tr("Audits", "Аудиты", "Audit", "Audits", "Auditlər", "Denetimler", "Аудити", "Аудиттер"),
     "pe.auditTab":       tr("Checks", "Проверки", "Controlli", "Contrôles", "Yoxlamalar", "Kontroller", "Перевірки", "Тексерулер"),
+    "pe.checklistTemplates": tr("Templates", "Шаблоны", "Modelli", "Modèles", "Şablonlar", "Şablonlar", "Шаблони", "Үлгілер"),
+    "pe.verification":   tr("Verification", "Верификация", "Verifica", "Vérification", "Yoxlama", "Doğrulama", "Верифікація", "Верификация"),
     "pe.techcards":      tr("Tech cards", "Техкарты", "Schede tecniche", "Fiches techniques", "Texnoloji kartlar", "Teknik kartlar", "Техкарти", "Техкарталар"),
     "pe.open":           tr("Opening", "Открытие", "Apertura", "Ouverture", "Açılış", "Açılış", "Відкриття", "Ашылу"),
     "pe.close":          tr("Closing", "Закрытие", "Chiusura", "Fermeture", "Bağlanış", "Kapanış", "Закриття", "Жабылу"),

@@ -91,13 +91,12 @@ struct PeopleBody: View {
                     .tabItem { Label(t("tab.shifts"), systemImage: "calendar") }.tag("shifts")
                 AppTabPage(refresh: { await refreshTasks() }) { TasksTab(m: m, showForm: $showTaskForm) }
                     .tabItem { Label(t("tab.tasks"), systemImage: "checklist") }.tag("tasks")
-                    .badge(m.newReportsCount)
                 AppTabPage(refresh: { await refreshOps() }) { ZalTab(m: m) }
                     .tabItem { Label(t("tab.hall"), systemImage: "storefront") }.tag("ops")
                     .badge(m.activeOrders.isEmpty ? 0 : m.activeOrders.count)
                 AppTabPage(refresh: { await m.loadPurchase() }) { PurchaseTab(m: m) }
                     .tabItem { Label(t("tab.purchase"), systemImage: "cart") }.tag("purchase")
-                AppTabPage(refresh: { await m.loadSalary(); await m.loadSalaryDebt() }) { PeopleSalaryTab(m: m) }
+                AppTabPage(refresh: { await m.loadSalary() }) { PeopleSalaryTab(m: m) }
                     .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
             }
             .tint(PEOPLE_ACCENT)
@@ -125,9 +124,7 @@ struct PeopleBody: View {
                 if !m.menuLoaded { await m.loadMenu() }
                 if !m.ordersLoaded { await m.loadOrders() }
             case "purchase": if !m.purchaseLoaded { await m.loadPurchase() }
-            case "salary":
-                if !m.salaryLoaded { await m.loadSalary() }
-                await m.loadSalaryDebt()
+            case "salary": if !m.salaryLoaded { await m.loadSalary() }
             default:       if !m.schedLoaded { await m.loadSchedule() }
             }
         }
@@ -140,7 +137,6 @@ struct PeopleBody: View {
         switch m.shiftsView {
         case "swaps": await m.loadSwaps()
         case "audit": await m.loadChecklists(); await m.loadAudits()
-        case "discipline": await m.loadDiscipline()
         default: await m.loadAttendance(); await m.loadSchedule()
         }
     }

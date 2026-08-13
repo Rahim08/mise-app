@@ -15,10 +15,15 @@ struct ChecklistEdit: Identifiable {
 // «Смена» — открытие/закрытие, весь персонал по цеху. Восьмёрка выделена в отдельную пилюлю
 // в ShiftAuditHub (Д5, флаттенинг: раньше был пикер Смена|Восьмёрка внутри «Рутины», теперь
 // это отдельные пилюли одного уровня — ShiftAuditHub переключает контент напрямую).
+// Редактирование шаблонов (создание/роль/пункты) переехало в Manager→Настройки→Чек-листы
+// (реструктура 2026-08-13). Менеджерская верификация (grading, было Д4 2026-07-31) —
+// переехала туда же (реструктура 2026-08-14, юзер-фидбок + индустрия: SafetyCulture/Jolt/
+// Zenput — «field team исполняет → quality/manager team проверяет через отдельный
+// dashboard», а не внутри той же карточки, что использует исполнитель). Здесь, в People,
+// менеджер теперь только проходит СВОИ чек-листы, как рядовой сотрудник — ничего не
+// верифицирует за других.
 struct RoutineTab: View {
     @Bindable var m: PeopleModel
-    @State private var edit: ChecklistEdit?
-    @State private var showHistory = false
 
     var body: some View {
         Group {
@@ -28,8 +33,6 @@ struct RoutineTab: View {
                 shiftSection
             }
         }
-        .sheet(item: $edit) { e in ChecklistEditSheet(m: m, edit: e) }
-        .sheet(isPresented: $showHistory) { ChecklistHistorySheet(m: m) }
     }
 
     private var shiftSection: some View {
@@ -44,41 +47,13 @@ struct RoutineTab: View {
             } else {
                 ForEach(lists) { list in checklistRow(list) }
             }
-            if m.isManager {
-                Button { edit = ChecklistEdit(listId: nil, role: nil, items: [ChecklistItem(label: "")]) } label: {
-                    Label(t("pe.checklistForRole"), systemImage: "plus")
-                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
-                        .frame(maxWidth: .infinity).padding(.vertical, 13)
-                        .background(RoundedRectangle(cornerRadius: 14).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5])).foregroundStyle(.primary.opacity(0.2)))
-                }
-                .padding(.top, 4)
-                Button { showHistory = true } label: {
-                    Label(t("pe.checklistHistory"), systemImage: "clock.arrow.circlepath")
-                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
-                        .frame(maxWidth: .infinity).padding(.vertical, 12)
-                }
-            }
         }
     }
 
-    // Менеджерская верификация (Д4, 2026-07-31): когда сотрудники дожали прогон до
-    // status="done", карточка менеджера автоматически переключается в grading-режим
-    // (pass/fail/N/A поверх готового чек-листа) — тот же механизм, что у разовых аудитов,
-    // ничего нового не строим. Вынесено в отдельный метод — инлайновый let+тернарник внутри
-    // ForEach-замыкания ломал вывод типов ViewBuilder ("ambiguous use of init").
-    private func gradingNow(_ list: ShiftChecklist) -> Bool { m.isManager && m.completion(list)?.status == "done" }
-    private func gradeCallback(_ list: ShiftChecklist) -> ((Int, String?, String?) async -> Void)? {
-        guard gradingNow(list) else { return nil }
-        return { i, r, photo in await m.gradeChecklistItem(list, i, result: r, photoURL: photo) }
-    }
-
     @ViewBuilder private func checklistRow(_ list: ShiftChecklist) -> some View {
-        ChecklistRunCard(m: m, list: list, run: m.completion(list), showManagerControls: m.isManager,
+        ChecklistRunCard(m: m, list: list, run: m.completion(list), showManagerControls: false,
                           onToggle: { i, photo in await m.toggleChecklistItem(list, i, photoURL: photo) },
-                          onEdit: { edit = ChecklistEdit(listId: list.id, role: list.role, items: (list.itemDetails?.isEmpty == false) ? list.itemDetails! : [ChecklistItem(label: "")]) },
-                          onDelete: { Task { await m.deleteChecklist(list.id) } },
-                          grading: gradingNow(list),
-                          onGrade: gradeCallback(list))
+                          onEdit: {}, onDelete: {})
     }
 
     private var inactiveBanner: some View {

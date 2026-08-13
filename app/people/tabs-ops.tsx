@@ -319,7 +319,7 @@ export function TechCardsView({ isManager, accent, t, toast }: { isManager: bool
 
 // ── PURCHASE TAB (закуп) ─────────────────────────────────────────────────────────
 
-const PURCHASE_CATS = [
+export const PURCHASE_CATS = [
   { id: 'kitchen', label: 'pe.catKitchen' },
   { id: 'bar', label: 'pe.catBar' },
   { id: 'hookah', label: 'pe.catHookah' },

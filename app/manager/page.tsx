@@ -12,6 +12,11 @@ import { AppLoading } from '@/components/AppLoading'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate, fv, displayDate, dd } from '@/lib/format'
+import { ManagerSalaryTab } from './tabs-salary'
+import { ManagerReportsTab } from './tabs-reports'
+import { ManagerChecklistsTab } from './tabs-checklists'
+import { ManagerDisciplineTab } from './tabs-discipline'
+import { ScheduleTab } from '@/components/people/ScheduleTab'
 
 // ── ICONS ─────────────────────────────────────────────────────────────────────
 
@@ -91,6 +96,20 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
   const [mounted, setMounted] = useState(false)
+  // Вкладки Manager (реструктура 2026-08-13, см. docs/MANAGER-PEOPLE-RESTRUCTURE-2026-08-13.md):
+  // «Смена» — прежнее тело экрана без изменений логики. Остальные — новые разделы.
+  const [tab, setTab] = useState('shift')
+  const [settingsSection, setSettingsSection] = useState<'menu' | 'reports' | 'checklists' | 'schedule'>('menu')
+  const [newReportsCount, setNewReportsCount] = useState(0)
+  useEffect(() => {
+    db.from('staff_reports').select('id').eq('status', 'new').then(({ data }: any) => setNewReportsCount((data || []).length))
+  }, [tab, settingsSection])
+  const MANAGER_TABS = [
+    { id: 'shift', label: tr('mg.tabShift') },
+    { id: 'salary', label: tr('mg.tabSalary') },
+    { id: 'settings', label: tr('mg.tabSettings') },
+    { id: 'discipline', label: tr('mg.tabDiscipline') },
+  ]
 
   useEffect(() => {
     setMounted(true)
@@ -392,8 +411,17 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
         </div>
       </div>
 
+      {/* TABS (реструктура 2026-08-13) */}
+      <div style={{ position: 'fixed', top: 56, left: 0, right: 0, zIndex: 290, background: t.hbg, borderBottom: `0.5px solid ${t.sep2}`, padding: '8px 16px' }}>
+        <div style={{ maxWidth: 600, margin: '0 auto' }}>
+          <Segmented options={MANAGER_TABS} value={tab} onChange={setTab} t={t} />
+        </div>
+      </div>
+
+      {tab === 'shift' && (
+      <>
       {/* CONTENT */}
-      <div style={{ position: 'fixed', top: 56, left: 0, right: 0, bottom: 0, overflowY: 'auto', background: t.bg }}>
+      <div style={{ position: 'fixed', top: 104, left: 0, right: 0, bottom: 0, overflowY: 'auto', background: t.bg }}>
         <div style={{ padding: '16px 16px 100px', maxWidth: 600, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
 
           {/* DATE ROW */}
@@ -595,6 +623,59 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
               ? <><svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>{tr('mg.edit')}</>
               : <><svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>{tr('mg.save')}</>}
           </button>
+        </div>
+      )}
+      </>
+      )}
+
+      {/* ЗАРПЛАТА (реструктура 2026-08-13) */}
+      {tab === 'salary' && (
+        <div style={{ position: 'fixed', top: 104, left: 0, right: 0, bottom: 0, overflowY: 'auto', background: t.bg }}>
+          <div style={{ padding: '16px 16px 40px', maxWidth: 600, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
+            <ManagerSalaryTab restaurantId={restaurantId} accent={t.blue} t={t} />
+          </div>
+        </div>
+      )}
+
+      {/* НАСТРОЙКИ (реструктура 2026-08-14): хаб-меню Заявки/Чек-листы/Расписание */}
+      {tab === 'settings' && (
+        <div style={{ position: 'fixed', top: 104, left: 0, right: 0, bottom: 0, overflowY: 'auto', background: t.bg }}>
+          <div style={{ padding: '16px 16px 40px', maxWidth: 600, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
+            {settingsSection === 'menu' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {([
+                  ['reports', tr('pe.reports'), 'M3 8l9 6 9-6M3 8v8a2 2 0 002 2h14a2 2 0 002-2V8M3 8l9-5 9 5', newReportsCount],
+                  ['checklists', tr('pe.auditTab'), 'M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11', 0],
+                  ['schedule', tr('tab.shifts'), 'M3 4h18v18H3zM3 10h18M8 2v4M16 2v4', 0],
+                ] as const).map(([id, label, path, badge]) => (
+                  <button key={id} onClick={() => setSettingsSection(id)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px', borderRadius: 16, border: 'none', background: t.surface, boxShadow: t.sh, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                    <svg width="18" height="18" fill="none" stroke={t.blue} strokeWidth="2" viewBox="0 0 24 24"><path d={path} /></svg>
+                    <span style={{ fontSize: 15, fontWeight: 600, color: t.text, flex: 1 }}>{label}</span>
+                    {badge > 0 && <span style={{ minWidth: 20, height: 20, borderRadius: 10, background: t.red, color: '#fff', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>{badge}</span>}
+                    <svg width="16" height="16" fill="none" stroke={t.text3} strokeWidth="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6" /></svg>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div>
+                <button onClick={() => setSettingsSection('menu')} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: t.blue, fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer', padding: 0, marginBottom: 14 }}>
+                  <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" /></svg>{tr('mg.tabSettings')}
+                </button>
+                {settingsSection === 'reports' && <ManagerReportsTab restaurantId={restaurantId} accent={t.blue} t={t} />}
+                {settingsSection === 'checklists' && <ManagerChecklistsTab restaurantId={restaurantId} accent={t.blue} t={t} />}
+                {settingsSection === 'schedule' && <ScheduleTab restaurantId={restaurantId} accent={t.blue} t={t} toast={showToast} />}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ДИСЦИПЛИНА (реструктура 2026-08-14) */}
+      {tab === 'discipline' && (
+        <div style={{ position: 'fixed', top: 104, left: 0, right: 0, bottom: 0, overflowY: 'auto', background: t.bg }}>
+          <div style={{ padding: '16px 16px 40px', maxWidth: 600, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
+            <ManagerDisciplineTab accent={t.blue} t={t} />
+          </div>
         </div>
       )}
 

@@ -81,6 +81,7 @@ private let NOTIFY: [String: [String]] = [
     "notify.attendanceBody":     ["{name} checked in", "{name} пришёл(а)", "{name} è arrivato/a", "{name} est arrivé(e)", "{name} gəldi", "{name} geldi", "{name} прийшов(ла)", "{name} келді"],
     "notify.attendanceBodyLate": ["{name} checked in (+{min} min)", "{name} пришёл(а) (+{min} мин)", "{name} è arrivato/a (+{min} min)", "{name} est arrivé(e) (+{min} min)", "{name} gəldi (+{min} dəq)", "{name} geldi (+{min} dk)", "{name} прийшов(ла) (+{min} хв)", "{name} келді (+{min} мин)"],
 
+    "notify.newReportTitle":        ["New request", "Новая заявка", "Nuova richiesta", "Nouvelle demande", "Yeni sorğu", "Yeni talep", "Нова заявка", "Жаңа өтініш"],
     "notify.purchaseTitle":         ["{category} · Purchase", "{category} · Закуп", "{category} · Acquisti", "{category} · Achats", "{category} · Satınalma", "{category} · Satın alma", "{category} · Закупівля", "{category} · Сатып алу"],
     "notify.purchaseDigestTitle":   ["Purchase — daily summary", "Закуп за день", "Acquisti — riepilogo del giorno", "Achats — bilan du jour", "Satınalma — günün xülasəsi", "Satın alma — günlük özet", "Закупівля за день", "Күндік сатып алу қорытындысы"],
     "notify.purchaseDigestBody":    ["{n} items to purchase", "{n} позиц. к закупке", "{n} voci da acquistare", "{n} articles à acheter", "alınacaq {n} mövqe", "satın alınacak {n} kalem", "{n} позиц. до закупівлі", "сатып алынатын {n} позиция"],

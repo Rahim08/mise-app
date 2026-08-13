@@ -97,18 +97,6 @@ final class PeopleModel {
     var purchaseLoaded = false
     var purchaseSeg = "todo" // todo | done
 
-    // дисциплина (история опозданий)
-    var discRecords: [AttendanceRecord] = []
-    var discGrace = 5
-    var discLoaded = false
-    var discPeriod = "thisMonth" // thisMonth | lastMonth | 30d | 90d
-    var discSel: String? = nil
-    /// Провал = менеджер поставил fail при верификации смены (result="fail" независимо от
-    /// галочки сотрудника) — виноваты все, у кого attendance_records за тот день (и тот же
-    /// цех, если чек-лист цеховой; все, если общий), не тот, кто именно тапнул чекбокс
-    /// (Д4, 2026-07-31 — attribution по галочке ненадёжна, сознательный отказ).
-    var checklistFailMap: [String: [ChecklistFailDay]] = [:]
-
     init(rid: String, myId: String, myName: String, isManager: Bool, myRole: String?) {
         self.rid = rid; self.myId = myId; self.myName = myName; self.isManager = isManager; self.myRole = myRole
     }
@@ -234,10 +222,9 @@ final class PeopleModel {
         reportsLoaded = true
     }
     /// Видимость: менеджер/владелец видит все; сотрудник — только свои.
-    var visibleReports: [StaffReport] {
-        isManager ? reports : reports.filter { $0.author_id == myId }
-    }
-    var newReportsCount: Int { isManager ? reports.filter { ($0.status ?? "new") == "new" }.count : 0 }
+    // Личный вид: свои заявки, независимо от роли (реструктура 2026-08-13) — разбор ВСЕХ
+    // заявок сотрудников переехал в Manager→Настройки→Заявки (ManagerReports.swift).
+    var visibleReports: [StaffReport] { reports.filter { $0.author_id == myId } }
 
     func createReport(type: String, title: String, desc: String) async -> Bool {
         guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { flash(t("pe.reportNeedTitle")); return false }
@@ -250,15 +237,12 @@ final class PeopleModel {
             try await DB.from("staff_reports").insert(v).run()
         } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
         flash(t("pe.reportSent"))
+        // Юзер-фидбок 2026-08-14: менеджер видел новую заявку только зайдя в Manager сам —
+        // добавлен пуш, тот же паттерн, что покупки/явка (audience managers).
+        await Notify.send(type: "report", title: t("pe.newReport"), body: title,
+                          audience: ["managers": true], titleKey: "notify.newReportTitle")
         await loadReports()
         return true
-    }
-    func setReportStatus(_ r: StaffReport, _ status: String) async {
-        if let i = reports.firstIndex(where: { $0.id == r.id }) { reports[i].status = status }
-        let resolvedAt: Any = status == "resolved" ? ISO8601DateFormatter().string(from: Date()) : NSNull()
-        do {
-            try await DB.from("staff_reports").update(["status": status, "resolved_at": resolvedAt]).eq("id", r.id).run()
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadReports() }
     }
     func deleteReport(_ id: String) async {
         reports.removeAll { $0.id == id }
@@ -268,7 +252,8 @@ final class PeopleModel {
     }
     func canDeleteReport(_ r: StaffReport) -> Bool { isManager || r.author_id == myId }
 
-    // MARK: зарплата
+    // MARK: зарплата (личный вид; фонд/оплата/долг всех сотрудников — Manager→Зарплата,
+    // реструктура 2026-08-13, см. docs/MANAGER-PEOPLE-RESTRUCTURE-2026-08-13.md)
 
     struct SalRow: Identifiable {
         let id: String; let name: String; let salary: Double; let absences: Int
@@ -279,9 +264,6 @@ final class PeopleModel {
     }
 
     var salaryViewMonth: Date = Date()
-    var salaryDebtTotal: Double = 0
-    var salaryDebtByEmp: [String: Double] = [:]
-    var salaryPayoutDay: Int? = nil
 
     var salaryIsCurrentMonth: Bool { Calendar.current.isDate(salaryViewMonth, equalTo: Date(), toGranularity: .month) }
 
@@ -292,9 +274,8 @@ final class PeopleModel {
         Task { await loadSalary() }
     }
 
-    // Расчёт зарплаты за произвольный месяц — канон расчёта решение 2026-07-17, долг/выплаты
-    // добавлены 2026-07-28 (salary_payments — факт фактической выдачи, отдельно от авансов
-    // и от monthly_card_amounts, который не трогаем — юзер вводит его сам помесячно).
+    // Расчёт зарплаты за произвольный месяц — канон расчёта решение 2026-07-17 (паритет
+    // с ManagerModel.computeSalary — там же фонд/долг/оплата всех сотрудников).
     private func computeSalary(monthOf date: Date) async -> [SalRow] {
         let cal = Calendar.current
         let ym = String(key(date).prefix(7))
@@ -336,61 +317,9 @@ final class PeopleModel {
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedSalary(); return }
         #endif
-        if salaryPayoutDay == nil {
-            salaryPayoutDay = (try? await DB.from("restaurant_settings").select("salary_payout_day").limit(1).list(PayoutDayRow.self))?.first?.salary_payout_day
-        }
-        var list = await computeSalary(monthOf: salaryViewMonth)
-        if !isManager { list = list.filter { $0.name == myName } }
-        salaryRows = list; salaryLoaded = true
-    }
-    var salaryFund: Double { salaryRows.reduce(0) { $0 + $1.total } }
-    // Буфер до реального дня выплаты (salary_payout_day, ЗП-долг 2026-07-28): ЗП за месяц
-    // выдаётся 10-15 числа СЛЕДУЮЩЕГО месяца, поэтому 100% начисления должно достигаться не
-    // в конце текущего месяца, а на payout_day следующего.
-    var salaryAccruedToday: Double {
-        guard salaryIsCurrentMonth else { return salaryFund }
-        let cal = Calendar.current
-        let day = cal.component(.day, from: Date())
-        let daysInMonth = cal.range(of: .day, in: .month, for: salaryViewMonth)?.count ?? 30
-        let denom = salaryPayoutDay.map { daysInMonth + $0 } ?? daysInMonth
-        return salaryFund * Double(min(day, denom)) / Double(denom)
-    }
-
-    // Задолженность = сумма непокрытого остатка по всем ЗАКРЫТЫМ месяцам (строго раньше
-    // текущего), окно 6 месяцев назад (дальше пересчёт дороже — 5 запросов на месяц).
-    // debtTrackingStart: до этой фичи (2026-07-28) факт выплаты нигде не фиксировался,
-    // поэтому по умолчанию «не оплачено» = вся история месяцев — ложный многотысячный долг
-    // сразу при первом включении (юзер-фидбек 2026-07-29). Легаси-месяцы (до и включая
-    // июль 2026) в подсчёт никогда не попадают.
-    private var debtTrackingStart: Date { DateComponents(calendar: .current, year: 2026, month: 8, day: 1).date ?? Date() }
-    func loadSalaryDebt() async {
-        guard isManager else { return }
-        var total = 0.0; var byEmp: [String: Double] = [:]
-        for i in 1...6 {
-            guard let d = Calendar.current.date(byAdding: .month, value: -i, to: Date()), d >= debtTrackingStart else { continue }
-            let list = await computeSalary(monthOf: d)
-            for r in list where r.remaining > 0 {
-                total += r.remaining
-                byEmp[r.id, default: 0] += r.remaining
-            }
-        }
-        salaryDebtTotal = total; salaryDebtByEmp = byEmp
-    }
-
-    func markSalaryPaid(employeeId: String, amount: Double, method: String, date: Date, note: String) async {
-        guard amount > 0 else { return }
-        let period = String(key(salaryViewMonth).prefix(7)) + "-01"
-        let paidAt = ISO8601DateFormatter().string(from: date)
-        let noteVal: Any = note.isEmpty ? NSNull() : note
-        do {
-            try await DB.from("salary_payments").insert([
-                "employee_id": employeeId, "period": period, "amount": amount, "method": method,
-                "paid_at": paidAt, "note": noteVal,
-            ]).run()
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
-        flash(t("pe.paymentSaved"))
-        await loadSalary()
-        await loadSalaryDebt()
+        let list = await computeSalary(monthOf: salaryViewMonth)
+        salaryRows = list.filter { $0.name == myName }
+        salaryLoaded = true
     }
 
     // MARK: расписание
@@ -411,8 +340,9 @@ final class PeopleModel {
             if !schedules.isEmpty { flash(t("refreshFailed")) }
             return
         }
-        var rows = schAll
-        if !isManager { rows = rows.filter { $0.staff_id == myId } }
+        // Личный вид (реструктура 2026-08-13): всегда своя смена, даже у менеджера —
+        // весь график всех сотрудников теперь Manager→Настройки→Расписание.
+        let rows = schAll.filter { $0.staff_id == myId }
         schedules = rows.sorted { $0.date < $1.date }
         schedLoaded = true
     }
@@ -445,55 +375,6 @@ final class PeopleModel {
         flash(t("pe.shiftAdded"))
         await loadSchedule()
         return true
-    }
-    func deleteSchedule(_ id: String) async {
-        schedules.removeAll { $0.id == id }
-        do {
-            try await DB.from("staff_schedules").delete().eq("id", id).run()
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadSchedule() }
-    }
-    /// Пакетное добавление: один сотрудник на несколько дат с одним временем.
-    func createSchedules(staffId: String, dates: [String], start: String, end: String, note: String) async -> Bool {
-        guard !staffId.isEmpty else { flash(t("pe.pickStaff")); return false }
-        guard !dates.isEmpty else { flash(t("pe.pickDates")); return false }
-        var inserts: [[String: Any]] = []
-        for d in dates {
-            var v: [String: Any] = ["restaurant_id": rid, "staff_id": staffId, "date": d, "shift_start": start, "shift_end": end]
-            if !note.isEmpty { v["note"] = note }
-            inserts.append(v)
-        }
-        do {
-            try await DB.from("staff_schedules").insert(inserts).run()
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
-        flash(t("pe.copied", ["n": "\(inserts.count)"]))
-        await loadSchedule()
-        return true
-    }
-    func copyLastWeek() async {
-        let cal = Calendar.current
-        let weekday = cal.component(.weekday, from: Date())
-        let monday = cal.date(byAdding: .day, value: -((weekday + 5) % 7), to: Date()) ?? Date()
-        let lastMon = cal.date(byAdding: .day, value: -7, to: monday) ?? monday
-        let lastSun = cal.date(byAdding: .day, value: -1, to: monday) ?? monday
-        let prev = (try? await DB.from("staff_schedules").select()
-            .gte("date", key(lastMon)).lte("date", key(lastSun)).list(Schedule.self)) ?? []
-        guard !prev.isEmpty else { flash(t("pe.noPrevWeek")); return }
-        var inserts: [[String: Any]] = []
-        for s in prev {
-            guard let d = df.date(from: s.date), let nd = cal.date(byAdding: .day, value: 7, to: d) else { continue }
-            var v: [String: Any] = ["restaurant_id": rid, "staff_id": s.staff_id ?? "", "date": key(nd)]
-            if let st = s.shift_start { v["shift_start"] = st }
-            if let en = s.shift_end { v["shift_end"] = en }
-            if let n = s.note { v["note"] = n }
-            inserts.append(v)
-        }
-        if !inserts.isEmpty {
-            do {
-                try await DB.from("staff_schedules").insert(inserts).run()
-            } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
-        }
-        flash(t("pe.copied", ["n": "\(inserts.count)"]))
-        await loadSchedule()
     }
 
     // MARK: явка
@@ -951,41 +832,9 @@ final class PeopleModel {
         if allDone { flash(clType == "open" ? t("pe.checklistOpenDone") : t("pe.checklistCloseDone")) }
     }
 
-    /// Менеджерская верификация сменного чек-листа (Д4, 2026-07-31): result выставляется
-    /// НЕЗАВИСИМО от done сотрудника — тот же приём, что у gradeAuditItem, просто пишет в
-    /// completions (по цеху/дню), а не в auditRuns. Без гео-гейта и без guard на openShiftId —
-    /// менеджер проверяет независимо от своей явки (владелец может смотреть удалённо),
-    /// вызывается только когда прогон уже status='done' (см. gradingNow в RoutineTab).
-    func gradeChecklistItem(_ list: ShiftChecklist, _ idx: Int, result: String?, photoURL: String? = nil) async {
-        let itemsList = list.itemDetails ?? []
-        var state = completion(list)?.items_state ?? Array(repeating: ChecklistItemState(done: false), count: itemsList.count)
-        while state.count <= idx { state.append(ChecklistItemState(done: false)) }
-        var item = state[idx]
-        if result == "pass", idx < itemsList.count, itemsList[idx].photo_required, photoURL == nil, item.photo_url == nil {
-            flash(t("pe.photoRequired")); return
-        }
-        item.result = result
-        item.done = result != nil
-        if let photoURL { item.photo_url = photoURL }
-        state[idx] = item
-        var allDone = state.allSatisfy { $0.done }
-        guard let i = completions.firstIndex(where: { $0.checklist_id == list.id }) else { return }
-        let cid = completions[i].id
-        // Против lost update: свежая копия с сервера, мержим ТОЛЬКО свой индекс.
-        if let freshState = try? await DB.from("shift_checklist_completions").select().fresh().eq("id", cid).limit(1).list(ChecklistCompletion.self).first?.items_state {
-            var merged = freshState
-            while merged.count <= idx { merged.append(ChecklistItemState(done: false)) }
-            merged[idx] = item
-            state = merged
-            allDone = state.allSatisfy { $0.done }
-        }
-        completions[i].items_state = state
-        do {
-            try await DB.from("shift_checklist_completions").update([
-                "items_state": state.map { $0.asDict }, "status": allDone ? "done" : "in_progress",
-            ] as [String: Any]).eq("id", cid).run()
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])) }
-    }
+    // gradeChecklistItem (менеджерская верификация сменного чек-листа) переехала в
+    // ManagerChecklistsModel (ManagerChecklists.swift, реструктура 2026-08-14) — People
+    // больше не верифицирует чужие прогоны, только свои проходит.
 
     // Журнал уведомлений переехал в AppModel (глобальный колокольчик, см. MainView.swift) —
     // раньше жил только тут (People→Смены), но уведомления бывают о любом модуле.
@@ -1143,45 +992,11 @@ final class PeopleModel {
     }
 
     /// Восьмёрка — общий пул для менеджеров (Д3, 2026-07-30): по исследованию обход-восьмёрка
-    /// исторически обязанность сменного менеджера, не рядового персонала — раньше сотрудник
-    /// мог завести себе личный шаблон, теперь любой шаблон виден/редактируем любому менеджеру,
-    /// рядовой сотрудник не видит вкладку вообще (гейтится в ZalTab).
+    /// исторически обязанность сменного менеджера, не рядового персонала — рядовой сотрудник
+    /// не видит вкладку вообще (гейтится в ZalTab). Редактирование шаблонов переехало в
+    /// Manager→Настройки (реструктура 2026-08-13, ManagerWalkModel) — здесь менеджер только
+    /// запускает обход и смотрит историю, как личное действие.
     func relevantWalks() -> [WalkTemplate] { isManager ? walkTemplates : [] }
-    func canEditWalk(_ w: WalkTemplate) -> Bool { isManager }
-
-    // -> Bool: см. saveChecklistTemplate — dismiss на вызывающей стороне гейтится на true.
-    @discardableResult
-    func saveWalkTemplate(_ template: WalkTemplate) async -> Bool {
-        let clean = template.blocks
-            .map { WalkBlock(id: $0.id, label: $0.label.trimmingCharacters(in: .whitespaces), categories:
-                $0.categories.map { WalkCategory(id: $0.id, label: $0.label.trimmingCharacters(in: .whitespaces), items:
-                    $0.items.map { WalkItem(id: $0.id, label: $0.label.trimmingCharacters(in: .whitespaces)) }.filter { !$0.label.isEmpty }) }
-                    .filter { !$0.label.isEmpty && !$0.items.isEmpty }) }
-            .filter { !$0.label.isEmpty && !$0.categories.isEmpty }
-        guard !clean.isEmpty else { flash(t("pe.addItem")); return false }
-        var t2 = template; t2.blocks = clean
-        let isNew = !walkTemplates.contains { $0.id == template.id }
-        do {
-            if isNew {
-                var values = t2.asUpdateDict
-                values["restaurant_id"] = rid
-                values["id"] = t2.id
-                try await DB.from("shift_checklists").insert(values).run()
-            } else {
-                try await DB.from("shift_checklists").update(t2.asUpdateDict).eq("id", t2.id).run()
-            }
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
-        flash(t("pe.checklistSaved"))
-        await loadWalks()
-        return true
-    }
-
-    func deleteWalkTemplate(_ id: String) async {
-        walkTemplates.removeAll { $0.id == id }
-        do {
-            try await DB.from("shift_checklists").delete().eq("id", id).run()
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); await loadWalks() }
-    }
 
     /// Итог прогона восьмёрки — пишется ОДНИМ запросом по завершению обхода (не поштучно,
     /// как аудиты: чекбоксы копятся локально в раннере, таймер/шагомер — тоже; сеть нужна
@@ -1380,90 +1195,6 @@ final class PeopleModel {
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // дисциплина
-    struct ChecklistFailDay { let date: String; let role: String?; let items: [String] }
-    struct DiscStat {
-        var shifts = 0; var evaluable = 0; var onTime = 0; var late = 0; var extra = 0; var totalMin = 0; var avgMin = 0; var maxMin = 0; var punct: Int? = nil
-        var checklistFails = 0; var checklistFailDays: [ChecklistFailDay] = []
-    }
-
-    func discRange() -> (String, String) {
-        let cal = Calendar.current; let now = Date()
-        switch discPeriod {
-        case "lastMonth":
-            let startThis = cal.date(from: cal.dateComponents([.year, .month], from: now)) ?? now
-            let startLast = cal.date(byAdding: .month, value: -1, to: startThis) ?? startThis
-            let endLast = cal.date(byAdding: .day, value: -1, to: startThis) ?? startThis
-            return (key(startLast), key(endLast))
-        case "30d": return (key(cal.date(byAdding: .day, value: -29, to: now) ?? now), key(now))
-        case "90d": return (key(cal.date(byAdding: .day, value: -89, to: now) ?? now), key(now))
-        default:
-            let start = cal.date(from: cal.dateComponents([.year, .month], from: now)) ?? now
-            return (key(start), key(now))
-        }
-    }
-
-    func loadDiscipline() async {
-        let (from, to) = discRange()
-        async let recsL = (try? await DB.from("attendance_records").select().gte("date", from).lte("date", to).order("date", ascending: false).limit(3000).list(AttendanceRecord.self)) ?? []
-        async let listsL = (try? await DB.from("shift_checklists").select().eq("kind", "shift").list(ShiftChecklist.self)) ?? []
-        async let compsL = (try? await DB.from("shift_checklist_completions").select().gte("date", from).lte("date", to).limit(3000).list(ChecklistCompletion.self)) ?? []
-        let recs = await recsL
-        if dir.isEmpty {
-            dir = (try? await DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)) ?? []
-        }
-        let g = (try? await DB.from("restaurant_settings").select("late_grace_min").limit(1).list(GraceRow.self))?.first
-        discRecords = recs; discGrace = g?.late_grace_min ?? 5
-
-        let lists = await listsL, comps = await compsL
-        let listById = Dictionary(uniqueKeysWithValues: lists.map { ($0.id, $0) })
-        var attendByDate: [String: [String]] = [:]
-        for r in recs { if let d = r.date, let sid = r.staff_id { attendByDate[d, default: []].append(sid) } }
-        var roleOf: [String: String?] = [:]
-        for s in dir { roleOf[s.id] = s.role }
-        var fm: [String: [ChecklistFailDay]] = [:]
-        for c in comps {
-            guard let cid = c.checklist_id, let list = listById[cid], let date = c.date else { continue }
-            let items = list.itemDetails ?? []
-            let state = c.items_state ?? []
-            var failed: [String] = []
-            for i in items.indices {
-                let eff = i < state.count ? (state[i].result ?? (state[i].done ? "pass" : nil)) : nil
-                if eff == "fail" { failed.append(items[i].label) }
-            }
-            guard !failed.isEmpty else { continue }
-            let attendees = attendByDate[date] ?? []
-            let blamed = list.role == nil ? attendees : attendees.filter { (roleOf[$0] ?? nil) == list.role }
-            for sid in blamed { fm[sid, default: []].append(ChecklistFailDay(date: date, role: list.role, items: failed)) }
-        }
-        checklistFailMap = fm
-        discLoaded = true
-    }
-
-    func discStat(_ sid: String) -> DiscStat {
-        let recs = discRecords.filter { $0.staff_id == sid }
-        let eval = recs.filter { $0.late_minutes != nil }
-        let lateR = eval.filter { ($0.late_minutes ?? 0) > discGrace }
-        let total = lateR.reduce(0) { $0 + ($1.late_minutes ?? 0) }
-        var s = DiscStat()
-        s.shifts = recs.count; s.evaluable = eval.count; s.onTime = eval.count - lateR.count
-        s.late = lateR.count; s.extra = recs.count - eval.count; s.totalMin = total
-        s.avgMin = lateR.isEmpty ? 0 : total / lateR.count
-        s.maxMin = lateR.reduce(0) { max($0, $1.late_minutes ?? 0) }
-        s.punct = eval.isEmpty ? nil : Int((Double(eval.count - lateR.count) / Double(eval.count) * 100).rounded())
-        let failDays = checklistFailMap[sid] ?? []
-        s.checklistFailDays = failDays; s.checklistFails = failDays.reduce(0) { $0 + $1.items.count }
-        return s
-    }
-
-    func saveDiscGrace(_ v: Int) async {
-        let prev = discGrace
-        discGrace = v
-        do {
-            try await DB.from("restaurant_settings").update(["late_grace_min": v]).run()
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); discGrace = prev }
-    }
-
     func flash(_ m: String) {
         toast = m
         Task { try? await Task.sleep(nanoseconds: 2_400_000_000); if toast == m { toast = nil } }
@@ -1488,7 +1219,7 @@ final class PeopleModel {
             .init(id: "e2", name: "Игорь Петров",   salary: 1100, absences: 1, absenceList: ["2026-06-14"], deduct: 20, card: 0, advance: 0, advanceList: [], total: 1080, cash: 1080),
             .init(id: "e3", name: "Мария Соколова", salary: 900,  absences: 2, absenceList: ["2026-06-10", "2026-06-18"], deduct: 30, card: 300, advance: 0, advanceList: [], total: 870, cash: 570),
         ]
-        if !isManager { salaryRows = salaryRows.filter { $0.name == myName } }
+        salaryRows = salaryRows.filter { $0.name == myName }
         salaryLoaded = true
     }
     private func seedSchedule() {
