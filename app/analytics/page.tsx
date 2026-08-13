@@ -1084,20 +1084,9 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   }
 
   const renderSalary = () => {
-    const monthKey = fmtDate(currentDate).slice(0, 7)
-    // Правка суммы на карту за выбранный месяц (каждый месяц своя). Без unique-constraint: update by id или insert.
-    const saveCard = async (emp: any, value: string) => {
-      const amt = Math.max(0, parseFloat(value) || 0)
-      if (amt === cardOf(emp)) return
-      const existing = cardAmounts.find((c: any) => c.employee_id === emp.id)
-      if (existing) {
-        await db.from('monthly_card_amounts').update({ card_amount: amt }).eq('id', existing.id)
-        setCardAmounts((prev: any[]) => prev.map(c => c.id === existing.id ? { ...c, card_amount: amt } : c))
-      } else {
-        const { data } = await db.from('monthly_card_amounts').insert({ employee_id: emp.id, month: monthKey, card_amount: amt }).select().single()
-        if (data) setCardAmounts((prev: any[]) => [...prev, data])
-      }
-    }
+    // Read-only (92f6076/86f1673) — редактирование карты/аванса только в Manager→Зарплата
+    // (app/manager/tabs-salary.tsx), единая точка правки, без риска задвоенной правки
+    // (A3, аудит 2026-08-13: этот таб оставался живым write-путём вопреки докам, починено).
     const totFOT = employees.reduce((s: number, e: any) => s + e.salary, 0)
     const totCard = employees.reduce((s: number, e: any) => s + cardOf(e), 0)
     const totCash = employees.reduce((s: number, emp: any) => {
@@ -1168,16 +1157,12 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
                       {paid > 0 && <div style={{ fontSize: 12, color: t.green, marginBottom: 6 }}>{tr('pe.paidStatus')} −{currency}{fv(paid)}</div>}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <span style={{ fontSize: 13, color: t.orange, fontWeight: 600 }}>{tr('an.cashShort')} {currency}{fv(remaining)}</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontSize: 12, color: t.text3 }}>{tr('an.toCard')} {currency}</span>
-                          <input
-                            key={`card-${emp.id}-${monthKey}`} type="number" inputMode="decimal"
-                            defaultValue={card || ''} placeholder="0"
-                            onBlur={e => saveCard(emp, e.target.value)}
-                            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                            style={{ width: 84, textAlign: 'right', padding: '7px 10px', borderRadius: 9, border: `1px solid ${t.sep2}`, background: t.fill, color: t.purple, fontWeight: 700, fontSize: 14, fontFamily: 'inherit', outline: 'none' }}
-                          />
-                        </div>
+                        {card > 0 && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 12, color: t.text3 }}>{tr('an.toCard')}</span>
+                            <span style={{ fontSize: 14, fontWeight: 700, color: t.purple }}>{currency}{fv(card)}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

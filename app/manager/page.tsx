@@ -89,6 +89,19 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   // менеджера (дельту), не затираем то, что параллельно записал addAdvance/settleDebt в Analytics.
   const [loadedInkExpense, setLoadedInkExpense] = useState('')
   const [loadedInkReason, setLoadedInkReason] = useState('')
+  // Долги (Б, 2026-08-09/13 — веб-паритет A2, аудит 2026-08-13, до этого фича существовала
+  // только в iOS). «В долг» — расход вписан, но наличных в кассе не хватило: попадает в
+  // shift_expenses с реальной датой (is_paid=false, Analytics видит accrual сразу), но не
+  // уменьшает кассу дня, пока не погашен. Погашение — прямо при закрытии текущей смены.
+  const [catUnpaid, setCatUnpaid] = useState<Record<string, boolean>>({})
+  const [empUnpaid, setEmpUnpaid] = useState<Record<string, boolean>>({})
+  const [openDebts, setOpenDebts] = useState<{ id: string; shiftId: string; date: string; categoryId: string | null; categoryName: string; employeeId: string | null; amount: number }[]>([])
+  const [selectedDebtIds, setSelectedDebtIds] = useState<Set<string>>(new Set())
+  const [showDebts, setShowDebts] = useState(false)
+  // Сумма долгов, уже погашенных ЭТОЙ сменой (settlement-строка с paid_shift_id == shift.id) —
+  // без этого пересохранение того же дня теряло сумму погашения из кассы (A1, аудит 2026-08-13,
+  // тот же баг что и в iOS ManagerView.swift, порт фикса).
+  const [settledTodayTotal, setSettledTodayTotal] = useState(0)
   const [showSummary, setShowSummary] = useState(false)
   const [checklistWarn, setChecklistWarn] = useState(false)
   const [locked, setLocked] = useState(false) // сохранённая смена закрыта «матовым стеклом» до Редактировать
@@ -124,6 +137,23 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     setEmployees(empsRes.data || [])
     setCategories(catsRes.data || [])
     await loadDay(restaurantId, new Date(), empsRes.data || [], catsRes.data || [])
+    await loadOpenDebts()
+  }
+
+  // Все открытые долги ресторана (не только за сегодня) — менеджер мог не успеть заплатить
+  // неделю назад, долг всё ещё должен быть виден сегодня (паритет с ManagerView.swift).
+  const loadOpenDebts = async () => {
+    const { data: unpaid } = await db.from('shift_expenses').select('id, shift_id, category_id, category_name, employee_id, amount').eq('restaurant_id', restaurantId).eq('is_paid', false)
+    if (!unpaid || unpaid.length === 0) { setOpenDebts([]); return }
+    const shiftIds = Array.from(new Set(unpaid.map((e: any) => e.shift_id).filter(Boolean)))
+    const { data: shiftDates } = await db.from('shifts').select('id, date').in('id', shiftIds)
+    const dateById: Record<string, string> = {}
+    ;(shiftDates || []).forEach((s: any) => { dateById[s.id] = s.date })
+    const rows = unpaid
+      .map((e: any) => ({ id: e.id, shiftId: e.shift_id, date: dateById[e.shift_id], categoryId: e.category_id, categoryName: e.category_name || '—', employeeId: e.employee_id, amount: Number(e.amount || 0) }))
+      .filter((d: any) => d.date)
+      .sort((a: any, b: any) => a.date < b.date ? -1 : 1)
+    setOpenDebts(rows)
   }
 
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2500) }
@@ -170,13 +200,20 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       ])
       const amounts: Record<string, string> = {}; const notes: Record<string, string> = {}
       const extras: Record<string, string> = {}
-      // paid_shift_id != null — строка управляется экраном «Долги» (Analytics), не формой
-      // закрытия смены: не должна всплывать как редактируемое поле (см. persistShift ниже).
+      const catUn: Record<string, boolean> = {}; const empUn: Record<string, boolean> = {}
+      // paid_shift_id != null — строка управляется экраном долгов, не формой закрытия смены:
+      // не должна всплывать как редактируемое поле (см. persistShift ниже). Отдельно (вне этого
+      // фильтра) считаем settledTodayTotal — сумму долгов, погашенных ИМЕННО этой сменой, чтобы
+      // пересохранение дня её не теряло (A1, аудит 2026-08-13).
+      const shId = sh.id
+      setSettledTodayTotal((exps || []).filter((e: any) => e.paid_shift_id === shId).reduce((s: number, e: any) => s + Number(e.amount || 0), 0))
       ;(exps || []).filter((e: any) => !e.paid_shift_id).forEach((e: any) => {
-        if (e.employee_id) { extras[e.employee_id] = String(e.amount) }
-        else if (e.category_id) { amounts[e.category_id] = String(e.amount); if (e.note) notes[e.category_id] = e.note }
+        const unpaid = e.is_paid === false
+        if (e.employee_id) { extras[e.employee_id] = String(e.amount); if (unpaid) empUn[e.employee_id] = true }
+        else if (e.category_id) { amounts[e.category_id] = String(e.amount); if (e.note) notes[e.category_id] = e.note; if (unpaid) catUn[e.category_id] = true }
       })
       setCatAmounts(amounts); setCatNotes(notes); setEmpExtras(extras)
+      setCatUnpaid(catUn); setEmpUnpaid(empUn)
       const ink = Array.isArray(inkList) ? inkList[0] : inkList
       const nextExpense = ink && ink.expense > 0 ? String(ink.expense) : ''
       const nextReason = ink?.reason || ''
@@ -186,6 +223,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       setShift(null); setLocked(false); setIncome(''); setIncomeCard(''); setInkSum(''); setInkExpense(''); setInkReason('')
       setLoadedInkExpense(''); setLoadedInkReason('')
       setCatAmounts({}); setCatNotes({}); setEmpExtras({})
+      setCatUnpaid({}); setEmpUnpaid({}); setSettledTodayTotal(0)
     }
     setLoading(false)
   }
@@ -250,17 +288,23 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     if (autoAbsences.has(empId)) setAutoAbsences(prev => { const n = new Set(prev); n.delete(empId); return n })
   }
 
+  const debtSettleTotal = () => openDebts.filter(d => selectedDebtIds.has(d.id)).reduce((s, d) => s + d.amount, 0)
+
   const calc = () => {
     const inc = parseFloat(income) || 0          // наличные
     const card = parseFloat(incomeCard) || 0     // безнал — не участвует в кассе
     const ink = parseFloat(inkSum) || 0
-    const catTotal = categories.reduce((s, c) => s + (parseFloat(catAmounts[c.id] || '0') || 0), 0)
-    const empExtraTotal = employees.reduce((s, e) => s + (parseFloat(empExtras[e.id] || '0') || 0), 0)
-    const totalExp = catTotal + empExtraTotal + ink
+    // «В долг» — не покидал кассу сегодня, не входит в дневной расход/баланс (паритет с iOS).
+    const catTotal = categories.reduce((s, c) => catUnpaid[c.id] ? s : s + (parseFloat(catAmounts[c.id] || '0') || 0), 0)
+    const empExtraTotal = employees.reduce((s, e) => empUnpaid[e.id] ? s : s + (parseFloat(empExtras[e.id] || '0') || 0), 0)
+    // Погашение отмеченных сейчас долгов + уже погашенных этой сменой ранее (A1) — реальные
+    // наличные, покинувшие кассу именно сегодня.
+    const debtTotal = debtSettleTotal() + settledTodayTotal
+    const totalExp = catTotal + empExtraTotal + debtTotal + ink
     const opening = shift?.opening_balance || 0
     const balance = opening + inc - totalExp
     const inkNet = ink - (parseFloat(inkExpense) || 0) // итог инкассации после расхода
-    return { inc, card, ink, catTotal, empExtraTotal, totalExp, balance, opening, inkNet }
+    return { inc, card, ink, catTotal, empExtraTotal, debtTotal, totalExp, balance, opening, inkNet }
   }
 
   // Core DB write — used by explicit save AND auto-save on day switch.
@@ -270,6 +314,28 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   // audit-2026-07-12) — применялся раньше только к iOS, веб оставался уязвим (аудит 2026-08-04).
   // Если теперь упадёт финальный delete — видимые дубли, следующее успешное сохранение само
   // подчистит (старые id уже собраны).
+  // Погашение отмеченных долгов — прямо здесь, в текущей смене (не отдельным действием). 1) новая
+  // строка расхода датой ТЕКУЩЕЙ смены (считается в кассе/отчётах именно сегодня) — вставляем
+  // ПЕРВОЙ, чтобы при сбое сети старый долг остался открытым, а не тихо потерялся; 2) исходная
+  // строка помечается «оплачено» — paid_shift_id ≠ её собственный shift_id → навсегда исключена
+  // из подсчёта своего родного дня. Паритет с ManagerView.swift persistDebtSettlements.
+  const persistDebtSettlements = async (shiftId: string, dateStr: string) => {
+    const ids = Array.from(selectedDebtIds)
+    if (ids.length === 0) return
+    const selected = openDebts.filter(d => ids.includes(d.id))
+    if (selected.length === 0) return
+    const newRows = selected.map(d => ({
+      shift_id: shiftId, restaurant_id: restaurantId, amount: d.amount,
+      category_id: d.categoryId || undefined, category_name: d.categoryName,
+      employee_id: d.employeeId || undefined, is_paid: true, paid_shift_id: shiftId,
+      note: `${tr('an.debtSettleNote')} (${d.date})`,
+    }))
+    const { error: insErr } = await db.from('shift_expenses').insert(newRows)
+    if (insErr) throw new Error(insErr.message)
+    const { error: updErr } = await db.from('shift_expenses').update({ is_paid: true, paid_at: dateStr, paid_shift_id: shiftId }).in('id', ids)
+    if (updErr) throw new Error(updErr.message)
+  }
+
   const persistShift = async (sh = shift, dateForInk = currentDate) => {
     if (!sh) return
     const { inc, card, ink, totalExp, balance } = calc()
@@ -285,11 +351,11 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     const inserts: any[] = []
     categories.forEach(c => {
       const amt = parseFloat(catAmounts[c.id] || '0')
-      if (amt > 0) inserts.push({ shift_id: sh.id, restaurant_id: restaurantId, category_id: c.id, category_name: c.name, amount: amt, note: catNotes[c.id] || '' })
+      if (amt > 0) inserts.push({ shift_id: sh.id, restaurant_id: restaurantId, category_id: c.id, category_name: c.name, amount: amt, note: catNotes[c.id] || '', is_paid: !catUnpaid[c.id] })
     })
     employees.forEach(emp => {
       const extra = parseFloat(empExtras[emp.id] || '0')
-      if (extra > 0) inserts.push({ shift_id: sh.id, restaurant_id: restaurantId, employee_id: emp.id, category_name: emp.name + ' (экстра)', amount: extra })
+      if (extra > 0) inserts.push({ shift_id: sh.id, restaurant_id: restaurantId, employee_id: emp.id, category_name: emp.name + ' (экстра)', amount: extra, is_paid: !empUnpaid[emp.id] })
     })
     if (inserts.length > 0) {
       const { error: insErr } = await db.from('shift_expenses').insert(inserts)
@@ -326,6 +392,14 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     // db.from вернёт ошибку молча (не бросит), что безвредно: авто-прогулов до миграции не бывает.
     await db.from('shift_absences').update({ shift_id: sh.id, source: 'manager' }).eq('restaurant_id', restaurantId).eq('date', fmtDate(dateForInk))
     setAutoAbsences(new Set())
+
+    await persistDebtSettlements(sh.id, fmtDate(dateForInk))
+    if (selectedDebtIds.size > 0) {
+      const settledIds = selectedDebtIds
+      setOpenDebts(ds => ds.filter(d => !settledIds.has(d.id)))
+      setSelectedDebtIds(new Set())
+    }
+
     setShift({ ...sh, income: inc, inkassation: ink, total_expense: totalExp, closing_balance: balance })
     return balance
   }
@@ -363,8 +437,8 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     setSaving(false)
   }
 
-  const { inc, card, ink, catTotal, empExtraTotal, totalExp, balance, opening } = calc()
-  const netExpense = catTotal + empExtraTotal
+  const { inc, card, ink, catTotal, empExtraTotal, debtTotal, totalExp, balance, opening } = calc()
+  const netExpense = catTotal + empExtraTotal + debtTotal
   const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
   const dowRaw = currentDate.toLocaleDateString(locale, { weekday: 'long' })
   const dowName = dowRaw.charAt(0).toUpperCase() + dowRaw.slice(1)
@@ -475,14 +549,18 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{emp.name}</span>
                         {isAuto && absent && <span title={tr('mg.autoTitle')} style={{ fontSize: 9, fontWeight: 800, color: t.orange, background: `${t.orange}1a`, padding: '2px 6px', borderRadius: 6, textTransform: 'uppercase', letterSpacing: 0.3, flexShrink: 0, textDecoration: 'none' }}>{tr('mg.auto')}</span>}
                       </div>
+                      <button onClick={() => setEmpUnpaid({ ...empUnpaid, [emp.id]: !empUnpaid[emp.id] })} title={tr('mg.debtToggle')}
+                        style={{ width: 26, height: 26, borderRadius: '50%', border: 'none', background: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke={empUnpaid[emp.id] ? t.orange : t.text4} strokeWidth="2" opacity={empUnpaid[emp.id] ? 1 : 0.4}><circle cx="12" cy="12" r="10" fill={empUnpaid[emp.id] ? t.orange : 'none'} stroke="none" opacity={empUnpaid[emp.id] ? 0.16 : 0} /><circle cx="12" cy="12" r="10" /><path d="M12 8v5M12 16h.01" strokeLinecap="round" /></svg>
+                      </button>
                       <input type="number" value={extra}
                         onChange={e => setEmpExtras({ ...empExtras, [emp.id]: e.target.value })}
                         placeholder="€ 0"
                         style={{
                           width: 90, textAlign: 'right', padding: '8px 10px', border: 'none', borderRadius: 10,
                           fontSize: 14, fontFamily: 'inherit', outline: 'none',
-                          background: parseFloat(extra) > 0 ? `${t.green}18` : t.fill,
-                          color: parseFloat(extra) > 0 ? t.green : t.text,
+                          background: empUnpaid[emp.id] ? `${t.orange}18` : parseFloat(extra) > 0 ? `${t.green}18` : t.fill,
+                          color: empUnpaid[emp.id] ? t.orange : parseFloat(extra) > 0 ? t.green : t.text,
                           fontWeight: parseFloat(extra) > 0 ? 600 : 400,
                         }}
                       />
@@ -498,6 +576,37 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                 })}
               </div>
 
+              {/* ДОЛГИ (веб-паритет A2, аудит 2026-08-13) — плашка со счётчиком, раскрывается в
+                  список ВСЕХ открытых долгов ресторана. Галочка отмечает погашение сегодня —
+                  сумма сразу входит в кассу/расчёт, отдельной кнопки «Погасить» нет, сохраняется
+                  вместе с обычным «Сохранить смену». Паритет с ManagerView.swift debtsBadge. */}
+              {openDebts.length > 0 && (
+                <div style={{ background: t.surface, borderRadius: 14, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
+                  <button onClick={() => setShowDebts(!showDebts)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: 14, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
+                    <svg width="16" height="16" fill={t.orange} stroke="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 8v5M12 16h.01" stroke="#fff" strokeWidth="2" strokeLinecap="round" /></svg>
+                    <span style={{ fontSize: 15, fontWeight: 500, color: t.text }}>{tr('an.debts')}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#fff', background: t.orange, borderRadius: 20, padding: '2px 7px' }}>{openDebts.length}</span>
+                    <div style={{ flex: 1 }} />
+                    {debtSettleTotal() > 0 && <span style={{ fontSize: 13, fontWeight: 600, color: t.orange }}>−€{fv(debtSettleTotal())}</span>}
+                    <svg width="11" height="11" fill="none" stroke={t.text3} strokeWidth="2.2" viewBox="0 0 24 24" style={{ transform: showDebts ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}><path d="M6 9l6 6 6-6" /></svg>
+                  </button>
+                  {showDebts && openDebts.map((d, i) => {
+                    const sel = selectedDebtIds.has(d.id)
+                    return (
+                      <button key={d.id} onClick={() => setSelectedDebtIds(prev => { const n = new Set(prev); sel ? n.delete(d.id) : n.add(d.id); return n })}
+                        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'none', border: 'none', borderTop: `0.5px solid ${t.sep2}`, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                        <svg width="18" height="18" fill={sel ? t.orange : 'none'} stroke={sel ? t.orange : t.text4} strokeWidth="2" viewBox="0 0 24 24">{sel ? <path d="M9 12l2 2 4-4M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /> : <circle cx="12" cy="12" r="9" />}</svg>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 14, fontWeight: 500, color: t.text }}>{d.categoryName}</div>
+                          <div style={{ fontSize: 11, color: t.text3, marginTop: 1 }}>{d.date}</div>
+                        </div>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: t.orange }}>€{fv(d.amount)}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+
               {/* РАСХОДЫ */}
               <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('mg.secExpenses')}</div>
               <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
@@ -508,14 +617,18 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                     <div key={cat.id}>
                       <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 12, borderBottom: i < categories.length - 1 && !hasVal ? `0.5px solid ${t.sep2}` : 'none' }}>
                         <div style={{ flex: 1, fontSize: 15, color: t.text }}>{cat.name}</div>
+                        <button onClick={() => setCatUnpaid({ ...catUnpaid, [cat.id]: !catUnpaid[cat.id] })} title={tr('mg.debtToggle')}
+                          style={{ width: 26, height: 26, borderRadius: '50%', border: 'none', background: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+                          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke={catUnpaid[cat.id] ? t.orange : t.text4} strokeWidth="2" opacity={catUnpaid[cat.id] ? 1 : 0.4}><circle cx="12" cy="12" r="10" fill={catUnpaid[cat.id] ? t.orange : 'none'} stroke="none" opacity={catUnpaid[cat.id] ? 0.16 : 0} /><circle cx="12" cy="12" r="10" /><path d="M12 8v5M12 16h.01" strokeLinecap="round" /></svg>
+                        </button>
                         <input type="number" value={val}
                           onChange={e => setCatAmounts({ ...catAmounts, [cat.id]: e.target.value })}
                           placeholder="€ 0"
                           style={{
                             width: 110, textAlign: 'right', padding: '8px 10px', border: 'none', borderRadius: 10,
                             fontSize: 14, fontFamily: 'inherit', outline: 'none',
-                            background: hasVal ? `${t.blue}14` : t.fill,
-                            color: hasVal ? t.blue : t.text, fontWeight: hasVal ? 600 : 400,
+                            background: catUnpaid[cat.id] ? `${t.orange}14` : hasVal ? `${t.blue}14` : t.fill,
+                            color: catUnpaid[cat.id] ? t.orange : hasVal ? t.blue : t.text, fontWeight: hasVal ? 600 : 400,
                           }}
                         />
                       </div>
@@ -646,7 +759,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                 {([
                   ['reports', tr('pe.reports'), 'M3 8l9 6 9-6M3 8v8a2 2 0 002 2h14a2 2 0 002-2V8M3 8l9-5 9 5', newReportsCount],
                   ['checklists', tr('pe.auditTab'), 'M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11', 0],
-                  ['schedule', tr('tab.shifts'), 'M3 4h18v18H3zM3 10h18M8 2v4M16 2v4', 0],
+                  ['schedule', tr('pe.schedule'), 'M3 4h18v18H3zM3 10h18M8 2v4M16 2v4', 0],
                 ] as const).map(([id, label, path, badge]) => (
                   <button key={id} onClick={() => setSettingsSection(id)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px', borderRadius: 16, border: 'none', background: t.surface, boxShadow: t.sh, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
                     <svg width="18" height="18" fill="none" stroke={t.blue} strokeWidth="2" viewBox="0 0 24 24"><path d={path} /></svg>
@@ -699,6 +812,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
               {categories.filter(c => parseFloat(catAmounts[c.id] || '0') > 0).map(c => (
                 <SRow key={c.id} label={c.name + (catNotes[c.id] ? ` (${catNotes[c.id]})` : '')} value={`−€${fv(parseFloat(catAmounts[c.id]))}`} color={t.red} t={t} />
               ))}
+              {debtSettleTotal() > 0 && <SRow label={tr('an.debts')} value={`−€${fv(debtSettleTotal())}`} color={t.orange} t={t} />}
               {parseFloat(inkSum) > 0 && <SRow label={tr('mg.secCollection')} value={`−€${fv(parseFloat(inkSum))}`} color={t.orange} t={t} />}
               {parseFloat(inkExpense) > 0 && <SRow label={`${tr('mg.inkExpenseShort')}${inkReason ? ` (${inkReason})` : ''}`} value={`−€${fv(parseFloat(inkExpense))}`} color={t.red} t={t} />}
               <div style={{ borderTop: `1.5px solid ${t.sep}`, marginTop: 10, paddingTop: 10 }}>

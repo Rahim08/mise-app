@@ -5,7 +5,7 @@ import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
 import { CHECKLIST_ROLES, PRESET_TEMPLATES, ChecklistCard, normItem, normState } from '@/app/people/audits'
 import { lbl, inp } from '@/app/people/shared'
-import { Sheet, roleLabel } from '@/components/people/helpers'
+import { Sheet, roleLabel, getMe } from '@/components/people/helpers'
 
 // Manager → Настройки → Чек-листы (реструктура 2026-08-13/14). Два раздела: Шаблоны
 // (kind="shift", открытие/закрытие) и Верификация (pass/fail проверка прогонов, было
@@ -23,6 +23,9 @@ export function ManagerChecklistsTab({ restaurantId, accent, t }: { restaurantId
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState('')
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2500) }
+  // B5 (аудит 2026-08-13): Manager нигде не подгружал свою личность → myId="" ломал
+  // created_by (violation-задачи без автора) и notifyIds (менеджер слал пуш сам себе).
+  const myId = getMe(restaurantId).id || ''
 
   const load = async () => {
     setLoading(true)
@@ -103,7 +106,7 @@ export function ManagerChecklistsTab({ restaurantId, accent, t }: { restaurantId
             <ChecklistCard key={list.id}
               title={list.role ? tr(roleLabel(list.role)) : tr('pe.general')}
               items={items} state={state} canFill={true} grading
-              restaurantId={restaurantId} completionId={completion?.id} staff={staff} myId=""
+              restaurantId={restaurantId} completionId={completion?.id} staff={staff} myId={myId}
               accent={accent} t={t} toast={showToast}
               onSetItem={(idx, next) => setVerifyItem(list, idx, next)}
             />

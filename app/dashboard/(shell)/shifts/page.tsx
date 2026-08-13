@@ -75,6 +75,14 @@ export default function ShiftsPage() {
   // менеджера (дельту), не затираем то, что параллельно записал addAdvance/settleDebt в Analytics.
   const [loadedInkExpense, setLoadedInkExpense] = useState('')
   const [loadedInkReason, setLoadedInkReason] = useState('')
+  // Долги (веб-паритет A2, аудит 2026-08-13 — до этого фича существовала только в iOS и
+  // мобильном app/manager/page.tsx). См. те же комментарии там для полного контекста.
+  const [catUnpaid, setCatUnpaid] = useState<Record<string, boolean>>({})
+  const [empUnpaid, setEmpUnpaid] = useState<Record<string, boolean>>({})
+  const [openDebts, setOpenDebts] = useState<{ id: string; shiftId: string; date: string; categoryId: string | null; categoryName: string; employeeId: string | null; amount: number }[]>([])
+  const [selectedDebtIds, setSelectedDebtIds] = useState<Set<string>>(new Set())
+  const [showDebts, setShowDebts] = useState(false)
+  const [settledTodayTotal, setSettledTodayTotal] = useState(0)
   const [locked, setLocked] = useState(false)
   const [saving, setSaving] = useState(false)
   const [loadingDay, setLoadingDay] = useState(true)
@@ -82,6 +90,20 @@ export default function ShiftsPage() {
   const [closing, setClosing] = useState(false)
   const [err, setErr] = useState('')
   const [checklistWarn, setChecklistWarn] = useState(false)
+
+  const loadOpenDebts = async () => {
+    const { data: unpaid } = await db.from('shift_expenses').select('id, shift_id, category_id, category_name, employee_id, amount').eq('restaurant_id', restaurantId).eq('is_paid', false)
+    if (!unpaid || unpaid.length === 0) { setOpenDebts([]); return }
+    const shiftIds = Array.from(new Set(unpaid.map((e: any) => e.shift_id).filter(Boolean)))
+    const { data: shiftDates } = await db.from('shifts').select('id, date').in('id', shiftIds)
+    const dateById: Record<string, string> = {}
+    ;(shiftDates || []).forEach((s: any) => { dateById[s.id] = s.date })
+    const rows = unpaid
+      .map((e: any) => ({ id: e.id, shiftId: e.shift_id, date: dateById[e.shift_id], categoryId: e.category_id, categoryName: e.category_name || '—', employeeId: e.employee_id, amount: Number(e.amount || 0) }))
+      .filter((d: any) => d.date)
+      .sort((a: any, b: any) => a.date < b.date ? -1 : 1)
+    setOpenDebts(rows)
+  }
 
   const loadAbsencesByDate = async (dateStr: string) => {
     const { data: abs } = await db.from('shift_absences').select('*').eq('restaurant_id', restaurantId).eq('date', dateStr)
@@ -105,12 +127,18 @@ export default function ShiftsPage() {
       setInkSum(sh.inkassation > 0 ? String(sh.inkassation) : '')
       const { data: exps } = await db.from('shift_expenses').select('*').eq('shift_id', sh.id)
       const amounts: Record<string, string> = {}; const notes: Record<string, string> = {}; const extras: Record<string, string> = {}
-      // paid_shift_id != null — строка управляется экраном «Долги» (Analytics), не форма смены.
+      const catUn: Record<string, boolean> = {}; const empUn: Record<string, boolean> = {}
+      // paid_shift_id != null — строка управляется экраном долгов, не форма смены. Отдельно
+      // считаем settledTodayTotal — сумму долгов, погашенных ИМЕННО этой сменой (A1, аудит
+      // 2026-08-13), иначе пересохранение дня теряет сумму погашения из кассы.
+      setSettledTodayTotal((exps || []).filter((e: any) => e.paid_shift_id === sh.id).reduce((s: number, e: any) => s + Number(e.amount || 0), 0))
       ;(exps || []).filter((e: any) => !e.paid_shift_id).forEach((e: any) => {
-        if (e.employee_id) extras[e.employee_id] = String(e.amount)
-        else if (e.category_id) { amounts[e.category_id] = String(e.amount); if (e.note) notes[e.category_id] = e.note }
+        const unpaid = e.is_paid === false
+        if (e.employee_id) { extras[e.employee_id] = String(e.amount); if (unpaid) empUn[e.employee_id] = true }
+        else if (e.category_id) { amounts[e.category_id] = String(e.amount); if (e.note) notes[e.category_id] = e.note; if (unpaid) catUn[e.category_id] = true }
       })
       setCatAmounts(amounts); setCatNotes(notes); setEmpExtras(extras)
+      setCatUnpaid(catUn); setEmpUnpaid(empUn)
       await loadAbsencesByDate(dateStr)
       const { data: inkList } = await db.from('inkassations').select('*').eq('shift_id', sh.id).limit(1)
       const ink = Array.isArray(inkList) ? inkList[0] : inkList
@@ -122,6 +150,7 @@ export default function ShiftsPage() {
       setShift(null); setLocked(false); setIncome(''); setIncomeCard(''); setInkSum(''); setInkExpense(''); setInkReason('')
       setLoadedInkExpense(''); setLoadedInkReason('')
       setCatAmounts({}); setCatNotes({}); setAbsences([]); setAutoAbsences(new Set()); setEmpExtras({})
+      setCatUnpaid({}); setEmpUnpaid({}); setSettledTodayTotal(0)
     }
     setLoadingDay(false)
   }
@@ -135,6 +164,7 @@ export default function ShiftsPage() {
       ])
       setEmployees(empsRes.data || []); setCategories(catsRes.data || [])
       await loadDay(currentDate)
+      await loadOpenDebts()
     })()
   }, [restaurantId])
 
@@ -184,17 +214,20 @@ export default function ShiftsPage() {
     if (autoAbsences.has(empId)) setAutoAbsences(prev => { const n = new Set(prev); n.delete(empId); return n })
   }
 
+  const debtSettleTotal = () => openDebts.filter(d => selectedDebtIds.has(d.id)).reduce((s, d) => s + d.amount, 0)
+
   const calc = () => {
     const inc = parseFloat(income) || 0
     const card = parseFloat(incomeCard) || 0
     const ink = parseFloat(inkSum) || 0
-    const catTotal = categories.reduce((s, c) => s + (parseFloat(catAmounts[c.id] || '0') || 0), 0)
-    const empExtraTotal = employees.reduce((s, e) => s + (parseFloat(empExtras[e.id] || '0') || 0), 0)
-    const totalExp = catTotal + empExtraTotal + ink
+    const catTotal = categories.reduce((s, c) => catUnpaid[c.id] ? s : s + (parseFloat(catAmounts[c.id] || '0') || 0), 0)
+    const empExtraTotal = employees.reduce((s, e) => empUnpaid[e.id] ? s : s + (parseFloat(empExtras[e.id] || '0') || 0), 0)
+    const debtTotal = debtSettleTotal() + settledTodayTotal
+    const totalExp = catTotal + empExtraTotal + debtTotal + ink
     const opening = shift?.opening_balance || 0
     const balance = opening + inc - totalExp
     const inkNet = ink - (parseFloat(inkExpense) || 0)
-    return { inc, card, ink, catTotal, empExtraTotal, totalExp, balance, opening, inkNet }
+    return { inc, card, ink, catTotal, empExtraTotal, debtTotal, totalExp, balance, opening, inkNet }
   }
 
   // Расходы/инкассация пересобираются целиком: insert-новых → delete-старых-по-id
@@ -203,6 +236,23 @@ export default function ShiftsPage() {
   // Тот же порядок, что в app/manager/page.tsx (коммит b34d583) и ManagerView.swift.
   // Если упадёт финальный delete — останутся видимые дубли, следующее успешное сохранение
   // их подчистит (старые id уже собраны).
+  const persistDebtSettlements = async (shiftId: string, dateStr: string) => {
+    const ids = Array.from(selectedDebtIds)
+    if (ids.length === 0) return
+    const selected = openDebts.filter(d => ids.includes(d.id))
+    if (selected.length === 0) return
+    const newRows = selected.map(d => ({
+      shift_id: shiftId, restaurant_id: restaurantId, amount: d.amount,
+      category_id: d.categoryId || undefined, category_name: d.categoryName,
+      employee_id: d.employeeId || undefined, is_paid: true, paid_shift_id: shiftId,
+      note: `${tr('an.debtSettleNote')} (${d.date})`,
+    }))
+    const { error: insErr } = await db.from('shift_expenses').insert(newRows)
+    if (insErr) throw new Error(insErr.message)
+    const { error: updErr } = await db.from('shift_expenses').update({ is_paid: true, paid_at: dateStr, paid_shift_id: shiftId }).in('id', ids)
+    if (updErr) throw new Error(updErr.message)
+  }
+
   const persistShift = async (sh = shift, dateForInk = currentDate) => {
     if (!sh) return
     const { inc, card, ink, totalExp, balance } = calc()
@@ -216,11 +266,11 @@ export default function ShiftsPage() {
     const inserts: any[] = []
     categories.forEach(c => {
       const amt = parseFloat(catAmounts[c.id] || '0')
-      if (amt > 0) inserts.push({ shift_id: sh.id, restaurant_id: restaurantId, category_id: c.id, category_name: c.name, amount: amt, note: catNotes[c.id] || '' })
+      if (amt > 0) inserts.push({ shift_id: sh.id, restaurant_id: restaurantId, category_id: c.id, category_name: c.name, amount: amt, note: catNotes[c.id] || '', is_paid: !catUnpaid[c.id] })
     })
     employees.forEach(emp => {
       const extra = parseFloat(empExtras[emp.id] || '0')
-      if (extra > 0) inserts.push({ shift_id: sh.id, restaurant_id: restaurantId, employee_id: emp.id, category_name: emp.name + ' (экстра)', amount: extra })
+      if (extra > 0) inserts.push({ shift_id: sh.id, restaurant_id: restaurantId, employee_id: emp.id, category_name: emp.name + ' (экстра)', amount: extra, is_paid: !empUnpaid[emp.id] })
     })
     if (inserts.length > 0) {
       const { error: insErr } = await db.from('shift_expenses').insert(inserts)
@@ -250,6 +300,14 @@ export default function ShiftsPage() {
 
     await db.from('shift_absences').update({ shift_id: sh.id, source: 'manager' }).eq('restaurant_id', restaurantId).eq('date', fmtDate(dateForInk))
     setAutoAbsences(new Set())
+
+    await persistDebtSettlements(sh.id, fmtDate(dateForInk))
+    if (selectedDebtIds.size > 0) {
+      const settledIds = selectedDebtIds
+      setOpenDebts(ds => ds.filter(d => !settledIds.has(d.id)))
+      setSelectedDebtIds(new Set())
+    }
+
     setShift({ ...sh, income: inc, inkassation: ink, total_expense: totalExp, closing_balance: balance })
     return balance
   }
@@ -292,8 +350,8 @@ export default function ShiftsPage() {
     await loadHistory()
   }
 
-  const { ink, catTotal, empExtraTotal, balance } = calc()
-  const netExpense = catTotal + empExtraTotal
+  const { ink, catTotal, empExtraTotal, debtTotal, balance } = calc()
+  const netExpense = catTotal + empExtraTotal + debtTotal
   const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
   const dowRaw = currentDate.toLocaleDateString(locale, { weekday: 'long' })
   const dowName = dowRaw.charAt(0).toUpperCase() + dowRaw.slice(1)
@@ -359,9 +417,13 @@ export default function ShiftsPage() {
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{emp.name}</span>
                         {isAuto && absent && <Badge tone="warn">{tr('mg.auto')}</Badge>}
                       </div>
+                      <button onClick={() => setEmpUnpaid({ ...empUnpaid, [emp.id]: !empUnpaid[emp.id] })} disabled={locked} title={tr('mg.debtToggle')}
+                        style={{ width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: locked ? 'default' : 'pointer', flexShrink: 0 }}>
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={empUnpaid[emp.id] ? 'var(--warn)' : 'var(--tx3)'} strokeWidth="2" opacity={empUnpaid[emp.id] ? 1 : 0.4}><circle cx="12" cy="12" r="10" /><path d="M12 8v5M12 16h.01" strokeLinecap="round" /></svg>
+                      </button>
                       <input type="number" value={empExtras[emp.id] || ''} disabled={locked}
                         onChange={e => setEmpExtras({ ...empExtras, [emp.id]: e.target.value })}
-                        placeholder="€ 0" className="ui-input" style={numInput} />
+                        placeholder="€ 0" className="ui-input" style={{ ...numInput, background: empUnpaid[emp.id] ? 'var(--warn-soft)' : numInput.background }} />
                       <button onClick={() => toggleAbsence(emp.id)} disabled={locked} className="ui-press" style={{
                         width: 28, height: 28, borderRadius: '50%', border: `1.5px solid ${absent ? 'var(--danger)' : 'rgba(var(--seprgb),.3)'}`,
                         background: absent ? 'var(--danger-soft)' : 'none', cursor: locked ? 'default' : 'pointer', flexShrink: 0,
@@ -374,6 +436,33 @@ export default function ShiftsPage() {
                 })}
               </Card>
 
+              {openDebts.length > 0 && (
+                <Card>
+                  <button onClick={() => setShowDebts(!showDebts)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
+                    <svg width="14" height="14" fill="var(--warn)" stroke="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 8v5M12 16h.01" stroke="var(--surface, #fff)" strokeWidth="2" strokeLinecap="round" /></svg>
+                    <span style={{ fontWeight: 700, fontSize: '.85rem', color: 'var(--tx)' }}>{tr('an.debts')}</span>
+                    <Badge tone="warn">{openDebts.length}</Badge>
+                    <div style={{ flex: 1 }} />
+                    {debtSettleTotal() > 0 && <span style={{ fontSize: '.8rem', fontWeight: 700, color: 'var(--warn)' }}>−€{fv(debtSettleTotal())}</span>}
+                    <svg width="10" height="10" fill="none" stroke="var(--tx3)" strokeWidth="2.2" viewBox="0 0 24 24" style={{ transform: showDebts ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}><path d="M6 9l6 6 6-6" /></svg>
+                  </button>
+                  {showDebts && openDebts.map(d => {
+                    const sel = selectedDebtIds.has(d.id)
+                    return (
+                      <button key={d.id} onClick={() => setSelectedDebtIds(prev => { const n = new Set(prev); sel ? n.delete(d.id) : n.add(d.id); return n })}
+                        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderTop: 'var(--hairline)', background: 'none', border: 'none', borderTopStyle: 'solid', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                        <svg width="15" height="15" fill={sel ? 'var(--warn)' : 'none'} stroke={sel ? 'var(--warn)' : 'var(--tx3)'} strokeWidth="2" viewBox="0 0 24 24">{sel ? <path d="M9 12l2 2 4-4M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /> : <circle cx="12" cy="12" r="9" />}</svg>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '.8rem', color: 'var(--tx)' }}>{d.categoryName}</div>
+                          <div style={{ fontSize: '.7rem', color: 'var(--tx3)' }}>{d.date}</div>
+                        </div>
+                        <span style={{ fontSize: '.8rem', fontWeight: 700, color: 'var(--warn)' }}>€{fv(d.amount)}</span>
+                      </button>
+                    )
+                  })}
+                </Card>
+              )}
+
               <Card>
                 <div style={{ fontWeight: 700, fontSize: '.85rem', color: 'var(--tx)', marginBottom: 4 }}>{tr('mg.secExpenses')}</div>
                 {categories.map(cat => {
@@ -383,9 +472,13 @@ export default function ShiftsPage() {
                     <div key={cat.id} style={{ padding: '8px 0', borderBottom: 'var(--hairline)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                         <div style={{ flex: 1, fontSize: '.85rem', color: 'var(--tx)' }}>{cat.name}</div>
+                        <button onClick={() => setCatUnpaid({ ...catUnpaid, [cat.id]: !catUnpaid[cat.id] })} disabled={locked} title={tr('mg.debtToggle')}
+                          style={{ width: 24, height: 24, borderRadius: '50%', border: 'none', background: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: locked ? 'default' : 'pointer', flexShrink: 0 }}>
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={catUnpaid[cat.id] ? 'var(--warn)' : 'var(--tx3)'} strokeWidth="2" opacity={catUnpaid[cat.id] ? 1 : 0.4}><circle cx="12" cy="12" r="10" /><path d="M12 8v5M12 16h.01" strokeLinecap="round" /></svg>
+                        </button>
                         <input type="number" value={val} disabled={locked}
                           onChange={e => setCatAmounts({ ...catAmounts, [cat.id]: e.target.value })}
-                          placeholder="€ 0" className="ui-input" style={numInput} />
+                          placeholder="€ 0" className="ui-input" style={{ ...numInput, background: catUnpaid[cat.id] ? 'var(--warn-soft)' : numInput.background }} />
                       </div>
                       {hasVal && (
                         <input value={catNotes[cat.id] || ''} disabled={locked}

@@ -28,6 +28,11 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   const [paying, setPaying] = useState(false)
   const [debt, setDebt] = useState<{ total: number; byId: Record<string, number> }>({ total: 0, byId: {} })
   const [payoutDay, setPayoutDay] = useState<number | null>(null)
+  const [toast, setToast] = useState('')
+  const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2500) }
+  const [advFor, setAdvFor] = useState<{ id: string; name: string } | null>(null)
+  const [advAmount, setAdvAmount] = useState('')
+  const [advDate, setAdvDate] = useState(fmtDate(new Date()))
 
   const computeMonth = async (targetYm: string) => {
     const monthStart = `${targetYm}-01`
@@ -48,7 +53,11 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     const absByEmp: Record<string, string[]> = {}
     ;(abs || []).forEach((a: any) => { if (a.source !== 'auto') (absByEmp[a.employee_id] = absByEmp[a.employee_id] || []).push(a.date) })
     const advByEmp: Record<string, number> = {}
-    ;(advs || []).forEach((a: any) => { advByEmp[a.employee_id] = (advByEmp[a.employee_id] || 0) + Number(a.amount || 0) })
+    const advRowsByEmp: Record<string, any[]> = {}
+    ;(advs || []).forEach((a: any) => {
+      advByEmp[a.employee_id] = (advByEmp[a.employee_id] || 0) + Number(a.amount || 0)
+      ;(advRowsByEmp[a.employee_id] = advRowsByEmp[a.employee_id] || []).push(a)
+    })
     const paidByEmp: Record<string, number> = {}; const lastPaidByEmp: Record<string, string> = {}
     ;(pays || []).forEach((p: any) => {
       paidByEmp[p.employee_id] = (paidByEmp[p.employee_id] || 0) + Number(p.amount || 0)
@@ -64,7 +73,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       const total = Math.max(0, salary - deduct)
       const cash = Math.max(0, total - advance - card)
       const remaining = Math.max(0, cash - paid)
-      return { id: e.id, name: e.name, salary, dates, absences: dates.length, deduct, card, advance, paid, remaining, total, cash, lastPaidAt: lastPaidByEmp[e.id] || null, hours: hoursByName[e.name] || 0 }
+      return { id: e.id, name: e.name, salary, dates, absences: dates.length, deduct, card, advance, advanceRows: (advRowsByEmp[e.id] || []).sort((a, b) => a.date < b.date ? 1 : -1), paid, remaining, total, cash, lastPaidAt: lastPaidByEmp[e.id] || null, hours: hoursByName[e.name] || 0 }
     })
   }
 
@@ -112,6 +121,70 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       closing_balance: opening, status: 'open',
     }).select().single()
     return sh?.id ?? null
+  }
+
+  // «На карту» / авансы (2026-08-14, аудит A3/A4 — веб раньше вообще не имел этой
+  // функциональности, редактирование жило в app/analytics/page.tsx и было ошибочно ЖИВЫМ,
+  // хотя доки называли Analytics read-only; см. docs/MANAGER-RESTRUCTURE-AUDIT-2026-08-13.md).
+  // Паритет с iOS ManagerSalary.swift saveMonthlyCard/addAdvance/deleteAdvance — 1:1 логика.
+  const saveCard = async (empId: string, value: string) => {
+    const amt = Math.max(0, parseFloat(value) || 0)
+    const row = rows.find(r => r.id === empId)
+    if (row && amt === row.card) return
+    const { data: existing } = await db.from('monthly_card_amounts').select('id').eq('employee_id', empId).eq('month', ym).limit(1)
+    const ex = Array.isArray(existing) ? existing[0] : existing
+    const { error } = ex?.id
+      ? await db.from('monthly_card_amounts').update({ card_amount: amt }).eq('id', ex.id)
+      : await db.from('monthly_card_amounts').insert({ restaurant_id: restaurantId, employee_id: empId, month: ym, card_amount: amt })
+    if (error) { showToast(tr('pe.saveFailed', { err: error.message })); return }
+    await load()
+  }
+
+  const findShiftForDate = async (dateStr: string) => {
+    const { data } = await db.from('shifts').select('id, date, inkassation').eq('restaurant_id', restaurantId).eq('date', dateStr).order('opened_at', { ascending: false }).limit(1)
+    return Array.isArray(data) ? data[0] : data
+  }
+  const findInkassation = async (shiftId: string) => {
+    const { data } = await db.from('inkassations').select('shift_id, amount, expense, reason, total, salary').eq('shift_id', shiftId).limit(1)
+    return Array.isArray(data) ? data[0] : data
+  }
+
+  const addAdvance = async (empId: string, empName: string, amount: number, dateStr: string) => {
+    const { error: insErr } = await db.from('salary_advances').insert({ restaurant_id: restaurantId, employee_id: empId, amount, date: dateStr, note: `${empName} аванс` })
+    if (insErr) { showToast(tr('pe.saveFailed', { err: insErr.message })); return }
+    const shift = await findShiftForDate(dateStr)
+    if (shift) {
+      const ink = await findInkassation(shift.id)
+      const baseAmount = ink?.amount ?? shift.inkassation ?? 0
+      const newExpense = (ink?.expense || 0) + amount
+      const reasonParts = [ink?.reason || null, `${empName} аванс`].filter(Boolean)
+      const newReason = reasonParts.join(', ')
+      const newTotal = baseAmount - newExpense - (ink?.salary || 0)
+      if (ink) {
+        await db.from('inkassations').update({ expense: newExpense, reason: newReason, total: newTotal }).eq('shift_id', shift.id)
+      } else {
+        await db.from('inkassations').insert({ shift_id: shift.id, restaurant_id: restaurantId, date: dateStr, amount: baseAmount, expense: newExpense, reason: newReason, salary: 0, total: newTotal })
+      }
+    } else {
+      showToast(tr('an.advanceInkassationMissing'))
+    }
+    await load(); await loadDebt()
+  }
+
+  const deleteAdvance = async (a: any, empName: string) => {
+    const { error } = await db.from('salary_advances').delete().eq('id', a.id)
+    if (error) { showToast(tr('pe.saveFailed', { err: error.message })); return }
+    const shift = await findShiftForDate(a.date)
+    if (shift) {
+      const ink = await findInkassation(shift.id)
+      if (ink) {
+        const newExpense = Math.max(0, (ink.expense || 0) - Number(a.amount || 0))
+        const newReason = (ink.reason || '').split(', ').filter((s: string) => !s.startsWith(`${empName} аванс`)).join(', ')
+        const newTotal = (ink.amount ?? shift.inkassation ?? 0) - newExpense - (ink.salary || 0)
+        await db.from('inkassations').update({ expense: newExpense, reason: newReason, total: newTotal }).eq('shift_id', shift.id)
+      }
+    }
+    await load(); await loadDebt()
   }
 
   // Выплата ЗП «прямо из инкассации» — списывает сумму с инкассации дня оплаты
@@ -200,8 +273,6 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
           { _l: tr('pe.worked'), v: fmtHours(r.hours, tr), c: t.text2, hide: r.hours <= 0 },
           { _l: tr('pe.absencesN', { n: r.absences }), v: r.dates.map(absDate).join(', '), c: t.text2, small: true, hide: r.absences === 0 },
           { _l: tr('pe.absenceDeduct'), v: `−${eur(r.deduct)}`, c: t.red, hide: r.deduct === 0 },
-          { _l: tr('pe.toCard'), v: eur(r.card), c: t.blue, hide: r.card === 0 },
-          { _l: tr('pe.advances'), v: `−${eur(r.advance)}`, c: t.orange, hide: !r.advance },
           { _l: tr('pe.inCash'), v: eur(r.cash), c: t.green, hide: false },
         ].filter((x: any) => !x.hide).map((x: any, i, arr) => (
           <div key={x._l} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 16px', borderBottom: i < arr.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
@@ -209,6 +280,32 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
             <span style={{ fontSize: x.small ? 12 : 15, fontWeight: x.small ? 500 : 700, color: x.c, textAlign: 'right' }}>{x.v}</span>
           </div>
         ))}
+        {/* «На карту» — редактируемо только здесь (Manager), Analytics read-only (A3, аудит 2026-08-13) */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 16px', borderBottom: `0.5px solid ${t.sep2}` }}>
+          <span style={{ fontSize: 14, color: t.text2 }}>{tr('pe.toCard')}</span>
+          <input
+            key={`card-${r.id}-${ym}`} type="number" inputMode="decimal"
+            defaultValue={r.card || ''} placeholder="0"
+            onBlur={e => saveCard(r.id, e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+            style={{ width: 84, textAlign: 'right', padding: '7px 10px', borderRadius: 9, border: `1px solid ${t.sep2}`, background: t.fill, color: t.blue, fontWeight: 700, fontSize: 14, fontFamily: 'inherit', outline: 'none' }}
+          />
+        </div>
+        {r.advanceRows.map((a: any) => (
+          <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 16px', borderBottom: `0.5px solid ${t.sep2}` }}>
+            <span style={{ fontSize: 13, color: t.text3 }}>{tr('pe.advances')} · {absDate(a.date)}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: t.orange }}>−{eur(Number(a.amount || 0))}</span>
+              <button onClick={() => deleteAdvance(a, r.name)} style={{ width: 22, height: 22, borderRadius: '50%', background: `${t.red}14`, border: 'none', color: t.red, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <svg width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" /></svg>
+              </button>
+            </div>
+          </div>
+        ))}
+        <button onClick={() => { setAdvFor({ id: r.id, name: r.name }); setAdvAmount(''); setAdvDate(fmtDate(new Date())) }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', background: 'transparent', border: 'none', borderBottom: `0.5px solid ${t.sep2}`, color: accent, fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+          <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+          {tr('an.addAdvance')}
+        </button>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', background: `${accent}0d` }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{tr('pe.totalPayout')}</span>
           <span style={{ fontSize: 18, fontWeight: 800, color: accent }}>{eur(r.total)}</span>
@@ -297,6 +394,31 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
             <button onClick={savePayment} disabled={paying} style={{ width: '100%', marginTop: 18, padding: '14px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: paying ? 'default' : 'pointer', opacity: paying ? 0.6 : 1, boxShadow: `0 4px 16px ${accent}44` }}>{tr('pe.savePayment')}</button>
           </div>
         </Sheet>
+      )}
+      {advFor && (
+        <Sheet onClose={() => setAdvFor(null)} t={t}>
+          <div style={{ padding: '4px 20px 24px' }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 14 }}>{tr('an.addAdvance')} · {advFor.name}</div>
+            <label style={lbl(t)}>{tr('pe.paymentAmount')}</label>
+            <input type="number" inputMode="decimal" value={advAmount} onChange={e => setAdvAmount(e.target.value)} style={inp(t)} />
+            <label style={{ ...lbl(t), marginTop: 12 }}>{tr('pe.paymentDate')}</label>
+            <input type="date" value={advDate} onChange={e => setAdvDate(e.target.value)} style={inp(t)} />
+            <button
+              onClick={async () => {
+                const amt = Math.max(0, parseFloat(advAmount) || 0)
+                if (amt <= 0 || !advFor) return
+                await addAdvance(advFor.id, advFor.name, amt, advDate)
+                setAdvFor(null)
+              }}
+              disabled={(parseFloat(advAmount) || 0) <= 0}
+              style={{ width: '100%', marginTop: 18, padding: '14px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', opacity: (parseFloat(advAmount) || 0) <= 0 ? 0.5 : 1, boxShadow: `0 4px 16px ${accent}44` }}>
+              {tr('pe.save')}
+            </button>
+          </div>
+        </Sheet>
+      )}
+      {toast && (
+        <div style={{ position: 'fixed', bottom: 100, left: '50%', transform: 'translateX(-50%)', background: t.dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.85)', backdropFilter: 'blur(16px)', color: '#fff', padding: '12px 22px', borderRadius: 22, fontSize: 14, fontWeight: 600, zIndex: 600, whiteSpace: 'nowrap' }}>{toast}</div>
       )}
     </div>
   )

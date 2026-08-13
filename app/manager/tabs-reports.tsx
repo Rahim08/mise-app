@@ -1,6 +1,7 @@
 'use client'
 import React, { useEffect, useState } from 'react'
 import { db } from '@/lib/db'
+import { notify as pushNotify } from '@/lib/notifyClient'
 import { useI18n } from '@/lib/i18n'
 import { PURCHASE_CATS } from '@/app/people/tabs-ops'
 import { Sheet, roleLabel } from '@/components/people/helpers'
@@ -64,6 +65,9 @@ export function ManagerReportsTab({ restaurantId, accent, t }: { restaurantId: s
     const base = { title: r.title, description: r.description || null, created_by: null, priority, due_date: due || null, status: 'todo' }
     const results = await Promise.all(targets.map(tid => db.from('staff_tasks').insert({ ...base, assigned_to: tid })))
     if (results.every(x => x.error)) { showToast(tr('dash.notSaved') + results[0].error?.message); return }
+    // B4 (аудит 2026-08-13): конвертация заявки в задачу раньше не слала пуш исполнителю,
+    // в отличие от прямого создания (app/people/tabs-tasks.tsx createTask).
+    pushNotify({ type: 'task', title: 'New task', body: r.title, titleKey: 'notify.newTaskTitle', audience: { staff_ids: targets } })
     await setStatus(r, 'resolved')
     setConvertTask(null)
     showToast(tr('pe.reportConverted'))
@@ -153,7 +157,7 @@ function ConvertTaskSheet({ t, tr, report, roles, staff, onCancel, onSave }: { t
           ))}
         </div>
         <input type="date" value={due} onChange={e => setDue(e.target.value)} style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 15, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', marginBottom: 12 }} />
-        <button onClick={() => onSave(assignee, priority, due)} disabled={!assignee} style={{ width: '100%', padding: '14px', borderRadius: 14, background: t.blue, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: assignee ? 'pointer' : 'default', opacity: assignee ? 1 : 0.5 }}>{tr('create')}</button>
+        <button onClick={() => onSave(assignee, priority, due)} disabled={!assignee} style={{ width: '100%', padding: '14px', borderRadius: 14, background: t.blue, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: assignee ? 'pointer' : 'default', opacity: assignee ? 1 : 0.5 }}>{tr('me.create')}</button>
       </div>
     </Sheet>
   )
@@ -174,7 +178,7 @@ function ConvertPurchaseSheet({ t, tr, report, onCancel, onSave }: { t: any; tr:
           <input value={qty} onChange={e => setQty(e.target.value)} placeholder={tr('pe.pQtyEx')} style={{ flex: 1, padding: '12px 14px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 15, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none' }} />
           <input value={unit} onChange={e => setUnit(e.target.value)} placeholder={tr('pe.pUnitEx')} style={{ flex: 1, padding: '12px 14px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 15, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none' }} />
         </div>
-        <button onClick={() => onSave(cat, qty, unit)} style={{ width: '100%', padding: '14px', borderRadius: 14, background: t.green, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>{tr('create')}</button>
+        <button onClick={() => onSave(cat, qty, unit)} style={{ width: '100%', padding: '14px', borderRadius: 14, background: t.green, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>{tr('me.create')}</button>
       </div>
     </Sheet>
   )
