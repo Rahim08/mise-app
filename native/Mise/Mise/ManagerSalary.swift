@@ -156,12 +156,19 @@ final class ManagerSalaryModel {
     func saveMonthlyCard(_ empId: String, _ amount: Double) async {
         let ym = String(key(viewMonth).prefix(7))
         let existing = try? await DB.from("monthly_card_amounts").select().eq("employee_id", empId).eq("month", ym).limit(1).list(CardAmount.self).first
+        // B1 (аудит 2026-08-13): regression при переносе из Analytics — раньше здесь была
+        // guard-проверка результата (потеря правки при unique-constraint на повторном
+        // редактировании в той же сессии молча терялась). Восстановлено.
         if let cid = existing?.id {
-            try? await DB.from("monthly_card_amounts").update(["card_amount": amount]).eq("id", cid).run()
+            guard (try? await DB.from("monthly_card_amounts").update(["card_amount": amount]).eq("id", cid).run()) != nil else {
+                flash(t("bk.saveFailed")); return
+            }
         } else {
-            try? await DB.from("monthly_card_amounts").insert([
+            guard (try? await DB.from("monthly_card_amounts").insert([
                 "restaurant_id": rid, "employee_id": empId, "month": ym, "card_amount": amount,
-            ]).run()
+            ]).run()) != nil else {
+                flash(t("bk.saveFailed")); return
+            }
         }
         await load()
     }
@@ -572,7 +579,10 @@ private struct ManagerMarkPaidSheet: View {
                             saving = false
                             if ok { dismiss() }
                         }
-                    }.disabled(saving || (Double(amount) ?? 0) <= 0)
+                    // C5 (аудит 2026-08-13): disabled сверял Double(amount) БЕЗ замены запятой,
+                    // хотя сам save её заменяет — на ru-раскладке (десятичная запятая) кнопка
+                    // оставалась disabled навсегда. Теперь сверяются одинаково.
+                    }.disabled(saving || (Double(amount.replacingOccurrences(of: ",", with: ".")) ?? 0) <= 0)
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)

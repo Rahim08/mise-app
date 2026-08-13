@@ -988,12 +988,15 @@ private struct AnalyticsBody: View {
                             .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
                         AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { HookahTab(m: m) }
                             .tabItem { Label(t("tab.hookah"), systemImage: "flame.fill") }.tag("hookah")
-                        AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { DebtsTab(m: m) }
-                            .tabItem { Label(t("an.debts"), systemImage: "exclamationmark.circle.fill") }.tag("debts")
                     }
                     .tint(BrandKit.analytics)
                     .sensoryFeedback(.selection, trigger: m.tab)
-                    .tabEdgeSwipe(tabs: ["period", "kassa", "forecast", "salary", "hookah", "debts"],
+                    // «Долги» убраны из таб-бара (юзер-фидбок 2026-08-14) — при 6 вкладках iOS
+                    // автоматически прятал 5-ю и 6-ю («Сессии»/«Долги») за системный «Ещё», из-за
+                    // чего «Сессии» были не видны напрямую. Теперь ровно 5 вкладок — без «Ещё».
+                    // Долги переехали в PeriodTab — блок под «Расходами», period-aware
+                    // (periodDebts/periodDebtHistory), тап открывает DebtsTab шторкой.
+                    .tabEdgeSwipe(tabs: ["period", "kassa", "forecast", "salary", "hookah"],
                                   selection: $m.tab,
                                   onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
                 }
@@ -1086,6 +1089,7 @@ private struct PeriodTab: View {
     let aiEnabled: Bool
     private var isMonth: Bool { m.periodMode == "month" }
     @State private var selectedDay: Int?
+    @State private var showDebts = false
 
     var body: some View {
         Picker("", selection: $m.periodMode) {
@@ -1145,6 +1149,41 @@ private struct PeriodTab: View {
             }
             .padding(14)
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        }
+
+        // Долги (юзер-фидбок 2026-08-14) — под «Расходами», только если есть открытые долги
+        // ИМЕННО в выбранном периоде (m.periodDebts уже фильтрует по day/week/month —
+        // periodDateRange/periodDebts были готовы, использовались только внутри старой
+        // отдельной вкладки «Долги»). Тап — «погружение» в детальную зону (шторка DebtsTab):
+        // каждый долг, когда появился, сумма, когда погашен.
+        if !m.periodDebts.isEmpty {
+            Button { showDebts = true } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.circle.fill").font(.system(size: 16)).foregroundStyle(BrandKit.stash)
+                    Text(t("an.debts")).font(.system(size: 15, weight: .medium)).foregroundStyle(.primary)
+                    Text("\(m.periodDebts.count)")
+                        .font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(BrandKit.stash, in: Capsule())
+                    Spacer()
+                    Text(cur(m.periodDebts.reduce(0) { $0 + $1.amount })).font(.system(size: 13, weight: .semibold)).foregroundStyle(BrandKit.stash)
+                    Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(.primary.opacity(0.3))
+                }
+                .padding(14)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            }
+            .buttonStyle(.plain)
+            // Тап — «See all»-паттерн (Revolut): погружение в отдельный полноэкранный лист с
+            // полной детализацией (когда образован, сумма, когда погашен) — DebtsTab целиком,
+            // без изменений, просто переехал из вкладки таб-бара в шторку.
+            .sheet(isPresented: $showDebts) {
+                NavigationStack {
+                    ScrollView { VStack(spacing: 12) { DebtsTab(m: m) }.padding(16) }
+                        .background(Color.miseBg.ignoresSafeArea())
+                        .navigationTitle(t("an.debts")).navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button(t("done")) { showDebts = false } } }
+                }
+            }
         }
 
         if aiEnabled {
@@ -1250,12 +1289,10 @@ private struct SalaryTab: View {
                     HStack {
                         Text(r.name).font(.system(size: 15, weight: .medium)).foregroundStyle(.primary)
                         Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(cur(r.remaining)).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
-                            if r.advance > 0 || r.card > 0 || r.paid > 0 {
-                                Text(t("byCash")).font(.system(size: 10)).foregroundStyle(.primary.opacity(0.35))
-                            }
-                        }
+                        // «Наличными» подпись под суммой убрана (юзер-фидбок 2026-08-14) — свёрнутая
+                        // шапка теперь показывает только имя + остаток к выплате, разбивка
+                        // (аванс/карта/оплачено) только в развёрнутом виде (detail() ниже).
+                        Text(cur(r.remaining)).font(.system(size: 16, weight: .bold)).foregroundStyle(.primary)
                         Image(systemName: expanded == r.id ? "chevron.up" : "chevron.down")
                             .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
                     }

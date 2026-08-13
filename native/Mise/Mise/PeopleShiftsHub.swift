@@ -212,12 +212,12 @@ struct AttendanceTab: View {
             ? m.dir
             : m.dir.filter { m.todayScheduledIds.contains($0.id) }
         return VStack(alignment: .leading, spacing: 0) {
+            // «Подробнее» (→ Дисциплина) убрана (B2, аудит 2026-08-13): указывала на
+            // m.shiftsView = "discipline", кейс убран из Picker/switch выше в реструктуре
+            // 2026-08-13 (Дисциплина переехала в Manager→Дисциплина) — кнопка была мёртвой.
             HStack {
                 Text(t("pe.todayCaps")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                 Spacer()
-                Button { m.shiftsView = "discipline" } label: {
-                    Text(t("pe.disMore")).font(.system(size: 13, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
-                }
             }.padding(.bottom, 8)
             VStack(spacing: 0) {
                 ForEach(Array(scheduled.enumerated()), id: \.element.id) { i, s in

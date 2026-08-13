@@ -41,6 +41,11 @@ final class ManagerModel {
     var openDebts: [DebtRow] = []
     var selectedDebtIds: Set<String> = []
     var debtSettleTotal: Double { openDebts.filter { selectedDebtIds.contains($0.id) }.reduce(0) { $0 + $1.amount } }
+    // Сумма долгов, УЖЕ погашенных сегодняшней сменой (persistDebtSettlements вставляет строку
+    // с paid_shift_id == shift_id самой этой смены) — loadDay исключает такие строки из
+    // catAmounts/empExtras (см. ниже), поэтому без этого поля пересохранение того же дня
+    // теряло сумму погашения из totalExp/closing_balance (A1, аудит 2026-08-13).
+    var settledTodayTotal: Double = 0
 
     var income = ""
     var incomeCard = ""
@@ -102,7 +107,9 @@ final class ManagerModel {
         c.catTotal = categories.reduce(0) { catUnpaid[$1.id] == true ? $0 : $0 + num(catAmounts[$1.id] ?? "") }
         c.empExtraTotal = employees.reduce(0) { empUnpaid[$1.id] == true ? $0 : $0 + num(empExtras[$1.id] ?? "") }
         // Погашение отмеченных долгов — реальные наличные уходят из кассы ИМЕННО сегодня.
-        c.debtTotal = debtSettleTotal
+        // + уже погашенные сегодня в предыдущем save этого же дня (settledTodayTotal) — иначе
+        // пересохранение дня теряет сумму погашения (A1, аудит 2026-08-13).
+        c.debtTotal = debtSettleTotal + settledTodayTotal
         c.totalExp = c.catTotal + c.empExtraTotal + c.debtTotal + c.ink
         c.opening = shift?.opening_balance ?? 0
         c.balance = c.opening + c.inc - c.totalExp
@@ -195,7 +202,7 @@ final class ManagerModel {
             income = ""; incomeCard = ""; inkSum = ""; inkExpense = ""; inkReason = ""
             loadedInkExpense = ""; loadedInkReason = ""
             catAmounts = [:]; catNotes = [:]; empExtras = [:]; absences = []; autoAbsences = []
-            catUnpaid = [:]; empUnpaid = [:]
+            catUnpaid = [:]; empUnpaid = [:]; settledTodayTotal = 0
             return
         }
         if let opening { sh.opening_balance = opening }
@@ -213,6 +220,9 @@ final class ManagerModel {
         async let absencesTask: Void = loadAbsences(dateStr)
 
         let exps = await expsTask
+        // Строки погашения долгов, вставленные ЭТОЙ же сменой (paid_shift_id == shId) —
+        // исключены из формы ниже, но их сумма должна остаться в кассе дня при пересохранении.
+        settledTodayTotal = exps.filter { $0.paid_shift_id == shId }.reduce(0.0) { $0 + ($1.amount ?? 0) }
         var amounts: [String: String] = [:], notes: [String: String] = [:], extras: [String: String] = [:]
         var catUn: [String: Bool] = [:], empUn: [String: Bool] = [:]
         for e in exps {
@@ -243,6 +253,10 @@ final class ManagerModel {
             inkExpense = ""; inkReason = ""
         }
         loadedInkExpense = inkExpense; loadedInkReason = inkReason
+
+        // Черновик несохранённой формы — восстановить, только если смена ещё не сохранена
+        // (locked == false); если уже сохранена (реальные данные из БД) — стереть как устаревший.
+        if locked { clearDraft(dateStr) } else { restoreDraftIfAny(dateStr) }
     }
 
     private func loadAbsences(_ dateStr: String) async {
@@ -254,6 +268,42 @@ final class ManagerModel {
 
     private func trimNum(_ v: Double) -> String {
         v == v.rounded() ? String(format: "%.0f", v) : String(v)
+    }
+
+    // MARK: - Черновик несохранённой формы (юзер-фидбок 2026-08-14). Смена открыта, но
+    // «Сохранить смену» ещё не нажата — до сих пор вбитые цифры жили только в @State и
+    // терялись, если приложение убивали (свайпом/системой памяти) до сохранения. Черновик
+    // лежит в UserDefaults (переживает перезапуск), восстанавливается ТОЛЬКО поверх пустой
+    // несохранённой формы (locked == false) и НИКОГДА не считается частью кассы/Analytics —
+    // это чисто восстановление ввода, реальные данные появляются лишь по нажатию «Сохранить».
+    private struct Draft: Codable {
+        var income = "", incomeCard = "", inkSum = "", inkExpense = "", inkReason = ""
+        var catAmounts: [String: String] = [:], catNotes: [String: String] = [:], empExtras: [String: String] = [:]
+        var catUnpaid: [String: Bool] = [:], empUnpaid: [String: Bool] = [:]
+    }
+    private func draftKey(_ dateStr: String) -> String { "mgDraft_\(rid)_\(dateStr)" }
+
+    /// Вызывается при уходе экрана в фон (см. `.onChange(of: scenePhase)` в `ManagerBody`).
+    func saveDraft() {
+        guard shift != nil, !locked else { return }
+        let d = Draft(income: income, incomeCard: incomeCard, inkSum: inkSum, inkExpense: inkExpense,
+                      inkReason: inkReason, catAmounts: catAmounts, catNotes: catNotes, empExtras: empExtras,
+                      catUnpaid: catUnpaid, empUnpaid: empUnpaid)
+        guard let data = try? JSONEncoder().encode(d) else { return }
+        UserDefaults.standard.set(data, forKey: draftKey(key(currentDate)))
+    }
+
+    private func clearDraft(_ dateStr: String) {
+        UserDefaults.standard.removeObject(forKey: draftKey(dateStr))
+    }
+
+    private func restoreDraftIfAny(_ dateStr: String) {
+        guard let data = UserDefaults.standard.data(forKey: draftKey(dateStr)),
+              let d = try? JSONDecoder().decode(Draft.self, from: data) else { return }
+        income = d.income; incomeCard = d.incomeCard; inkSum = d.inkSum
+        inkExpense = d.inkExpense; inkReason = d.inkReason
+        catAmounts = d.catAmounts; catNotes = d.catNotes; empExtras = d.empExtras
+        catUnpaid = d.catUnpaid; empUnpaid = d.empUnpaid
     }
 
     // MARK: действия
@@ -458,6 +508,7 @@ final class ManagerModel {
             openDebts.removeAll { selectedDebtIds.contains($0.id) }
             selectedDebtIds = []
         }
+        clearDraft(key(currentDate))
         return c.balance
     }
 
@@ -648,6 +699,7 @@ private struct ManagerBody: View {
     private let accent = BrandKit.manager
     @State private var showDatePicker = false
     @State private var showDebts = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -703,6 +755,9 @@ private struct ManagerBody: View {
         }
         .animation(.easeInOut(duration: 0.2), value: m.toast)
         .scrollDismissesKeyboard(.interactively)
+        // Черновик формы — юзер-фидбок 2026-08-14: не терять вбитые, но не сохранённые
+        // цифры при уходе в фон/убийстве приложения (см. ManagerModel.saveDraft).
+        .onChange(of: scenePhase) { _, phase in if phase != .active { m.saveDraft() } }
     }
 
     // дата

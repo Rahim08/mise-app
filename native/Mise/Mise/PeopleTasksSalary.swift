@@ -275,8 +275,10 @@ struct ReportsTab: View {
                         .background(PEOPLE_ACCENT, in: RoundedRectangle(cornerRadius: 14))
                 }
                 if m.visibleReports.isEmpty {
+                    // C6 (аудит 2026-08-13): visibleReports теперь ВСЕГДА только свои (реструктура
+                    // 2026-08-13, блок 6) — isManager-ветка со старым «нет заявок вообще» устарела.
                     VStack(spacing: 4) {
-                        Text(m.isManager ? t("pe.noReports") : t("pe.noReportsMine"))
+                        Text(t("pe.noReportsMine"))
                             .font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4))
                         Text(t("pe.reportHint")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3)).multilineTextAlignment(.center)
                     }

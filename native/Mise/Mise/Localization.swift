@@ -256,11 +256,10 @@ let STRINGS: [String: [Lang: String]] = [
     "pe.nsDaily":      tr("Once a day", "Раз в день", "Una volta al giorno", "Une fois par jour", "Gündə bir dəfə", "Günde bir kez", "Раз на день", "Күніне бір рет"),
     "pe.nsForManagers": tr("For managers and owner", "Для менеджеров и владельца", "Per manager e titolare", "Pour managers et propriétaire", "Menecerlər və sahib üçün", "Yöneticiler ve sahip için", "Для менеджерів і власника", "Менеджерлер мен иеге"),
 
-    // Дисциплина (pe.dis*)
-    "pe.discipline":   tr("Discipline", "Дисциплина", "Disciplina", "Discipline", "İntizam", "Disiplin", "Дисципліна", "Тәртіп"),
+    // Дисциплина (pe.dis*) — "pe.discipline"/"pe.disMore" удалены (B2/C7, аудит 2026-08-13):
+    // Дисциплина переехала в Manager→Дисциплина целиком, оба ключа осиротели.
     "pe.checklistErrors": tr("Checklist errors", "Ошибки чек-листов", "Errori checklist", "Erreurs de checklist", "Çek-list xətaları", "Kontrol listesi hataları", "Помилки чек-листів", "Чек-парақ қателері"),
     "pe.checklistErrorsShort": tr("errors", "ошибок", "errori", "erreurs", "xəta", "hata", "помилок", "қате"),
-    "pe.disMore":      tr("Details", "Подробнее", "Dettagli", "Détails", "Ətraflı", "Ayrıntılar", "Детальніше", "Толығырақ"),
     "pe.perThisMonth": tr("This month", "Этот месяц", "Questo mese", "Ce mois", "Bu ay", "Bu ay", "Цей місяць", "Осы ай"),
     "pe.perLastMonth": tr("Last month", "Прошлый", "Mese scorso", "Mois dernier", "Keçən ay", "Geçen ay", "Минулий", "Өткен ай"),
     "pe.per30":        tr("30 days", "30 дней", "30 giorni", "30 jours", "30 gün", "30 gün", "30 днів", "30 күн"),

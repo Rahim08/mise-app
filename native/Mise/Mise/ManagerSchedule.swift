@@ -316,6 +316,7 @@ private struct ManagerScheduleEditSheet: View {
     @State private var start = Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: Date()) ?? Date()
     @State private var end = Calendar.current.date(bySettingHour: 22, minute: 0, second: 0, of: Date()) ?? Date()
     @State private var note = ""
+    @State private var saving = false
 
     private let timeFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; f.locale = Locale(identifier: "en_US_POSIX"); return f
@@ -349,13 +350,19 @@ private struct ManagerScheduleEditSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
+                    // C4 (аудит 2026-08-13): без saving-гварда быстрый даблтап мог задвоить
+                    // staff_schedules — унаследовано из старого PeopleSchedule.ScheduleEditSheet,
+                    // теперь в admin-critical пути (Manager), паритет с другими Manager-шторками.
                     Button(t("save")) {
+                        saving = true
                         let s = timeFmt.string(from: start), e = timeFmt.string(from: end)
                         let keys = dates.compactMap { Calendar.current.date(from: $0).map { sm.key($0) } }.sorted()
                         Task {
-                            if await sm.createSchedules(staffId: staffId, dates: keys, start: s, end: e, note: note) { dismiss() }
+                            let ok = await sm.createSchedules(staffId: staffId, dates: keys, start: s, end: e, note: note)
+                            saving = false
+                            if ok { dismiss() }
                         }
-                    }
+                    }.disabled(saving)
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)

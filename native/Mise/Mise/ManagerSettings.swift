@@ -12,7 +12,11 @@ struct ManagerSettingsTab: View {
     var body: some View {
         NavigationStack {
             List {
-                NavigationLink(destination: ManagerReportsTab(rid: rid)) {
+                // C1 (аудит 2026-08-13): бейдж фетчился один раз в .task — NavigationLink push
+                // не «убивает» родителя (List остаётся смонтирован, просто закрыт сверху), так
+                // что счётчик оставался стейл после разбора заявок. .onDisappear на самом пуше
+                // (реально размонтируется при возврате назад) — надёжный момент для рефетча.
+                NavigationLink(destination: ManagerReportsTab(rid: rid).onDisappear { Task { await reloadBadge() } }) {
                     settingsRow(icon: "tray.full", label: t("pe.reports"), badge: newReportsCount)
                 }
                 NavigationLink(destination: ManagerWalkTab(rid: rid)) {
@@ -27,10 +31,12 @@ struct ManagerSettingsTab: View {
             }
             .navigationTitle(t("tab.settings"))
         }
-        .task {
-            if let rows = try? await DB.from("staff_reports").select("id").eq("status", "new").list(ReportIdRow.self) {
-                newReportsCount = rows.count
-            }
+        .task { await reloadBadge() }
+    }
+
+    private func reloadBadge() async {
+        if let rows = try? await DB.from("staff_reports").select("id").eq("status", "new").list(ReportIdRow.self) {
+            newReportsCount = rows.count
         }
     }
 
