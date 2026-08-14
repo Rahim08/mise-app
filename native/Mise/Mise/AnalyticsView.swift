@@ -266,14 +266,13 @@ final class AnalyticsModel {
             histLoaded = true
         }
 
-        // Инкассация копится ЧЕРЕЗ МЕСЯЦЫ (деньги заведения, не обнуляются на новый месяц):
-        // вся валовая инкассация по сменам до конца выбранного месяца минус все списания
-        // из инкассации (расход + выплаченная из неё ЗП). Гросс из shiftsRaw (кэш выше),
-        // вычеты — из inkassations (строка есть только когда были траты); фильтр по
-        // monthEnd — локально, без похода в сеть на каждую смену месяца.
-        let monthEndKey = key(monthEnd)
-        let grossInk = allShiftInkRows.filter { $0.date <= monthEndKey }.reduce(0) { $0 + ($1.inkassation ?? 0) }
-        let dedInk = allInkDedRows.filter { ($0.date ?? "") <= monthEndKey }.reduce(0) { $0 + (($1.expense ?? 0) + ($1.salary ?? 0)) }
+        // Инкассация — общий баланс заведения, не привязан к просматриваемому месяцу
+        // (юзер-фидбок 2026-08-16: цифра не должна ехать при пролистывании назад/вперёд).
+        // Вся валовая инкассация по сменам ЗА ВСЁ ВРЕМЯ минус все списания из неё (расход +
+        // выплаченная ЗП) — без фильтра по monthEnd (тот был багом: паритет с вебом
+        // app/analytics/page.tsx cumulativeInkass, который всегда all-time).
+        let grossInk = allShiftInkRows.reduce(0) { $0 + ($1.inkassation ?? 0) }
+        let dedInk = allInkDedRows.reduce(0) { $0 + (($1.expense ?? 0) + ($1.salary ?? 0)) }
         cumulativeInkass = grossInk - dedInk
     }
 
