@@ -1083,7 +1083,12 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
 
     const now = new Date(); const dIM = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
     const prevDIM = new Date(now.getFullYear(), now.getMonth(), 0).getDate()
-    const shiftsWithInk = shifts.filter((s: any) => (s.inkassation || 0) > 0)
+    // Не только дни с реальным сбором (s.inkassation) — так же дни, где из фонда просто
+    // списали расход/ЗП без нового сбора (юзер-фидбок 2026-08-16: выплата Ренате 11 авг
+    // была именно такой и пропадала из истории целиком, хотя корректно учитывалась в
+    // cumulativeInkass).
+    const shiftsWithInk = shifts.filter((s: any) =>
+      (s.inkassation || 0) > 0 || (inkByShift[s.id]?.expense || 0) > 0 || (inkByShift[s.id]?.salary || 0) > 0)
     // Инкассация — не месячный, а накопительный счёт (не обнуляется 1-го числа): валовая
     // инкассация по сменам минус всё списанное из неё (расход + выплаченная ЗП), см. cumulativeInkass.
     const inkBal = cumulativeInkass

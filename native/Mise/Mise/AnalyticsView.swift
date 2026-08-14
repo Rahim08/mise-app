@@ -406,7 +406,13 @@ final class AnalyticsModel {
         if let prevClose = prevShifts.last?.closing_balance { rows[0].opening_balance = prevClose }
         return rows
     }
-    var shiftsWithInk: [Shift] { shifts.filter { ($0.inkassation ?? 0) > 0 || (inkDetails[$0.id]?.expense ?? 0) > 0 } }
+    // Не только дни с реальным сбором — так же дни, где из фонда списали расход/ЗП без
+    // нового сбора (юзер-фидбок 2026-08-16: выплата пропадала из истории целиком).
+    var shiftsWithInk: [Shift] {
+        shifts.filter {
+            ($0.inkassation ?? 0) > 0 || (inkDetails[$0.id]?.expense ?? 0) > 0 || (inkDetails[$0.id]?.salary ?? 0) > 0
+        }
+    }
 
     // прогноз
     var daysInMonth: Int {
