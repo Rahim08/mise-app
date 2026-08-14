@@ -64,6 +64,7 @@ final class ManagerModel {
     var loadError = false        // реальная ошибка загрузки (не отмена) → показать «Повторить»
     var toast: String?
     var showChecklistWarn = false
+    var showDebtNegativeWarn = false
     private var loadGen = 0       // поколение загрузки — защита от гонок при быстрой смене даты
 
     // Вкладки Manager (реструктура 2026-08-13): Смена/Зарплата/Настройки/Дисциплина.
@@ -484,16 +485,25 @@ final class ManagerModel {
         guard let sh = shift else { return nil }
         let c = calc
 
+        // Погашение долгов — ПЕРВЫМ и ОТДЕЛЬНО от остального (C3, аудит 2026-08-13/15): если
+        // сам погашаемый долг был создан СЕГОДНЯ (shift_id == текущей смене), запуск параллельно
+        // с persistExpenses создавал race — persistExpenses мог удалить ту же строку по своему
+        // снэпшоту раньше, чем persistDebtSettlements успевал пометить её paid, и апдейт молча
+        // терялся (деньги не страдали, но исторический маркер «оплачено» на исходной строке —
+        // да). Settlement теперь всегда завершается ДО того как persistExpenses читает
+        // oldExpenses — к этому моменту paid_shift_id на исходной строке уже проставлен, так что
+        // persistExpenses естественным образом её не тронет (см. фильтр там же).
+        try await persistDebtSettlements(shiftId: sh.id)
+
         // Смена/расходы/инкассация/прогулы трогают разные таблицы и не зависят друг от
-        // друга — параллелим, чтобы не ждать 7 сетевых round-trip'ов подряд. Порядок
-        // ВНУТРИ каждой цепочки (например insert-перед-delete в расходах) не меняется.
+        // друга — параллелим, чтобы не ждать round-trip'ы подряд. Порядок ВНУТРИ каждой
+        // цепочки (например insert-перед-delete в расходах) не меняется.
         async let shiftUpdate: () = DB.from("shifts").update([
             "income": c.inc, "income_card": c.card, "inkassation": c.ink,
             "total_expense": c.totalExp, "closing_balance": c.balance,
         ]).eq("id", sh.id).run()
         async let expensesResult: () = persistExpenses(shiftId: sh.id)
         async let inkResult: () = persistInkassation(shiftId: sh.id, c)
-        async let debtResult: () = persistDebtSettlements(shiftId: sh.id)
         // best-effort: подтвердить прогулы дня (привязать к смене, снять авто-черновик)
         async let absResult: Void = { _ = try? await DB.from("shift_absences").update(["shift_id": sh.id, "source": "manager"])
             .eq("date", key(currentDate)).run() }()
@@ -501,7 +511,6 @@ final class ManagerModel {
         try await shiftUpdate
         try await expensesResult
         try await inkResult
-        try await debtResult
         await absResult
         autoAbsences = []
         if !selectedDebtIds.isEmpty {
@@ -528,6 +537,11 @@ final class ManagerModel {
     func save(force: Bool = false) async {
         guard shift != nil else { return }
         if !force, await closeChecklistIncomplete() { showChecklistWarn = true; return }
+        // C8 (юзер-фидбок 2026-08-15) — мягкий гейт: панель долгов позволяет отметить сразу ВСЕ
+        // открытые долги ресторана (любых дат), одним save может увести кассу глубоко в минус
+        // без подтверждения. Обычные расходы это НЕ блокируют (существующее поведение — только
+        // красный текст), но батч-погашение долгов достаточно рискованно, чтобы спросить лишний раз.
+        if !force, debtSettleTotal > 0, calc.balance < 0 { showDebtNegativeWarn = true; return }
         saving = true
         do {
             try await persist()
@@ -667,14 +681,16 @@ private struct ManagerTabs: View {
                 .tabItem { Label(t("tab.shift"), systemImage: "cart.fill") }.tag("shift")
             AppTabPage { ManagerSalaryTab(rid: m.rid) }
                 .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
+            // Дисциплина перед Настройками (юзер-фидбок 2026-08-14) — шестерёнка по конвенции
+            // всегда последняя вкладка, раньше была третьей из четырёх.
+            NavigationStack { ManagerDisciplineTab(rid: m.rid).navigationTitle(t("tab.discipline")).navigationBarTitleDisplayMode(.inline) }
+                .tabItem { Label(t("tab.discipline"), systemImage: "exclamationmark.shield.fill") }.tag("discipline")
             ManagerSettingsTab(rid: m.rid)
                 .tabItem { Label(t("tab.settings"), systemImage: "gearshape.fill") }.tag("settings")
-            NavigationStack { ManagerDisciplineTab(rid: m.rid).navigationTitle(t("tab.discipline")) }
-                .tabItem { Label(t("tab.discipline"), systemImage: "exclamationmark.shield.fill") }.tag("discipline")
         }
         .tint(BrandKit.manager)
         .sensoryFeedback(.selection, trigger: m.tab)
-        .tabEdgeSwipe(tabs: ["shift", "salary", "settings", "discipline"], selection: $m.tab,
+        .tabEdgeSwipe(tabs: ["shift", "salary", "discipline", "settings"], selection: $m.tab,
                       onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
     }
 }
@@ -1038,6 +1054,13 @@ private struct ManagerBody: View {
             Button(t("mg.closeChecklistWarnBack"), role: .cancel) {}
         } message: {
             Text(t("mg.closeChecklistWarnBody"))
+        }
+        .confirmationDialog(t("mg.debtNegativeWarnTitle"), isPresented: Binding(get: { m.showDebtNegativeWarn }, set: { m.showDebtNegativeWarn = $0 }),
+                             titleVisibility: .visible) {
+            Button(t("mg.debtNegativeWarnAnyway"), role: .destructive) { Task { await m.save(force: true) } }
+            Button(t("mg.debtNegativeWarnBack"), role: .cancel) {}
+        } message: {
+            Text(t("mg.debtNegativeWarnBody", ["amount": money(m.calc.balance)]))
         }
     }
 

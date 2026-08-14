@@ -104,7 +104,7 @@ struct ManagerReportsTab: View {
                 RowListSkeleton(rows: 3)
             }
         }
-        .navigationTitle(t("pe.reports"))
+        .navigationTitle(t("pe.reports")).navigationBarTitleDisplayMode(.inline)
         .task {
             if rm == nil {
                 let model = ManagerReportsModel(rid: rid)

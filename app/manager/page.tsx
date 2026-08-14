@@ -104,6 +104,10 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const [settledTodayTotal, setSettledTodayTotal] = useState(0)
   const [showSummary, setShowSummary] = useState(false)
   const [checklistWarn, setChecklistWarn] = useState(false)
+  // C8 (юзер-фидбок 2026-08-15): мягкий гейт — панель долгов позволяет отметить сразу ВСЕ
+  // открытые долги ресторана (любых дат), одним save может увести кассу глубоко в минус
+  // без подтверждения. Паритет с ManagerView.swift showDebtNegativeWarn.
+  const [debtNegativeWarn, setDebtNegativeWarn] = useState(false)
   const [locked, setLocked] = useState(false) // сохранённая смена закрыта «матовым стеклом» до Редактировать
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -344,6 +348,14 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     const { error: upErr } = await db.from('shifts').update({ income: inc, income_card: card, inkassation: ink, total_expense: totalExp, closing_balance: balance }).eq('id', sh.id)
     if (upErr) throw new Error(upErr.message)
 
+    // Погашение долгов — ПЕРВЫМ, до чтения/удаления старых расходов (C3, аудит 2026-08-13/15):
+    // если сам погашаемый долг был создан СЕГОДНЯ (shift_id == текущей смене), исходная строка
+    // на момент ниже ещё не имела paid_shift_id — попадала в oldExpenses и УДАЛЯЛАСЬ, из-за чего
+    // update «пометить оплаченным» ниже гарантированно бил по уже удалённой строке (не race, а
+    // строгий порядок — было хуже, чем на iOS). Теперь paid_shift_id уже проставлен к моменту
+    // чтения oldExpenses, и фильтр там же (!e.paid_shift_id) естественно её не тронет.
+    await persistDebtSettlements(sh.id, fmtDate(dateForInk))
+
     // paid_shift_id != null — строка управляется экраном «Долги» (Analytics), не трогаем.
     const { data: oldExpensesAll, error: oldExpErr } = await db.from('shift_expenses').select('id, paid_shift_id').eq('shift_id', sh.id)
     if (oldExpErr) throw new Error(oldExpErr.message)
@@ -393,7 +405,6 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     await db.from('shift_absences').update({ shift_id: sh.id, source: 'manager' }).eq('restaurant_id', restaurantId).eq('date', fmtDate(dateForInk))
     setAutoAbsences(new Set())
 
-    await persistDebtSettlements(sh.id, fmtDate(dateForInk))
     if (selectedDebtIds.size > 0) {
       const settledIds = selectedDebtIds
       setOpenDebts(ds => ds.filter(d => !settledIds.has(d.id)))
@@ -418,6 +429,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const saveShift = async (force = false) => {
     if (!shift) return
     if (!force && await closeChecklistIncomplete()) { setChecklistWarn(true); return }
+    if (!force && debtSettleTotal() > 0 && calc().balance < 0) { setDebtNegativeWarn(true); return }
     setSaving(true)
     try { await persistShift() } catch (e: any) { showToast(tr('mg.err') + ': ' + (e?.message || tr('mg.notSaved'))); setSaving(false); return }
     setShowSummary(false)
@@ -851,6 +863,21 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
             <div style={{ display: 'flex', gap: 10 }}>
               <button onClick={() => setChecklistWarn(false)} style={{ flex: 1, padding: '13px', borderRadius: 14, border: 'none', background: t.fill, color: t.text, fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>{tr('mg.closeChecklistWarnBack')}</button>
               <button onClick={() => { setChecklistWarn(false); saveShift(true) }} style={{ flex: 1, padding: '13px', borderRadius: 14, border: 'none', background: t.red, color: '#fff', fontFamily: 'inherit', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>{tr('mg.closeChecklistWarnAnyway')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Мягкий гейт: погашение долгов уводит кассу в минус (C8, аудит 2026-08-15) */}
+      {debtNegativeWarn && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 700, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+          onClick={() => setDebtNegativeWarn(false)}>
+          <div style={{ background: t.bg, borderRadius: 20, width: '100%', maxWidth: 380, padding: 20 }} onClick={(e: any) => e.stopPropagation()}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 6 }}>{tr('mg.debtNegativeWarnTitle')}</div>
+            <div style={{ fontSize: 14, color: t.text2, marginBottom: 18 }}>{tr('mg.debtNegativeWarnBody', { amount: `€${fv(calc().balance)}` })}</div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setDebtNegativeWarn(false)} style={{ flex: 1, padding: '13px', borderRadius: 14, border: 'none', background: t.fill, color: t.text, fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>{tr('mg.debtNegativeWarnBack')}</button>
+              <button onClick={() => { setDebtNegativeWarn(false); saveShift(true) }} style={{ flex: 1, padding: '13px', borderRadius: 14, border: 'none', background: t.red, color: '#fff', fontFamily: 'inherit', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>{tr('mg.debtNegativeWarnAnyway')}</button>
             </div>
           </div>
         </div>

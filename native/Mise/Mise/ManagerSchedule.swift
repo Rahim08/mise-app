@@ -125,7 +125,7 @@ struct ManagerScheduleTab: View {
                 RowListSkeleton(rows: 3)
             }
         }
-        .navigationTitle(t("tab.shifts"))
+        .navigationTitle(t("tab.shifts")).navigationBarTitleDisplayMode(.inline)
         .task {
             if sm == nil {
                 let model = ManagerScheduleModel(rid: rid)

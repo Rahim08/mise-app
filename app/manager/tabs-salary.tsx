@@ -150,6 +150,13 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   }
 
   const addAdvance = async (empId: string, empName: string, amount: number, dateStr: string) => {
+    // Аванс не может увести сотрудника в минус по ЗП (юзер-фидбок 2026-08-14) — row.remaining
+    // уже = max(0, cash − paid), т.е. именно то, что ещё можно выдать до конца месяца.
+    // fail-closed (паритет с iOS addAdvance, аудит 2026-08-15): если строка сотрудника почему-то
+    // не найдена — блокируем целиком, а не пропускаем без проверки.
+    const row = rows.find(r => r.id === empId)
+    if (!row) { showToast(tr('pe.saveFailed', { err: 'row' })); return }
+    if (amount > row.remaining) { showToast(tr('an.advanceExceedsRemaining', { avail: eur(row.remaining) })); return }
     const { error: insErr } = await db.from('salary_advances').insert({ restaurant_id: restaurantId, employee_id: empId, amount, date: dateStr, note: `${empName} аванс` })
     if (insErr) { showToast(tr('pe.saveFailed', { err: insErr.message })); return }
     const shift = await findShiftForDate(dateStr)
@@ -187,9 +194,10 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     await load(); await loadDebt()
   }
 
-  // Выплата ЗП «прямо из инкассации» — списывает сумму с инкассации дня оплаты
-  // (inkassations.salary += amount, salary_note дописывается «Имя: Сумма»). Карта — безнал,
-  // кассы не касается. Уход в минус запрещён.
+  // Выплата ЗП «прямо из инкассации» — записывается на инкассацию дня оплаты
+  // (inkassations.salary += amount, salary_note дописывается «Имя: Сумма»), но лимит «не уйти
+  // в минус» сверяется с накопительным кошельком инкассации (см. ниже), не с суммой этого дня.
+  // Карта — безнал, кассы не касается.
   const savePayment = async () => {
     if (!payFor) return
     const amount = Number(payFor.amount) || 0
@@ -201,16 +209,31 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     if (method === 'cash') {
       const shiftId = await ensureShift(dateStr)
       if (!shiftId) { setPayError(tr('pe.saveFailed', { err: 'shift' })); setPaying(false); return }
-      const { data: inkList } = await db.from('inkassations').select('id, amount, expense, salary, salary_note').eq('shift_id', shiftId).limit(1)
+      // Инкассация — накопительный кошелёк, не сумма конкретного дня (юзер-фидбок 2026-08-16):
+      // доступно = вся инкассация по сменам минус всё уже списанное (расход+ЗП) за всё время
+      // (те же cumulativeInkass, что в app/analytics/page.tsx). Раньше сверяли только с
+      // инкассацией дня выплаты — ложно блокировало или пропускало мимо реального остатка.
+      const [{ data: shAll }, { data: inkAll }, { data: inkList }] = await Promise.all([
+        db.from('shifts').select('inkassation').eq('restaurant_id', restaurantId),
+        db.from('inkassations').select('expense, salary').eq('restaurant_id', restaurantId),
+        db.from('inkassations').select('id, amount, expense, salary, salary_note').eq('shift_id', shiftId).limit(1),
+      ])
+      const grossInk = (shAll || []).reduce((s: number, r: any) => s + (r.inkassation || 0), 0)
+      const deducted = (inkAll || []).reduce((s: number, r: any) => s + (r.expense || 0) + (r.salary || 0), 0)
+      const available = grossInk - deducted
       const cur = Array.isArray(inkList) ? inkList[0] : inkList
-      const available = (cur?.amount || 0) - (cur?.expense || 0) - (cur?.salary || 0)
       if (amount > available) {
-        setPayError(tr('pe.insufficientInkassation', { date: dateStr, avail: eur(Math.max(0, available)) }))
+        setPayError(tr('pe.insufficientInkassationPool', { avail: eur(Math.max(0, available)) }))
         setPaying(false); return
       }
       const noteEntry = `${payFor.name}: ${eur(amount)}`
       const mergedNote = [cur?.salary_note, noteEntry].filter(Boolean).join('; ')
-      const values = { restaurant_id: restaurantId, date: dateStr, salary: (cur?.salary || 0) + amount, salary_note: mergedNote }
+      const newSalary = (cur?.salary || 0) + amount
+      // C6 (юзер-фидбок 2026-08-15): total раньше не пересчитывался здесь — оставался от
+      // последнего обычного закрытия смены, без учёта зарплаты, «остаток» в Кассе расходился
+      // с реальностью после каждой выплаты.
+      const newTotal = (cur?.amount || 0) - (cur?.expense || 0) - newSalary
+      const values = { restaurant_id: restaurantId, date: dateStr, salary: newSalary, salary_note: mergedNote, total: newTotal }
       const { error } = cur?.id
         ? await db.from('inkassations').update(values).eq('id', cur.id)
         : await db.from('inkassations').insert({ shift_id: shiftId, ...values })

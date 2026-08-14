@@ -29,7 +29,9 @@ struct ManagerSettingsTab: View {
                     settingsRow(icon: "checklist", label: t("pe.auditTab"))
                 }
             }
-            .navigationTitle(t("tab.settings"))
+            // .inline (юзер-фидбок 2026-08-14) — large-title поверх уже существующего кастомного
+            // хедера приложения («mise Manager») давал огромный пустой отступ сверху.
+            .navigationTitle(t("tab.settings")).navigationBarTitleDisplayMode(.inline)
         }
         .task { await reloadBadge() }
     }
@@ -129,7 +131,7 @@ struct ManagerWalkTab: View {
                 RowListSkeleton(rows: 3)
             }
         }
-        .navigationTitle(t("pe.walks"))
+        .navigationTitle(t("pe.walks")).navigationBarTitleDisplayMode(.inline)
         .task {
             if wm == nil {
                 let model = ManagerWalkModel(rid: rid)

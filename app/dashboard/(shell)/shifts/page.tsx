@@ -90,6 +90,8 @@ export default function ShiftsPage() {
   const [closing, setClosing] = useState(false)
   const [err, setErr] = useState('')
   const [checklistWarn, setChecklistWarn] = useState(false)
+  // C8 (юзер-фидбок 2026-08-15): паритет с app/manager/page.tsx / ManagerView.swift.
+  const [debtNegativeWarn, setDebtNegativeWarn] = useState(false)
 
   const loadOpenDebts = async () => {
     const { data: unpaid } = await db.from('shift_expenses').select('id, shift_id, category_id, category_name, employee_id, amount').eq('restaurant_id', restaurantId).eq('is_paid', false)
@@ -259,6 +261,11 @@ export default function ShiftsPage() {
     const { error: upErr } = await db.from('shifts').update({ income: inc, income_card: card, inkassation: ink, total_expense: totalExp, closing_balance: balance }).eq('id', sh.id)
     if (upErr) throw new Error(upErr.message)
 
+    // Погашение долгов — ПЕРВЫМ, до чтения/удаления старых расходов (C3, аудит 2026-08-13/15,
+    // см. app/manager/page.tsx за полным объяснением): иначе долг, созданный СЕГОДНЯ же, попадал
+    // под удаление ниже раньше, чем помечался оплаченным.
+    await persistDebtSettlements(sh.id, fmtDate(dateForInk))
+
     // paid_shift_id != null — строка управляется экраном «Долги» (Analytics), не трогаем.
     const { data: oldExpensesAll, error: oldExpErr } = await db.from('shift_expenses').select('id, paid_shift_id').eq('shift_id', sh.id)
     if (oldExpErr) throw new Error(oldExpErr.message)
@@ -301,7 +308,6 @@ export default function ShiftsPage() {
     await db.from('shift_absences').update({ shift_id: sh.id, source: 'manager' }).eq('restaurant_id', restaurantId).eq('date', fmtDate(dateForInk))
     setAutoAbsences(new Set())
 
-    await persistDebtSettlements(sh.id, fmtDate(dateForInk))
     if (selectedDebtIds.size > 0) {
       const settledIds = selectedDebtIds
       setOpenDebts(ds => ds.filter(d => !settledIds.has(d.id)))
@@ -326,6 +332,7 @@ export default function ShiftsPage() {
   const saveShift = async (force = false) => {
     if (!shift) return
     if (!force && await closeChecklistIncomplete()) { setChecklistWarn(true); return }
+    if (!force && debtSettleTotal() > 0 && calc().balance < 0) { setDebtNegativeWarn(true); return }
     setSaving(true); setErr('')
     try { await persistShift() } catch (e: any) { setErr(tr('mg.err') + ': ' + (e?.message || tr('mg.notSaved'))); setSaving(false); return }
     setLocked(true)
@@ -554,6 +561,17 @@ export default function ShiftsPage() {
                   <div style={{ display: 'flex', gap: 8 }}>
                     <Btn small variant="danger" onClick={() => { setChecklistWarn(false); saveShift(true) }}>{tr('mg.closeChecklistWarnAnyway')}</Btn>
                     <Btn small variant="ghost" onClick={() => setChecklistWarn(false)}>{tr('mg.closeChecklistWarnBack')}</Btn>
+                  </div>
+                </Card>
+              )}
+
+              {debtNegativeWarn && (
+                <Card>
+                  <div style={{ fontSize: '.85rem', fontWeight: 700, color: 'var(--tx)', marginBottom: 4 }}>{tr('mg.debtNegativeWarnTitle')}</div>
+                  <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginBottom: 10, lineHeight: 1.5 }}>{tr('mg.debtNegativeWarnBody', { amount: `€${fv(calc().balance)}` })}</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Btn small variant="danger" onClick={() => { setDebtNegativeWarn(false); saveShift(true) }}>{tr('mg.debtNegativeWarnAnyway')}</Btn>
+                    <Btn small variant="ghost" onClick={() => setDebtNegativeWarn(false)}>{tr('mg.debtNegativeWarnBack')}</Btn>
                   </div>
                 </Card>
               )}

@@ -108,7 +108,14 @@ final class ManagerSalaryModel {
     }
 
     func addAdvance(empId: String, amount: Double, date: String) async {
-        let empName = rows.first { $0.id == empId }?.name ?? ""
+        guard let row = rows.first(where: { $0.id == empId }) else { return }
+        // Аванс не может увести сотрудника в минус по ЗП (юзер-фидбок 2026-08-14) — row.remaining
+        // уже = max(0, cash − paid), т.е. именно то, что ещё можно выдать (авансом или доплатой)
+        // до конца месяца. amount не должен его превышать.
+        guard amount <= row.remaining else {
+            flash(t("an.advanceExceedsRemaining", ["avail": Money.s(row.remaining)])); return
+        }
+        let empName = row.name
         guard (try? await DB.from("salary_advances").insert([
             "restaurant_id": rid, "employee_id": empId,
             "amount": amount, "date": date, "note": empName + " аванс",
@@ -215,10 +222,12 @@ final class ManagerSalaryModel {
     }
 
     // Выплата ЗП «прямо из инкассации» (юзер-фидбок 2026-08-13): одно действие одновременно
-    // фиксирует факт выплаты (salary_payments) И списывает её с инкассации ДНЯ, выбранного в
+    // фиксирует факт выплаты (salary_payments) И записывается на инкассацию ДНЯ, выбранного в
     // шторке оплаты — inkassations.salary += amount, salary_note дописывается «Имя: Сумма».
-    // Карта — безнал, кассы не касается, списывается только method="cash". Уход в минус
-    // запрещён: сумма не может превышать (amount − expense − уже списанная salary).
+    // Карта — безнал, кассы не касается, списывается только method="cash". Лимит «не уйти в
+    // минус» (юзер-фидбок 2026-08-16) сверяется с накопительным кошельком инкассации — вся
+    // инкассация по сменам минус всё уже списанное (расход+ЗП) за всё время, а НЕ с суммой
+    // инкассации этого конкретного дня (раньше ложно блокировало/пропускало мимо остатка).
     var toast: String?
     private func flash(_ m: String) {
         toast = m
@@ -233,18 +242,33 @@ final class ManagerSalaryModel {
                 flash(t("saveFailed", ["err": "shift"])); return false
             }
             struct InkRow: Codable, Sendable { let id: String; let amount: Double?; let expense: Double?; let salary: Double?; let salary_note: String? }
-            let current = try? await DB.from("inkassations").select("id, amount, expense, salary, salary_note")
+            struct ShiftInkRow: Codable, Sendable { let inkassation: Double? }
+            struct InkDeductRow: Codable, Sendable { let expense: Double?; let salary: Double? }
+            async let currentTask = DB.from("inkassations").select("id, amount, expense, salary, salary_note")
                 .eq("shift_id", shiftId).limit(1).list(InkRow.self).first
-            let available = (current?.amount ?? 0) - (current?.expense ?? 0) - (current?.salary ?? 0)
+            async let shAllTask = DB.from("shifts").select("inkassation").eq("restaurant_id", rid).list(ShiftInkRow.self)
+            async let inkAllTask = DB.from("inkassations").select("expense, salary").eq("restaurant_id", rid).list(InkDeductRow.self)
+            let current = try? await currentTask
+            let shAll = (try? await shAllTask) ?? []
+            let inkAll = (try? await inkAllTask) ?? []
+            let grossInk = shAll.reduce(0.0) { $0 + ($1.inkassation ?? 0) }
+            let deducted = inkAll.reduce(0.0) { $0 + ($1.expense ?? 0) + ($1.salary ?? 0) }
+            let available = grossInk - deducted
             guard amount <= available else {
-                flash(t("pe.insufficientInkassation", ["date": dateStr, "avail": Money.s(max(0, available))]))
+                flash(t("pe.insufficientInkassationPool", ["avail": Money.s(max(0, available))]))
                 return false
             }
             let noteEntry = "\(employeeName): \(Money.s(amount))"
             let mergedNote = [current?.salary_note, noteEntry].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "; ")
+            let newSalary = (current?.salary ?? 0) + amount
+            // C6 (юзер-фидбок 2026-08-15): total/inkNet раньше НЕ пересчитывался здесь — писались
+            // только salary/salary_note, total оставался от последнего обычного закрытия смены
+            // (без учёта зарплаты), из-за чего «остаток» в Кассе/Инкассации молча расходился с
+            // реальностью после каждой выплаты ЗП.
+            let newTotal = (current?.amount ?? 0) - (current?.expense ?? 0) - newSalary
             let values: [String: Any] = [
                 "restaurant_id": rid, "date": dateStr,
-                "salary": (current?.salary ?? 0) + amount, "salary_note": mergedNote,
+                "salary": newSalary, "salary_note": mergedNote, "total": newTotal,
             ]
             do {
                 if let id = current?.id {

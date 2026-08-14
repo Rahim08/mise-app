@@ -130,12 +130,11 @@ struct ManagerDisciplineTab: View {
                 RowListSkeleton(rows: 3)
             }
         }
+        // C2 (аудит 2026-08-13/15): loadDiscipline() здесь ДУБЛИРОВАЛ первый фетч —
+        // ManagerDisciplineBody.task(id: discPeriod) уже грузит данные при первом появлении.
+        // Тут только создаём модель, без сетевого вызова.
         .task {
-            if m == nil {
-                let model = ManagerDisciplineModel(rid: rid)
-                m = model
-                await model.loadDiscipline()
-            }
+            if m == nil { m = ManagerDisciplineModel(rid: rid) }
         }
     }
 }

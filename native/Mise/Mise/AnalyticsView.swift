@@ -1753,7 +1753,10 @@ private struct KassaTab: View {
                     Divider().overlay(Color.primary.opacity(0.08))
                     ForEach(Array(m.shiftsWithInk.enumerated()), id: \.element.id) { i, s in
                         let ink = m.inkDetails[s.id]
-                        let hasReason = ink?.reason?.isEmpty == false
+                        // C6 (юзер-фидбок 2026-08-15): иконка заметки проверяла только reason,
+                        // salary_note (выплаты ЗП) не подсвечивала — записи о зарплате были
+                        // невидимы в Кассе/Инкассации, хотя реально пишутся в БД.
+                        let hasReason = ink?.reason?.isEmpty == false || ink?.salary_note?.isEmpty == false
                         HStack {
                             Text(dd(s.date)).frame(width: 32, alignment: .leading).foregroundStyle(.primary.opacity(0.5))
                             Text(cur(s.inkassation ?? 0)).frame(maxWidth: .infinity, alignment: .trailing)
@@ -1776,13 +1779,23 @@ private struct KassaTab: View {
                                 get: { reasonPopoverShiftID == s.id },
                                 set: { if !$0 { reasonPopoverShiftID = nil } }
                             ), attachmentAnchor: .point(.top), arrowEdge: .top) {
-                                Text(ink?.reason ?? "—")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(.primary)
-                                    .padding(14)
-                                    .frame(maxWidth: 230, alignment: .leading)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .presentationCompactAdaptation(.popover)
+                                // C6 (юзер-фидбок 2026-08-15): попап показывал только reason,
+                                // salary_note (выплаты ЗП с этого дня) не показывался вообще.
+                                // Нет ветки «оба пустые — показать —»: кнопка задизейблена
+                                // (.disabled(!hasReason)) как раз тогда, когда оба пустые, так что
+                                // попап физически не может открыться в этом состоянии (аудит 2026-08-15).
+                                VStack(alignment: .leading, spacing: 8) {
+                                    if let reason = ink?.reason, !reason.isEmpty {
+                                        Text(reason).font(.system(size: 13)).foregroundStyle(.primary)
+                                    }
+                                    if let note = ink?.salary_note, !note.isEmpty {
+                                        Text(t("mg.tabSalary") + ": " + note).font(.system(size: 13)).foregroundStyle(BrandKit.manager)
+                                    }
+                                }
+                                .padding(14)
+                                .frame(maxWidth: 230, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .presentationCompactAdaptation(.popover)
                             }
                             Text(cur(ink?.total ?? (s.inkassation ?? 0)))
                                 .frame(width: 84, alignment: .trailing).fontWeight(.semibold)

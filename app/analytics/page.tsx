@@ -12,6 +12,16 @@ import { useI18n, tCurrent } from '@/lib/i18n'
 import { fmtDate, fv, dd } from '@/lib/format'
 const COLORS = ['#34c759', '#ff3b30', '#007aff', '#ff9500', '#af52de', '#00c7be', '#ff6b35', '#5856d6']
 
+// Банк (Open Banking) — короткий список стран для поиска института в GoCardless
+// (Revolut Business регистрируется под разным institution_id по стране). Названия —
+// через Intl.DisplayNames на локали юзера, без отдельных i18n-ключей на каждую страну.
+// IT первой — целевой рынок банк-интеграции после теста на личном Revolut юзера
+// (LT/GB — типичные страны регистрации самого Revolut).
+const BANK_COUNTRIES = ['IT', 'CH', 'FR', 'DE', 'GB', 'LT', 'TR', 'AZ']
+function countryName(code: string, locale: string): string {
+  try { return new Intl.DisplayNames([locale], { type: 'region' }).of(code) || code } catch { return code }
+}
+
 // «Вход» дня N = «Касса» дня N-1 из этого же (уже отсортированного по дате) списка,
 // а не хранимое поле opening_balance — оно пишется один раз при открытии смены и
 // может «застыть» на 0, если предыдущий день был закрыт позже (баг SO 2026-07-07).
@@ -423,13 +433,22 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [restaurantId, setRestaurantId] = useState(rid)
   const [currency, setCurrency] = useState('€')
   const [isPro, setIsPro] = useState(false)
-  const [tab, setTab] = useState<'period' | 'kassa' | 'forecast' | 'salary' | 'hookah'>('period')
+  const [tab, setTab] = useState<'period' | 'kassa' | 'bank' | 'salary' | 'hookah'>('period')
   const [periodMode, setPeriodMode] = useState<'day' | 'week' | 'month'>('month')
   const [kassaMode, setKassaMode] = useState<'kassa' | 'inkass'>('kassa')
   const [currentDate, setCurrentDate] = useState(new Date())
   const [includeCard, setIncludeCard] = useState(false) // restaurant_settings.include_card_in_analytics
-  const [revGoal, setRevGoal] = useState(0)             // restaurant_settings.monthly_revenue_goal (цель выручки на месяц)
   const [payoutDay, setPayoutDay] = useState<number | null>(null) // restaurant_settings.salary_payout_day — только для «до выплаты N дн.», в рамп начисления НЕ входит
+  // Банк (Open Banking, GoCardless) — вкладка «Банк» заменила «Прогноз» (юзер-фидбок
+  // 2026-08-16). connection: последняя строка bank_connections (null пока не подключено
+  // или status!=='linked'); tx: её лента операций, свежие сверху.
+  const [bankConnection, setBankConnection] = useState<any>(null)
+  const [bankTx, setBankTx] = useState<any[]>([])
+  const [bankBusy, setBankBusy] = useState(false)
+  const [bankCountry, setBankCountry] = useState('IT')
+  const [bankQuery, setBankQuery] = useState('') // название банка — разные заведения подключают разные банки
+  const [bankInstitutions, setBankInstitutions] = useState<{ name: string; country: string }[]>([])
+  const [bankError, setBankError] = useState<string | null>(null)
   const [expSalary, setExpSalary] = useState<string | null>(null) // раскрытая карточка ЗП (сворачиваемые)
   const [expDay, setExpDay] = useState<string | null>(null)       // раскрытый день в «По дням» (кальян)
   // Кальян: настройки + остатки (all-time) + строки смен кальянщика за месяц
@@ -439,6 +458,10 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [prevShiftsRaw, setPrevShifts] = useState<any[]>([])
   const [allShiftsRaw, setAllShifts] = useState<any[]>([])
   const [inkDeductions, setInkDeductions] = useState<any[]>([])
+  // C6 (юзер-фидбок 2026-08-15): дневная карточка «Инкассация» была хардкод-заглушкой
+  // (expense:0, reason:null) — не читала реальную запись вообще. Полные строки по shift_id,
+  // включая salary_note (выплаты ЗП), для дневного вида периода.
+  const [inkByShift, setInkByShift] = useState<Record<string, any>>({})
   const [expenses, setExpenses] = useState<any[]>([])
   const [allExpenses, setAllExpenses] = useState<any[]>([])
   const [pinnedCats, setPinnedCats] = useState<Set<string>>(new Set())
@@ -477,7 +500,6 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
       const r = Array.isArray(data) ? data[0] : data
       setIncludeCard(!!r?.include_card_in_analytics)
-      setRevGoal(Number(r?.monthly_revenue_goal || 0))
       setPayoutDay(r?.salary_payout_day ?? null)
       setHk(h => ({ ...h, price: Number(r?.hookah_price || 0), portion: Number(r?.hookah_portion_g || 20) }))
     })
@@ -495,7 +517,46 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       setPinnedCats(new Set((data || []).filter((c: any) => c.is_pinned).map((c: any) => c.name))))
     loadAll(restaurantId, new Date())
     loadAllHistory(restaurantId)
+    loadBank()
+    const bankErr = new URLSearchParams(window.location.search).get('bankError')
+    if (bankErr) { setBankError(bankErr); window.history.replaceState(null, '', window.location.pathname + '?tab=bank') }
   }, [restaurantId])
+
+  const loadBank = async () => {
+    const { data } = await db.from('bank_connections').select('*').order('created_at', { ascending: false }).limit(1)
+    const c = Array.isArray(data) ? data[0] : data
+    setBankConnection(c && c.status === 'linked' ? c : null)
+    if (c?.id && c.status === 'linked') {
+      const { data: tx } = await db.from('bank_transactions').select('*').eq('connection_id', c.id).order('booking_date', { ascending: false })
+      setBankTx(tx || [])
+    }
+  }
+
+  const connectBank = async (institutionName?: string, countryOverride?: string) => {
+    setBankBusy(true); setBankError(null); setBankInstitutions([])
+    try {
+      const res = await fetch('/api/bank/connect', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ country: countryOverride || bankCountry, query: bankQuery, institutionName }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setBankError(data?.error || 'error'); setBankBusy(false); return }
+      if (data.institutions) { setBankInstitutions(data.institutions); setBankBusy(false); return }
+      if (data.link) window.location.href = data.link
+    } catch (err: any) {
+      setBankError(err?.message || 'error'); setBankBusy(false)
+    }
+  }
+
+  const refreshBank = async () => {
+    setBankBusy(true); setBankError(null)
+    try {
+      const res = await fetch('/api/bank/sync', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) setBankError(data?.error || 'error')
+      await loadBank()
+    } finally { setBankBusy(false) }
+  }
 
   const loadAll = async (rid: string, date: Date) => {
     setLoading(true)
@@ -539,6 +600,10 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       const ids = shiftList.map((s: any) => s.id)
       const { data: e1 } = await db.from('shift_expenses').select('*').in('shift_id', ids)
       setExpenses(e1 || [])
+      const { data: inkRows } = await db.from('inkassations').select('shift_id, amount, expense, reason, total, salary, salary_note').in('shift_id', ids)
+      const byShift: Record<string, any> = {}
+      ;(inkRows || []).forEach((r: any) => { if (r.shift_id) byShift[r.shift_id] = r })
+      setInkByShift(byShift)
     }
     setLoading(false)
   }
@@ -749,8 +814,13 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     const dayShift = shifts.find((s: any) => s.date === dayStr)
     const dayExps = (dayShift ? expenses.filter((e: any) => e.shift_id === dayShift.id && !e.employee_id && countsInRollup(e)) : [])
       .sort((a: any, b: any) => ((pinnedCats.has(b.category_name) ? 1 : 0) - (pinnedCats.has(a.category_name) ? 1 : 0)) || b.amount - a.amount)
+    const inkRow = dayShift ? inkByShift[dayShift.id] : null
     const inkAmt = dayShift?.inkassation || 0
-    const dayInk = inkAmt > 0 ? { amount: inkAmt, expense: 0, reason: null, balance: inkAmt } : null
+    const dayInk = inkAmt > 0 ? {
+      amount: inkAmt, expense: inkRow?.expense || 0,
+      reason: [inkRow?.reason, inkRow?.salary_note].filter(Boolean).join(' · ') || null,
+      balance: inkRow?.total ?? inkAmt,
+    } : null
 
     const getWeekShifts = () => {
       const start = new Date(currentDate); const day = start.getDay()
@@ -1070,13 +1140,22 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
         <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
           {shiftsWithInk.length === 0
             ? <div style={{ padding: '32px', textAlign: 'center', color: t.text4 }}>{tr('an.noInkass')}</div>
-            : shiftsWithInk.map((s: any, i: number) => (
-              <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '44px 1fr 1fr', padding: '12px 14px', gap: 4, borderBottom: i < shiftsWithInk.length - 1 ? `0.5px solid ${t.sep2}` : 'none', fontSize: 13 }}>
-                <span style={{ color: t.text3 }}>{dd(s.date)}</span>
-                <span style={{ color: t.text }}>{s.date}</span>
-                <span style={{ color: t.orange, fontWeight: 600 }}>{currency}{fv(s.inkassation)}</span>
-              </div>
-            ))
+            : shiftsWithInk.map((s: any, i: number) => {
+              // C6 (юзер-фидбок 2026-08-15): истории не хватало причины/заметки — reason и
+              // salary_note (выплаты ЗП с этого дня) были невидимы нигде на вебе.
+              const row = inkByShift[s.id]
+              const note = [row?.reason, row?.salary_note].filter(Boolean).join(' · ')
+              return (
+                <div key={s.id} style={{ padding: '12px 14px', borderBottom: i < shiftsWithInk.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '44px 1fr 1fr', gap: 4, fontSize: 13 }}>
+                    <span style={{ color: t.text3 }}>{dd(s.date)}</span>
+                    <span style={{ color: t.text }}>{s.date}</span>
+                    <span style={{ color: t.orange, fontWeight: 600 }}>{currency}{fv(s.inkassation)}</span>
+                  </div>
+                  {note && <div style={{ fontSize: 11, color: t.text3, marginTop: 4 }}>{note}</div>}
+                </div>
+              )
+            })
           }
         </div>
       </div>
@@ -1175,6 +1254,110 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     )
   }
 
+  const renderBank = () => {
+    if (!isPro) {
+      return (
+        <div style={{ background: t.surface, borderRadius: 18, padding: '28px 20px', textAlign: 'center' as const, boxShadow: t.sh }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: t.text, marginBottom: 6 }}>{tr('an.bankProOnly')}</div>
+          <div style={{ fontSize: 13, color: t.text3 }}>{tr('an.bankProOnlyHint')}</div>
+        </div>
+      )
+    }
+
+    if (!bankConnection) {
+      return (
+        <div style={{ background: t.surface, borderRadius: 18, padding: '24px 20px', boxShadow: t.sh }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: t.text, marginBottom: 12 }}>{tr('an.bankConnectCta')}</div>
+          {bankError && <div style={{ fontSize: 13, color: t.red, marginBottom: 12 }}>{bankError}</div>}
+          {bankInstitutions.length > 0 ? (
+            <div>
+              {bankInstitutions.map((inst) => (
+                <button key={`${inst.name}-${inst.country}`} onClick={() => connectBank(inst.name)} disabled={bankBusy}
+                  style={{ display: 'block', width: '100%', textAlign: 'left' as const, padding: '12px 14px', borderRadius: 12, border: `1px solid ${t.sep2}`, background: t.fill, color: t.text, fontFamily: 'inherit', fontSize: 14, marginBottom: 8, cursor: 'pointer' }}>
+                  {inst.name}
+                </button>
+              ))}
+              <button onClick={() => setBankInstitutions([])} style={{ background: 'none', border: 'none', color: t.text3, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>{tr('an.back')}</button>
+            </div>
+          ) : (
+            <>
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: t.text3, marginBottom: 6 }}>{tr('an.bankCountry')}</div>
+                <select value={bankCountry} onChange={e => setBankCountry(e.target.value)}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `1px solid ${t.sep2}`, background: t.fill, color: t.text, fontFamily: 'inherit', fontSize: 14 }}>
+                  {BANK_COUNTRIES.map(code => <option key={code} value={code}>{countryName(code, locale)}</option>)}
+                </select>
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: t.text3, marginBottom: 6 }}>{tr('an.bankName')}</div>
+                <input value={bankQuery} onChange={e => setBankQuery(e.target.value)} placeholder={tr('an.bankNamePlaceholder')}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: `1px solid ${t.sep2}`, background: t.fill, color: t.text, fontFamily: 'inherit', fontSize: 14, boxSizing: 'border-box' as const }} />
+              </div>
+              <button onClick={() => connectBank()} disabled={bankBusy || !bankQuery.trim()}
+                style={{ width: '100%', padding: '14px', borderRadius: 14, background: t.green, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', opacity: (bankBusy || !bankQuery.trim()) ? 0.6 : 1 }}>
+                {bankBusy ? '···' : tr('an.bankConnect')}
+              </button>
+            </>
+          )}
+        </div>
+      )
+    }
+
+    const expiresAt = bankConnection.consent_expires_at ? new Date(bankConnection.consent_expires_at) : null
+    const daysLeft = expiresAt ? Math.ceil((expiresAt.getTime() - Date.now()) / 86400000) : null
+    const grouped: Record<string, any[]> = {}
+    ;(bankTx || []).forEach((row: any) => { const k = row.booking_date || '—'; (grouped[k] = grouped[k] || []).push(row) })
+    const days = Object.keys(grouped).sort((a, b) => a < b ? 1 : -1)
+
+    return (
+      <div>
+        {bankError && <div style={{ fontSize: 13, color: t.red, marginBottom: 12 }}>{bankError}</div>}
+        {daysLeft !== null && daysLeft <= 7 && (
+          <div style={{ background: `${t.orange}18`, borderRadius: 14, padding: '12px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <span style={{ fontSize: 13, color: t.orange, fontWeight: 500 }}>{tr('an.bankReconsentSoon', { n: String(Math.max(0, daysLeft)) })}</span>
+            <button onClick={() => connectBank(bankConnection.institution_name, bankConnection.institution_id)} style={{ background: 'none', border: 'none', color: t.orange, fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>{tr('an.bankReconnect')}</button>
+          </div>
+        )}
+        <div style={{ background: t.surface, borderRadius: 18, padding: '20px 18px', boxShadow: t.sh, marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{tr('an.bankBalance')}</div>
+              <div style={{ fontSize: 34, fontWeight: 800, color: t.text, letterSpacing: -1, marginTop: 6 }}>{currency}{fv(bankConnection.balance || 0)}</div>
+              {bankConnection.balance_synced_at && <div style={{ fontSize: 12, color: t.text3, marginTop: 4 }}>{tr('an.bankUpdated', { d: new Date(bankConnection.balance_synced_at).toLocaleString(locale) })}</div>}
+            </div>
+            <button onClick={refreshBank} disabled={bankBusy} style={{ width: 40, height: 40, borderRadius: '50%', background: t.fill, border: 'none', color: t.text, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: bankBusy ? 0.5 : 1 }}>
+              <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6" /><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" /></svg>
+            </button>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>{tr('an.history')}</div>
+        <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
+          {days.length === 0
+            ? <div style={{ padding: '32px', textAlign: 'center' as const, color: t.text4 }}>{tr('an.bankNoTransactions')}</div>
+            : days.map((day, di) => (
+              <div key={day} style={{ borderBottom: di < days.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                <div style={{ padding: '10px 14px 4px', fontSize: 12, fontWeight: 600, color: t.text3 }}>{day}</div>
+                {grouped[day].map((row: any) => (
+                  <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px' }}>
+                    <div style={{ width: 30, height: 30, borderRadius: '50%', background: row.amount >= 0 ? `${t.green}18` : `${t.red}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <svg width="14" height="14" fill="none" stroke={row.amount >= 0 ? t.green : t.red} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                        {row.amount >= 0 ? <path d="M12 19V5M5 12l7-7 7 7" /> : <path d="M12 5v14M5 12l7 7 7-7" />}
+                      </svg>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{row.description || row.counterparty || '—'}</div>
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: row.amount >= 0 ? t.green : t.red, flexShrink: 0 }}>{row.amount >= 0 ? '+' : ''}{currency}{fv(row.amount)}</div>
+                  </div>
+                ))}
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    )
+  }
+
   if (!restaurantId) return <AuthGate appId="analytics" appName="Mise Analytics" onAuth={setRestaurantId} />
 
   if (!t.mounted || loading) return embedded
@@ -1184,7 +1367,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const TABS = [
     { id: 'period', label: tr('an.tabPeriod'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },
     { id: 'kassa', label: tr('an.tabKassa'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 3H8L2 7h20z" /></svg> },
-    { id: 'forecast', label: tr('an.tabForecast'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M3 17l6-6 4 4 7-7" strokeLinecap="round" strokeLinejoin="round" /><path d="M14 8h6v6" strokeLinecap="round" strokeLinejoin="round" /></svg> },
+    { id: 'bank', label: tr('an.tabBank'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><rect x="2" y="6" width="20" height="14" rx="2" /><path d="M2 10h20" strokeLinecap="round" /><path d="M6 15h4" strokeLinecap="round" /></svg> },
     { id: 'salary', label: tr('an.tabSalary'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" /></svg> },
     { id: 'hookah', label: tr('an.tabHookah'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="26" height="26"><path d="M8 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M12 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M16 8c0-2.5 3-4 3-6" strokeLinecap="round"/><path d="M5 14h14" strokeLinecap="round"/><path d="M5 17c1 1.5 2 2 3.5 2s2.5-1 4-1 2.5 1 4 1 2.5-.5 3.5-2" strokeLinecap="round"/></svg> },
   ] as const
@@ -1274,78 +1457,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
             </>
           )}
 
-          {tab === 'forecast' && (() => {
-            const now = new Date()
-            const dim = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
-            const isCur = currentDate.getMonth() === now.getMonth() && currentDate.getFullYear() === now.getFullYear()
-            const dpass = isCur ? now.getDate() : dim
-            const mtd = totalIncome
-            const dailyAvg = dpass > 0 ? mtd / dpass : 0
-            const projected = Math.round(dailyAvg * dim)
-            const projPct = pct(projected, prevIncome)
-            const goalPct = revGoal > 0 ? Math.min(100, mtd / revGoal * 100) : 0
-            const daysLeft = Math.max(0, dim - dpass)
-            const needPerDay = revGoal > mtd && daysLeft > 0 ? (revGoal - mtd) / daysLeft : 0
-            const onTrack = revGoal > 0 && projected >= revGoal
-
-            const saveGoal = async (value: string) => {
-              const amt = Math.max(0, parseFloat(value) || 0)
-              if (amt === revGoal) return
-              setRevGoal(amt)
-              await db.from('restaurant_settings').update({ monthly_revenue_goal: amt }).eq('restaurant_id', restaurantId)
-            }
-
-            return (
-              <div>
-                {/* Прогноз на месяц */}
-                <div style={{ background: t.surface, borderRadius: 18, padding: '20px 18px', boxShadow: t.sh, marginBottom: 12 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{isCur ? tr('an.forecastMonth') : tr('an.revenueMonth')}</div>
-                  <div style={{ fontSize: 34, fontWeight: 800, color: t.text, letterSpacing: -1, marginTop: 6 }}>{currency}{fv(isCur ? projected : mtd)}</div>
-                  <div style={{ fontSize: 13, color: t.text3, marginTop: 4 }}>
-                    {isCur ? tr('an.atCurrentPace', { v: `${currency}${fv(Math.round(dailyAvg))}` }) : tr('an.monthResult')}
-                    {projPct !== null && <span style={{ color: projPct >= 0 ? t.green : t.red, fontWeight: 600 }}> · {projPct >= 0 ? '+' : ''}{projPct.toFixed(0)}% {tr('an.vsPrevious')}</span>}
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
-                  <StatCard label={tr('an.sinceMonthStart')} rawValue={mtd} value={`${currency}${fv(mtd)}`} color={t.blue} sm t={t} />
-                  <StatCard label={tr('an.avgPerDay')} rawValue={dailyAvg} value={`${currency}${fv(Math.round(dailyAvg))}`} color={t.orange} sm t={t} />
-                  <StatCard label={tr('an.prevMonth')} rawValue={prevIncome} value={`${currency}${fv(prevIncome)}`} color={t.purple} sm t={t} />
-                </div>
-
-                {/* Цель на месяц */}
-                <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '8px 4px 8px' }}>{tr('an.monthGoal')}</div>
-                <div style={{ background: t.surface, borderRadius: 16, padding: '16px', boxShadow: t.sh }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: revGoal > 0 ? 12 : 0 }}>
-                    <span style={{ fontSize: 14, color: t.text, fontWeight: 500 }}>{tr('an.revenueGoal')}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 14, color: t.text3 }}>{currency}</span>
-                      <input
-                        key={`goal-${fmtDate(currentDate).slice(0, 7)}`} type="number" inputMode="decimal"
-                        defaultValue={revGoal || ''} placeholder="0"
-                        onBlur={e => saveGoal(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                        style={{ width: 110, textAlign: 'right', padding: '7px 10px', borderRadius: 10, border: `1px solid ${t.sep2}`, background: t.fill, color: t.text, fontWeight: 700, fontSize: 15, fontFamily: 'inherit', outline: 'none' }}
-                      />
-                    </div>
-                  </div>
-                  {revGoal > 0 && (
-                    <>
-                      <div style={{ height: 8, borderRadius: 4, background: t.fill, overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${goalPct}%`, borderRadius: 4, background: onTrack ? t.green : t.orange, transition: 'width 0.8s cubic-bezier(.16,1,.3,1)' }} />
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 12 }}>
-                        <span style={{ color: t.text3 }}>{goalPct.toFixed(0)}% · {currency}{fv(mtd)} {tr('an.ofWord')} {currency}{fv(revGoal)}</span>
-                        {isCur && daysLeft > 0
-                          ? <span style={{ color: onTrack ? t.green : t.orange, fontWeight: 600 }}>{onTrack ? tr('an.onTrack') : tr('an.needPerDay', { v: `${currency}${fv(Math.round(needPerDay))}` })}</span>
-                          : <span style={{ color: mtd >= revGoal ? t.green : t.red, fontWeight: 600 }}>{mtd >= revGoal ? tr('an.goalReached') : tr('an.short', { v: `${currency}${fv(revGoal - mtd)}` })}</span>}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            )
-          })()}
+          {tab === 'bank' && renderBank()}
 
           {tab === 'salary' && renderSalary()}
 

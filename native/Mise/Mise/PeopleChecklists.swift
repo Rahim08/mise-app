@@ -1125,65 +1125,7 @@ func weekdayShort(_ d: Int) -> String {
     }
 }
 
-struct ChecklistHistorySheet: View {
-    @Bindable var m: PeopleModel
-    @Environment(\.dismiss) private var dismiss
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.miseBg.ignoresSafeArea()
-                ScrollView {
-                    VStack(spacing: 12) {
-                        if !m.clHistoryLoaded {
-                            RowListSkeleton(rows: 3)
-                        } else if m.historyByDate.isEmpty {
-                            Text(t("pe.historyEmpty")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 60)
-                        } else {
-                            ForEach(m.historyByDate, id: \.0) { date, comps in dayCard(date, comps) }
-                        }
-                    }
-                    .padding(16)
-                }
-            }
-            .navigationTitle(t("pe.checklistHistory")).navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(t("done")) { dismiss() } } }
-            .toolbarBackground(Color.miseBg, for: .navigationBar)
-        }
-        .task { if !m.clHistoryLoaded { await m.loadChecklistHistory() } }
-    }
-
-    private func dayCard(_ date: String, _ comps: [ChecklistCompletion]) -> some View {
-        var total = 0, done = 0
-        var missed: [String] = []
-        for c in comps {
-            guard let cl = m.checklistTitle(c.checklist_id), let items = cl.items else { continue }
-            let state = c.items_state ?? []
-            for (i, it) in items.enumerated() {
-                total += 1
-                if i < state.count && state[i].done { done += 1 } else { missed.append(it) }
-            }
-        }
-        let allDone = total > 0 && done == total
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(dayLabel(date)).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
-                Spacer()
-                Text("\(done)/\(total)").font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(allDone ? BrandKit.analytics : BrandKit.stash)
-            }
-            if missed.isEmpty {
-                Text(t("pe.allDone")).font(.system(size: 13)).foregroundStyle(BrandKit.analytics)
-            } else {
-                ForEach(Array(missed.enumerated()), id: \.offset) { _, it in
-                    HStack(spacing: 8) {
-                        Image(systemName: "xmark.circle").font(.system(size: 13)).foregroundStyle(BrandKit.menu)
-                        Text(it).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.7))
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
-    }
-}
+// ChecklistHistorySheet удалена (C7, аудит 2026-08-13/15) — была осиротевшей (0 вызовов) после
+// реструктуры 2026-08-13, портирована в ManagerChecklistsModel/ManagerChecklistHistoryList
+// (ManagerChecklists.swift) как третий сегмент «История» в Manager→Настройки→Чек-листы.
 

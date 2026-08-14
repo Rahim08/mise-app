@@ -109,13 +109,38 @@ final class ManagerChecklistsModel {
             ] as [String: Any]).eq("id", cid).run()
         } catch { flash(t("saveFailed", ["err": error.localizedDescription])) }
     }
+
+    // MARK: История (C7, аудит 2026-08-13/15) — ChecklistHistorySheet осиротела при реструктуре
+    // 2026-08-13 (жила в PeopleChecklists.swift, привязана к PeopleModel, но нигде не вызывалась
+    // после переноса — история чек-листов у менеджера была недоступна нигде). Портировано сюда
+    // (та же query-логика, что PeopleModel.loadChecklistHistory/historyByDate/checklistTitle),
+    // без изменений: 30 дней, все прохождения ресторана (не только свои), kind="shift".
+
+    var history: [ChecklistCompletion] = []
+    var historyLoaded = false
+    private let dfDayKey: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+    func loadHistory() async {
+        let from = dfDayKey.string(from: Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date())
+        history = (try? await DB.from("shift_checklist_completions").select()
+            .gte("date", from).order("date", ascending: false).list(ChecklistCompletion.self)) ?? []
+        historyLoaded = true
+    }
+    var historyByDate: [(String, [ChecklistCompletion])] {
+        var m: [String: [ChecklistCompletion]] = [:]
+        for c in history { m[c.date ?? "", default: []].append(c) }
+        return m.sorted { $0.key > $1.key }
+    }
+    func checklistTitle(_ id: String?) -> ShiftChecklist? { checklists.first { $0.id == id } }
 }
 
 struct ManagerChecklistsTab: View {
     let rid: String
     @State private var cm: ManagerChecklistsModel?
     @State private var edit: ChecklistEdit?
-    @State private var section = "templates" // templates | verify
+    @State private var section = "templates" // templates | verify | history
 
     var body: some View {
         Group {
@@ -124,18 +149,21 @@ struct ManagerChecklistsTab: View {
                     Picker("", selection: $section) {
                         Text(t("pe.checklistTemplates")).tag("templates")
                         Text(t("pe.verification")).tag("verify")
+                        Text(t("pe.checklistHistory")).tag("history")
                     }.pickerStyle(.segmented).padding(.horizontal, 16).padding(.top, 8)
                     if section == "templates" {
                         ManagerChecklistsList(cm: cm, edit: $edit)
-                    } else {
+                    } else if section == "verify" {
                         ManagerVerifyList(cm: cm)
+                    } else {
+                        ManagerChecklistHistoryList(cm: cm)
                     }
                 }
             } else {
                 RowListSkeleton(rows: 3)
             }
         }
-        .navigationTitle(t("pe.auditTab"))
+        .navigationTitle(t("pe.auditTab")).navigationBarTitleDisplayMode(.inline)
         .task {
             if cm == nil {
                 let model = ManagerChecklistsModel(rid: rid)
@@ -167,6 +195,62 @@ private struct ManagerVerifyList: View {
             }
             .padding(16)
         }
+    }
+}
+
+/// История (C7, аудит 2026-08-13/15) — портировано из ChecklistHistorySheet (PeopleChecklists.swift,
+/// была осиротевшей после реструктуры 2026-08-13), без изменений вёрстки dayCard.
+private struct ManagerChecklistHistoryList: View {
+    @Bindable var cm: ManagerChecklistsModel
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                if !cm.historyLoaded {
+                    RowListSkeleton(rows: 3)
+                } else if cm.historyByDate.isEmpty {
+                    Text(t("pe.historyEmpty")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 60)
+                } else {
+                    ForEach(cm.historyByDate, id: \.0) { date, comps in dayCard(date, comps) }
+                }
+            }
+            .padding(16)
+        }
+        .task { if !cm.historyLoaded { await cm.loadHistory() } }
+    }
+
+    private func dayCard(_ date: String, _ comps: [ChecklistCompletion]) -> some View {
+        var total = 0, done = 0
+        var missed: [String] = []
+        for c in comps {
+            guard let cl = cm.checklistTitle(c.checklist_id), let items = cl.items else { continue }
+            let state = c.items_state ?? []
+            for (i, it) in items.enumerated() {
+                total += 1
+                if i < state.count && state[i].done { done += 1 } else { missed.append(it) }
+            }
+        }
+        let allDone = total > 0 && done == total
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(dayLabel(date)).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
+                Spacer()
+                Text("\(done)/\(total)").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(allDone ? BrandKit.analytics : BrandKit.stash)
+            }
+            if missed.isEmpty {
+                Text(t("pe.allDone")).font(.system(size: 13)).foregroundStyle(BrandKit.analytics)
+            } else {
+                ForEach(Array(missed.enumerated()), id: \.offset) { _, it in
+                    HStack(spacing: 8) {
+                        Image(systemName: "xmark.circle").font(.system(size: 13)).foregroundStyle(BrandKit.menu)
+                        Text(it).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.7))
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
     }
 }
 

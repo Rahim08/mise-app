@@ -72,6 +72,11 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   // через service-role напрямую, не через этот шлюз) — клиент только читает.
   google_reviews:              { read: ['manager', 'analytics', 'stash', 'people'], write: [] },
   google_rating_snapshots:     { read: ['manager', 'analytics', 'stash', 'people'], write: [] },
+  // Банк (Open Banking, GoCardless) — баланс/лента операций во вкладке «Банк» в
+  // Analytics. Пишет только сервер (app/api/bank/*, cron/bank-sync через service-role),
+  // клиент только читает — та же логика, что у google_reviews выше.
+  bank_connections:            { read: ['manager', 'analytics'], write: [] },
+  bank_transactions:           { read: ['manager', 'analytics'], write: [] },
 }
 
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'like', 'ilike'])
