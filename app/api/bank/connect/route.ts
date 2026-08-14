@@ -1,5 +1,7 @@
-// Начало подключения банка (Enable Banking /auth) — owner-only, вкладка «Банк» в
-// Analytics. Тело: { country, query, institutionName? }. Разные заведения подключают
+// Начало подключения банка (Enable Banking /auth) — owner+manager (юзер-фидбок
+// 2026-08-16: тест сейчас идёт под менеджерской сессией; сузить обратно до owner-only
+// после теста, если понадобится). Вкладка «Банк» в Analytics. Тело: { country, query,
+// institutionName? }. Разные заведения подключают
 // разные банки (напр. SO — Revolut, другое заведение — Banco Popolare di Sondrio),
 // поэтому имя банка ищем по свободному тексту (`query`), не хардкодим. Если
 // institutionName не передан, ищем ASPSP по стране+query; при >1 совпадении возвращаем
@@ -17,7 +19,9 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   const caller = await resolveCaller(req)
-  if (!caller || !caller.owner) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!caller || (!caller.owner && !caller.apps.includes('manager') && !caller.apps.includes('analytics'))) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
 
   let body: any
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Bad request' }, { status: 400 }) }
