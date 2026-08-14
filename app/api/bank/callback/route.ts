@@ -20,6 +20,17 @@ import { createSession, syncConnection } from '@/lib/enableBanking'
 
 export const dynamic = 'force-dynamic'
 
+// ASWebAuthenticationSession перехватывает навигацию НА кастомную схему, но HTTP
+// Location-редирект (30x) на неё WebKit часто не отдаёт сессии — сам пытается открыть
+// mise://... как страницу и падает с «address is invalid» (юзер-фидбок 2026-08-16).
+// Обходной путь (стандартный для OAuth+ASWebAuthenticationSession): 200 OK с HTML,
+// который сам делает JS-навигацию на кастомную схему — это WebKit перехватывает.
+function schemeRedirectHTML(url: string): NextResponse {
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>` +
+    `<script>location.replace(${JSON.stringify(url)})</script></body></html>`
+  return new NextResponse(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+}
+
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')
   const rawState = req.nextUrl.searchParams.get('state')
@@ -28,7 +39,7 @@ export async function GET(req: NextRequest) {
   const isIos = platform === 'ios'
 
   const fail = (msg: string) => isIos
-    ? NextResponse.redirect(`mise://bank-callback?error=${encodeURIComponent(msg)}`)
+    ? schemeRedirectHTML(`mise://bank-callback?error=${encodeURIComponent(msg)}`)
     : NextResponse.redirect(`${origin}/analytics?tab=bank&bankError=${encodeURIComponent(msg)}`)
 
   if (!ref || !code) return fail('unauthorized')
@@ -53,7 +64,7 @@ export async function GET(req: NextRequest) {
 
     await syncConnection(admin, updated)
     return isIos
-      ? NextResponse.redirect('mise://bank-callback?ok=1')
+      ? schemeRedirectHTML('mise://bank-callback?ok=1')
       : NextResponse.redirect(`${origin}/analytics?tab=bank`)
   } catch (err: any) {
     await admin.from('bank_connections').update({ status: 'error', error_message: err?.message || 'callback failed' }).eq('id', connection.id)
