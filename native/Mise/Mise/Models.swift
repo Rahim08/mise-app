@@ -55,7 +55,6 @@ nonisolated struct Absence: Codable, Sendable {
 
 nonisolated struct AnalyticsSettings: Codable, Sendable {
     let include_card_in_analytics: Bool?
-    let monthly_revenue_goal: Double?
     let hookah_price: Double?
     let hookah_portion_g: Double?
     let salary_payout_day: Int?
@@ -74,6 +73,27 @@ nonisolated struct Inkassation: Codable, Sendable {
 nonisolated struct ClosingOnly: Codable, Sendable { let closing_balance: Double? }
 nonisolated struct InkOnly: Codable, Sendable { let inkassation: Double? }
 nonisolated struct InkTotalOnly: Codable, Sendable { let total: Double? }
+
+// Банк (Open Banking, Enable Banking) — вкладка «Банк» в Analytics.
+nonisolated struct BankConnection: Codable, Identifiable, Sendable {
+    let id: String
+    let institution_name: String?
+    let institution_id: String?   // страна ASPSP (не сам институт — см. lib/enableBanking.ts)
+    let account_id: String?
+    let status: String?
+    let balance: Double?
+    let balance_currency: String?
+    let balance_synced_at: String?
+    let consent_expires_at: String?
+}
+nonisolated struct BankTransaction: Codable, Identifiable, Sendable {
+    let id: String
+    let booking_date: String?
+    let amount: Double?
+    let currency: String?
+    let description: String?
+    let counterparty: String?
+}
 
 // MARK: - Stash (склад табака + кальянная смена)
 

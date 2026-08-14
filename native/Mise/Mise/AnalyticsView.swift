@@ -30,11 +30,21 @@ final class AnalyticsModel {
     var includeCard = false
     var hkPrice = 0.0
     var hkPortion = 20.0
-    var revGoal = 0.0
     var payoutDay: Int? = nil // restaurant_settings.salary_payout_day — только для «до выплаты N дн.», в рамп начисления НЕ входит
     var kassaMode = "kassa"
     var periodMode = "month" // day | week | month
     var cumulativeInkass = 0.0 // инкассация накопительно (до конца выбранного месяца)
+
+    // Банк (Open Banking, Enable Banking) — вкладка «Банк» заменила «Прогноз» (5-таб
+    // лимит iOS, см. комментарий у TabView в AnalyticsBody). connection == nil, пока не
+    // подключено (или status != "linked").
+    var bankConnection: BankConnection?
+    var bankTx: [BankTransaction] = []
+    var bankBusy = false
+    var bankCountry = "IT" // целевой рынок после теста на личном Revolut юзера
+    var bankQuery = ""
+    var bankInstitutions: [BankInstitutionDTO] = []
+    var bankError: String?
 
     var shiftsRaw: [Shift] = []
     var prevShiftsRaw: [Shift] = []
@@ -183,7 +193,6 @@ final class AnalyticsModel {
             includeCard = s.include_card_in_analytics ?? false
             hkPrice = s.hookah_price ?? 0
             hkPortion = s.hookah_portion_g ?? 20
-            revGoal = s.monthly_revenue_goal ?? 0
             payoutDay = s.salary_payout_day
         }
 
@@ -253,6 +262,7 @@ final class AnalyticsModel {
             stockG = stockRows.reduce(0) { $0 + $1.quantity_g }
             types = (await tps) ?? types
             await loadDebts()
+            await loadBank()
             histLoaded = true
         }
 
@@ -265,6 +275,56 @@ final class AnalyticsModel {
         let grossInk = allShiftInkRows.filter { $0.date <= monthEndKey }.reduce(0) { $0 + ($1.inkassation ?? 0) }
         let dedInk = allInkDedRows.filter { ($0.date ?? "") <= monthEndKey }.reduce(0) { $0 + (($1.expense ?? 0) + ($1.salary ?? 0)) }
         cumulativeInkass = grossInk - dedInk
+    }
+
+    // MARK: - Банк (Open Banking)
+
+    func loadBank() async {
+        guard let c = try? await DB.from("bank_connections").select()
+            .order("created_at", ascending: false).limit(1).list(BankConnection.self).first else {
+            bankConnection = nil; return
+        }
+        guard c.status == "linked" else { bankConnection = nil; return }
+        bankConnection = c
+        if let tx = try? await DB.from("bank_transactions").select()
+            .eq("connection_id", c.id).order("booking_date", ascending: false).list(BankTransaction.self) {
+            bankTx = tx
+        }
+    }
+
+    /// institutionName задан — либо выбор из списка совпадений, либо повторное
+    /// подключение уже известного банка (re-consent). countryOverride — то же для страны.
+    func connectBank(institutionName: String? = nil, countryOverride: String? = nil) async {
+        bankBusy = true; bankError = nil; bankInstitutions = []
+        defer { bankBusy = false }
+        do {
+            let resp = try await API.postJSON("/api/bank/connect", body: [
+                "country": countryOverride ?? bankCountry, "query": bankQuery,
+                "institutionName": institutionName ?? "", "platform": "ios",
+            ].compactMapValues { $0.isEmpty ? nil : $0 }, as: BankConnectResponse.self)
+            if let institutions = resp.institutions, !institutions.isEmpty {
+                bankInstitutions = institutions; return
+            }
+            guard let link = resp.link, let url = URL(string: link) else {
+                bankError = resp.error ?? "error"; return
+            }
+            try await BankAuthCoordinator().present(url: url)
+            await loadBank()
+        } catch {
+            bankError = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func refreshBank() async {
+        bankBusy = true; bankError = nil
+        defer { bankBusy = false }
+        do {
+            let resp = try await API.postJSON("/api/bank/sync", body: [:], as: BankSyncResponse.self)
+            if resp.ok == false { bankError = resp.error ?? "error" }
+        } catch {
+            bankError = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+        await loadBank()
     }
 
     func changeMonth(_ d: Int) async {
@@ -359,19 +419,6 @@ final class AnalyticsModel {
     var daysPassed: Int { isCurrentMonth ? Calendar.current.component(.day, from: Date()) : daysInMonth }
     var dailyAvg: Double { daysPassed > 0 ? totalIncome / Double(daysPassed) : 0 }
     var projected: Double { (dailyAvg * Double(daysInMonth)).rounded() }
-    var goalPct: Double { revGoal > 0 ? min(100, totalIncome / revGoal * 100) : 0 }
-    var daysLeft: Int { max(0, daysInMonth - daysPassed) }
-    var needPerDay: Double { (revGoal > totalIncome && daysLeft > 0) ? (revGoal - totalIncome) / Double(daysLeft) : 0 }
-    var onTrack: Bool { revGoal > 0 && projected >= revGoal }
-
-    func saveGoal(_ v: Double) async {
-        guard v != revGoal else { return }
-        let prev = revGoal
-        revGoal = v
-        do {
-            try await DB.from("restaurant_settings").update(["monthly_revenue_goal": v]).eq("restaurant_id", rid).run()
-        } catch { flash(t("saveFailed", ["err": error.localizedDescription])); revGoal = prev }
-    }
 
     // Период: срез смен по режиму относительно ВЫБРАННОЙ даты (currentDate).
     private var allLoaded: [Shift] { adj(shiftsRaw + prevShiftsRaw) }
@@ -982,8 +1029,8 @@ private struct AnalyticsBody: View {
                             .tabItem { Label(t("tab.period"), systemImage: "calendar") }.tag("period")
                         AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { KassaTab(m: m) }
                             .tabItem { Label(t("tab.kassa"), systemImage: "banknote.fill") }.tag("kassa")
-                        AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { ForecastTab(m: m) }
-                            .tabItem { Label(t("tab.forecast"), systemImage: "chart.line.uptrend.xyaxis") }.tag("forecast")
+                        AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { BankTab(m: m, bankEnabled: aiEnabled) }
+                            .tabItem { Label(t("tab.bank"), systemImage: "building.columns.fill") }.tag("bank")
                         AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { SalaryTab(m: m) }
                             .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
                         AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { HookahTab(m: m) }
@@ -996,7 +1043,7 @@ private struct AnalyticsBody: View {
                     // чего «Сессии» были не видны напрямую. Теперь ровно 5 вкладок — без «Ещё».
                     // Долги переехали в PeriodTab — блок под «Расходами», period-aware
                     // (periodDebts/periodDebtHistory), тап открывает DebtsTab шторкой.
-                    .tabEdgeSwipe(tabs: ["period", "kassa", "forecast", "salary", "hookah"],
+                    .tabEdgeSwipe(tabs: ["period", "kassa", "bank", "salary", "hookah"],
                                   selection: $m.tab,
                                   onFirstBack: app.availableApps.count > 1 ? { app.backToLauncher() } : nil)
                 }
@@ -1925,85 +1972,161 @@ func dayLabelRu(_ ymd: String) -> String {
     return f.string(from: d).capitalized
 }
 
-// MARK: Прогноз
+// MARK: Банк (Open Banking, Enable Banking) — заменила «Прогноз» (юзер-фидбок 2026-08-16,
+// паритет с вебом app/analytics/page.tsx renderBank). Гейт Pro переиспользует aiEnabled
+// (тот же флаг, что открывает AI-ассистента) — не заводим отдельный.
 
-private struct ForecastTab: View {
+private let bankCountries = ["IT", "CH", "FR", "DE", "GB", "LT", "TR", "AZ"]
+private func regionName(_ code: String) -> String {
+    Locale.current.localizedString(forRegionCode: code) ?? code
+}
+private func bankTimestamp(_ iso: String?) -> String {
+    guard let d = parseISO(iso) else { return "" }
+    let f = DateFormatter(); f.locale = appLocale(); f.dateStyle = .short; f.timeStyle = .short
+    return f.string(from: d)
+}
+
+private struct BankTab: View {
     @Bindable var m: AnalyticsModel
-    @State private var goalText = ""
-    @FocusState private var goalFocused: Bool
+    let bankEnabled: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(m.isCurrentMonth ? t("an.forecastMonth") : t("an.revenueMonth"))
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
-            Text(cur(m.isCurrentMonth ? m.projected : m.totalIncome))
-                .font(.system(size: 34, weight: .heavy)).foregroundStyle(.primary)
-            if m.isCurrentMonth {
-                Text(t("an.atPace", ["v": cur(m.dailyAvg.rounded())]))
-                    .font(.system(size: 13)).foregroundStyle(.primary.opacity(0.45))
+        if !bankEnabled {
+            VStack(spacing: 6) {
+                Text(t("an.bankProOnly")).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+                Text(t("an.bankProOnlyHint")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5))
+                    .multilineTextAlignment(.center)
             }
+            .frame(maxWidth: .infinity).padding(.vertical, 28).padding(.horizontal, 20)
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
+        } else if m.bankConnection == nil {
+            connectCard
+        } else {
+            connectedView
         }
-        .frame(maxWidth: .infinity, alignment: .leading).padding(18)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
-
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-            mini(t("an.sinceMonthStart"), cur(m.totalIncome), BrandKit.manager)
-            mini(t("an.avgPerDay"), cur(m.dailyAvg.rounded()), BrandKit.stash)
-            mini(t("an.prevMonth"), cur(m.prevIncome), BrandKit.people)
-        }
-
-        VStack(alignment: .leading, spacing: 12) {
-            Text(t("an.monthGoal")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
-            HStack {
-                Text(t("an.revenueGoal")).font(.system(size: 14)).foregroundStyle(.primary)
-                Spacer()
-                if goalFocused {
-                    Button(t("done")) { Task { await m.saveGoal(Double(goalText) ?? 0) }; goalFocused = false }
-                        .font(.system(size: 13, weight: .bold)).foregroundStyle(BrandKit.analytics)
-                }
-                Text(Money.symbol).foregroundStyle(.primary.opacity(0.4))
-                TextField("0", text: $goalText)
-                    .keyboardType(.numberPad).multilineTextAlignment(.trailing)
-                    .font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
-                    .frame(width: 100).padding(.vertical, 7).padding(.horizontal, 10)
-                    .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
-                    .focused($goalFocused)
-                    .onChange(of: goalFocused) { _, f in if !f { Task { await m.saveGoal(Double(goalText) ?? 0) } } }
-            }
-            if m.revGoal > 0 {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.primary.opacity(0.1)).frame(height: 8)
-                        Capsule().fill(m.onTrack ? BrandKit.analytics : BrandKit.stash)
-                            .frame(width: geo.size.width * m.goalPct / 100, height: 8)
-                    }
-                }
-                .frame(height: 8)
-                HStack {
-                    Text(t("an.goalProgress", ["pct": "\(Int(m.goalPct))", "cur": cur(m.totalIncome), "goal": cur(m.revGoal)]))
-                        .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
-                    Spacer()
-                    if m.isCurrentMonth && m.daysLeft > 0 {
-                        Text(m.onTrack ? t("an.onTrack") : t("an.needPerDay", ["v": cur(m.needPerDay.rounded())]))
-                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(m.onTrack ? BrandKit.analytics : BrandKit.stash)
-                    } else {
-                        Text(m.totalIncome >= m.revGoal ? t("an.goalReached") : t("an.short", ["v": cur(m.revGoal - m.totalIncome)]))
-                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(m.totalIncome >= m.revGoal ? BrandKit.analytics : BrandKit.menu)
-                    }
-                }
-            }
-        }
-        .padding(16).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
-        .onAppear { goalText = m.revGoal > 0 ? String(Int(m.revGoal)) : "" }
     }
 
-    private func mini(_ label: String, _ value: String, _ color: Color) -> some View {
-        VStack(spacing: 3) {
-            Text(value).font(.system(size: 15, weight: .heavy)).foregroundStyle(color).minimumScaleFactor(0.5).lineLimit(1)
-            Text(label).font(.system(size: 10)).foregroundStyle(.primary.opacity(0.45)).multilineTextAlignment(.center)
+    private var connectCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(t("an.bankConnectCta")).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+            if let err = m.bankError {
+                Text(err).font(.system(size: 13)).foregroundStyle(BrandKit.menu)
+            }
+            if !m.bankInstitutions.isEmpty {
+                ForEach(m.bankInstitutions) { inst in
+                    Button { Task { await m.connectBank(institutionName: inst.name) } } label: {
+                        Text(inst.name).font(.system(size: 14)).foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14).padding(.vertical, 12)
+                            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+                Button(t("an.back")) { m.bankInstitutions = [] }
+                    .font(.system(size: 13)).foregroundStyle(.primary.opacity(0.5))
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(t("an.bankCountry")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
+                    Picker(t("an.bankCountry"), selection: $m.bankCountry) {
+                        ForEach(bankCountries, id: \.self) { Text(regionName($0)).tag($0) }
+                    }
+                    .pickerStyle(.menu).tint(.primary)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(t("an.bankName")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
+                    TextField(t("an.bankNamePlaceholder"), text: $m.bankQuery)
+                        .font(.system(size: 14)).padding(.horizontal, 12).padding(.vertical, 10)
+                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                }
+                Button {
+                    Task { await m.connectBank() }
+                } label: {
+                    Text(m.bankBusy ? "···" : t("an.bankConnect"))
+                        .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).padding(.vertical, 14)
+                        .background(BrandKit.analytics, in: RoundedRectangle(cornerRadius: 14))
+                }
+                .disabled(m.bankBusy || m.bankQuery.trimmingCharacters(in: .whitespaces).isEmpty)
+                .opacity(m.bankBusy || m.bankQuery.trimmingCharacters(in: .whitespaces).isEmpty ? 0.6 : 1)
+            }
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 12)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        .padding(18).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private var connectedView: some View {
+        let c = m.bankConnection!
+        let daysLeft = parseISO(c.consent_expires_at).map { Int(ceil($0.timeIntervalSinceNow / 86400)) }
+        let grouped = Dictionary(grouping: m.bankTx) { $0.booking_date ?? "—" }
+        let days = grouped.keys.sorted(by: >)
+
+        return VStack(alignment: .leading, spacing: 12) {
+            if let err = m.bankError {
+                Text(err).font(.system(size: 13)).foregroundStyle(BrandKit.menu)
+            }
+            if let daysLeft, daysLeft <= 7 {
+                HStack {
+                    Text(t("an.bankReconsentSoon", ["n": "\(max(0, daysLeft))"]))
+                        .font(.system(size: 13)).foregroundStyle(BrandKit.stash)
+                    Spacer()
+                    Button(t("an.bankReconnect")) {
+                        Task { await m.connectBank(institutionName: c.institution_name, countryOverride: c.institution_id) }
+                    }
+                    .font(.system(size: 13, weight: .bold)).foregroundStyle(BrandKit.stash)
+                }
+                .padding(12).background(BrandKit.stash.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+            }
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(t("an.bankBalance")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
+                    Text(cur(c.balance ?? 0)).font(.system(size: 34, weight: .heavy)).foregroundStyle(.primary)
+                    if let ts = c.balance_synced_at {
+                        Text(t("an.bankUpdated", ["d": bankTimestamp(ts)])).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
+                    }
+                }
+                Spacer()
+                Button { Task { await m.refreshBank() } } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary)
+                        .frame(width: 40, height: 40).background(Color.primary.opacity(0.07), in: Circle())
+                }
+                .disabled(m.bankBusy).opacity(m.bankBusy ? 0.5 : 1)
+            }
+            .padding(18).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
+            .frame(maxWidth: .infinity)
+
+            Text(t("an.history")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
+            if days.isEmpty {
+                Text(t("an.bankNoTransactions")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4))
+                    .frame(maxWidth: .infinity).padding(.vertical, 30)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(days, id: \.self) { day in
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(dayLabelRu(day)).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45))
+                                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
+                            ForEach(grouped[day] ?? []) { row in
+                                let amt = row.amount ?? 0
+                                HStack(spacing: 10) {
+                                    Image(systemName: amt >= 0 ? "arrow.up" : "arrow.down")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundStyle(amt >= 0 ? BrandKit.analytics : BrandKit.menu)
+                                        .frame(width: 30, height: 30)
+                                        .background((amt >= 0 ? BrandKit.analytics : BrandKit.menu).opacity(0.12), in: Circle())
+                                    Text(row.description ?? row.counterparty ?? "—")
+                                        .font(.system(size: 14)).foregroundStyle(.primary).lineLimit(1)
+                                    Spacer()
+                                    Text((amt >= 0 ? "+" : "") + cur(amt))
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(amt >= 0 ? BrandKit.analytics : BrandKit.menu)
+                                }
+                                .padding(.horizontal, 14).padding(.vertical, 8)
+                            }
+                        }
+                        if day != days.last { Divider().overlay(Color.primary.opacity(0.07)) }
+                    }
+                }
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            }
+        }
     }
 }
 

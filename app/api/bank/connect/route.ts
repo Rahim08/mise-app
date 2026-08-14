@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
 
   let body: any
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Bad request' }, { status: 400 }) }
-  const { country, institutionName, query } = body || {}
+  const { country, institutionName, query, platform } = body || {}
   if (!country) return NextResponse.json({ error: 'country required' }, { status: 400 })
   if (!institutionName && !query) return NextResponse.json({ error: 'query required' }, { status: 400 })
 
@@ -50,8 +50,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: insErr?.message || 'Не удалось создать подключение' }, { status: 500 })
     }
 
+    // iOS открывает ссылку в ASWebAuthenticationSession, где нет staff-cookie нашего
+    // URLSession (отдельный webview-контекст) — платформу пробрасываем прямо в `state`
+    // (не в redirect_url: некоторые ASPSP матчат redirect_url строго, без query-хвоста),
+    // callback читает её оттуда и решает, куда редиректить в конце (https либо mise://).
     const redirectUrl = `${req.nextUrl.origin}/api/bank/callback`
-    const { link } = await createAuth(institution!, redirectUrl, connection.id)
+    const state = platform === 'ios' ? `${connection.id}:ios` : connection.id
+    const { link } = await createAuth(institution!, redirectUrl, state)
 
     return NextResponse.json({ link })
   } catch (err: any) {

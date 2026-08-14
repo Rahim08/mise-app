@@ -1,30 +1,41 @@
 // Редирект от банка после авторизации согласия (Enable Banking /auth redirect):
-// ?code=...&state=<bank_connections.id>. state — тот же id мы передали как `state` при
-// создании /auth в /api/bank/connect. Обменивает code на session_id + список привязанных
-// счетов, сразу тянет первую историю (syncConnection), редиректит обратно в Analytics.
+// ?code=...&state=<bank_connections.id>[:ios]. state — тот же токен мы передали как
+// `state` при создании /auth в /api/bank/connect (":ios" суффикс — маркер платформы,
+// см. комментарий там). Обменивает code на session_id + список привязанных счетов,
+// сразу тянет первую историю (syncConnection), редиректит обратно в Analytics (веб)
+// либо на кастомную схему mise:// (iOS, перехватывает ASWebAuthenticationSession).
+//
+// Авторизация — не cookie-сессия: на iOS этот запрос идёт из отдельного webview
+// (ASWebAuthenticationSession), у которого нет staff-cookie нашего URLSession. Доверяем
+// самому `state` — непредсказуемый UUID, созданный секундами ранее уже авторизованным
+// /api/bank/connect, и single-use: как только status уходит в 'linked', повторный вызов
+// с тем же state больше не найдёт 'pending'-строку.
 //
 // bank_connections.requisition_id хранит session_id Enable Banking (переиспользуем
 // колонку от первой версии на GoCardless — семантика та же: «идентификатор согласия»).
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { resolveCaller } from '@/lib/apiAuth'
 import { createSession, syncConnection } from '@/lib/enableBanking'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')
-  const ref = req.nextUrl.searchParams.get('state')
+  const rawState = req.nextUrl.searchParams.get('state')
   const origin = req.nextUrl.origin
-  const fail = (msg: string) => NextResponse.redirect(`${origin}/analytics?tab=bank&bankError=${encodeURIComponent(msg)}`)
+  const [ref, platform] = (rawState || '').split(':')
+  const isIos = platform === 'ios'
 
-  const caller = await resolveCaller(req)
-  if (!caller || !ref || !code) return fail('unauthorized')
+  const fail = (msg: string) => isIos
+    ? NextResponse.redirect(`mise://bank-callback?error=${encodeURIComponent(msg)}`)
+    : NextResponse.redirect(`${origin}/analytics?tab=bank&bankError=${encodeURIComponent(msg)}`)
+
+  if (!ref || !code) return fail('unauthorized')
 
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
   const { data: connection } = await admin.from('bank_connections').select('*')
-    .eq('id', ref).eq('restaurant_id', caller.rid).single()
+    .eq('id', ref).eq('status', 'pending').single()
   if (!connection) return fail('not_found')
 
   try {
@@ -41,7 +52,9 @@ export async function GET(req: NextRequest) {
     }).eq('id', connection.id).select().single()
 
     await syncConnection(admin, updated)
-    return NextResponse.redirect(`${origin}/analytics?tab=bank`)
+    return isIos
+      ? NextResponse.redirect('mise://bank-callback?ok=1')
+      : NextResponse.redirect(`${origin}/analytics?tab=bank`)
   } catch (err: any) {
     await admin.from('bank_connections').update({ status: 'error', error_message: err?.message || 'callback failed' }).eq('id', connection.id)
     return fail('sync_failed')

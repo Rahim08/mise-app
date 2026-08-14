@@ -141,3 +141,21 @@ struct PinCheckResponse: Codable, Sendable {
     let apps: [String]?
     let staff: StaffDTO?
 }
+
+// MARK: - Банк (Open Banking)
+
+struct BankInstitutionDTO: Codable, Sendable, Identifiable {
+    let name: String
+    let country: String
+    var id: String { "\(name)-\(country)" }
+}
+struct BankConnectResponse: Codable, Sendable {
+    let link: String?
+    let institutions: [BankInstitutionDTO]?
+    let error: String?
+}
+struct BankSyncResponse: Codable, Sendable {
+    let ok: Bool?
+    let throttled: Bool?
+    let error: String?
+}
