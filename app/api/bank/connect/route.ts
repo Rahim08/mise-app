@@ -58,7 +58,12 @@ export async function POST(req: NextRequest) {
     // URLSession (отдельный webview-контекст) — платформу пробрасываем прямо в `state`
     // (не в redirect_url: некоторые ASPSP матчат redirect_url строго, без query-хвоста),
     // callback читает её оттуда и решает, куда редиректить в конце (https либо mise://).
-    const redirectUrl = `${req.nextUrl.origin}/api/bank/callback`
+    //
+    // Канонический домен, не req.nextUrl.origin: iOS (API.swift) ходит через
+    // www.misesuite.com, и origin запроса становится www-вариантом — Enable Banking
+    // матчит redirect_url строго по строке, а в Control Panel зарегистрирован домен без
+    // www → «Redirect URI not allowed» (юзер-фидбок 2026-08-16).
+    const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/bank/callback`
     const state = platform === 'ios' ? `${connection.id}:ios` : connection.id
     const { link } = await createAuth(institution!, redirectUrl, state)
 
