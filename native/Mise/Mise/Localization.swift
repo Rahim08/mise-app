@@ -313,6 +313,7 @@ let STRINGS: [String: [Lang: String]] = [
     "mg.expenses":       tr("Expenses", "Расходы", "Spese", "Dépenses", "Xərclər", "Giderler", "Витрати", "Шығындар"),
     "mg.debtToggle":     tr("Mark as debt — not paid from register today", "В долг — не оплачено из кассы сегодня", "Segna come debito — non pagato dalla cassa oggi", "Marquer comme dette — non payé de la caisse aujourd'hui", "Borc kimi qeyd et — bu gün kassadan ödənilməyib", "Borç olarak işaretle — bugün kasadan ödenmedi", "Позначити як борг — не оплачено з каси сьогодні", "Борыш деп белгілеу — бүгін кассадан төленбеді"),
     "mg.inkass":         tr("Cash collection", "Инкассация", "Prelievo cassa", "Encaisse", "İnkassasiya", "Tahsilat", "Інкасація", "Инкассация"),
+    "mg.tabSalary":      tr("Salary", "Зарплата", "Stipendio", "Salaire", "Maaş", "Maaş", "Зарплата", "Жалақы"),
     "mg.inkSum":         tr("Collection amount", "Сумма инкассации", "Importo prelievo", "Montant encaissé", "İnkassasiya məbləği", "Tahsilat tutarı", "Сума інкасації", "Инкассация сомасы"),
     "mg.inkExpense":     tr("Expense from collection", "Расход из инкассации", "Spesa dal prelievo", "Dépense du prélèvement", "İnkassasiyadan xərc", "Tahsilattan gider", "Витрата з інкасації", "Инкассациядан шығыс"),
     "mg.inkReason":      tr("Reason", "Причина", "Motivo", "Motif", "Səbəb", "Neden", "Причина", "Себеп"),

@@ -1813,7 +1813,10 @@ private struct KassaTab: View {
                             Text(dd(s.date)).frame(width: 32, alignment: .leading).foregroundStyle(.primary.opacity(0.5))
                             Text(cur(s.inkassation ?? 0)).frame(maxWidth: .infinity, alignment: .trailing)
                                 .foregroundStyle(BrandKit.stash).lineLimit(1).minimumScaleFactor(0.75)
-                            Text((ink?.expense ?? 0) > 0 ? "−" + cur(ink?.expense ?? 0) : "—")
+                            // Не только expense — salary тоже реально списывается из фонда
+                            // (юзер-фидбок 2026-08-16: колонка «Расход» показывала «—» для
+                            // ЗП-выплаты, хотя «Итого» уже честно её учитывало — путало).
+                            Text({ let d = (ink?.expense ?? 0) + (ink?.salary ?? 0); return d > 0 ? "−" + cur(d) : "—" }())
                                 .frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.menu)
                                 .lineLimit(1).minimumScaleFactor(0.75)
                             Button {
