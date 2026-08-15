@@ -1510,21 +1510,19 @@ struct CardInputRow: View {
 
 // Не private — переиспользуется Manager→Зарплата (ManagerSalary.swift, реструктура 2026-08-14).
 struct AdvanceAddSheet: View {
-    let monthRange: ClosedRange<Date>
     let onSave: (Double, String) -> Void
     @State private var amount = ""
-    @State private var date: Date
+    @State private var date = Date()
     @Environment(\.dismiss) private var dismiss
 
-    // Дефолт — реальное «сегодня», но зажатое в границы ПРОСМАТРИВАЕМОГО месяца: иначе если
-    // добавить аванс, листая Analytics на прошлый/будущий месяц, и не потрогать пикер —
-    // запись улетала под сегодняшнее число (другой месяц), инкассация списывалась со смены
-    // просматриваемого месяца, а сама запись при следующей загрузке пропадала из Зарплаты
-    // (не попадала в date-фильтр текущего просмотра) — юзер-репорт 2026-08-04.
-    init(monthRange: ClosedRange<Date>, onSave: @escaping (Double, String) -> Void) {
-        self.monthRange = monthRange
+    // A6 (юзер-фидбок 2026-08-16): раньше пикер был жёстко зажат в границы просматриваемого
+    // месяца (см. историю — юзер-репорт 2026-08-04) — нельзя было взять аванс сегодня датой
+    // прошлого месяца в счёт ещё не выплаченной ЗП за него. Месяц, к которому относится аванс,
+    // определяется исключительно полем date (см. addAdvance/computeSalary) — значит и пикер
+    // должен позволять любую дату, а не только текущий просмотренный месяц. Дефолт — просто
+    // «сегодня», без зажима.
+    init(onSave: @escaping (Double, String) -> Void) {
         self.onSave = onSave
-        _date = State(initialValue: min(max(Date(), monthRange.lowerBound), monthRange.upperBound))
     }
 
     var body: some View {
@@ -1541,7 +1539,7 @@ struct AdvanceAddSheet: View {
                     .padding(16)
                     .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
 
-                    DatePicker(t("an.date"), selection: $date, in: monthRange, displayedComponents: .date)
+                    DatePicker(t("an.date"), selection: $date, displayedComponents: .date)
                         .datePickerStyle(.compact).tint(BrandKit.analytics)
 
                     Spacer()

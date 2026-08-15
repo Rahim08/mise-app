@@ -131,7 +131,16 @@ final class ManagerSalaryModel {
     }
 
     func addAdvance(empId: String, amount: Double, date: String) async {
-        guard let row = rows.first(where: { $0.id == empId }) else { return }
+        // A6 (юзер-фидбок 2026-08-16): дата аванса больше не зажата в просматриваемый месяц
+        // (см. AdvanceAddSheet) — можно взять аванс сегодня датой прошлого месяца, в счёт ещё не
+        // выплаченной ЗП за него. Лимит remaining тогда должен считаться по МЕСЯЦУ ДАТЫ аванса,
+        // а не по месяцу, который сейчас на экране (viewMonth) — иначе сумма сверяется не с теми
+        // цифрами. Веб-паритет: tabs-salary.tsx addAdvance.
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"; df.locale = Locale(identifier: "en_US_POSIX")
+        let cal = Calendar.current
+        let sameMonth = df.date(from: date).map { cal.isDate($0, equalTo: viewMonth, toGranularity: .month) } ?? true
+        guard let row = sameMonth ? rows.first(where: { $0.id == empId })
+            : await computeSalary(monthOf: df.date(from: date) ?? viewMonth).first(where: { $0.id == empId }) else { return }
         // Аванс не может увести сотрудника в минус по ЗП (юзер-фидбок 2026-08-14) — row.remaining
         // уже = max(0, cash − paid), т.е. именно то, что ещё можно выдать (авансом или доплатой)
         // до конца месяца. amount не должен его превышать.
@@ -480,10 +489,7 @@ private struct ManagerSalaryBody: View {
             }
         }
         .sheet(isPresented: $showAdvanceSheet) {
-            let cal = Calendar.current
-            let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: sm.viewMonth)) ?? sm.viewMonth
-            let monthEnd = cal.date(byAdding: DateComponents(month: 1, day: -1), to: monthStart) ?? monthStart
-            AdvanceAddSheet(monthRange: monthStart...monthEnd) { amount, date in
+            AdvanceAddSheet { amount, date in
                 Task { await sm.addAdvance(empId: advEmpId, amount: amount, date: date) }
             }
         }

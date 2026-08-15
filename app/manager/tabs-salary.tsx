@@ -182,7 +182,12 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     // уже = max(0, cash − paid), т.е. именно то, что ещё можно выдать до конца месяца.
     // fail-closed (паритет с iOS addAdvance, аудит 2026-08-15): если строка сотрудника почему-то
     // не найдена — блокируем целиком, а не пропускаем без проверки.
-    const row = rows.find(r => r.id === empId)
+    // A6 (юзер-фидбок 2026-08-16): дата аванса больше не зажата в текущий просматриваемый месяц
+    // (см. UI ниже) — можно взять аванс сегодня датой прошлого месяца, в счёт ещё не выплаченной
+    // ЗП за него. Лимит remaining тогда должен считаться по МЕСЯЦУ ДАТЫ аванса, а не по месяцу,
+    // который сейчас на экране — иначе разрешённая сумма сверяется не с теми цифрами.
+    const advYm = dateStr.slice(0, 7)
+    const row = advYm === ym ? rows.find(r => r.id === empId) : (await computeMonth(advYm)).find((r: any) => r.id === empId)
     if (!row) { showToast(tr('pe.saveFailed', { err: 'row' })); return }
     if (amount > row.remaining) { showToast(tr('an.advanceExceedsRemaining', { avail: eur(row.remaining) })); return }
     const { data: advRow, error: insErr } = await db.from('salary_advances').insert({ restaurant_id: restaurantId, employee_id: empId, amount, date: dateStr, note: `${empName} аванс` }).select().single()
@@ -416,7 +421,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
         </div>
         {r.advanceRows.map((a: any) => (
           <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 16px', borderBottom: `0.5px solid ${t.sep2}` }}>
-            <span style={{ fontSize: 13, color: t.text3 }}>{tr('pe.advances')} · {absDate(a.date)}</span>
+            <span style={{ fontSize: 13, color: t.text3 }}>{tr('pe.advances')} · {new Date(a.date).toLocaleDateString(tr('dash.locale'), { day: 'numeric', month: 'short' })}</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 14, fontWeight: 700, color: t.orange }}>−{eur(Number(a.amount || 0))}</span>
               <button onClick={() => deleteAdvance(a, r.name)} style={{ width: 22, height: 22, borderRadius: '50%', background: `${t.red}14`, border: 'none', color: t.red, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
