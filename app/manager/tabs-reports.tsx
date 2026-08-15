@@ -65,12 +65,17 @@ export function ManagerReportsTab({ restaurantId, accent, t }: { restaurantId: s
     const base = { title: r.title, description: r.description || null, created_by: null, priority, due_date: due || null, status: 'todo' }
     const results = await Promise.all(targets.map(tid => db.from('staff_tasks').insert({ ...base, assigned_to: tid })))
     if (results.every(x => x.error)) { showToast(tr('dash.notSaved') + results[0].error?.message); return }
+    // A5 (аудит 2026-08-15): при частичном провале уведомляем и подсчитываем только реально
+    // созданные задачи — раньше пуш уходил всем целям (включая упавшие вставки), а отчёт
+    // помечался «решён» без единого сигнала, что часть сотрудников задачу не получила.
+    const okTargets = targets.filter((_, i) => !results[i].error)
+    const failedCount = targets.length - okTargets.length
     // B4 (аудит 2026-08-13): конвертация заявки в задачу раньше не слала пуш исполнителю,
     // в отличие от прямого создания (app/people/tabs-tasks.tsx createTask).
-    pushNotify({ type: 'task', title: 'New task', body: r.title, titleKey: 'notify.newTaskTitle', audience: { staff_ids: targets } })
+    if (okTargets.length > 0) pushNotify({ type: 'task', title: 'New task', body: r.title, titleKey: 'notify.newTaskTitle', audience: { staff_ids: okTargets } })
     await setStatus(r, 'resolved')
     setConvertTask(null)
-    showToast(tr('pe.reportConverted'))
+    showToast(failedCount > 0 ? tr('pe.reportConvertedPartial', { n: failedCount }) : tr('pe.reportConverted'))
   }
 
   const doConvertPurchase = async (r: any, category: string, qty: string, unit: string) => {

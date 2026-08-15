@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS menu_events (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   restaurant_id uuid NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
   menu_id       uuid,
-  type          text NOT NULL,        -- view | item_view | add_to_cart | order
+  type          text NOT NULL,        -- view | item_view | add_to_cart | checkout_click (было 'order' — переименовано, аудит 2026-08-15 block-E #9)
   item_id       uuid,
   session_id    text,                 -- анонимный id сессии гостя
   table_number  text,

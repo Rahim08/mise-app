@@ -41,11 +41,17 @@ function jwt(): string | null {
 
 export interface PushMsg { title: string; body: string; data?: Record<string, unknown>; badge?: number; threadId?: string }
 
+const APNS_REQUEST_TIMEOUT_MS = 10_000
+
 function sendOne(host: string, jwtToken: string, deviceToken: string, msg: PushMsg): Promise<{ ok: boolean; status: number; reason?: string }> {
   return new Promise((resolve) => {
     let settled = false
-    const done = (r: { ok: boolean; status: number; reason?: string }) => { if (!settled) { settled = true; resolve(r) } }
-    let client: http2.ClientHttp2Session
+    let client: http2.ClientHttp2Session | undefined
+    const done = (r: { ok: boolean; status: number; reason?: string }) => { if (!settled) { settled = true; clearTimeout(timer); resolve(r) } }
+    // A connection that's accepted but never answers would otherwise hang this promise
+    // forever, stalling dispatchNotification's loop over every remaining recipient
+    // (audit 2026-08-15, block-G #9).
+    const timer = setTimeout(() => { try { client?.destroy() } catch { /* noop */ }; done({ ok: false, status: 0, reason: 'timeout' }) }, APNS_REQUEST_TIMEOUT_MS)
     try { client = http2.connect(`https://${host}`) } catch { return done({ ok: false, status: 0, reason: 'connect_error' }) }
     client.on('error', () => done({ ok: false, status: 0, reason: 'connect_error' }))
 

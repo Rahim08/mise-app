@@ -1,6 +1,6 @@
-// Начало подключения банка (Enable Banking /auth) — owner+manager (юзер-фидбок
-// 2026-08-16: тест сейчас идёт под менеджерской сессией; сузить обратно до owner-only
-// после теста, если понадобится). Вкладка «Банк» в Analytics. Тело: { country, query,
+// Начало подключения банка (Enable Banking /auth) — owner+manager (аудит-находка
+// 2026-08-15: analytics-роль тоже пропускала этот write-эндпоинт — сужено). Вкладка
+// «Банк» в Analytics. Тело: { country, query,
 // institutionName? }. Разные заведения подключают
 // разные банки (напр. SO — Revolut, другое заведение — Banco Popolare di Sondrio),
 // поэтому имя банка ищем по свободному тексту (`query`), не хардкодим. Если
@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   const caller = await resolveCaller(req)
-  if (!caller || (!caller.owner && !caller.apps.includes('manager') && !caller.apps.includes('analytics'))) {
+  if (!caller || (!caller.owner && !caller.apps.includes('manager'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     // iOS открывает ссылку в ASWebAuthenticationSession, где нет staff-cookie нашего
     // URLSession (отдельный webview-контекст) — платформу пробрасываем прямо в `state`
     // (не в redirect_url: некоторые ASPSP матчат redirect_url строго, без query-хвоста),
-    // callback читает её оттуда и решает, куда редиректить в конце (https либо mise://).
+    // callback читает её оттуда и решает, куда редиректить в конце (https либо com.rahim.mise://).
     //
     // Канонический домен, не req.nextUrl.origin: iOS (API.swift) ходит через
     // www.misesuite.com, и origin запроса становится www-вариантом — Enable Banking

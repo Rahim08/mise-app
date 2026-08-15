@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { db } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
+import { computeAccruedToday } from '@/lib/analytics'
 import { inp, lbl, fmtHours, hoursOf } from '@/app/people/shared'
 import { Sheet } from '@/components/people/helpers'
 
@@ -28,6 +29,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   const [paying, setPaying] = useState(false)
   const [debt, setDebt] = useState<{ total: number; byId: Record<string, number> }>({ total: 0, byId: {} })
   const [payoutDay, setPayoutDay] = useState<number | null>(null)
+  const [prevCashTotal, setPrevCashTotal] = useState(0)
   const [toast, setToast] = useState('')
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2500) }
   const [advFor, setAdvFor] = useState<{ id: string; name: string } | null>(null)
@@ -58,9 +60,14 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       advByEmp[a.employee_id] = (advByEmp[a.employee_id] || 0) + Number(a.amount || 0)
       ;(advRowsByEmp[a.employee_id] = advRowsByEmp[a.employee_id] || []).push(a)
     })
-    const paidByEmp: Record<string, number> = {}; const lastPaidByEmp: Record<string, string> = {}
+    // A2 (аудит 2026-08-15): remaining должен уменьшаться только оплатами method='cash' —
+    // `card` (monthly_card_amounts) уже вычтен из `cash` бюджетно; если ещё и salary_payments с
+    // method='card' вычесть из remaining, одна и та же карточная часть спишется дважды и может
+    // пометить сотрудника «оплачен полностью», хотя реальный нал ещё не выплачен.
+    const paidByEmp: Record<string, number> = {}; const paidCashByEmp: Record<string, number> = {}; const lastPaidByEmp: Record<string, string> = {}
     ;(pays || []).forEach((p: any) => {
       paidByEmp[p.employee_id] = (paidByEmp[p.employee_id] || 0) + Number(p.amount || 0)
+      if ((p.method || 'cash') === 'cash') paidCashByEmp[p.employee_id] = (paidCashByEmp[p.employee_id] || 0) + Number(p.amount || 0)
       if (!lastPaidByEmp[p.employee_id] || p.paid_at > lastPaidByEmp[p.employee_id]) lastPaidByEmp[p.employee_id] = p.paid_at
     })
     return (emps || []).map((e: any) => {
@@ -70,10 +77,11 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       const card = cardByEmp[e.id] ?? 0
       const advance = advByEmp[e.id] || 0
       const paid = paidByEmp[e.id] || 0
+      const paidCash = paidCashByEmp[e.id] || 0
       const total = Math.max(0, salary - deduct)
       const cash = Math.max(0, total - advance - card)
-      const remaining = Math.max(0, cash - paid)
-      return { id: e.id, name: e.name, salary, dates, absences: dates.length, deduct, card, advance, advanceRows: (advRowsByEmp[e.id] || []).sort((a, b) => a.date < b.date ? 1 : -1), paid, remaining, total, cash, lastPaidAt: lastPaidByEmp[e.id] || null, hours: hoursByName[e.name] || 0 }
+      const remaining = Math.max(0, cash - paidCash)
+      return { id: e.id, name: e.name, salary, dates, absences: dates.length, deduct, card, advance, advanceRows: (advRowsByEmp[e.id] || []).sort((a, b) => a.date < b.date ? 1 : -1), paid, paidCash, remaining, total, cash, lastPaidAt: lastPaidByEmp[e.id] || null, hours: hoursByName[e.name] || 0 }
     })
   }
 
@@ -106,6 +114,15 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       setPayoutDay(r?.salary_payout_day ?? null)
     })
   }, [])
+
+  // C3 (аудит 2026-08-15): для payout-day-цикла (см. computeAccruedToday) нужен кэш-нал
+  // прошлого месяца, пока не наступил payout_day текущего — паритет с Analytics.
+  useEffect(() => {
+    if (!isCurrentMonth) return
+    const now = new Date()
+    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    computeMonth(fmtDate(d).slice(0, 7)).then(prevRows => setPrevCashTotal(prevRows.reduce((s, r: any) => s + r.cash, 0)))
+  }, [isCurrentMonth])
 
   // Смена/инкассация на дату оплаты может не существовать — создаём её тем же паттерном,
   // что openShift (opening = closing предыдущей смены, gap-tolerant .lt('date', ...)).
@@ -148,6 +165,17 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     const { data } = await db.from('inkassations').select('shift_id, amount, expense, reason, total, salary').eq('shift_id', shiftId).limit(1)
     return Array.isArray(data) ? data[0] : data
   }
+  // A3 (аудит 2026-08-15): addAdvance/deleteAdvance/savePayment читали inkassations и писали
+  // обратно без защиты от гонки — persistShift для этой же таблицы уже был захардён (A2, аудит
+  // 2026-08-09) после того, как именно параллельная правка ОТСЮДА теряла данные при перезаписи.
+  // Здесь сам read-modify-write остался незащищённым: два аванса подряд (или аванс + выплата
+  // одновременно) читают один снэпшот, вторая запись затирает первую. Compare-and-swap на поле,
+  // которое эта операция меняет — если строка успела измениться между чтением и записью, update
+  // не находит совпадения (0 строк), перечитываем и повторяем один раз.
+  const casUpdateInk = async (shiftId: string, casField: 'expense' | 'salary', casValue: number, values: Record<string, unknown>) => {
+    const { data } = await db.from('inkassations').update(values).eq('shift_id', shiftId).eq(casField, casValue).select()
+    return Array.isArray(data) && data.length > 0
+  }
 
   const addAdvance = async (empId: string, empName: string, amount: number, dateStr: string) => {
     // Аванс не может увести сотрудника в минус по ЗП (юзер-фидбок 2026-08-14) — row.remaining
@@ -157,19 +185,34 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     const row = rows.find(r => r.id === empId)
     if (!row) { showToast(tr('pe.saveFailed', { err: 'row' })); return }
     if (amount > row.remaining) { showToast(tr('an.advanceExceedsRemaining', { avail: eur(row.remaining) })); return }
-    const { error: insErr } = await db.from('salary_advances').insert({ restaurant_id: restaurantId, employee_id: empId, amount, date: dateStr, note: `${empName} аванс` })
+    const { data: advRow, error: insErr } = await db.from('salary_advances').insert({ restaurant_id: restaurantId, employee_id: empId, amount, date: dateStr, note: `${empName} аванс` }).select().single()
     if (insErr) { showToast(tr('pe.saveFailed', { err: insErr.message })); return }
+    // A4 (аудит 2026-08-15): тег с id аванса вместо голого «Имя аванс» — иначе deleteAdvance
+    // ниже стирал бы фрагмент reason ЛЮБОГО аванса этого сотрудника за день, а не только удаляемый.
+    const advTag = `${empName} аванс·${(advRow?.id || '').slice(0, 8)}`
     const shift = await findShiftForDate(dateStr)
     if (shift) {
-      const ink = await findInkassation(shift.id)
-      const baseAmount = ink?.amount ?? shift.inkassation ?? 0
-      const newExpense = (ink?.expense || 0) + amount
-      const reasonParts = [ink?.reason || null, `${empName} аванс`].filter(Boolean)
-      const newReason = reasonParts.join(', ')
-      const newTotal = baseAmount - newExpense - (ink?.salary || 0)
+      let ink = await findInkassation(shift.id)
+      const applyAdvance = (base: any) => {
+        const baseAmount = base?.amount ?? shift.inkassation ?? 0
+        const newExpense = (base?.expense || 0) + amount
+        const newReason = [base?.reason || null, advTag].filter(Boolean).join(', ')
+        const newTotal = baseAmount - newExpense - (base?.salary || 0)
+        return { baseAmount, newExpense, newReason, newTotal }
+      }
       if (ink) {
-        await db.from('inkassations').update({ expense: newExpense, reason: newReason, total: newTotal }).eq('shift_id', shift.id)
+        let { newExpense, newReason, newTotal } = applyAdvance(ink)
+        let ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
+        if (!ok) {
+          ink = await findInkassation(shift.id)
+          if (ink) {
+            ({ newExpense, newReason, newTotal } = applyAdvance(ink))
+            ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
+          }
+        }
+        if (!ok) showToast(tr('pe.saveFailed', { err: 'race' }))
       } else {
+        const { baseAmount, newExpense, newReason, newTotal } = applyAdvance(ink)
         await db.from('inkassations').insert({ shift_id: shift.id, restaurant_id: restaurantId, date: dateStr, amount: baseAmount, expense: newExpense, reason: newReason, salary: 0, total: newTotal })
       }
     } else {
@@ -183,12 +226,28 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     if (error) { showToast(tr('pe.saveFailed', { err: error.message })); return }
     const shift = await findShiftForDate(a.date)
     if (shift) {
-      const ink = await findInkassation(shift.id)
+      let ink = await findInkassation(shift.id)
+      const advTag = `${empName} аванс·${(a.id || '').slice(0, 8)}`
+      const applyRemoval = (base: any) => {
+        const newExpense = Math.max(0, (base.expense || 0) - Number(a.amount || 0))
+        // A4 (аудит 2026-08-15): точный тег по id (см. addAdvance) — с фолбэком на старый
+        // startsWith-префикс для авансов, созданных до этого фикса (без тега в reason).
+        const parts = (base.reason || '').split(', ')
+        const newReason = (parts.includes(advTag) ? parts.filter((s: string) => s !== advTag) : parts.filter((s: string) => !s.startsWith(`${empName} аванс`))).join(', ')
+        const newTotal = (base.amount ?? shift.inkassation ?? 0) - newExpense - (base.salary || 0)
+        return { newExpense, newReason, newTotal }
+      }
       if (ink) {
-        const newExpense = Math.max(0, (ink.expense || 0) - Number(a.amount || 0))
-        const newReason = (ink.reason || '').split(', ').filter((s: string) => !s.startsWith(`${empName} аванс`)).join(', ')
-        const newTotal = (ink.amount ?? shift.inkassation ?? 0) - newExpense - (ink.salary || 0)
-        await db.from('inkassations').update({ expense: newExpense, reason: newReason, total: newTotal }).eq('shift_id', shift.id)
+        let { newExpense, newReason, newTotal } = applyRemoval(ink)
+        let ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
+        if (!ok) {
+          ink = await findInkassation(shift.id)
+          if (ink) {
+            ({ newExpense, newReason, newTotal } = applyRemoval(ink))
+            ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
+          }
+        }
+        if (!ok) showToast(tr('pe.saveFailed', { err: 'race' }))
       }
     }
     await load(); await loadDebt()
@@ -226,18 +285,54 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
         setPayError(tr('pe.insufficientInkassationPool', { avail: eur(Math.max(0, available)) }))
         setPaying(false); return
       }
-      const noteEntry = `${payFor.name}: ${eur(amount)}`
-      const mergedNote = [cur?.salary_note, noteEntry].filter(Boolean).join('; ')
-      const newSalary = (cur?.salary || 0) + amount
-      // C6 (юзер-фидбок 2026-08-15): total раньше не пересчитывался здесь — оставался от
-      // последнего обычного закрытия смены, без учёта зарплаты, «остаток» в Кассе расходился
-      // с реальностью после каждой выплаты.
-      const newTotal = (cur?.amount || 0) - (cur?.expense || 0) - newSalary
-      const values = { restaurant_id: restaurantId, date: dateStr, salary: newSalary, salary_note: mergedNote, total: newTotal }
-      const { error } = cur?.id
-        ? await db.from('inkassations').update(values).eq('id', cur.id)
-        : await db.from('inkassations').insert({ shift_id: shiftId, ...values })
-      if (error) { setPayError(tr('pe.saveFailed', { err: error.message })); setPaying(false); return }
+      // A3 (аудит 2026-08-15): свой снэпшот cur.salary/expense мог устареть к моменту записи
+      // (аванс или другая выплата успели пройти между чтением выше и update здесь) — те же
+      // риски, что persistShift уже закрыл для этой таблицы (A2, аудит 2026-08-09).
+      const applyPayment = (base: any) => {
+        const mergedNote = [base?.salary_note, `${payFor.name}: ${eur(amount)}`].filter(Boolean).join('; ')
+        const newSalary = (base?.salary || 0) + amount
+        // C6 (юзер-фидбок 2026-08-15): total раньше не пересчитывался здесь — оставался от
+        // последнего обычного закрытия смены, без учёта зарплаты, «остаток» в Кассе расходился
+        // с реальностью после каждой выплаты.
+        const newTotal = (base?.amount || 0) - (base?.expense || 0) - newSalary
+        return { values: { restaurant_id: restaurantId, date: dateStr, salary: newSalary, salary_note: mergedNote, total: newTotal } }
+      }
+
+      // C2 (аудит 2026-08-15): раньше inkassations писалась первой, salary_payments —
+      // второй. Если второй insert падал после успешного первого — касса уже списана, но
+      // «оплачено» нигде не отмечено, менеджер платил второй раз реальными деньгами за уже
+      // списанный долг. Теперь salary_payments — источник истины «оплачено» — пишется
+      // первым; если следующая запись в inkassations падает, компенсируем откатом (удаляем
+      // только что вставленную salary_payments), чтобы не остаться в состоянии
+      // «оплачено, но касса не списана» либо «списано, но не оплачено» — только оба или ничего.
+      const { data: payRow, error: payErr } = await db.from('salary_payments').insert({
+        employee_id: payFor.id, period: `${ym}-01`, amount, method,
+        paid_at: new Date(dateStr).toISOString(),
+        note: payFor.note || null, created_by: null,
+      }).select().single()
+      if (payErr) { setPayError(tr('pe.saveFailed', { err: payErr.message })); setPaying(false); return }
+
+      let ok: boolean
+      if (cur?.id) {
+        let { values } = applyPayment(cur)
+        ok = await casUpdateInk(shiftId, 'salary', cur.salary || 0, values)
+        if (!ok) {
+          const fresh = await findInkassation(shiftId)
+          if (fresh) { ({ values } = applyPayment(fresh)); ok = await casUpdateInk(shiftId, 'salary', fresh.salary || 0, values) }
+        }
+      } else {
+        const { values } = applyPayment(cur)
+        const { error } = await db.from('inkassations').insert({ shift_id: shiftId, ...values })
+        ok = !error
+      }
+      if (!ok) {
+        if (payRow?.id) await db.from('salary_payments').delete().eq('id', payRow.id)
+        setPayError(tr('pe.saveFailed', { err: 'race' })); setPaying(false); return
+      }
+      setPaying(false)
+      setPayFor(null)
+      await load(); await loadDebt()
+      return
     }
 
     const { error: payErr } = await db.from('salary_payments').insert({
@@ -258,11 +353,11 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     return { label: tr('pe.oweAmount', { amount: eur(r.remaining) }), color: t.orange }
   }
   const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate()
-  const accruedToday = (total: number) => {
-    if (!isCurrentMonth) return total
-    const denom = payoutDay ? daysInMonth + payoutDay : daysInMonth
-    return total * Math.min(new Date().getDate(), denom) / denom
-  }
+  // C3 (аудит 2026-08-15): раньше своя линейная рампа над daysInMonth+payoutDay, расходилась
+  // с Analytics (payout-day-цикл) до ~17пп на один день. Теперь единая формула из lib/analytics —
+  // и база теперь totalCash (нал к выплате, за вычетом аванса/карты), как в Analytics.salToday,
+  // а не валовой fund (включавший уже отложенное на карту/аванс).
+  const prevDaysInMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 0).getDate()
 
   const MonthNav = () => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
@@ -350,6 +445,8 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
 
   const fund = rows.reduce((s, r) => s + r.total, 0)
   const cardTotal = rows.reduce((s, r) => s + r.card, 0)
+  const cashTotal = rows.reduce((s, r) => s + r.cash, 0)
+  const accrued = computeAccruedToday({ isCurrentMonth, totalCash: cashTotal, daysInMonth, payoutDay, prevTotalCash: prevCashTotal, prevDaysInMonth })
   return (
     <div>
       <MonthNav />
@@ -370,7 +467,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
         </div>
         {isCurrentMonth && (
           <div style={{ marginTop: 10, fontSize: 12, opacity: 0.85 }}>
-            {tr('pe.accruedToday')} {eur(accruedToday(fund))} · {tr('pe.accruedTodayHint')}
+            {tr('pe.accruedToday')} {eur(accrued)} · {tr('pe.accruedTodayHint')}
           </div>
         )}
       </div>

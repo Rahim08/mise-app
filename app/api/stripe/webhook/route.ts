@@ -81,6 +81,13 @@ export async function POST(req: NextRequest) {
 }
 
 // Вся обработка события отдельной функцией: любой её throw снимает заявку дедупа (см. выше).
+//
+// Осознанно синхронно, не "ack fast + очередь" (аудит 2026-08-15, block-F #4): без реальной
+// очереди (Vercel Queues здесь не подключены) fire-and-forget после return 200 не гарантирует
+// докрутку — платформа может заморозить функцию до завершения фоновой работы. Синхронно +
+// claim-based дедуп (см. releaseClaim выше) — осознанный компромисс: событие либо полностью
+// обработано, либо заявка снята и Stripe ретраит; независимые под-шаги внутри (см. Promise.all
+// ниже) распараллелены там, где это безопасно.
 async function handleEvent(stripe: any, supabase: any, event: any): Promise<NextResponse> {
   const obj = event.data.object as any
 
@@ -124,12 +131,10 @@ async function handleEvent(stripe: any, supabase: any, event: any): Promise<Next
     // создаёт ВТОРУЮ подписку у того же customer → двойное списание.
     // Гасим все более старые живые подписки; «старые» — чтобы при ретраях/перестановке
     // событий старый checkout.completed не отменил новую подписку.
+    // Независимые отмены — параллельно, а не по очереди (аудит 2026-08-15, block-F #4).
     const siblings = await stripe.subscriptions.list({ customer: (sub as any).customer, status: 'all', limit: 20 })
-    for (const o of siblings.data) {
-      if (o.id !== sub.id && o.created < (sub as any).created && ['active', 'trialing', 'past_due'].includes(o.status)) {
-        await stripe.subscriptions.cancel(o.id)
-      }
-    }
+    const toCancel = siblings.data.filter(o => o.id !== sub.id && o.created < (sub as any).created && ['active', 'trialing', 'past_due'].includes(o.status))
+    await Promise.all(toCancel.map(o => stripe.subscriptions.cancel(o.id)))
   }
 
   // Новые версии Stripe API убрали invoice.subscription с верхнего уровня —

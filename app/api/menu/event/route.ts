@@ -1,11 +1,18 @@
 // Anonymous menu analytics. Guests POST lightweight events (view / item_view /
-// add_to_cart / order). Restaurant + menu are resolved server-side from the slug, so the
-// client can't forge another venue's stats. Writes via service role (like /api/menu/order).
+// add_to_cart / checkout_click). Restaurant + menu are resolved server-side from the slug,
+// so the client can't forge another venue's stats. Writes via service role (like
+// /api/menu/order).
+//
+// checkout_click (аудит 2026-08-15, block-E #9): раньше называлось 'order', что легко
+// спутать с реальным заказом (app/api/menu/order → menu_orders) — ничего их не связывает
+// (нет общего id), это лёгкое клиентское событие "нажал отправить", не факт успешного
+// заказа на сервере. Переименовано, чтобы аналитика по этому типу не читалась как
+// «число реальных заказов».
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
-const ALLOWED = new Set(['view', 'item_view', 'add_to_cart', 'order'])
+const ALLOWED = new Set(['view', 'item_view', 'add_to_cart', 'checkout_click'])
 
 export async function POST(req: NextRequest) {
   const rlKey = rateLimitKey(req, 'menu-event')

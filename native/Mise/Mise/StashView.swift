@@ -205,7 +205,10 @@ final class StashModel {
             return acc + Double(delta) * (tp.portion_g ?? 0)
         }
     }
-    var venueLeft: Double { max(0, venueBase - gramsUsed) }
+    // НЕ клампим в 0 — отрицательное значение сигналит расхождение (продано больше, чем
+    // выдано в зал); web показывает это же значение красным (app/tobacco/page.tsx), раньше
+    // iOS тихо прятал сигнал за max(0, ...) (аудит M1, 2026-08-15).
+    var venueLeft: Double { venueBase - gramsUsed }
 
     func saveShift() async {
         // Гвард от двойного тапа: без него быстрый второй тап запускал второй
@@ -834,6 +837,7 @@ private struct ShiftTab: View {
                     goalSection
                     dayNav
                     stats
+                    venueLeftBanner
                     modeSeg
                     typesList
                     saveBtn
@@ -924,6 +928,20 @@ private struct ShiftTab: View {
                 }
             }
         }
+    }
+
+    // Масса табака в заведении — паритет с web (app/tobacco/page.tsx): отрицательное
+    // значение (продано больше, чем выдано в зал) красным, иначе синим (аудит M1, 2026-08-15).
+    private var venueLeftBanner: some View {
+        let negative = m.venueLeft < 0
+        let color = negative ? BrandKit.menu : BrandKit.manager
+        return HStack {
+            Text(t("st.venueLeft")).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(color)
+            Spacer()
+            Text(grams(m.venueLeft)).font(.system(size: 13, weight: .heavy)).foregroundStyle(color)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var modeSeg: some View {

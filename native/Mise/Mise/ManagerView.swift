@@ -514,6 +514,10 @@ final class ManagerModel {
         await absResult
         autoAbsences = []
         if !selectedDebtIds.isEmpty {
+            // A1 (аудит 2026-08-15): бампаем settledTodayTotal ДО очистки selectedDebtIds —
+            // иначе calc на следующий рендер теряет только что погашенную сумму, баланс кассы
+            // на экране на секунду показывает больше, чем реально сохранено в БД.
+            settledTodayTotal += debtSettleTotal
             openDebts.removeAll { selectedDebtIds.contains($0.id) }
             selectedDebtIds = []
         }

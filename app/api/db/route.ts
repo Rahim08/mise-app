@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { resolveCaller, isOfficial, type Caller } from '@/lib/apiAuth'
 import { entitlements, isActiveStatus } from '@/lib/plans'
+import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
 type AppId = 'manager' | 'analytics' | 'stash' | 'people'
 
@@ -80,6 +81,26 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
 }
 
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'like', 'ilike'])
+
+// Generic backstop against a runaway client (retry loop with no backoff, scripted staff
+// session) — this is the busiest endpoint in the app, so the ceiling is deliberately
+// generous and shouldn't affect any normal usage pattern.
+const DB_GATEWAY_RATE_LIMIT = 300
+const DB_GATEWAY_RATE_WINDOW_MS = 60_000
+
+// Postgres error codes safe to name specifically; anything else collapses to a generic
+// message so table/column/constraint names and value details don't reach the client
+// (audit 2026-08-15, block-G #2). Full error is always logged server-side below.
+const PG_ERROR_MESSAGES: Record<string, string> = {
+  '23505': 'Duplicate entry',
+  '23503': 'Referenced record not found',
+  '23502': 'Missing required field',
+  '22P02': 'Invalid input',
+}
+function clientSafeError(error: any): string {
+  const code = error?.code
+  return (code && PG_ERROR_MESSAGES[code]) || 'Internal error'
+}
 
 // Только Stripe webhook / /api/admin (сервис-роль напрямую, минуя этот шлюз) вправе менять
 // биллинг. Иначе owner из консоли браузера: db.from('restaurants').update({subscription_plan:
@@ -170,6 +191,11 @@ export async function POST(req: NextRequest) {
   const caller = await resolveCaller(req)
   if (!caller) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  const rlKey = rateLimitKey(req, `db:${caller.rid}:${caller.sid || 'owner'}`)
+  if (!await checkRateLimit(rlKey, DB_GATEWAY_RATE_LIMIT, DB_GATEWAY_RATE_WINDOW_MS)) {
+    return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
+  }
+
   // Ни PIN-логин, ни этот шлюз раньше не сверялись с subscription_status: после
   // canceled/past_due сотрудники работали бессрочно (аудит 2026-08-05, раздел 3).
   // Owner исключён — иначе не смог бы дойти до /dashboard/billing чтобы починить оплату.
@@ -231,6 +257,21 @@ export async function POST(req: NextRequest) {
     ? vals.map(v => ({ ...v, [scope]: caller.rid }))
     : { ...vals, [scope]: caller.rid }
 
+  // Deactivating a staff row previously left their push_subscriptions live — they kept
+  // receiving cash-amount pushes until the device token itself went stale, since
+  // unsubscribe only ever ran from the staff member's own logout() (audit 2026-08-15,
+  // block-G #3). Capture the affected staff ids before the update so we can prune after.
+  let staffDeactivatedIds: string[] = []
+  if (table === 'staff' && op === 'update' && values && typeof values === 'object'
+    && !Array.isArray(values) && values.is_active === false) {
+    let sq = admin.from('staff').select('id').eq(scope, caller.rid)
+    for (const f of (filters || [])) {
+      if (FILTER_OPS.has(f.op) && typeof sq[f.op] === 'function') sq = sq[f.op](f.col, f.val)
+    }
+    const { data: rows } = await sq
+    staffDeactivatedIds = (rows || []).map((r: any) => r.id)
+  }
+
   try {
     let q: any
     if (op === 'select') {
@@ -279,9 +320,16 @@ export async function POST(req: NextRequest) {
     }
 
     const { data, error } = await q
-    if (error) return NextResponse.json({ error: error.message, code: (error as any).code }, { status: 400 })
+    if (error) {
+      console.error(`[api/db] ${table}.${op} failed:`, error)
+      return NextResponse.json({ error: clientSafeError(error), code: (error as any).code }, { status: 400 })
+    }
+    if (staffDeactivatedIds.length) {
+      await admin.from('push_subscriptions').delete().in('staff_id', staffDeactivatedIds)
+    }
     return NextResponse.json({ data: stripOwnerOnlyColumns(table, data, caller) })
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+    console.error(`[api/db] ${table}.${op} threw:`, err)
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
 }

@@ -26,8 +26,8 @@ function toUtcDate(iso: string): Date {
   const withTz = /[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z'
   return new Date(withTz)
 }
-function timeStr(iso: string) {
-  return toUtcDate(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', ' ')
+function timeStr(iso: string, locale: string) {
+  return toUtcDate(iso).toLocaleString(locale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', ' ')
 }
 
 // ── AUTOCOMPLETE INPUT ────────────────────────────────────────────────────────
@@ -141,7 +141,8 @@ function StatCard({ label, value, color, t }: { label: string; value: string; co
 // указывается — отложено.
 
 // Категории бесплатных кальянов (для кого/повод). Храним в hookah_sales.flavor — без миграции.
-const FREE_CATS = ['Сотрудники', 'Владелец', 'Менеджер', 'Гость', 'Дегустация'] as const
+// Дефолт, если владелец не задал свои в дашборде (Настройки → restaurant_settings.free_hookah_categories) — см. StashView.swift DEFAULT_FREE_CATS.
+const DEFAULT_FREE_CATS = ['Сотрудники', 'Владелец', 'Менеджер', 'Гость', 'Дегустация']
 const FREE_CAT_KEYS: Record<string, string> = { 'Сотрудники': 'st.fcStaff', 'Владелец': 'st.fcOwner', 'Менеджер': 'st.fcManager', 'Гость': 'st.fcGuest', 'Дегустация': 'st.fcTasting' }
 
 function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId: string; t: ReturnType<typeof useTheme>; toast: (m: string) => void; canSeeMoney: boolean }) {
@@ -149,7 +150,8 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
   const [currentDate, setCurrentDate] = useState(new Date())
   const dateStr = fmtDay(currentDate)
   const [mode, setMode] = useState<'paid' | 'free'>('paid')
-  const [freeCat, setFreeCat] = useState<string>(FREE_CATS[0])
+  const [freeCats, setFreeCats] = useState<string[]>(DEFAULT_FREE_CATS)
+  const [freeCat, setFreeCat] = useState<string>(DEFAULT_FREE_CATS[0])
   const [types, setTypes] = useState<any[]>([])
   // vals[typeId] = { paid: число, free: { категория → число } }
   const [vals, setVals] = useState<Record<string, { paid: string; free: Record<string, string> }>>({})
@@ -165,12 +167,20 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
 
   const loadShift = async () => {
     setLoading(true)
-    const [{ data: tps }, { data: sales }, { data: outs }] = await Promise.all([
+    const [{ data: tps }, { data: sales }, { data: outs }, { data: venueWo }, { data: settingsRows }] = await Promise.all([
       db.from('hookah_types').select('*').eq('is_active', true).order('created_at'),
       db.from('hookah_sales').select('hookah_type_id, quantity, portion_g, is_free, date, flavor'),
       db.from('tobacco_movements').select('quantity_g').eq('restaurant_id', restaurantId).eq('type', 'out'),
+      // Списание «с заведения» = движение writeoff без бренда/вкуса (общий вес зала) — см. StashView.swift saveVenueWriteoff.
+      db.from('tobacco_movements').select('quantity_g, brand, flavor').eq('restaurant_id', restaurantId).eq('type', 'writeoff'),
+      // Категории бесплатных кальянов из настроек заведения (дашборд → Настройки → Кальян).
+      db.from('restaurant_settings').select('free_hookah_categories').limit(1),
     ])
     setTypes(tps || [])
+    const cats: string[] = settingsRows?.[0]?.free_hookah_categories
+    const activeCats = cats && cats.length > 0 ? cats : DEFAULT_FREE_CATS
+    setFreeCats(activeCats)
+    setFreeCat(fc => activeCats.includes(fc) ? fc : activeCats[0])
     const v: Record<string, { paid: string; free: Record<string, string> }> = {}
     let pastGrams = 0
     let todaySavedGrams = 0
@@ -181,7 +191,7 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
         todaySavedGrams += (r.quantity || 0) * Number(r.portion_g || 0)
         const cur = v[r.hookah_type_id] || { paid: '', free: {} }
         if (r.is_free) {
-          const cat = r.flavor || FREE_CATS[0]
+          const cat = r.flavor || activeCats[0]
           cur.free[cat] = String((Number(cur.free[cat]) || 0) + (r.quantity || 0))
         } else {
           cur.paid = String((Number(cur.paid) || 0) + (r.quantity || 0))
@@ -196,7 +206,8 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
     setVals(v)
     setSavedGrams(todaySavedGrams)
     setSavedQty(todaySavedQty)
-    setVenueBase((outs || []).reduce((s: number, m: any) => s + (m.quantity_g || 0), 0) - pastGrams)
+    const venueWriteoff = (venueWo || []).filter((m: any) => !m.brand && !m.flavor).reduce((s: number, m: any) => s + (m.quantity_g || 0), 0)
+    setVenueBase(Math.max(0, (outs || []).reduce((s: number, m: any) => s + (m.quantity_g || 0), 0) - pastGrams - venueWriteoff))
     setLoading(false)
   }
 
@@ -204,7 +215,7 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
 
   const paidOf = (typeId: string) => Number(vals[typeId]?.paid) || 0
   const freeOf = (typeId: string, cat: string) => Number(vals[typeId]?.free?.[cat]) || 0
-  const freeTotalOf = (typeId: string) => FREE_CATS.reduce((s, c) => s + freeOf(typeId, c), 0)
+  const freeTotalOf = (typeId: string) => freeCats.reduce((s, c) => s + freeOf(typeId, c), 0)
   const inputVal = (typeId: string) => mode === 'paid' ? (vals[typeId]?.paid || '') : (vals[typeId]?.free?.[freeCat] || '')
   const setQty = (typeId: string, val: string) => {
     const clean = val.replace(/[^\d]/g, '')
@@ -245,7 +256,7 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
           price: Number(tp.price || 0), portion_g: Number(tp.portion_g || 0),
           is_free: false, brand: null, flavor: null, flavor_id: null,
         })
-        FREE_CATS.forEach(cat => {
+        freeCats.forEach(cat => {
           const f = freeOf(tp.id, cat)
           if (f > 0) rows.push({
             hookah_type_id: tp.id, quantity: f, date: dateStr,
@@ -329,7 +340,7 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: t.text3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, padding: '0 2px 7px' }}>{tr('st.forWhom')}</div>
           <div style={{ display: 'flex', gap: 7, overflowX: 'auto', paddingBottom: 2, WebkitOverflowScrolling: 'touch' }}>
-            {FREE_CATS.map(cat => {
+            {freeCats.map(cat => {
               const on = freeCat === cat
               const n = types.reduce((s, tp) => s + freeOf(tp.id, cat), 0)
               return (
@@ -404,6 +415,11 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
   const [showAddMov, setShowAddMov] = useState(false)
   const [showInv, setShowInv] = useState(false)
   const [movRows, setMovRows] = useState<MovRow[]>([newRow()])
+  // Списание «с заведения» (венью) — только вес, без бренда/вкуса. Уменьшает venueBase
+  // в смене кальянщика, склад не трогает. Паритет с StashView.swift saveVenueWriteoff (H2).
+  const [writeoffVenue, setWriteoffVenue] = useState(false)
+  const [venueGrams, setVenueGrams] = useState('')
+  const [venueAvailable, setVenueAvailable] = useState(0)
   const [invRows, setInvRows] = useState<InvRow[]>([])
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
@@ -439,6 +455,23 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
     setMovements(s2.data || [])
     setInventories(s3.data || [])
     setLoading(false)
+    loadVenueAvailable(rid)
+  }
+
+  // Сколько табака физически в заведении прямо сейчас (для гейта списания «с заведения»):
+  // всё выдано в зал минус всё продано минус уже списанное «с заведения». Независимый от
+  // HookahShiftTab расчёт (та вкладка держит свой venueBase локально, с разбивкой по дню
+  // навигации) — здесь нужен just актуальный тотал вне контекста конкретного дня смены.
+  const loadVenueAvailable = async (rid: string) => {
+    const [{ data: outs }, { data: sales }, { data: wo }] = await Promise.all([
+      db.from('tobacco_movements').select('quantity_g').eq('restaurant_id', rid).eq('type', 'out'),
+      db.from('hookah_sales').select('quantity, portion_g'),
+      db.from('tobacco_movements').select('quantity_g, brand, flavor').eq('restaurant_id', rid).eq('type', 'writeoff'),
+    ])
+    const totalOut = (outs || []).reduce((s: number, m: any) => s + (m.quantity_g || 0), 0)
+    const totalGrams = (sales || []).reduce((s: number, r: any) => s + (r.quantity || 0) * Number(r.portion_g || 0), 0)
+    const totalVenueWo = (wo || []).filter((m: any) => !m.brand && !m.flavor).reduce((s: number, m: any) => s + (m.quantity_g || 0), 0)
+    setVenueAvailable(Math.max(0, totalOut - totalGrams - totalVenueWo))
   }
 
   const showToastMsg = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 2500) }
@@ -488,12 +521,20 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
       // а не по возможно устаревшему стейту `stock` (правки в другой вкладке/сессии).
       const { data: freshData } = await db.from('tobacco_stock').select('*').eq('restaurant_id', restaurantId)
       const freshStock: StockItem[] = freshData || []
-      for (const r of filled) {
-        const qty = parseFloat(r.quantity_g)
-        if (movMode !== 'in') {
-          const item = freshStock.find(s => s.brand === r.brand && s.flavor === r.flavor)
-          if (!item) { showToastMsg(`${r.brand} · ${r.flavor} ${tr('st.notFoundSuffix')}`); return }
-          if (qty > item.quantity_g) { showToastMsg(`${r.brand} · ${r.flavor}: ${tr('st.onlyWord')} ${fg(item.quantity_g)}`); return }
+      if (movMode !== 'in') {
+        // Копим дельту по бренд+вкус ПО ВСЕМ строкам батча — иначе два ряда на один и тот же
+        // товар (напр. 300г + 300г при остатке 400г) проходили валидацию по отдельности,
+        // а итоговый апдейт молча клампился в 0 без единого сообщения об ошибке.
+        const cumulative = new Map()
+        for (const r of filled) {
+          const key = r.brand + ' ' + r.flavor
+          const cur = cumulative.get(key)
+          cumulative.set(key, { brand: r.brand, flavor: r.flavor, qty: (cur ? cur.qty : 0) + parseFloat(r.quantity_g) })
+        }
+        for (const { brand, flavor, qty } of cumulative.values()) {
+          const item = freshStock.find(s => s.brand === brand && s.flavor === flavor)
+          if (!item) { showToastMsg(`${brand} · ${flavor} ${tr('st.notFoundSuffix')}`); return }
+          if (qty > item.quantity_g) { showToastMsg(`${brand} · ${flavor}: ${tr('st.onlyWord')} ${fg(item.quantity_g)}`); return }
         }
       }
 
@@ -549,11 +590,47 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
     }
   }
 
+  // Списание «с заведения»: только вес, без бренда/вкуса — паритет с iOS saveVenueWriteoff (H2).
+  const saveVenueWriteoff = async () => {
+    if (savingRef.current) return
+    const qty = parseFloat(venueGrams)
+    if (!(qty > 0)) { showToastMsg(tr('st.addAtLeastOne')); return }
+    if (!movReason.trim()) { showToastMsg(tr('st.enterWriteoffReason')); return }
+    if (qty > venueAvailable) { showToastMsg(tr('st.onlyLeftVenue', { g: fg(Math.round(venueAvailable)) })); return }
+    savingRef.current = true
+    setSaving(true)
+    try {
+      const batchId = editBatch || crypto.randomUUID()
+      let originalCreatedAt: string | undefined
+      if (editBatch) {
+        originalCreatedAt = movements.find(m => m.batch_id === editBatch)?.created_at
+        await db.from('tobacco_movements').delete().eq('batch_id', editBatch)
+      }
+      const row: Record<string, unknown> = { restaurant_id: restaurantId, brand: '', flavor: '', quantity_g: qty, type: 'writeoff', batch_id: batchId, reason: movReason.trim() }
+      if (originalCreatedAt) row.created_at = originalCreatedAt
+      await db.from('tobacco_movements').insert(row)
+      await loadAll(restaurantId)
+      setMovRows([newRow()]); setMovReason(''); setVenueGrams(''); setWriteoffVenue(false); setShowAddMov(false); setEditBatch(null)
+      showToastMsg(tr('st.savedItems', { n: 1 }))
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
+  }
+
   const openEdit = (batchId: string, items: Movement[]) => {
     setEditBatch(batchId)
     setMovMode(items[0].type as any)
-    setMovReason((items[0] as any).reason && items[0].type === 'writeoff' ? (items[0] as any).reason : '')
-    setMovRows([...items.map(m => ({ id: m.id, brand: m.brand, flavor: m.flavor, quantity_g: String(m.quantity_g) }))])
+    const isVenue = items.every(i => !i.brand && !i.flavor)
+    setWriteoffVenue(isVenue)
+    if (isVenue) {
+      setVenueGrams(String(items.reduce((s, i) => s + i.quantity_g, 0)))
+      setMovReason((items[0] as any).reason || '')
+      setMovRows([newRow()])
+    } else {
+      setMovReason((items[0] as any).reason && items[0].type === 'writeoff' ? (items[0] as any).reason : '')
+      setMovRows([...items.map(m => ({ id: m.id, brand: m.brand, flavor: m.flavor, quantity_g: String(m.quantity_g) }))])
+    }
     setShowAddMov(true)
   }
 
@@ -571,9 +648,20 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
     try {
       const items = filled.map(r => ({ brand: r.brand, flavor: r.flavor, expected_g: r.expected_g, actual_g: parseFloat(r.actual_g), diff_g: parseFloat(r.actual_g) - r.expected_g }))
       await db.from('tobacco_inventories').insert({ restaurant_id: restaurantId, type: 'warehouse', items })
+      // Движение-маркер рядом с апдейтом остатка — иначе коррекция по инвентаризации была
+      // невидима в ленте «Движения» (нет ни одной строки tobacco_movements для неё).
+      const invBatchId = crypto.randomUUID()
       for (const r of filled) {
         const item = stock.find(s => s.brand === r.brand && s.flavor === r.flavor)
-        if (item) await db.from('tobacco_stock').update({ quantity_g: Math.max(0, parseFloat(r.actual_g)), updated_at: new Date().toISOString() }).eq('id', item.id)
+        if (item) {
+          await db.from('tobacco_stock').update({ quantity_g: Math.max(0, parseFloat(r.actual_g)), updated_at: new Date().toISOString() }).eq('id', item.id)
+          const diff = parseFloat(r.actual_g) - r.expected_g
+          await db.from('tobacco_movements').insert({
+            restaurant_id: restaurantId, brand: r.brand, flavor: r.flavor, quantity_g: Math.abs(diff),
+            type: 'inventory', batch_id: invBatchId, flavor_id: item.id,
+            reason: `Инвентаризация: было ${fg(r.expected_g)}, стало ${fg(parseFloat(r.actual_g))}`,
+          })
+        }
       }
       await loadAll(restaurantId)
       setShowInv(false)
@@ -666,7 +754,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
           <AppSwitchBrand name="Stash" accent={t.orange} color={t.text} muted={t.text3} size={18} />
         </div>}
         <button
-          onClick={() => { setEditBatch(null); setMovRows([newRow()]); setMovReason(''); setShowAddMov(true) }}
+          onClick={() => { setEditBatch(null); setMovRows([newRow()]); setMovReason(''); setWriteoffVenue(false); setVenueGrams(''); setShowAddMov(true) }}
           style={{
             display: 'flex', alignItems: 'center', gap: 6,
             background: `${t.orange}1a`, borderRadius: 20,
@@ -846,7 +934,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
                             <span style={{ fontSize: 11, color: t.blue, background: `${t.blue}18`, padding: '3px 8px', borderRadius: 8, fontWeight: 600 }}>{tr('st.last')}</span>
                           )}
                         </div>
-                        <div style={{ fontSize: 13, color: t.text3 }}>{timeStr(items[0].created_at)}</div>
+                        <div style={{ fontSize: 13, color: t.text3 }}>{timeStr(items[0].created_at, locale)}</div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div style={{ fontSize: 17, fontWeight: 700, color }}>
@@ -871,7 +959,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
                         borderBottom: i < items.length - 1 ? `0.5px solid ${t.sep2}` : 'none',
                         background: t.dark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)',
                       }}>
-                        <div style={{ fontSize: 15, color: t.text2 }}>{item.brand} · {item.flavor}</div>
+                        <div style={{ fontSize: 15, color: t.text2 }}>{!item.brand && !item.flavor ? tr('st.venueWriteoffLabel') : `${item.brand} · ${item.flavor}`}</div>
                         <div style={{ fontSize: 15, fontWeight: 600, color }}>{movMode === 'in' ? '+' : '−'}{fg(item.quantity_g)}</div>
                       </div>
                     ))}
@@ -925,7 +1013,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
                               <div style={{ fontSize: 16, color: t.text, fontWeight: 600 }}>{tr('st.discrepCount', { n: diffs.length })}</div>
                               {isFirst && <span style={{ fontSize: 11, color: t.blue, background: `${t.blue}18`, padding: '3px 8px', borderRadius: 8, fontWeight: 600 }}>{tr('st.last')}</span>}
                             </div>
-                            <div style={{ fontSize: 13, color: t.text3 }}>{timeStr(inv.created_at)}</div>
+                            <div style={{ fontSize: 13, color: t.text3 }}>{timeStr(inv.created_at, locale)}</div>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <div style={{ fontSize: 16, fontWeight: 700, color: totalDiff >= 0 ? t.green : t.red }}>
@@ -1037,10 +1125,21 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
                 <Segmented
                   options={[{ id: 'in', label: tr('st.movIn') }, { id: 'out', label: tr('st.movOut') }, { id: 'writeoff', label: tr('st.movWriteoff') }]}
                   value={movMode}
-                  onChange={v => { setMovMode(v as any); if (!editBatch) setMovRows([newRow()]) }}
+                  onChange={v => { setMovMode(v as any); if (!editBatch) setMovRows([newRow()]); if (v !== 'writeoff') setWriteoffVenue(false) }}
                   t={t}
                 />
               </div>
+              {/* Списание: со склада (бренд/вкус) или с заведения (только вес общего объёма зала) — паритет с iOS (H2). */}
+              {movMode === 'writeoff' && (
+                <div style={{ marginBottom: 16 }}>
+                  <Segmented
+                    options={[{ id: 'warehouse', label: tr('st.fromWarehouse') }, { id: 'venue', label: tr('st.fromVenue') }]}
+                    value={writeoffVenue ? 'venue' : 'warehouse'}
+                    onChange={v => setWriteoffVenue(v === 'venue')}
+                    t={t}
+                  />
+                </div>
+              )}
             </div>
 
             <div style={{ padding: '4px 16px 36px' }}>
@@ -1051,7 +1150,22 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
                   style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: `1px solid ${movReason.trim() ? t.sep2 : t.red}`, fontSize: 16, color: t.text, background: t.surface, fontFamily: 'inherit', outline: 'none', marginBottom: 12 }}
                 />
               )}
-              {movRows.map((row) => {
+              {movMode === 'writeoff' && writeoffVenue ? (
+                <div style={{ background: t.surface, borderRadius: 16, padding: '14px', boxShadow: t.sh2 }}>
+                  <div style={{ fontSize: 12, color: t.text3, marginBottom: 8 }}>{tr('st.venueWriteoffHint')}</div>
+                  <input
+                    value={venueGrams}
+                    onChange={e => setVenueGrams(e.target.value.replace(/[^\d]/g, ''))}
+                    placeholder={tr('st.gramsPh')}
+                    type="number" min={1} max={venueAvailable}
+                    style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: `1px solid ${t.sep2}`, fontSize: 16, color: t.text, background: t.bg, fontFamily: 'inherit', outline: 'none', marginBottom: 10 }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 12, color: t.text3 }}>{tr('st.venueAvailable')}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: t.text2 }}>{fg(Math.round(venueAvailable))}</span>
+                  </div>
+                </div>
+              ) : movRows.map((row) => {
                 const brandsForMode = movMode !== 'in' ? outBrands : allBrands
                 const flavors = flavorsForBrand(row.brand, movMode !== 'in')
                 const maxQty = movMode !== 'in' ? stock.find(s => s.brand === row.brand && s.flavor === row.flavor)?.quantity_g : undefined
@@ -1092,18 +1206,20 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
                 )
               })}
 
-              <button
-                onClick={() => setMovRows(r => [...r, newRow()])}
-                style={{
-                  width: '100%', padding: '13px', borderRadius: 14,
-                  background: t.fill, border: 'none', fontFamily: 'inherit',
-                  fontSize: 15, fontWeight: 600, cursor: 'pointer', color: t.text, marginBottom: 12,
-                }}>
-                {tr('st.addPosition')}
-              </button>
+              {!(movMode === 'writeoff' && writeoffVenue) && (
+                <button
+                  onClick={() => setMovRows(r => [...r, newRow()])}
+                  style={{
+                    width: '100%', padding: '13px', borderRadius: 14,
+                    background: t.fill, border: 'none', fontFamily: 'inherit',
+                    fontSize: 15, fontWeight: 600, cursor: 'pointer', color: t.text, marginBottom: 12,
+                  }}>
+                  {tr('st.addPosition')}
+                </button>
+              )}
 
               <button
-                onClick={saveMov} disabled={saving}
+                onClick={() => { if (movMode === 'writeoff' && writeoffVenue) saveVenueWriteoff(); else saveMov() }} disabled={saving}
                 style={{
                   width: '100%', padding: '16px', borderRadius: 16,
                   background: saving ? t.fill : t.orange, color: saving ? t.text3 : '#fff',

@@ -3,7 +3,8 @@
 // `state` при создании /auth в /api/bank/connect (":ios" суффикс — маркер платформы,
 // см. комментарий там). Обменивает code на session_id + список привязанных счетов,
 // сразу тянет первую историю (syncConnection), редиректит обратно в Analytics (веб)
-// либо на кастомную схему mise:// (iOS, перехватывает ASWebAuthenticationSession).
+// либо на кастомную схему com.rahim.mise:// (iOS, перехватывает ASWebAuthenticationSession).
+// Reverse-DNS, не голое "mise" (аудит 2026-08-15, block-B — RFC 8252 §7.1).
 //
 // Авторизация — не cookie-сессия: на iOS этот запрос идёт из отдельного webview
 // (ASWebAuthenticationSession), у которого нет staff-cookie нашего URLSession. Доверяем
@@ -13,6 +14,11 @@
 //
 // bank_connections.requisition_id хранит session_id Enable Banking (переиспользуем
 // колонку от первой версии на GoCardless — семантика та же: «идентификатор согласия»).
+//
+// Claim атомарный (аудит-находка 2026-08-15): pending → processing одним UPDATE с
+// условием status='pending' в WHERE — если строка не вернулась, значит state уже
+// обработан параллельным вызовом (WebKit-ретрай навигации, двойной тап), и второй
+// вызов не должен второй раз обменивать code на сессию.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
@@ -22,7 +28,7 @@ export const dynamic = 'force-dynamic'
 
 // ASWebAuthenticationSession перехватывает навигацию НА кастомную схему, но HTTP
 // Location-редирект (30x) на неё WebKit часто не отдаёт сессии — сам пытается открыть
-// mise://... как страницу и падает с «address is invalid» (юзер-фидбок 2026-08-16).
+// com.rahim.mise://... как страницу и падает с «address is invalid» (юзер-фидбок 2026-08-16).
 // Обходной путь (стандартный для OAuth+ASWebAuthenticationSession): 200 OK с HTML,
 // который сам делает JS-навигацию на кастомную схему — это WebKit перехватывает.
 function schemeRedirectHTML(url: string): NextResponse {
@@ -34,19 +40,19 @@ function schemeRedirectHTML(url: string): NextResponse {
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')
   const rawState = req.nextUrl.searchParams.get('state')
-  const origin = req.nextUrl.origin
+  const origin = process.env.NEXT_PUBLIC_APP_URL
   const [ref, platform] = (rawState || '').split(':')
   const isIos = platform === 'ios'
 
   const fail = (msg: string) => isIos
-    ? schemeRedirectHTML(`mise://bank-callback?error=${encodeURIComponent(msg)}`)
+    ? schemeRedirectHTML(`com.rahim.mise://bank-callback?error=${encodeURIComponent(msg)}`)
     : NextResponse.redirect(`${origin}/analytics?tab=bank&bankError=${encodeURIComponent(msg)}`)
 
   if (!ref || !code) return fail('unauthorized')
 
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-  const { data: connection } = await admin.from('bank_connections').select('*')
-    .eq('id', ref).eq('status', 'pending').single()
+  const { data: connection } = await admin.from('bank_connections')
+    .update({ status: 'processing' }).eq('id', ref).eq('status', 'pending').select().single()
   if (!connection) return fail('not_found')
 
   try {
@@ -64,7 +70,7 @@ export async function GET(req: NextRequest) {
 
     await syncConnection(admin, updated)
     return isIos
-      ? schemeRedirectHTML('mise://bank-callback?ok=1')
+      ? schemeRedirectHTML('com.rahim.mise://bank-callback?ok=1')
       : NextResponse.redirect(`${origin}/analytics?tab=bank`)
   } catch (err: any) {
     await admin.from('bank_connections').update({ status: 'error', error_message: err?.message || 'callback failed' }).eq('id', connection.id)

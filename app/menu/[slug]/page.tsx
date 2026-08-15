@@ -393,7 +393,7 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
     try {
       const res = await fetch('/api/menu/order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, items: orderItems, total: cartTotal, tip: tipAmount, order_type: 'dine_in', table_number: tableN }) })
       if (!res.ok) throw new Error(String(res.status))
-      track('order')
+      track('checkout_click')
       saveBill([...bill, { items: orderItems, total: grandTotal, at: Date.now() }])
       // Тумбстоним отправленные позиции (не стираем карту) — просроченный remote-broadcast
       // от соседа по столу не должен воскресить уже оформленный заказ.

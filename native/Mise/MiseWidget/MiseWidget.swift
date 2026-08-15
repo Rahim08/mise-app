@@ -71,9 +71,9 @@ struct MiseWidgetView: View {
     // Deep-link: тап по виджету открывает приложение на нужном модуле.
     private var deepLink: URL? {
         switch entry.config.metric {
-        case .cash:     return URL(string: "mise://analytics")
-        case .hookahs:  return URL(string: "mise://stash")
-        case .bookings: return URL(string: "mise://bookings")
+        case .cash:     return URL(string: "com.rahim.mise://analytics")
+        case .hookahs:  return URL(string: "com.rahim.mise://stash")
+        case .bookings: return URL(string: "com.rahim.mise://bookings")
         }
     }
 

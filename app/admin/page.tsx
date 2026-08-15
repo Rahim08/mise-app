@@ -162,6 +162,7 @@ export default function AdminPage() {
   }
   const freeze = async () => {
     if (!selected) return
+    if (!confirm(`Заморозить подписку «${selected.name}»? Клиент сразу потеряет доступ.`)) return
     await adminApi({ action: 'freeze', restaurantId: selected.id })
     setSelected({ ...selected, subscription_status: 'frozen' }); await loadAll()
   }

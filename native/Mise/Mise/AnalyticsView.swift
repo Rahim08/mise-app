@@ -1,6 +1,23 @@
 import SwiftUI
 import Charts
 
+// C3 (аудит 2026-08-15): единая формула «начислено на сегодня» для Analytics и Manager→Зарплата
+// (ManagerSalary.swift) — раньше Manager считал свою линейную рампу над daysInMonth+payoutDay,
+// Analytics — payout-day-цикл; та же ЗП на тот же день расходилась между экранами до ~17пп.
+// Канон — цикл, привязанный к payout_day (см. комментарий у прежнего AnalyticsModel.salToday):
+// с payout_day этого месяца стартует новый цикл (копит на ЗП текущего месяца, выплата — в
+// следующем на payout_day); до payout_day идёт дособор на прошлый месяц. Паритет с
+// lib/analytics.ts computeAccruedToday (веб).
+func computeAccruedToday(isCurrentMonth: Bool, totalCash: Double, daysInMonth: Int, payoutDay: Int?, prevTotalCash: Double, prevDaysInMonth: Int, today: Date = Date()) -> Double {
+    guard isCurrentMonth else { return totalCash }
+    let cycleStart = payoutDay ?? 1
+    let day = Calendar.current.component(.day, from: today)
+    if day >= cycleStart {
+        return max(0, totalCash / Double(daysInMonth) * Double(day - cycleStart + 1))
+    }
+    return max(0, prevTotalCash / Double(prevDaysInMonth) * Double(prevDaysInMonth - cycleStart + day + 1))
+}
+
 private func cur(_ v: Double) -> String { Money.s(v) }
 private func kg(_ g: Double) -> String {
     if g >= 1000 {
@@ -559,14 +576,9 @@ final class AnalyticsModel {
     var salToday: Double {
         // Рамп завязан на РЕАЛЬНУЮ сегодняшнюю дату — при просмотре прошлого/будущего
         // месяца (стрелками) даёт бессмысленную цифру (% от чужого месяца по чужому дню).
-        // Прошлый закрытый месяц уже полностью начислен — 100%.
-        guard isCurrentMonth else { return salCash }
-        let today = Calendar.current.component(.day, from: Date())
-        if today >= cycleStart {
-            return max(0, (salCash / Double(daysInMonth) * Double(today - cycleStart + 1)).rounded())
-        } else {
-            return max(0, (prevSalCash / Double(prevDaysInMonth) * Double(prevDaysInMonth - cycleStart + today + 1)).rounded())
-        }
+        // Прошлый закрытый месяц уже полностью начислен — 100%. Формула — см.
+        // computeAccruedToday (C3, аудит 2026-08-15).
+        computeAccruedToday(isCurrentMonth: isCurrentMonth, totalCash: salCash, daysInMonth: daysInMonth, payoutDay: payoutDay, prevTotalCash: prevSalCash, prevDaysInMonth: prevDaysInMonth).rounded()
     }
     // Аванс/сумма-на-карту (запись) — переехали в Manager→Зарплата (ManagerSalary.swift,
     // реструктура 2026-08-14). advances/cardAmounts здесь остаются read-only для отображения.

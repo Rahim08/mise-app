@@ -29,7 +29,13 @@ struct RootView: View {
         .environment(model)
         .task { await model.start() }
         .onAppear { l10n.applyThemeToWindows() }
-        // Deep-link из виджета: mise://analytics | mise://stash | mise://bookings.
+        // Deep-link из виджета: com.rahim.mise://analytics | .../stash | .../bookings.
+        // Схема была объявлена в коде, но НЕ зарегистрирована в Info.plist (GENERATE_INFOPLIST_FILE
+        // не поддерживает CFBundleURLTypes напрямую) — тап по виджету не открывал нужный экран
+        // (юзер-репорт 2026-08-15). Теперь зарегистрирована через InfoPlistSupport/URLSchemes.plist
+        // (INFOPLIST_FILE, мёржится поверх генерируемого) + reverse-DNS схема вместо голого "mise"
+        // (аудит 2026-08-15, block-B: bare-word схему потенциально может застолбить другое
+        // приложение — RFC 8252 §7.1).
         .onOpenURL { url in route(url) }
         // Quick Actions с иконки (3D Touch / Haptic Touch)
         .onReceive(NotificationCenter.default.publisher(for: .quickAction)) { note in
@@ -55,7 +61,7 @@ struct RootView: View {
     }
 
     private func route(_ url: URL) {
-        guard url.scheme == "mise", let host = url.host, !host.isEmpty else { return }
+        guard url.scheme == "com.rahim.mise", let host = url.host, !host.isEmpty else { return }
         apply(.module(host))
     }
 

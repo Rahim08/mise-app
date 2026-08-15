@@ -18,7 +18,16 @@ export async function checkRateLimit(key: string, max: number, windowMs: number)
   return data === true
 }
 
+// G8 (аудит 2026-08-15): подтверждено по docs (vercel.com/docs/headers/request-headers,
+// раздел x-forwarded-for), 2026-08-15 — «we currently overwrite the X-Forwarded-For header
+// and do not forward external IPs. This restriction is in place to prevent IP spoofing»
+// (кроме Enterprise Trusted Proxy — этот проект на нём не сидит). Клиент не может подменить
+// этот заголовок на Vercel — `.split(',')[0]` здесь берёт IP, который проставил сам Vercel,
+// не что-то, что мог прислать запрос. x-vercel-forwarded-for предпочтителен и первым в
+// цепочке: та же доступная в доке формулировка — «x-forwarded-for could be overwritten if
+// you're using a proxy on top of Vercel», x-vercel-forwarded-for от этого не зависит.
 export function rateLimitKey(req: Request, prefix: string): string {
-  const ip = (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown'
+  const raw = req.headers.get('x-vercel-forwarded-for') || req.headers.get('x-forwarded-for') || ''
+  const ip = raw.split(',')[0].trim() || 'unknown'
   return `${prefix}:${ip}`
 }

@@ -41,6 +41,17 @@ export async function POST(req: NextRequest) {
         await stripe.subscriptions.cancel(restaurant.subscription_id)
       } catch (err: any) {
         console.error('Stripe cancel on delete failed:', err)
+        // Deletion proceeds regardless (owner asked to delete their account, don't block
+        // on a Stripe hiccup) — but without this, the subscription+customer id is only
+        // in Vercel logs and nothing surfaces it for manual reconciliation/refund once
+        // the restaurants row is gone (аудит 2026-08-15, block-F #5).
+        try {
+          await supabaseAdmin.from('app_errors').insert({
+            source: 'server',
+            message: `account/delete: orphaned Stripe subscription ${restaurant.subscription_id} (customer ${restaurant.stripe_customer_id ?? 'unknown'}) for restaurant ${restaurant.id} — cancel failed: ${err.message}`,
+            stack: err.stack?.slice(0, 4000),
+          })
+        } catch {}
       }
     }
 

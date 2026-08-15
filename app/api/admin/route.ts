@@ -10,20 +10,23 @@ import { ALL_MODULES } from '@/lib/plans'
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL
 if (!ADMIN_EMAIL) console.warn('[admin] ADMIN_EMAIL not set — admin route will be inaccessible')
 
-async function isAdmin(req: NextRequest): Promise<boolean> {
+// Возвращает email админа при успешной проверке (нужен для audit-лога импersонации), иначе null.
+async function getAdminEmail(req: NextRequest): Promise<string | null> {
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     { cookies: { getAll: () => req.cookies.getAll(), setAll: () => {} } }
   )
   const { data: { user } } = await supabase.auth.getUser()
-  return user?.email === ADMIN_EMAIL
+  if (user && user.email === ADMIN_EMAIL) return user.email ?? null
+  return null
 }
 
 export async function POST(req: NextRequest) {
   const rlKey = rateLimitKey(req, 'admin')
   if (!await checkRateLimit(rlKey, 30, 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
-  if (!await isAdmin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const adminEmail = await getAdminEmail(req)
+  if (!adminEmail) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { action, restaurantId, note, status, plan, ends_at, endsAt, compApps, discountPct, staffLimit, aiEnabled, addonModules, extraSeats, addonAI, billingInterval, trialEndsAt } = await req.json()
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
@@ -32,7 +35,9 @@ export async function POST(req: NextRequest) {
     case 'list': {
       const { data: rests } = await admin.from('restaurants').select('*').order('created_at', { ascending: false })
       const stats: Record<string, any> = {}
-      for (const r of rests || []) {
+      // Раньше — сериализованный for-loop, O(4N) round-trips один за другим (аудит-находка
+      // E8). Гоняем все рестораны параллельно, каждый всё равно ждёт свои 4 запроса.
+      await Promise.all((rests || []).map(async r => {
         const [lastShift, shiftsCount, movCount, empCount] = await Promise.all([
           admin.from('shifts').select('opened_at').eq('restaurant_id', r.id).order('opened_at', { ascending: false }).limit(1),
           admin.from('shifts').select('id', { count: 'exact', head: true }).eq('restaurant_id', r.id),
@@ -45,7 +50,7 @@ export async function POST(req: NextRequest) {
           employees: empCount.count || 0,
           lastActive: lastShift.data?.[0]?.opened_at || null,
         }
-      }
+      }))
       // Owner emails (to identify/contact clients)
       const emails: Record<string, string> = {}
       try {
@@ -128,6 +133,13 @@ export async function POST(req: NextRequest) {
       if (!restaurantId) return NextResponse.json({ error: 'Missing restaurantId' }, { status: 400 })
       const { data: rest } = await admin.from('restaurants').select('id, name').eq('id', restaurantId).single()
       if (!rest) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      // Audit-лог имперсонации (аудит-находка E3/F6: full owner-доступ выдавался без следа,
+      // кто и когда). admin_notes без своей колонки under действие/автора — кладём
+      // структурированной строкой, читаемо и в существующем UI заметок.
+      await admin.from('admin_notes').insert({
+        restaurant_id: restaurantId,
+        note: `[система] ${adminEmail} открыл дашборд клиента (имперсонация) — ${new Date().toISOString()}`,
+      })
       const res = NextResponse.json({ ok: true, name: rest.name })
       res.cookies.set(ADMIN_VIEW_COOKIE_NAME, issueAdminViewToken(restaurantId), {
         httpOnly: true, sameSite: 'lax', secure: true, path: '/', maxAge: ADMIN_VIEW_COOKIE_MAXAGE,

@@ -2,11 +2,17 @@ import AuthenticationServices
 import UIKit
 
 // Открывает consent-ссылку банка (Enable Banking /auth) в системном web-authentication
-// флоу и ждёт редиректа на mise://bank-callback — конечную точку, на которую сервер
-// шлёт после успешного/неуспешного обмена кода (см. ветка `platform=ios` в
+// флоу и ждёт редиректа на com.rahim.mise://bank-callback — конечную точку, на которую
+// сервер шлёт после успешного/неуспешного обмена кода (см. ветка `platform=ios` в
 // app/api/bank/callback/route.ts). Обычный WKWebView/SFSafariViewController не подошёл
 // бы: у него нет staff-cookie нашего URLSession (отдельный контекст), поэтому колбэк на
 // сервере авторизуется не сессией, а одноразовым `state`.
+//
+// Схема reverse-DNS, не голое "mise" (аудит 2026-08-15, block-B: RFC 8252 §7.1 — bare-word
+// custom-схему потенциально может зарегистрировать другое приложение). Для
+// ASWebAuthenticationSession регистрация в Info.plist не обязательна (система сама роутит
+// колбэк САМО́Й запустившей сессию), но диплинк из виджета (RootView.swift) — обязательна,
+// поэтому схема теперь и в InfoPlistSupport/URLSchemes.plist.
 @MainActor
 final class BankAuthCoordinator: NSObject, ASWebAuthenticationPresentationContextProviding {
     private var session: ASWebAuthenticationSession?
@@ -20,7 +26,7 @@ final class BankAuthCoordinator: NSObject, ASWebAuthenticationPresentationContex
 
     func present(url: URL) async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            let s = ASWebAuthenticationSession(url: url, callbackURLScheme: "mise") { [weak self] callbackURL, error in
+            let s = ASWebAuthenticationSession(url: url, callbackURLScheme: "com.rahim.mise") { [weak self] callbackURL, error in
                 self?.session = nil
                 if let error {
                     // Пользователь закрыл шторку/отменил согласие — не показываем это как

@@ -10,6 +10,7 @@ import { Spinner } from '@/components/ui'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n, tCurrent } from '@/lib/i18n'
 import { fmtDate, fv, dd } from '@/lib/format'
+import { computeAccruedToday } from '@/lib/analytics'
 const COLORS = ['#34c759', '#ff3b30', '#007aff', '#ff9500', '#af52de', '#00c7be', '#ff6b35', '#5856d6']
 
 // Банк (Open Banking) — короткий список стран для поиска института в GoCardless
@@ -476,6 +477,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [loading, setLoading] = useState(true)
   const [showMonthPicker, setShowMonthPicker] = useState(false)
   const [showAI, setShowAI] = useState(false)
+  const [showDebts, setShowDebts] = useState(false)
+  const [showDebtHistory, setShowDebtHistory] = useState(false)
   const [chatMsgs, setChatMsgs] = useState<{ role: string; text: string }[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
@@ -653,6 +656,44 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   // Долги (Б, 2026-08-09): is_paid=false — ещё не оплачен; paid_shift_id на ДРУГУЮ смену —
   // историческая пометка «здесь был долг», уже посчитан в дне погашения.
   const countsInRollup = (e: any) => e.is_paid !== false && (!e.paid_shift_id || e.paid_shift_id === e.shift_id)
+
+  // C1 (аудит 2026-08-15): web вообще не показывал «Долги» — countsInRollup выше молча
+  // исключает неоплаченные shift_expenses из всех ролапов расходов, без единого UI-сигнала,
+  // что деньги пропущены. Портируем iOS AnalyticsView.periodDebts/periodDebtHistory: источник —
+  // allExpenses/allShifts (без границы по времени, как в iOS loadDebts, долг мог возникнуть
+  // в прошлом месяце), фильтр по текущему периоду (день/неделя/месяц) — здесь.
+  const dateByShiftId: Record<string, string> = {}
+  allShifts.forEach((s: any) => { dateByShiftId[s.id] = s.date })
+  const [periodStart, periodEnd] = periodMode === 'day' ? [fmtDate(currentDate), fmtDate(currentDate)]
+    : periodMode === 'week' ? (() => {
+        const start = new Date(currentDate); const day = start.getDay()
+        start.setDate(start.getDate() - (day === 0 ? 6 : day - 1))
+        const end = new Date(start); end.setDate(start.getDate() + 6)
+        return [fmtDate(start), fmtDate(end)]
+      })()
+    : [fmtDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)), fmtDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0))]
+  const toDebtRow = (e: any) => {
+    const date = dateByShiftId[e.shift_id]
+    if (!date) return null
+    return { id: e.id, shiftId: e.shift_id, date, categoryName: e.category_name || '—', amount: e.amount || 0, paidAt: e.paid_at || null }
+  }
+  const inPeriod = (d: { date: string } | null): d is { date: string; id: string; shiftId: string; categoryName: string; amount: number; paidAt: string | null } =>
+    !!d && d.date >= periodStart && d.date <= periodEnd
+  const periodDebts = allExpenses.filter((e: any) => e.is_paid === false).map(toDebtRow).filter(inPeriod).sort((a, b) => a.date < b.date ? -1 : 1)
+  const periodDebtHistory = allExpenses.filter((e: any) => e.paid_shift_id && e.paid_shift_id !== e.shift_id).map(toDebtRow).filter(inPeriod).sort((a, b) => a.date > b.date ? -1 : 1)
+  const debtTotal = periodDebts.reduce((s, d) => s + d.amount, 0)
+
+  const debtsCard = periodDebts.length > 0 && (
+    <div onClick={() => setShowDebts(true)} style={{ display: 'flex', alignItems: 'center', gap: 10, background: t.surface, borderRadius: 16, padding: '14px 16px', marginBottom: 12, boxShadow: t.sh, cursor: 'pointer' }}>
+      <svg width="17" height="17" fill="none" stroke={t.orange} strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 7.5v5.5M12 16.5h.01" strokeLinecap="round" /></svg>
+      <span style={{ fontSize: 15, fontWeight: 500, color: t.text }}>{tr('an.debts')}</span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: t.orange, borderRadius: 999, padding: '2px 7px', minWidth: 18, textAlign: 'center' as const }}>{periodDebts.length}</span>
+      <span style={{ flex: 1 }} />
+      <span style={{ fontSize: 13, fontWeight: 700, color: t.orange }}>{currency}{fv(debtTotal)}</span>
+      <svg width="7" height="13" fill="none" stroke={t.text3} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 10 18"><path d="M2 1l7 8-7 8" /></svg>
+    </div>
+  )
+
   const getCatMap = (exps: any[]) => {
     const m: Record<string, number> = {}
     exps.filter((e: any) => !e.employee_id && countsInRollup(e)).forEach((e: any) => { m[e.category_name] = (m[e.category_name] || 0) + e.amount })
@@ -884,6 +925,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
               </div>
             </div>
           </>}
+          {debtsCard}
         </div>
       )
     }
@@ -928,6 +970,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
               </div>
             ))}
           </div>
+          {debtsCard}
         </div>
       )
     }
@@ -1022,6 +1065,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
             ))}
           </div>
         </>}
+        {debtsCard}
       </div>
     )
   }
@@ -1110,21 +1154,13 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       const total = Math.max(0, Number(e.salary || 0) - deduct)
       return s + Math.max(0, total - prevAdvanceOf(e) - prevCardOf(e))
     }, 0)
-    // Цикл начисления привязан к payout_day, не к 1-му числу: с payout_day этого месяца
-    // стартует новый цикл (копит на ЗП текущего месяца, выплата — в следующем месяце на
-    // payout_day); до payout_day ещё идёт дособор на прошлый месяц (выплата — в этом
-    // месяце на payout_day). Без настройки payout_day — обычный календарный месяц.
-    const cycleStart = payoutDay || 1
-    const inNewCycle = now.getDate() >= cycleStart
     // Рамп завязан на РЕАЛЬНУЮ сегодняшнюю дату — при просмотре прошлого/будущего месяца
     // (пикером) даёт бессмысленную цифру (% от чужого месяца по чужому дню). Прошлый
     // закрытый месяц уже полностью начислен — 100%.
     const isCurrentMonth = currentDate.getFullYear() === now.getFullYear() && currentDate.getMonth() === now.getMonth()
-    const salToday = isCurrentMonth ? Math.round(
-      inNewCycle
-        ? totalCash / dIM * (now.getDate() - cycleStart + 1)
-        : prevTotalCash / prevDIM * (prevDIM - cycleStart + now.getDate() + 1)
-    ) : Math.round(totalCash)
+    // Цикл начисления привязан к payout_day, не к 1-му числу — см. computeAccruedToday
+    // (C3, аудит 2026-08-15: вынесено в lib/analytics, единая формула с Manager→Зарплата).
+    const salToday = Math.round(computeAccruedToday({ isCurrentMonth, totalCash, daysInMonth: dIM, payoutDay, prevTotalCash, prevDaysInMonth: prevDIM, today: now }))
     const diff = inkBal - salToday
 
     return (
@@ -1145,22 +1181,38 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
         <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
           {shiftsWithInk.length === 0
             ? <div style={{ padding: '32px', textAlign: 'center', color: t.text4 }}>{tr('an.noInkass')}</div>
-            : shiftsWithInk.map((s: any, i: number) => {
-              // C6 (юзер-фидбок 2026-08-15): истории не хватало причины/заметки — reason и
-              // salary_note (выплаты ЗП с этого дня) были невидимы нигде на вебе.
-              const row = inkByShift[s.id]
-              const note = [row?.reason, row?.salary_note].filter(Boolean).join(' · ')
-              return (
-                <div key={s.id} style={{ padding: '12px 14px', borderBottom: i < shiftsWithInk.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '44px 1fr 1fr', gap: 4, fontSize: 13 }}>
-                    <span style={{ color: t.text3 }}>{dd(s.date)}</span>
-                    <span style={{ color: t.text }}>{s.date}</span>
-                    <span style={{ color: t.orange, fontWeight: 600 }}>{currency}{fv(s.inkassation)}</span>
+            : <>
+              {/* C4 (аудит 2026-08-15): паритет с iOS-таблицей Дата/Инкассация/Расход/Итого —
+                  веб раньше показывал только валовую сумму + свободный текст, без числового
+                  расхода и итогового нетто по дню. */}
+              <div style={{ display: 'grid', gridTemplateColumns: '38px 1fr 1fr 1fr', gap: 4, padding: '10px 14px 6px', fontSize: 10, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                <span>{tr('an.csvDate')}</span>
+                <span style={{ textAlign: 'right' }}>{tr('an.inkassation')}</span>
+                <span style={{ textAlign: 'right' }}>{tr('an.expense')}</span>
+                <span style={{ textAlign: 'right' }}>{tr('an.inkNet')}</span>
+              </div>
+              {shiftsWithInk.map((s: any, i: number) => {
+                // C6 (юзер-фидбок 2026-08-15): истории не хватало причины/заметки — reason и
+                // salary_note (выплаты ЗП с этого дня) были невидимы нигде на вебе.
+                const row = inkByShift[s.id]
+                const note = [row?.reason, row?.salary_note].filter(Boolean).join(' · ')
+                // «Расход» = expense + salary (реально списанное из фонда), не только expense —
+                // паритет с iOS (2fc0215).
+                const deducted = (row?.expense || 0) + (row?.salary || 0)
+                const net = row?.total ?? s.inkassation
+                return (
+                  <div key={s.id} style={{ padding: '10px 14px', borderTop: `0.5px solid ${t.sep2}` }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '38px 1fr 1fr 1fr', gap: 4, fontSize: 13, alignItems: 'baseline' }}>
+                      <span style={{ color: t.text3 }}>{dd(s.date)}</span>
+                      <span style={{ color: t.orange, fontWeight: 600, textAlign: 'right' }}>{currency}{fv(s.inkassation)}</span>
+                      <span style={{ color: t.red, textAlign: 'right' }}>{deducted > 0 ? `−${currency}${fv(deducted)}` : '—'}</span>
+                      <span style={{ color: t.blue, fontWeight: 700, textAlign: 'right' }}>{currency}{fv(net)}</span>
+                    </div>
+                    {note && <div style={{ fontSize: 11, color: t.text3, marginTop: 4 }}>{note}</div>}
                   </div>
-                  {note && <div style={{ fontSize: 11, color: t.text3, marginTop: 4 }}>{note}</div>}
-                </div>
-              )
-            })
+                )
+              })}
+            </>
           }
         </div>
       </div>
@@ -1667,6 +1719,62 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
           )
         ))}
       </div>
+
+      {/* ДОЛГИ (C1, аудит 2026-08-15) — портировано с iOS AnalyticsView.DebtsTab */}
+      {showDebts && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,.45)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => { setShowDebts(false); setShowDebtHistory(false) }}>
+          <div style={{ background: t.surface, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '82vh', overflowY: 'auto' as const, paddingBottom: 32 }} onClick={(e: any) => e.stopPropagation()}>
+            <div style={{ width: 36, height: 4, background: t.fill, borderRadius: 2, margin: '12px auto 0' }} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px 0' }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: t.text }}>{tr('an.debts')}</div>
+              <button onClick={() => { setShowDebts(false); setShowDebtHistory(false) }} style={{ background: 'none', border: 'none', color: t.text4, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}>{tr('pe.stDone')}</button>
+            </div>
+            <div style={{ padding: '16px 16px 0' }}>
+              <div style={{ textAlign: 'center' as const, padding: '18px 0', background: t.fill, borderRadius: 16, marginBottom: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{tr('an.debts')}</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: t.orange, marginTop: 4 }}>{currency}{fv(debtTotal)}</div>
+                <div style={{ fontSize: 11, color: t.text3, marginTop: 4, padding: '0 20px' }}>{tr('an.debtTotalHint')}</div>
+              </div>
+
+              {periodDebts.length === 0 ? (
+                <div style={{ textAlign: 'center' as const, padding: '28px 0', color: t.text3, fontSize: 13 }}>{tr('an.debtsNonePeriod')}</div>
+              ) : (
+                <div style={{ background: t.fill, borderRadius: 14, overflow: 'hidden', marginBottom: 12 }}>
+                  {periodDebts.map((d, i) => (
+                    <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: i < periodDebts.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
+                      <svg width="14" height="14" fill="none" stroke={t.orange} strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 7.5v5.5M12 16.5h.01" strokeLinecap="round" /></svg>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, fontWeight: 500, color: t.text }}>{d.categoryName}</div>
+                        <div style={{ fontSize: 11, color: t.text3 }}>{dd(d.date)}</div>
+                      </div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: t.orange }}>{currency}{fv(d.amount)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {periodDebtHistory.length > 0 && (
+                <div style={{ background: t.fill, borderRadius: 14, overflow: 'hidden' }}>
+                  <div onClick={() => setShowDebtHistory(v => !v)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', cursor: 'pointer' }}>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: t.text3 }}>{tr('an.debtHistory')}</span>
+                    <svg width="10" height="10" fill="none" stroke={t.text3} strokeWidth="2" strokeLinecap="round" viewBox="0 0 12 12" style={{ transform: showDebtHistory ? 'rotate(180deg)' : 'none', transition: 'transform .18s' }}><path d="M2 4l4 4 4-4" /></svg>
+                  </div>
+                  {showDebtHistory && periodDebtHistory.map((d, i) => (
+                    <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', borderTop: `0.5px solid ${t.sep2}` }}>
+                      <svg width="14" height="14" fill="none" stroke={t.green} strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M8 12l2.5 2.5L16 9" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: t.text2 }}>{d.categoryName}</div>
+                        <div style={{ fontSize: 11, color: t.text3 }}>{dd(d.date)}{d.paidAt ? ` · ${tr('pe.paidOn', { date: dd(d.paidAt) })}` : ''}</div>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: t.text3 }}>{currency}{fv(d.amount)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MONTH PICKER */}
       {showMonthPicker && (

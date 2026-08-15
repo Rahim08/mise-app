@@ -7,11 +7,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { verifyStaffToken, STAFF_COOKIE } from '@/lib/staffToken'
+import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 import { MENU_LOCALES, LOCALE_LABEL } from '@/lib/menu'
 
+const MAX_TEXT_CHARS = 500 // это название/описание блюда, не документ
+
 async function getRestaurantId(req: NextRequest): Promise<string | null> {
+  // Владелец правит всё меню. Staff-токен принимаем только owner-сессии — PIN-сессии
+  // сотрудников отклоняем, как это уже сделано в соседнем /api/menu/import (аудит-находка E2:
+  // комментарий выше заявлял "Owner-only", код это не проверял).
   const staff = verifyStaffToken(req.cookies.get(STAFF_COOKIE)?.value)
-  if (staff) return staff.rid
+  if (staff) return staff.owner ? staff.rid : null
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -25,12 +31,18 @@ async function getRestaurantId(req: NextRequest): Promise<string | null> {
 }
 
 export async function POST(req: NextRequest) {
+  const rlKey = rateLimitKey(req, 'menu-translate')
+  if (!await checkRateLimit(rlKey, 5, 10 * 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
+
   const restaurantId = await getRestaurantId(req)
   if (!restaurantId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { text } = await req.json()
   if (!text || typeof text !== 'string' || !text.trim()) {
     return NextResponse.json({ error: 'Bad request' }, { status: 400 })
+  }
+  if (text.length > MAX_TEXT_CHARS) {
+    return NextResponse.json({ error: 'text_too_long' }, { status: 400 })
   }
 
   const key = process.env.GROQ_API_KEY

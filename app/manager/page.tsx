@@ -407,8 +407,13 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
 
     if (selectedDebtIds.size > 0) {
       const settledIds = selectedDebtIds
+      // A1 (аудит 2026-08-15): бампаем settledTodayTotal ДО очистки selectedDebtIds — иначе
+      // calc() на следующий рендер теряет только что погашенную сумму (debtSettleTotal() уже
+      // 0), баланс кассы на экране на секунду показывает больше, чем реально сохранено в БД.
+      const settledAmt = debtSettleTotal()
       setOpenDebts(ds => ds.filter(d => !settledIds.has(d.id)))
       setSelectedDebtIds(new Set())
+      setSettledTodayTotal(prev => prev + settledAmt)
     }
 
     setShift({ ...sh, income: inc, inkassation: ink, total_expense: totalExp, closing_balance: balance })

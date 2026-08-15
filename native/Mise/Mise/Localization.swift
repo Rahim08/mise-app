@@ -373,6 +373,7 @@ let STRINGS: [String: [Lang: String]] = [
     "st.free":          tr("Free", "Бесплатно", "Gratis", "Gratuits", "Pulsuz", "Ücretsiz", "Безкоштовно", "Тегін"),
     "st.revenue":       tr("Revenue", "Выручка", "Ricavo", "Recette", "Gəlir", "Gelir", "Виручка", "Түсім"),
     "st.tobacco":       tr("Product", "Продукт", "Prodotto", "Produit", "Məhsul", "Ürün", "Продукт", "Өнім"),
+    "st.venueLeft":     tr("Tobacco on the floor", "Табака в заведении", "Tabacco nel locale", "Tabac dans l’établissement", "Müəssisədə tütün", "İşletmedeki tütün", "Тютюну в закладі", "Мекемедегі темекі"),
     "st.sale":          tr("Sale", "Продажа", "Vendita", "Vente", "Satış", "Satış", "Продаж", "Сату"),
     "st.search":        tr("Search", "Поиск", "Cerca", "Rechercher", "Axtarış", "Ara", "Пошук", "Іздеу"),
     "st.low":           tr("{n} low", "{n} мало", "{n} in esaurimento", "{n} faibles", "{n} az", "{n} az", "{n} мало", "{n} аз"),

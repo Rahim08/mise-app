@@ -10,6 +10,21 @@ import { verifyStaffToken, STAFF_COOKIE, verifyAdminViewToken, ADMIN_VIEW_COOKIE
 
 export interface Caller { rid: string; owner: boolean; apps: string[]; sid?: string }
 
+function serviceRoleClient() {
+  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+}
+
+// The staff token payload is signed once at PIN-login and trusted as-is for its ~10-year
+// TTL — deactivating a staff member (or unbinding their device) previously only affected
+// UI lists, never the actual data path. Re-check the live `staff` row here so a
+// deactivation takes effect immediately instead of only at token expiry. Owner tokens
+// (`sid: 'owner'`) have no `staff` row and are exempt.
+async function staffTokenRevoked(admin: ReturnType<typeof serviceRoleClient>, staff: { rid: string; sid: string }): Promise<boolean> {
+  if (staff.sid === 'owner') return false
+  const { data } = await admin.from('staff').select('is_active').eq('id', staff.sid).eq('restaurant_id', staff.rid).single()
+  return !data || data.is_active === false
+}
+
 export async function resolveCaller(req: NextRequest): Promise<Caller | null> {
   // Super-admin "view as client" — unconditional priority so it works even when the
   // admin's own Supabase session (they may own a restaurant themselves) would otherwise
@@ -22,7 +37,11 @@ export async function resolveCaller(req: NextRequest): Promise<Caller | null> {
   // Owner может тестировать PIN-приложения в том же браузере → есть и staff-кука, и
   // Supabase-сессия. Если Supabase-куки нет — это точно сотрудник.
   const hasSbSession = req.cookies.getAll().some(c => c.name.startsWith('sb-') && c.name.includes('auth-token'))
-  if (staff && !hasSbSession) return { rid: staff.rid, owner: staff.owner, apps: staff.apps || [], sid: staff.sid }
+  if (staff && !hasSbSession) {
+    const admin = serviceRoleClient()
+    if (await staffTokenRevoked(admin, staff)) return null
+    return { rid: staff.rid, owner: staff.owner, apps: staff.apps || [], sid: staff.sid }
+  }
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -30,10 +49,19 @@ export async function resolveCaller(req: NextRequest): Promise<Caller | null> {
     { cookies: { getAll: () => req.cookies.getAll(), setAll: () => {} } }
   )
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return staff ? { rid: staff.rid, owner: staff.owner, apps: staff.apps || [], sid: staff.sid } : null
-  const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+  if (!user) {
+    if (!staff) return null
+    const admin = serviceRoleClient()
+    if (await staffTokenRevoked(admin, staff)) return null
+    return { rid: staff.rid, owner: staff.owner, apps: staff.apps || [], sid: staff.sid }
+  }
+  const admin = serviceRoleClient()
   const { data } = await admin.from('restaurants').select('id').eq('owner_id', user.id).single()
-  if (!data?.id) return staff ? { rid: staff.rid, owner: staff.owner, apps: staff.apps || [], sid: staff.sid } : null
+  if (!data?.id) {
+    if (!staff) return null
+    if (await staffTokenRevoked(admin, staff)) return null
+    return { rid: staff.rid, owner: staff.owner, apps: staff.apps || [], sid: staff.sid }
+  }
   return { rid: data.id, owner: true, apps: ['manager', 'analytics', 'stash', 'people'] }
 }
 

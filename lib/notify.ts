@@ -26,6 +26,15 @@ const TYPE_PREF: Record<string, string> = {
   booking: 'booking',
   news: 'news',
   salary_payout_reminder: 'salary_payout',
+  // G4 (аудит 2026-08-15): раньше без записи здесь — фолбэк `prefKey ? ... : true` пропускал
+  // их мимо проверки пользовательских настроек, шли ВСЕГДА независимо от prefs. Ключи (пока)
+  // не выведены тумблером в NotificationSettings (app/people/tabs-salary.tsx) — как и booking/
+  // news выше, это тот же паттерн: без строки в notification_prefs.prefs поведение не меняется
+  // (undefined !== false → включено), запись здесь просто делает систему честной на будущее,
+  // когда тумблер появится.
+  audit: 'audit',
+  audit_close_reminder: 'audit_close_reminder',
+  violation: 'violation',
 }
 
 export interface Audience { staff_ids?: string[]; owner?: boolean; managers?: boolean; all?: boolean }

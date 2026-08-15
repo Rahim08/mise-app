@@ -5,8 +5,15 @@
 // single `menu_settings` row when no `menus` row exists yet (pre-migration / old data).
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
+  // Публичный анонимный эндпоинт с несколькими Supabase-запросами на service-role ключе
+  // (включая скан menu_events до 3000 строк) — лимит нужен так же, как у соседних
+  // event/order/import (аудит-находка E5: этот единственный был без лимита).
+  const rlKey = rateLimitKey(req, 'menu-get')
+  if (!await checkRateLimit(rlKey, 60, 60_000)) return NextResponse.json({ error: 'Rate limit' }, { status: 429 })
+
   const { slug } = await params
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 

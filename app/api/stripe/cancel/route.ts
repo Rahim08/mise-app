@@ -26,6 +26,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No subscription' }, { status: 400 })
     }
 
+    // Guard against racing a webhook-driven cancel (e.g. customer.subscription.deleted)
+    // or a double-tapped "Cancel" — Stripe throws on an already-canceled subscription,
+    // which without this check surfaced as a generic 500 instead of a clean no-op.
+    const sub = await stripe.subscriptions.retrieve(data.subscription_id)
+    if (sub.status === 'canceled') {
+      await supabase.from('restaurants').update({ subscription_status: 'canceled' }).eq('id', restaurantId)
+      return NextResponse.json({ success: true, already_canceled: true })
+    }
+
     await stripe.subscriptions.update(data.subscription_id, { cancel_at_period_end: true })
     // Ошибку записи проверяем явно: иначе в Stripe отмена оформлена, а в БД статус остаётся
     // active — владелец видит «подписка активна» и повторно жмёт «Отменить».

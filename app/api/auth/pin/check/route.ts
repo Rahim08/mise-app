@@ -28,28 +28,44 @@ const supabase = createClient(
 
 const MAX_ATTEMPTS = 5
 const BLOCK_MS = 15 * 60 * 1000
+// Global per-restaurant ceiling, independent of device/IP — stops a distributed/
+// proxy-rotating attacker from grinding the 10000-combo 4-digit PIN keyspace across
+// many devices/IPs (аудит 2026-08-15, block-G #1) while the per-device limit below
+// keeps a couple of staff mistyping their PIN from locking out the whole restaurant
+// (аудит 2026-08-15, block-F #2).
+const RESTAURANT_MAX_ATTEMPTS = 50
+const RESTAURANT_BLOCK_MS = 15 * 60 * 1000
 
 // Rate-limit живёт в БД (таблица pin_attempts): на Vercel инстансы функций не делят
 // память, поэтому in-memory Map не ограничивал перебор между инстансами.
-function rateLimitKey(req: NextRequest, restaurantId: string): string {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0] ?? req.headers.get('x-real-ip') ?? 'unknown'
-  return `${ip}:${restaurantId}`
+//
+// G8 (аудит 2026-08-15): x-vercel-forwarded-for первым — тот же вывод, что в lib/rateLimit.ts
+// (см. комментарий там) — Vercel сам проставляет x-forwarded-for и не пробрасывает внешний IP
+// (docs.vercel.com/docs/headers/request-headers, кроме Enterprise Trusted Proxy, здесь не
+// применимо), но x-vercel-forwarded-for устойчивее к промежуточному прокси НАД Vercel.
+function deviceRateLimitKey(req: NextRequest, restaurantId: string, deviceId: string): string {
+  const ip = req.headers.get('x-vercel-forwarded-for')?.split(',')[0] ?? req.headers.get('x-forwarded-for')?.split(',')[0] ?? req.headers.get('x-real-ip') ?? 'unknown'
+  return `${ip}:${deviceId}:${restaurantId}`
 }
 
-async function getAttempts(key: string): Promise<{ count: number; blockedUntil: number }> {
+function restaurantRateLimitKey(restaurantId: string): string {
+  return `rid:${restaurantId}`
+}
+
+async function getAttempts(key: string, blockMs: number): Promise<{ count: number; blockedUntil: number }> {
   const { data } = await supabase.from('pin_attempts').select('count, blocked_until, updated_at').eq('key', key).maybeSingle()
   if (!data) return { count: 0, blockedUntil: 0 }
-  // Старые записи (без активной блокировки) сгорают через BLOCK_MS — счёт с нуля.
-  if (Date.now() - new Date(data.updated_at).getTime() > BLOCK_MS && (!data.blocked_until || new Date(data.blocked_until).getTime() < Date.now())) {
+  // Старые записи (без активной блокировки) сгорают через blockMs — счёт с нуля.
+  if (Date.now() - new Date(data.updated_at).getTime() > blockMs && (!data.blocked_until || new Date(data.blocked_until).getTime() < Date.now())) {
     return { count: 0, blockedUntil: 0 }
   }
   return { count: data.count || 0, blockedUntil: data.blocked_until ? new Date(data.blocked_until).getTime() : 0 }
 }
 
-async function recordFailure(key: string) {
+async function recordFailure(key: string, maxAttempts: number, blockMs: number) {
   // Атомарный UPSERT-инкремент в SQL (rate-limit-atomic-2026-07.sql) — закрывает
   // TOCTOU-гонку read-then-write, где конкурентные запросы могли обойти лимит попыток.
-  await supabase.rpc('pin_record_failure', { p_key: key, p_max_attempts: MAX_ATTEMPTS, p_block_ms: BLOCK_MS })
+  await supabase.rpc('pin_record_failure', { p_key: key, p_max_attempts: maxAttempts, p_block_ms: blockMs })
 }
 
 async function clearAttempts(key: string) {
@@ -60,10 +76,15 @@ export async function POST(req: NextRequest) {
   const { restaurantId, pin, deviceId } = await req.json()
   if (!restaurantId || !pin || !deviceId) return NextResponse.json({ error: 'Missing params (restaurantId, pin, deviceId required)' }, { status: 400 })
 
-  const key = rateLimitKey(req, restaurantId)
-  const entry = await getAttempts(key)
-  if (Date.now() < entry.blockedUntil) {
-    const retryAfter = Math.ceil((entry.blockedUntil - Date.now()) / 1000)
+  const deviceKey = deviceRateLimitKey(req, restaurantId, deviceId)
+  const ridKey = restaurantRateLimitKey(restaurantId)
+  const [deviceEntry, ridEntry] = await Promise.all([
+    getAttempts(deviceKey, BLOCK_MS),
+    getAttempts(ridKey, RESTAURANT_BLOCK_MS),
+  ])
+  const blockedUntil = Math.max(deviceEntry.blockedUntil, ridEntry.blockedUntil)
+  if (Date.now() < blockedUntil) {
+    const retryAfter = Math.ceil((blockedUntil - Date.now()) / 1000)
     return NextResponse.json({ error: 'Too many attempts' }, { status: 429, headers: { 'Retry-After': String(retryAfter) } })
   }
 
@@ -77,7 +98,7 @@ export async function POST(req: NextRequest) {
   if (restaurant?.owner_pin) {
     const ownerMatch = await bcrypt.compare(pin, restaurant.owner_pin)
     if (ownerMatch) {
-      await clearAttempts(key)
+      await Promise.all([clearAttempts(deviceKey), clearAttempts(ridKey)])
       const apps = ['manager', 'analytics', 'stash']
       const token = issueStaffToken({ rid: restaurantId, sid: 'owner', owner: true, apps })
       return withStaffCookie({ match: true, is_owner: true, apps }, token)
@@ -95,7 +116,7 @@ export async function POST(req: NextRequest) {
     if (!staff.pin_hash) continue
     const match = await bcrypt.compare(pin, staff.pin_hash)
     if (match) {
-      await clearAttempts(key)
+      await Promise.all([clearAttempts(deviceKey), clearAttempts(ridKey)])
       // Enforce device binding: if staff already has a device_id and this request
       // comes from a different device, block login.
       if (staff.device_id && deviceId !== staff.device_id) {
@@ -119,6 +140,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  await recordFailure(key)
+  await Promise.all([
+    recordFailure(deviceKey, MAX_ATTEMPTS, BLOCK_MS),
+    recordFailure(ridKey, RESTAURANT_MAX_ATTEMPTS, RESTAURANT_BLOCK_MS),
+  ])
   return NextResponse.json({ match: false })
 }

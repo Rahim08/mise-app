@@ -6,6 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
+import { itemAvailableNow } from '@/lib/menu'
+import { createHash } from 'crypto'
 
 type Admin = any
 
@@ -91,6 +93,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Orders not available' }, { status: 403 })
   }
 
+  // Дедупликация: гость дважды тапнул «Заказать» на медленной сети, или клиент
+  // ретраит после таймаута — без client-generated id ловим это по хешу содержимого
+  // заказа в узком окне; не идеально против всех паттернов ретраев, но закрывает
+  // реалистичный кейс двойного тапа (аудит-находка E4) без миграции схемы.
+  const dedupeSeed = isCall
+    ? `call:${callKind}:${cleanTable(table_number) || ''}`
+    : `items:${(Array.isArray(items) ? items : []).map((r: any) => `${r?.id}:${Math.floor(Number(r?.qty)) || 0}:${JSON.stringify(r?.opts || [])}`).sort().join(',')}:${cleanTable(table_number) || ''}:${Number(tip) || 0}`
+  const dedupeBucket = Math.floor(Date.now() / 8000)
+  const dedupeKey = 'menu-order-dedupe:' + createHash('sha1').update(`${restaurantId}:${dedupeSeed}:${dedupeBucket}`).digest('hex')
+  if (!await checkRateLimit(dedupeKey, 1, 8_000)) {
+    return NextResponse.json({ error: 'Duplicate order — already submitted' }, { status: 429 })
+  }
+
   // ── Пересчёт заказа НА СЕРВЕРЕ ───────────────────────────────────────────────
   // Гость аноним, поэтому его price/total/tip доверять нельзя: подделанный запрос
   // ({name:"Dom Pérignon", price:0} или tip:-500) уходил персоналу как настоящий заказ.
@@ -106,7 +121,7 @@ export async function POST(req: NextRequest) {
     if (ids.length === 0) return NextResponse.json({ error: 'Bad request' }, { status: 400 })
 
     const q = admin.from('menu_items')
-      .select('id, name, price, modifiers, is_visible, is_available, stock_left').in('id', ids)
+      .select('id, name, price, modifiers, is_visible, is_available, stock_left, schedule').in('id', ids)
     // Фильтр тот же, что в /api/menu/[slug]: позиция обязана принадлежать этому меню
     // (или ресторану — для легаси-меню без menus-строки).
     const { data: dbItems, error: itemsErr } = menuId ? await q.eq('menu_id', menuId) : await q.eq('restaurant_id', restaurantId)
@@ -118,9 +133,12 @@ export async function POST(req: NextRequest) {
     const merged = new Map<string, { db: any; qty: number; opts: string[]; unit: number }>()
     for (const r of rows) {
       const dbItem = byId.get(String(r?.id || ''))
-      // Позиция не из этого меню / скрыта / недоступна — отклоняем заказ целиком, чтобы
-      // гость не получил молча урезанный счёт.
-      if (!dbItem || !dbItem.is_visible || !dbItem.is_available) {
+      // Позиция не из этого меню / скрыта / недоступна / вне расписания (dayparting) —
+      // отклоняем заказ целиком, чтобы гость не получил молча урезанный счёт. Расписание
+      // проверялось только на клиенте (аудит-находка E1) — прямой POST мог обойти его.
+      // `new Date()` тут — то же серверное "сейчас" по локальным часам, что клиент уже
+      // использует в app/menu/[slug]/page.tsx (itemAvailableNow не завязан на TZ ресторана).
+      if (!dbItem || !dbItem.is_visible || !dbItem.is_available || !itemAvailableNow(dbItem.schedule, new Date())) {
         return NextResponse.json({ error: 'Item unavailable' }, { status: 400 })
       }
       const qty = Math.floor(Number(r?.qty))
@@ -156,9 +174,11 @@ export async function POST(req: NextRequest) {
     }
     subtotal = money(subtotal)
 
-    // Чаевые: только неотрицательные и не больше суммы заказа.
+    // Чаевые: только неотрицательные. Гость может тайпнуть больше суммы счёта (обычное
+    // дело на маленьких чеках) — капим только разумным потолком против опечаток, не
+    // суммой заказа (аудит-находка E10: капа по subtotal обрезала легитимные чаевые).
     const tipNum = Number(tip)
-    safeTip = Number.isFinite(tipNum) && tipNum > 0 ? money(Math.min(tipNum, subtotal)) : 0
+    safeTip = Number.isFinite(tipNum) && tipNum > 0 ? money(Math.min(tipNum, subtotal * 5 + 500)) : 0
 
     // Остаток списываем ДО записи заказа — иначе стоп-лист можно обойти параллельными
     // запросами. Если списать не удалось, возвращаем уже списанное обратно.

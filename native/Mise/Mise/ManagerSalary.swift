@@ -30,16 +30,20 @@ final class ManagerSalaryModel {
 
     var isCurrentMonth: Bool { Calendar.current.isDate(viewMonth, equalTo: Date(), toGranularity: .month) }
     var fund: Double { rows.reduce(0) { $0 + $1.total } }
-    // Буфер до реального дня выплаты (salary_payout_day, ЗП-долг 2026-07-28): ЗП за месяц
-    // выдаётся 10-15 числа СЛЕДУЮЩЕГО месяца, поэтому 100% начисления должно достигаться не
-    // в конце текущего месяца, а на payout_day следующего.
+    // C3 (аудит 2026-08-15): кэш-нал прошлого месяца для payout-day-цикла (computeAccruedToday),
+    // пока не наступил payout_day текущего — паритет с Analytics.salToday. Заполняется в load().
+    var prevCashTotal: Double = 0
+    // Единая формула с Analytics (computeAccruedToday, AnalyticsView.swift) — раньше здесь была
+    // своя линейная рампа над daysInMonth+payoutDay, применённая к валовому fund; расходилась с
+    // Analytics до ~17пп на одну и ту же ЗП. Теперь база — totalCash (нал к выплате, за вычетом
+    // аванса/карты), как в Analytics, а не fund (включающий уже отложенное на карту/аванс).
     var accruedToday: Double {
         guard isCurrentMonth else { return fund }
         let cal = Calendar.current
-        let day = cal.component(.day, from: Date())
         let daysInMonth = cal.range(of: .day, in: .month, for: viewMonth)?.count ?? 30
-        let denom = payoutDay.map { daysInMonth + $0 } ?? daysInMonth
-        return fund * Double(min(day, denom)) / Double(denom)
+        let prevDaysInMonth = cal.date(byAdding: .month, value: -1, to: Date()).flatMap { cal.range(of: .day, in: .month, for: $0)?.count } ?? 30
+        let totalCash = rows.reduce(0) { $0 + $1.cash }
+        return computeAccruedToday(isCurrentMonth: isCurrentMonth, totalCash: totalCash, daysInMonth: daysInMonth, payoutDay: payoutDay, prevTotalCash: prevCashTotal, prevDaysInMonth: prevDaysInMonth)
     }
 
     private let dfKey: DateFormatter = {
@@ -80,10 +84,14 @@ final class ManagerSalaryModel {
             let advance = advForEmp.reduce(0) { $0 + ($1.amount ?? 0) }
             let paysForEmp = payments.filter { $0.employee_id == e.id }
             let paid = paysForEmp.reduce(0) { $0 + ($1.amount ?? 0) }
+            // A2 (аудит 2026-08-15): remaining должен уменьшаться только оплатами method="cash" —
+            // `card` (monthly_card_amounts) уже вычтен из `cash` бюджетно; вычитать ещё и
+            // salary_payments с method="card" из remaining значит списать ту же сумму дважды.
+            let paidCash = paysForEmp.filter { ($0.method ?? "cash") == "cash" }.reduce(0) { $0 + ($1.amount ?? 0) }
             let lastPaidAt = paysForEmp.compactMap { $0.paid_at }.max()
             let total = max(0, (e.salary ?? 0) - deduct)
             let cash = max(0, total - advance - card)
-            let remaining = max(0, cash - paid)
+            let remaining = max(0, cash - paidCash)
             return ManagerModel.SalRow(id: e.id, name: e.name, salary: e.salary ?? 0, absences: absN, absenceList: absenceList, deduct: deduct, card: card, advance: advance, advanceList: advForEmp, total: total, cash: cash, paid: paid, remaining: remaining, lastPaidAt: lastPaidAt)
         }
     }
@@ -93,6 +101,12 @@ final class ManagerSalaryModel {
             payoutDay = (try? await DB.from("restaurant_settings").select("salary_payout_day").limit(1).list(PayoutDayRow.self))?.first?.salary_payout_day
         }
         rows = await computeSalary(monthOf: viewMonth)
+        // C3 (аудит 2026-08-15): нужен только пока не наступил payout_day текущего месяца —
+        // но считаем всегда при isCurrentMonth, дёшево (та же computeSalary, что и loadDebt).
+        if isCurrentMonth, let prevMonthDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) {
+            let prevRows = await computeSalary(monthOf: prevMonthDate)
+            prevCashTotal = prevRows.reduce(0) { $0 + $1.cash }
+        }
         loaded = true
     }
 
@@ -107,6 +121,15 @@ final class ManagerSalaryModel {
             .eq("shift_id", shiftId).limit(1).list(Inkassation.self).first
     }
 
+    // A3 (аудит 2026-08-15): addAdvance/deleteAdvance/markSalaryPaid читали inkassations и
+    // писали обратно без защиты от гонки — persistShift для этой же таблицы уже был захардён
+    // (веб-паритет A2, аудит 2026-08-09). Compare-and-swap на поле, которое эта операция
+    // меняет: если строка успела измениться между чтением и записью, .single() на 0-строчном
+    // совпадении возвращает nil — сигнал перечитать и повторить один раз.
+    private func casUpdateInk(shiftId: String, casField: String, casValue: Double, values: [String: Any]) async -> Bool {
+        (try? await DB.from("inkassations").update(values).eq("shift_id", shiftId).eq(casField, casValue).single(Inkassation.self)) != nil
+    }
+
     func addAdvance(empId: String, amount: Double, date: String) async {
         guard let row = rows.first(where: { $0.id == empId }) else { return }
         // Аванс не может увести сотрудника в минус по ЗП (юзер-фидбок 2026-08-14) — row.remaining
@@ -116,23 +139,39 @@ final class ManagerSalaryModel {
             flash(t("an.advanceExceedsRemaining", ["avail": Money.s(row.remaining)])); return
         }
         let empName = row.name
-        guard (try? await DB.from("salary_advances").insert([
+        guard let advRow = try? await DB.from("salary_advances").insert([
             "restaurant_id": rid, "employee_id": empId,
             "amount": amount, "date": date, "note": empName + " аванс",
-        ] as [String: Any]).single(SalaryAdvance.self)) != nil else { flash(t("bk.saveFailed")); return }
+        ] as [String: Any]).single(SalaryAdvance.self) else { flash(t("bk.saveFailed")); return }
+        // A4 (аудит 2026-08-15): тег с id аванса вместо голого «Имя аванс» — иначе deleteAdvance
+        // ниже стирал бы фрагмент reason ЛЮБОГО аванса этого сотрудника за день, а не только удаляемый.
+        let advTag = empName + " аванс·" + String(advRow.id.prefix(8))
 
         if let shift = await findShift(forDate: date) {
-            let ink = await findInkassation(forShiftId: shift.id)
-            let baseAmount = ink?.amount ?? (shift.inkassation ?? 0)
-            let newExpense = (ink?.expense ?? 0) + amount
-            let reasonParts = [ink?.reason?.isEmpty == false ? ink?.reason : nil, empName + " аванс"].compactMap { $0 }
-            let newReason = reasonParts.joined(separator: ", ")
-            let newTotal = baseAmount - newExpense - (ink?.salary ?? 0)
+            var ink = await findInkassation(forShiftId: shift.id)
+            func applyAdvance(_ base: Inkassation?) -> (baseAmount: Double, newExpense: Double, newReason: String, newTotal: Double) {
+                let baseAmount = base?.amount ?? (shift.inkassation ?? 0)
+                let newExpense = (base?.expense ?? 0) + amount
+                let reasonParts = [base?.reason?.isEmpty == false ? base?.reason : nil, advTag].compactMap { $0 }
+                let newReason = reasonParts.joined(separator: ", ")
+                let newTotal = baseAmount - newExpense - (base?.salary ?? 0)
+                return (baseAmount, newExpense, newReason, newTotal)
+            }
             if ink != nil {
-                try? await DB.from("inkassations").update([
-                    "expense": newExpense, "reason": newReason, "total": newTotal,
-                ] as [String: Any]).eq("shift_id", shift.id).run()
+                var (_, newExpense, newReason, newTotal) = applyAdvance(ink)
+                var ok = await casUpdateInk(shiftId: shift.id, casField: "expense", casValue: ink?.expense ?? 0,
+                    values: ["expense": newExpense, "reason": newReason, "total": newTotal])
+                if !ok {
+                    ink = await findInkassation(forShiftId: shift.id)
+                    if ink != nil {
+                        (_, newExpense, newReason, newTotal) = applyAdvance(ink)
+                        ok = await casUpdateInk(shiftId: shift.id, casField: "expense", casValue: ink?.expense ?? 0,
+                            values: ["expense": newExpense, "reason": newReason, "total": newTotal])
+                    }
+                }
+                if !ok { flash(t("bk.saveFailed")) }
             } else {
+                let (baseAmount, newExpense, newReason, newTotal) = applyAdvance(ink)
                 try? await DB.from("inkassations").insert([
                     "shift_id": shift.id, "restaurant_id": rid, "date": shift.date,
                     "amount": baseAmount, "expense": newExpense, "reason": newReason,
@@ -148,14 +187,33 @@ final class ManagerSalaryModel {
     func deleteAdvance(_ a: SalaryAdvance) async {
         do { try await DB.from("salary_advances").delete().eq("id", a.id).run() }
         catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
-        if let date = a.date, let shift = await findShift(forDate: date), let ink = await findInkassation(forShiftId: shift.id) {
+        if let date = a.date, let shift = await findShift(forDate: date) {
+            var ink = await findInkassation(forShiftId: shift.id)
             let empName = rows.first { $0.id == a.employee_id }?.name ?? ""
-            let newExpense = max(0, (ink.expense ?? 0) - (a.amount ?? 0))
-            let newReason = (ink.reason ?? "").components(separatedBy: ", ").filter { !$0.hasPrefix(empName + " аванс") }.joined(separator: ", ")
-            let newTotal = (ink.amount ?? (shift.inkassation ?? 0)) - newExpense - (ink.salary ?? 0)
-            try? await DB.from("inkassations").update([
-                "expense": newExpense, "reason": newReason, "total": newTotal,
-            ] as [String: Any]).eq("shift_id", shift.id).run()
+            // A4 (аудит 2026-08-15): точный тег по id (см. addAdvance) — с фолбэком на старый
+            // hasPrefix-префикс для авансов, созданных до этого фикса (без тега в reason).
+            let advTag = empName + " аванс·" + String(a.id.prefix(8))
+            func applyRemoval(_ base: Inkassation) -> (newExpense: Double, newReason: String, newTotal: Double) {
+                let newExpense = max(0, (base.expense ?? 0) - (a.amount ?? 0))
+                let parts = (base.reason ?? "").components(separatedBy: ", ")
+                let newReason = (parts.contains(advTag) ? parts.filter { $0 != advTag } : parts.filter { !$0.hasPrefix(empName + " аванс") }).joined(separator: ", ")
+                let newTotal = (base.amount ?? (shift.inkassation ?? 0)) - newExpense - (base.salary ?? 0)
+                return (newExpense, newReason, newTotal)
+            }
+            if let cur = ink {
+                var (newExpense, newReason, newTotal) = applyRemoval(cur)
+                var ok = await casUpdateInk(shiftId: shift.id, casField: "expense", casValue: cur.expense ?? 0,
+                    values: ["expense": newExpense, "reason": newReason, "total": newTotal])
+                if !ok {
+                    ink = await findInkassation(forShiftId: shift.id)
+                    if let cur2 = ink {
+                        (newExpense, newReason, newTotal) = applyRemoval(cur2)
+                        ok = await casUpdateInk(shiftId: shift.id, casField: "expense", casValue: cur2.expense ?? 0,
+                            values: ["expense": newExpense, "reason": newReason, "total": newTotal])
+                    }
+                }
+                if !ok { flash(t("bk.saveFailed")) }
+            }
         }
         await load()
     }
@@ -258,25 +316,61 @@ final class ManagerSalaryModel {
                 flash(t("pe.insufficientInkassationPool", ["avail": Money.s(max(0, available))]))
                 return false
             }
-            let noteEntry = "\(employeeName): \(Money.s(amount))"
-            let mergedNote = [current?.salary_note, noteEntry].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "; ")
-            let newSalary = (current?.salary ?? 0) + amount
-            // C6 (юзер-фидбок 2026-08-15): total/inkNet раньше НЕ пересчитывался здесь — писались
-            // только salary/salary_note, total оставался от последнего обычного закрытия смены
-            // (без учёта зарплаты), из-за чего «остаток» в Кассе/Инкассации молча расходился с
-            // реальностью после каждой выплаты ЗП.
-            let newTotal = (current?.amount ?? 0) - (current?.expense ?? 0) - newSalary
-            let values: [String: Any] = [
-                "restaurant_id": rid, "date": dateStr,
-                "salary": newSalary, "salary_note": mergedNote, "total": newTotal,
-            ]
+            // A3 (аудит 2026-08-15): снэпшот current.salary/expense мог устареть к моменту
+            // записи (аванс/другая выплата успели пройти между чтением выше и update ниже) —
+            // те же риски, что persistShift уже закрыл для этой таблицы (веб-паритет A2,
+            // аудит 2026-08-09). compare-and-swap на salary, перечитываем и повторяем один раз.
+            func applyPayment(_ base: (amount: Double?, expense: Double?, salary: Double?, salary_note: String?)) -> [String: Any] {
+                let noteEntry = "\(employeeName): \(Money.s(amount))"
+                let mergedNote = [base.salary_note, noteEntry].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "; ")
+                let newSalary = (base.salary ?? 0) + amount
+                // C6 (юзер-фидбок 2026-08-15): total/inkNet раньше НЕ пересчитывался здесь — писались
+                // только salary/salary_note, total оставался от последнего обычного закрытия смены
+                // (без учёта зарплаты), из-за чего «остаток» в Кассе/Инкассации молча расходился с
+                // реальностью после каждой выплаты ЗП.
+                let newTotal = (base.amount ?? 0) - (base.expense ?? 0) - newSalary
+                return ["restaurant_id": rid, "date": dateStr, "salary": newSalary, "salary_note": mergedNote, "total": newTotal]
+            }
+            // C2 (аудит 2026-08-15): раньше inkassations писалась первой, salary_payments —
+            // второй. Если второй insert падал после успешного первого — касса уже списана,
+            // но «оплачено» нигде не отмечено, менеджер платил второй раз реальными деньгами
+            // за уже списанный долг. Теперь salary_payments — источник истины «оплачено» —
+            // пишется первым; если следующая запись в inkassations падает, компенсируем
+            // откатом (удаляем только что вставленную salary_payments), чтобы не остаться в
+            // состоянии «оплачено, но касса не списана» — только оба или ничего.
+            let period = String(key(viewMonth).prefix(7)) + "-01"
+            let paidAt = ISO8601DateFormatter().string(from: date)
+            let noteVal: Any = note.isEmpty ? NSNull() : note
+            struct PayRow: Codable, Sendable { let id: String }
+            let payRow: PayRow?
             do {
-                if let id = current?.id {
-                    try await DB.from("inkassations").update(values).eq("id", id).run()
-                } else {
-                    try await DB.from("inkassations").insert(values.merging(["shift_id": shiftId]) { a, _ in a }).run()
-                }
+                payRow = try await DB.from("salary_payments").insert([
+                    "employee_id": employeeId, "period": period, "amount": amount, "method": method,
+                    "paid_at": paidAt, "note": noteVal,
+                ]).single(PayRow.self)
             } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
+
+            var ok: Bool
+            if let cur = current {
+                var values = applyPayment((cur.amount, cur.expense, cur.salary, cur.salary_note))
+                ok = await casUpdateInk(shiftId: shiftId, casField: "salary", casValue: cur.salary ?? 0, values: values)
+                if !ok, let fresh = await findInkassation(forShiftId: shiftId) {
+                    values = applyPayment((fresh.amount, fresh.expense, fresh.salary, fresh.salary_note))
+                    ok = await casUpdateInk(shiftId: shiftId, casField: "salary", casValue: fresh.salary ?? 0, values: values)
+                }
+            } else {
+                let values = applyPayment((nil, nil, nil, nil))
+                do { try await DB.from("inkassations").insert(values.merging(["shift_id": shiftId]) { a, _ in a }).run(); ok = true }
+                catch { ok = false }
+            }
+            guard ok else {
+                if let payId = payRow?.id { try? await DB.from("salary_payments").delete().eq("id", payId).run() }
+                flash(t("saveFailed", ["err": "race"])); return false
+            }
+            flash(t("pe.paymentSaved"))
+            await load()
+            await loadDebt()
+            return true
         }
 
         let period = String(key(viewMonth).prefix(7)) + "-01"
