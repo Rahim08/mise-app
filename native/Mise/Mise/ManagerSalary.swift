@@ -184,11 +184,15 @@ final class ManagerSalaryModel {
         await load()
     }
 
+    // A5 (аудит 2026-08-16): раньше salary_advances удалялся ПЕРВЫМ безусловно, а компенсация
+    // inkassations — best-effort в один retry; если CAS не проходил (гонка с автосейвом смены —
+    // shift остаётся open и persistShift пишет в ту же строку), аванс исчезал из salary_advances,
+    // а списанные деньги в кассе (inkassations.expense) оставались — реальный случай (Виталий,
+    // SO, 2026-08-10: аванс удалён, expense/total в inkassations не откатились). Теперь:
+    // компенсируем СНАЧАЛА, до 5 попыток; salary_advances удаляем только после подтверждённой
+    // компенсации — деньги не теряются даже под затяжной гонкой.
     func deleteAdvance(_ a: SalaryAdvance) async {
-        do { try await DB.from("salary_advances").delete().eq("id", a.id).run() }
-        catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
         if let date = a.date, let shift = await findShift(forDate: date) {
-            var ink = await findInkassation(forShiftId: shift.id)
             let empName = rows.first { $0.id == a.employee_id }?.name ?? ""
             // A4 (аудит 2026-08-15): точный тег по id (см. addAdvance) — с фолбэком на старый
             // hasPrefix-префикс для авансов, созданных до этого фикса (без тега в reason).
@@ -200,21 +204,23 @@ final class ManagerSalaryModel {
                 let newTotal = (base.amount ?? (shift.inkassation ?? 0)) - newExpense - (base.salary ?? 0)
                 return (newExpense, newReason, newTotal)
             }
-            if let cur = ink {
-                var (newExpense, newReason, newTotal) = applyRemoval(cur)
-                var ok = await casUpdateInk(shiftId: shift.id, casField: "expense", casValue: cur.expense ?? 0,
-                    values: ["expense": newExpense, "reason": newReason, "total": newTotal])
-                if !ok {
-                    ink = await findInkassation(forShiftId: shift.id)
-                    if let cur2 = ink {
-                        (newExpense, newReason, newTotal) = applyRemoval(cur2)
-                        ok = await casUpdateInk(shiftId: shift.id, casField: "expense", casValue: cur2.expense ?? 0,
-                            values: ["expense": newExpense, "reason": newReason, "total": newTotal])
+            if var cur = await findInkassation(forShiftId: shift.id) {
+                var ok = false
+                for i in 0..<5 {
+                    if i > 0 {
+                        guard let fresh = await findInkassation(forShiftId: shift.id) else { break }
+                        cur = fresh
                     }
+                    let (newExpense, newReason, newTotal) = applyRemoval(cur)
+                    ok = await casUpdateInk(shiftId: shift.id, casField: "expense", casValue: cur.expense ?? 0,
+                        values: ["expense": newExpense, "reason": newReason, "total": newTotal])
+                    if ok { break }
                 }
-                if !ok { flash(t("bk.saveFailed")) }
+                if !ok { flash(t("bk.saveFailed")); return }
             }
         }
+        do { try await DB.from("salary_advances").delete().eq("id", a.id).run() }
+        catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
         await load()
     }
 

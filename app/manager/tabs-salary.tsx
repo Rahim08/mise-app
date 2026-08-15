@@ -222,8 +222,13 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   }
 
   const deleteAdvance = async (a: any, empName: string) => {
-    const { error } = await db.from('salary_advances').delete().eq('id', a.id)
-    if (error) { showToast(tr('pe.saveFailed', { err: error.message })); return }
+    // A5 (аудит 2026-08-16): раньше salary_advances удалялся ПЕРВЫМ безусловно, а компенсация
+    // inkassations — best-effort в один retry; если CAS не проходил (гонка с автосейвом смены —
+    // shift остаётся open и persistShift пишет в ту же строку), аванс исчезал из salary_advances,
+    // а списанные деньги в кассе (inkassations.expense) оставались — реальный случай (Виталий,
+    // SO, 2026-08-10: 200 удалён из salary_advances, expense/total в inkassations не откатились).
+    // Теперь: компенсируем СНАЧАЛА, до 5 попыток; salary_advances удаляем только после
+    // подтверждённой компенсации — деньги не теряются даже под затяжной гонкой.
     const shift = await findShiftForDate(a.date)
     if (shift) {
       let ink = await findInkassation(shift.id)
@@ -238,18 +243,18 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
         return { newExpense, newReason, newTotal }
       }
       if (ink) {
-        let { newExpense, newReason, newTotal } = applyRemoval(ink)
-        let ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
-        if (!ok) {
-          ink = await findInkassation(shift.id)
-          if (ink) {
-            ({ newExpense, newReason, newTotal } = applyRemoval(ink))
-            ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
-          }
+        let ok = false
+        for (let i = 0; i < 5 && !ok; i++) {
+          if (i > 0) ink = await findInkassation(shift.id)
+          if (!ink) break
+          const { newExpense, newReason, newTotal } = applyRemoval(ink)
+          ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
         }
-        if (!ok) showToast(tr('pe.saveFailed', { err: 'race' }))
+        if (!ok) { showToast(tr('pe.saveFailed', { err: 'race' })); return }
       }
     }
+    const { error } = await db.from('salary_advances').delete().eq('id', a.id)
+    if (error) { showToast(tr('pe.saveFailed', { err: error.message })); return }
     await load(); await loadDebt()
   }
 
