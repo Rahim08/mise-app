@@ -64,6 +64,17 @@ enum Money {
     }
 }
 
+/// Инкассация reason хранит внутренние теги вида «Имя аванс·1fb7c57c» — id-суффикс
+/// нужен только ManagerSalaryModel.deleteAdvance, чтобы не стереть чужой аванс того же
+/// имени за тот же день (см. ManagerSalary.swift A4). Юзеру показываем без него.
+func displayReason(_ raw: String) -> String {
+    raw.components(separatedBy: ", ").map { part -> String in
+        guard let range = part.range(of: "·", options: .backwards) else { return part }
+        let suffix = part[range.upperBound...]
+        return suffix.count >= 6 && suffix.allSatisfy({ $0.isHexDigit }) ? String(part[..<range.lowerBound]) : part
+    }.joined(separator: ", ")
+}
+
 extension Color {
     init(hex: UInt, alpha: Double = 1) {
         self.init(

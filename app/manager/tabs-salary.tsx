@@ -14,6 +14,10 @@ import { Sheet } from '@/components/people/helpers'
 
 const eur = (n: number) => `€${Math.round(n).toLocaleString('de-DE')}`
 const absDate = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+// Тег с суммой (юзер-фидбок 2026-08-15): без неё в заметке инкассации было просто «Имя аванс»
+// без числа. id-суффикс не отображается юзеру (см. displayReason, lib/format.ts) — нужен
+// только чтобы deleteAdvance не стирал чужой аванс того же имени за тот же день (A4).
+const advanceTag = (name: string, amount: number, id: string) => `${name} аванс ${eur(amount)}·${(id || '').slice(0, 8)}`
 
 export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: string; accent: string; t: any }) {
   const { t: tr } = useI18n()
@@ -45,7 +49,9 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       db.from('monthly_card_amounts').select('employee_id, card_amount').eq('month', targetYm),
       db.from('attendance_records').select('staff_id, check_in_at, check_out_at, date').gte('date', monthStart).lte('date', monthEnd),
       db.from('staff_directory').select('id, name').eq('is_active', true),
-      db.from('salary_advances').select('*').gte('date', monthStart).lte('date', monthEnd),
+      // Фильтр по period (месяц ЗП), не по date (день списания из кассы) — юзер-фидбок
+      // 2026-08-15: аванс, взятый в июле датой на август, должен остаться в зарплате июля.
+      db.from('salary_advances').select('*').eq('period', monthStart),
       db.from('salary_payments').select('*').eq('period', monthStart),
     ])
     const staffName: Record<string, string> = {}; (dir || []).forEach((s: any) => { staffName[s.id] = s.name })
@@ -182,19 +188,17 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     // уже = max(0, cash − paid), т.е. именно то, что ещё можно выдать до конца месяца.
     // fail-closed (паритет с iOS addAdvance, аудит 2026-08-15): если строка сотрудника почему-то
     // не найдена — блокируем целиком, а не пропускаем без проверки.
-    // A6 (юзер-фидбок 2026-08-16): дата аванса больше не зажата в текущий просматриваемый месяц
-    // (см. UI ниже) — можно взять аванс сегодня датой прошлого месяца, в счёт ещё не выплаченной
-    // ЗП за него. Лимит remaining тогда должен считаться по МЕСЯЦУ ДАТЫ аванса, а не по месяцу,
-    // который сейчас на экране — иначе разрешённая сумма сверяется не с теми цифрами.
-    const advYm = dateStr.slice(0, 7)
-    const row = advYm === ym ? rows.find(r => r.id === empId) : (await computeMonth(advYm)).find((r: any) => r.id === empId)
+    // A6-ревизия (юзер-фидбок 2026-08-15): аванс относится к зарплате МЕСЯЦА ЭКРАНА (ym, тот, на
+    // котором стоишь, когда жмёшь «добавить»), не к месяцу даты списания — dateStr это только
+    // день, когда деньги физически уходят из кассы, можно указать и вне ym.
+    const row = rows.find(r => r.id === empId)
     if (!row) { showToast(tr('pe.saveFailed', { err: 'row' })); return }
     if (amount > row.remaining) { showToast(tr('an.advanceExceedsRemaining', { avail: eur(row.remaining) })); return }
-    const { data: advRow, error: insErr } = await db.from('salary_advances').insert({ restaurant_id: restaurantId, employee_id: empId, amount, date: dateStr, note: `${empName} аванс` }).select().single()
+    const { data: advRow, error: insErr } = await db.from('salary_advances').insert({ restaurant_id: restaurantId, employee_id: empId, amount, date: dateStr, period: `${ym}-01`, note: `${empName} аванс` }).select().single()
     if (insErr) { showToast(tr('pe.saveFailed', { err: insErr.message })); return }
     // A4 (аудит 2026-08-15): тег с id аванса вместо голого «Имя аванс» — иначе deleteAdvance
     // ниже стирал бы фрагмент reason ЛЮБОГО аванса этого сотрудника за день, а не только удаляемый.
-    const advTag = `${empName} аванс·${(advRow?.id || '').slice(0, 8)}`
+    const advTag = advanceTag(empName, amount, advRow?.id || '')
     const shift = await findShiftForDate(dateStr)
     if (shift) {
       let ink = await findInkassation(shift.id)
@@ -237,7 +241,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     const shift = await findShiftForDate(a.date)
     if (shift) {
       let ink = await findInkassation(shift.id)
-      const advTag = `${empName} аванс·${(a.id || '').slice(0, 8)}`
+      const advTag = advanceTag(empName, Number(a.amount || 0), a.id || '')
       const applyRemoval = (base: any) => {
         const newExpense = Math.max(0, (base.expense || 0) - Number(a.amount || 0))
         // A4 (аудит 2026-08-15): точный тег по id (см. addAdvance) — с фолбэком на старый
@@ -473,7 +477,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
         <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 13, fontWeight: 600, opacity: 0.92 }}>
           <span>{tr('pe.staffCountShort', { n: rows.length })}</span>
           {cardTotal > 0 && <span>{tr('pe.toCard')} {eur(cardTotal)}</span>}
-          <span>{tr('pe.inCash')} {eur(fund - cardTotal)}</span>
+          <span>{tr('pe.inCash')} {eur(cashTotal)}</span>
         </div>
         {isCurrentMonth && (
           <div style={{ marginTop: 10, fontSize: 12, opacity: 0.85 }}>

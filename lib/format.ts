@@ -21,3 +21,15 @@ export function dd(s: string | null | undefined): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s ?? '')
   return m ? `${m[3]}.${m[2]}` : ''
 }
+
+/**
+ * inkassations.reason stores internal tags like "Имя аванс·1fb7c57c" — the id suffix
+ * only exists so tabs-salary.tsx deleteAdvance can target the exact advance without
+ * erasing another same-name advance from the same day. Strip it for user display.
+ */
+export function displayReason(raw: string): string {
+  return raw
+    .split(', ')
+    .map((part) => part.replace(/·[0-9a-f]{6,}$/i, ''))
+    .join(', ')
+}

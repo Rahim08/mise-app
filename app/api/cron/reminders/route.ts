@@ -328,7 +328,9 @@ async function monthSalaryRemaining(admin: any, rid: string, targetYm: string): 
     admin.from('employees').select('id, salary, deduct_per_absence').eq('restaurant_id', rid).eq('is_active', true),
     admin.from('shift_absences').select('employee_id, date, source').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd),
     admin.from('monthly_card_amounts').select('employee_id, card_amount').eq('restaurant_id', rid).eq('month', targetYm),
-    admin.from('salary_advances').select('employee_id, amount').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd),
+    // Фильтр по period (месяц ЗП), не по date (день списания из кассы) — паритет с
+    // app/manager/tabs-salary.tsx (юзер-фидбок 2026-08-15).
+    admin.from('salary_advances').select('employee_id, amount').eq('restaurant_id', rid).eq('period', monthStart),
     admin.from('salary_payments').select('employee_id, amount').eq('restaurant_id', rid).eq('period', monthStart),
   ])
   const absByEmp: Record<string, number> = {}

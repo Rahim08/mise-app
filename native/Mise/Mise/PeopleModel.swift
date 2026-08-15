@@ -286,7 +286,9 @@ final class PeopleModel {
         async let empsR = try? DB.from("employees").select("id, name, salary, deduct_per_absence").eq("is_active", true).order("name").list(Employee.self)
         async let absR = try? DB.from("shift_absences").select("employee_id, date, source").gte("date", ym + "-01").lte("date", key(monthEnd)).list(Absence.self)
         async let cardsR = try? DB.from("monthly_card_amounts").select("employee_id, card_amount").eq("month", ym).list(CardAmount.self)
-        async let advR = try? DB.from("salary_advances").select().gte("date", ym + "-01").lte("date", key(monthEnd)).list(SalaryAdvance.self)
+        // Фильтр по period (месяц ЗП), не по date (день списания из кассы) — паритет с
+        // ManagerModel.computeSalary (ManagerSalary.swift, юзер-фидбок 2026-08-15).
+        async let advR = try? DB.from("salary_advances").select().eq("period", ym + "-01").list(SalaryAdvance.self)
         async let paysR = try? DB.from("salary_payments").select().eq("period", ym + "-01").list(SalaryPayment.self)
         guard let employees = await empsR else { return [] }
         let absences = (await absR) ?? [], cardAmounts = (await cardsR) ?? []
@@ -1213,7 +1215,7 @@ final class PeopleModel {
         tasksLoaded = true
     }
     private func seedSalary() {
-        let demoAdv = SalaryAdvance(id: "adv1", employee_id: "e1", amount: 200, date: "2026-06-12", note: "Анна Кузнецова аванс")
+        let demoAdv = SalaryAdvance(id: "adv1", employee_id: "e1", amount: 200, date: "2026-06-12", note: "Анна Кузнецова аванс", period: "2026-06-01")
         salaryRows = [
             .init(id: "e1", name: "Анна Кузнецова", salary: 1200, absences: 0, absenceList: [], deduct: 0, card: 450, advance: 200, advanceList: [demoAdv], total: 1200, cash: 550),
             .init(id: "e2", name: "Игорь Петров",   salary: 1100, absences: 1, absenceList: ["2026-06-14"], deduct: 20, card: 0, advance: 0, advanceList: [], total: 1080, cash: 1080),

@@ -49,7 +49,9 @@ export function SalaryTab({ me, accent, t }: { me: any; accent: string; t: any }
       db.from('monthly_card_amounts').select('employee_id, card_amount').eq('month', targetYm),
       db.from('attendance_records').select('staff_id, check_in_at, check_out_at, date').gte('date', monthStart).lte('date', monthEnd),
       db.from('staff_directory').select('id, name').eq('is_active', true),
-      db.from('salary_advances').select('*').gte('date', monthStart).lte('date', monthEnd),
+      // Фильтр по period (месяц ЗП), не по date (день списания из кассы) — паритет с
+      // app/manager/tabs-salary.tsx (юзер-фидбок 2026-08-15).
+      db.from('salary_advances').select('*').eq('period', monthStart),
       db.from('salary_payments').select('*').eq('period', monthStart),
     ])
     const staffName: Record<string, string> = {}; (dir || []).forEach((s: any) => { staffName[s.id] = s.name })

@@ -224,7 +224,9 @@ final class AnalyticsModel {
         let prevYm = String(key(prevStart).prefix(7))
         async let prevCards = try? DB.from("monthly_card_amounts").select("id, employee_id, card_amount").eq("month", prevYm).list(CardAmount.self)
         async let prevAbs = try? DB.from("shift_absences").select().gte("date", key(prevStart)).lte("date", key(prevEnd)).list(Absence.self)
-        async let prevAdv = try? DB.from("salary_advances").select().gte("date", key(prevStart)).lte("date", key(prevEnd)).list(SalaryAdvance.self)
+        // Фильтр по period (месяц ЗП), не по date (день списания из кассы) — паритет с
+        // ManagerSalary.computeSalary (юзер-фидбок 2026-08-15).
+        async let prevAdv = try? DB.from("salary_advances").select().eq("period", prevYm + "-01").list(SalaryAdvance.self)
 
         shiftsRaw = (await sh) ?? shiftsRaw
         prevShiftsRaw = (await prev) ?? prevShiftsRaw
@@ -251,8 +253,10 @@ final class AnalyticsModel {
             if let pe = try? await DB.from("shift_expenses").select().in("shift_id", prevIds).list(ShiftExpense.self) { prevExpenses = pe }
         } else { prevExpenses = [] }
 
+        // Фильтр по period (месяц ЗП), не по date (день списания из кассы) — паритет с
+        // ManagerSalary.computeSalary (юзер-фидбок 2026-08-15).
         if let adv = try? await DB.from("salary_advances").select()
-            .gte("date", key(monthStart)).lte("date", key(monthEnd)).list(SalaryAdvance.self) { advances = adv }
+            .eq("period", ym + "-01").list(SalaryAdvance.self) { advances = adv }
         if let pays = try? await DB.from("salary_payments").select()
             .eq("period", String(key(monthStart).prefix(7)) + "-01").list(SalaryPayment.self) { payments = pays }
 
@@ -1515,12 +1519,10 @@ struct AdvanceAddSheet: View {
     @State private var date = Date()
     @Environment(\.dismiss) private var dismiss
 
-    // A6 (юзер-фидбок 2026-08-16): раньше пикер был жёстко зажат в границы просматриваемого
-    // месяца (см. историю — юзер-репорт 2026-08-04) — нельзя было взять аванс сегодня датой
-    // прошлого месяца в счёт ещё не выплаченной ЗП за него. Месяц, к которому относится аванс,
-    // определяется исключительно полем date (см. addAdvance/computeSalary) — значит и пикер
-    // должен позволять любую дату, а не только текущий просмотренный месяц. Дефолт — просто
-    // «сегодня», без зажима.
+    // Этот date — только день, когда деньги физически спишутся из кассы (инкассация того
+    // дня); можно указать вне просматриваемого месяца — взять сегодня в счёт ещё не закрытой
+    // ЗП. К зарплате КАКОГО месяца отнести сумму, решает не эта дата, а viewMonth на экране в
+    // момент нажатия «добавить» (см. addAdvance/computeSalary, period). Дефолт — «сегодня».
     init(onSave: @escaping (Double, String) -> Void) {
         self.onSave = onSave
     }
@@ -1851,7 +1853,7 @@ private struct KassaTab: View {
                                 // попап физически не может открыться в этом состоянии (аудит 2026-08-15).
                                 VStack(alignment: .leading, spacing: 8) {
                                     if let reason = ink?.reason, !reason.isEmpty {
-                                        Text(reason).font(.system(size: 13)).foregroundStyle(.primary)
+                                        Text(displayReason(reason)).font(.system(size: 13)).foregroundStyle(.primary)
                                     }
                                     if let note = ink?.salary_note, !note.isEmpty {
                                         Text(t("mg.tabSalary") + ": " + note).font(.system(size: 13)).foregroundStyle(BrandKit.manager)

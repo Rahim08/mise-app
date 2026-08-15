@@ -68,7 +68,10 @@ final class ManagerSalaryModel {
         async let empsR = try? DB.from("employees").select("id, name, salary, deduct_per_absence").eq("is_active", true).order("name").list(Employee.self)
         async let absR = try? DB.from("shift_absences").select("employee_id, date, source").gte("date", ym + "-01").lte("date", key(monthEnd)).list(Absence.self)
         async let cardsR = try? DB.from("monthly_card_amounts").select("employee_id, card_amount").eq("month", ym).list(CardAmount.self)
-        async let advR = try? DB.from("salary_advances").select().gte("date", ym + "-01").lte("date", key(monthEnd)).list(SalaryAdvance.self)
+        // Фильтр по period (месяц ЗП, к которому отнесён аванс), НЕ по date (день списания из
+        // кассы) — юзер-фидбок 2026-08-15: аванс, взятый в июле датой на август, должен
+        // остаться в зарплате июля, а не уехать в август вслед за датой списания.
+        async let advR = try? DB.from("salary_advances").select().eq("period", ym + "-01").list(SalaryAdvance.self)
         async let paysR = try? DB.from("salary_payments").select().eq("period", ym + "-01").list(SalaryPayment.self)
         guard let employees = await empsR else { return [] }
         let absences = (await absR) ?? [], cardAmounts = (await cardsR) ?? []
@@ -130,17 +133,21 @@ final class ManagerSalaryModel {
         (try? await DB.from("inkassations").update(values).eq("shift_id", shiftId).eq(casField, casValue).single(Inkassation.self)) != nil
     }
 
+    // Тег с суммой (юзер-фидбок 2026-08-15): без неё в заметке инкассации было просто «Имя
+    // аванс» без числа — непонятно сколько. id-суффикс — см. A4 (аудит 2026-08-15), не
+    // отображается юзеру (см. displayReason, Theme.swift), нужен только чтобы deleteAdvance
+    // не стирал чужой аванс того же имени за тот же день.
+    private func advanceTag(name: String, amount: Double, id: String) -> String {
+        name + " аванс " + Money.s(amount) + "·" + String(id.prefix(8))
+    }
+
     func addAdvance(empId: String, amount: Double, date: String) async {
-        // A6 (юзер-фидбок 2026-08-16): дата аванса больше не зажата в просматриваемый месяц
-        // (см. AdvanceAddSheet) — можно взять аванс сегодня датой прошлого месяца, в счёт ещё не
-        // выплаченной ЗП за него. Лимит remaining тогда должен считаться по МЕСЯЦУ ДАТЫ аванса,
-        // а не по месяцу, который сейчас на экране (viewMonth) — иначе сумма сверяется не с теми
-        // цифрами. Веб-паритет: tabs-salary.tsx addAdvance.
-        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"; df.locale = Locale(identifier: "en_US_POSIX")
-        let cal = Calendar.current
-        let sameMonth = df.date(from: date).map { cal.isDate($0, equalTo: viewMonth, toGranularity: .month) } ?? true
-        guard let row = sameMonth ? rows.first(where: { $0.id == empId })
-            : await computeSalary(monthOf: df.date(from: date) ?? viewMonth).first(where: { $0.id == empId }) else { return }
+        // A6-ревизия (юзер-фидбок 2026-08-15): аванс относится к зарплате МЕСЯЦА ЭКРАНА
+        // (viewMonth, тот, на котором стоишь, когда жмёшь «добавить»), а НЕ к месяцу даты
+        // списания. date — только день, когда деньги физически уходят из кассы; можно указать
+        // и вне viewMonth (взять сегодня в счёт ещё не закрытого месяца) — это на period не
+        // влияет. Веб-паритет: tabs-salary.tsx addAdvance.
+        guard let row = rows.first(where: { $0.id == empId }) else { return }
         // Аванс не может увести сотрудника в минус по ЗП (юзер-фидбок 2026-08-14) — row.remaining
         // уже = max(0, cash − paid), т.е. именно то, что ещё можно выдать (авансом или доплатой)
         // до конца месяца. amount не должен его превышать.
@@ -148,13 +155,12 @@ final class ManagerSalaryModel {
             flash(t("an.advanceExceedsRemaining", ["avail": Money.s(row.remaining)])); return
         }
         let empName = row.name
+        let period = String(key(viewMonth).prefix(7)) + "-01"
         guard let advRow = try? await DB.from("salary_advances").insert([
             "restaurant_id": rid, "employee_id": empId,
-            "amount": amount, "date": date, "note": empName + " аванс",
+            "amount": amount, "date": date, "period": period, "note": empName + " аванс",
         ] as [String: Any]).single(SalaryAdvance.self) else { flash(t("bk.saveFailed")); return }
-        // A4 (аудит 2026-08-15): тег с id аванса вместо голого «Имя аванс» — иначе deleteAdvance
-        // ниже стирал бы фрагмент reason ЛЮБОГО аванса этого сотрудника за день, а не только удаляемый.
-        let advTag = empName + " аванс·" + String(advRow.id.prefix(8))
+        let advTag = advanceTag(name: empName, amount: amount, id: advRow.id)
 
         if let shift = await findShift(forDate: date) {
             var ink = await findInkassation(forShiftId: shift.id)
@@ -203,9 +209,9 @@ final class ManagerSalaryModel {
     func deleteAdvance(_ a: SalaryAdvance) async {
         if let date = a.date, let shift = await findShift(forDate: date) {
             let empName = rows.first { $0.id == a.employee_id }?.name ?? ""
-            // A4 (аудит 2026-08-15): точный тег по id (см. addAdvance) — с фолбэком на старый
+            // A4 (аудит 2026-08-15): точный тег по id (см. advanceTag) — с фолбэком на старый
             // hasPrefix-префикс для авансов, созданных до этого фикса (без тега в reason).
-            let advTag = empName + " аванс·" + String(a.id.prefix(8))
+            let advTag = advanceTag(name: empName, amount: a.amount ?? 0, id: a.id)
             func applyRemoval(_ base: Inkassation) -> (newExpense: Double, newReason: String, newTotal: Double) {
                 let newExpense = max(0, (base.expense ?? 0) - (a.amount ?? 0))
                 let parts = (base.reason ?? "").components(separatedBy: ", ")
@@ -427,6 +433,13 @@ struct ManagerSalaryTab: View {
                 await model.load()
                 await model.loadDebt()
             }
+        }
+        // Аванс/оплата может прийти из другого места сессии (или юзер просто ушёл со
+        // вкладки и вернулся) — .task грузит модель только один раз за жизнь View, поэтому
+        // без onAppear-рефреша строка сотрудника молча показывала бы устаревшие данные
+        // (юзер-репорт 2026-08-15: добавленный аванс не отображался в Зарплате).
+        .onAppear {
+            if let sm { Task { await sm.load(); await sm.loadDebt() } }
         }
         .sheet(item: $payFor) { r in if let sm { ManagerMarkPaidSheet(sm: sm, row: r) } }
     }

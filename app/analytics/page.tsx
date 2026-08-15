@@ -9,7 +9,7 @@ import { AppLoading } from '@/components/AppLoading'
 import { Spinner } from '@/components/ui'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n, tCurrent } from '@/lib/i18n'
-import { fmtDate, fv, dd } from '@/lib/format'
+import { fmtDate, fv, dd, displayReason } from '@/lib/format'
 import { computeAccruedToday } from '@/lib/analytics'
 const COLORS = ['#34c759', '#ff3b30', '#007aff', '#ff9500', '#af52de', '#00c7be', '#ff6b35', '#5856d6']
 
@@ -575,11 +575,13 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       db.from('monthly_card_amounts').select('*').eq('restaurant_id', rid).eq('month', fmtDate(date).slice(0, 7)),
       db.from('shift_absences').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd),
       db.from('hookah_sales').select('*').gte('date', monthStart).lte('date', monthEnd).order('date'),
-      db.from('salary_advances').select('*').gte('date', monthStart).lte('date', monthEnd),
+      // Фильтр по period (месяц ЗП), не по date (день списания из кассы) — паритет с
+      // ManagerSalary.computeSalary / tabs-salary.tsx (юзер-фидбок 2026-08-15).
+      db.from('salary_advances').select('*').eq('period', monthStart),
       // Прошлый месяц — для «Начислено» до payout_day (см. cycleTotalCash): до дня выплаты
       // карточка ещё показывает не выплаченную ЗП за прошлый месяц, а не новый цикл.
       db.from('shift_absences').select('*').eq('restaurant_id', rid).gte('date', prevStart).lte('date', prevEnd),
-      db.from('salary_advances').select('*').gte('date', prevStart).lte('date', prevEnd),
+      db.from('salary_advances').select('*').eq('period', prevStart),
       db.from('monthly_card_amounts').select('*').eq('restaurant_id', rid).eq('month', prevStart.slice(0, 7)),
       // Паритет с PeopleModel.computeSalary (canon-расчёт 2026-07-28) — без этого Analytics
       // показывала «к выплате» без учёта уже выданного (аудит 2026-08-09).
@@ -859,7 +861,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     const inkAmt = dayShift?.inkassation || 0
     const dayInk = inkAmt > 0 ? {
       amount: inkAmt, expense: inkRow?.expense || 0,
-      reason: [inkRow?.reason, inkRow?.salary_note].filter(Boolean).join(' · ') || null,
+      reason: [inkRow?.reason ? displayReason(inkRow.reason) : null, inkRow?.salary_note].filter(Boolean).join(' · ') || null,
       balance: inkRow?.total ?? inkAmt,
     } : null
 
@@ -1195,7 +1197,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
                 // C6 (юзер-фидбок 2026-08-15): истории не хватало причины/заметки — reason и
                 // salary_note (выплаты ЗП с этого дня) были невидимы нигде на вебе.
                 const row = inkByShift[s.id]
-                const note = [row?.reason, row?.salary_note].filter(Boolean).join(' · ')
+                const note = [row?.reason ? displayReason(row.reason) : null, row?.salary_note].filter(Boolean).join(' · ')
                 // «Расход» = expense + salary (реально списанное из фонда), не только expense —
                 // паритет с iOS (2fc0215).
                 const deducted = (row?.expense || 0) + (row?.salary || 0)

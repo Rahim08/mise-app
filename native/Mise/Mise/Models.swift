@@ -556,6 +556,10 @@ nonisolated struct SalaryAdvance: Codable, Identifiable, Sendable {
     let amount: Double?
     let date: String?
     let note: String?
+    // Месяц ЗП, к которому относится аванс (юзер-фидбок 2026-08-15) — YYYY-MM-01, как
+    // salary_payments.period. Независим от `date` (день списания из кассы). См.
+    // docs/migrations/salary-advances-period-2026-08-15.sql.
+    let period: String?
 }
 
 // Факт выдачи ЗП сотруднику (People→Зарплата, ЗП-долг 2026-07-28) — отдельно от salary_advances
