@@ -651,6 +651,12 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const cumulativeInkass = allShifts.reduce((s: number, sh: any) => s + (sh.inkassation || 0), 0)
     - inkDeductions.reduce((s: number, d: any) => s + (d.expense || 0) + (d.salary || 0), 0)
   const lastShift = shifts[shifts.length - 1]
+  // Фактический баланс кассы «сейчас» (юзер-фидбок 2026-08-20): не должен меняться от
+  // пролистывания старых месяцев — allShifts не фильтрован по periodMode/currentDate (вся
+  // история по order('date')), последняя строка = самая свежая смена ресторана, а не
+  // последняя смена ПРОСМАТРИВАЕМОГО периода (это lastShift, он и остаётся для
+  // экспорта/AI-контекста — там нужен именно баланс на конец отчётного периода).
+  const trueCurrentBalance = allShifts[allShifts.length - 1]?.closing_balance || 0
   const prevIncome = prevShifts.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
   const prevExpense = prevShifts.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
   const pct = (cur: number, prev: number) => prev ? ((cur - prev) / prev * 100) : null
@@ -938,7 +944,16 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       const we = ws.reduce((s: number, sh: any) => s + sh.total_expense, 0)
       const wExps = expenses.filter((e: any) => ws.map((s: any) => s.id).includes(e.shift_id))
       const cats = getCatMap(wExps); const maxV = Math.max(...cats.map((c: any) => c[1]), 1)
-      const ip = pct(wi, prevIncome / 4); const ep = pct(we, prevExpense / 4)
+      // Closed-day matching (юзер-фидбок 2026-08-21): та же логика, что в Month — незакрытый
+      // «сегодня» не должен занижать %. Баг здесь ещё грубее: базой было prevIncome/4 (среднее
+      // за неделю прошлого месяца ЦЕЛИКОМ), сравниваемое с неполной текущей неделей.
+      // Теперь база пропорциональна числу уже ЗАКРЫТЫХ дней недели (daysElapsed/7).
+      const closedWs = ws.filter((s: any) => s.closing_balance != null)
+      const daysElapsed = closedWs.length
+      const wiToDate = closedWs.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
+      const weToDate = closedWs.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
+      const ip = daysElapsed ? pct(wiToDate, (prevIncome / 4) * (daysElapsed / 7)) : null
+      const ep = daysElapsed ? pct(weToDate, (prevExpense / 4) * (daysElapsed / 7)) : null
 
       return (
         <div>
@@ -979,10 +994,26 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
 
     // Month
     const cats = getCatMap(expenses); const top5 = cats.slice(0, 5); const maxV = Math.max(...cats.map((c: any) => c[1]), 1)
-    const ip = pct(totalIncome, prevIncome); const ep = pct(totalExpense, prevExpense)
     const incomeArr = shifts.map((s: any) => s.income || 0)
     const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
-    const daysPassed = currentDate.getMonth() === new Date().getMonth() && currentDate.getFullYear() === new Date().getFullYear() ? new Date().getDate() : daysInMonth
+    const isCurrentMonth = currentDate.getMonth() === new Date().getMonth() && currentDate.getFullYear() === new Date().getFullYear()
+    // Closed-day matching (юзер-фидбок 2026-08-21): daysPassed раньше брался из календарной даты
+    // «сегодня» — открытая (ещё не закрытая) смена сегодняшнего дня всё равно попадала в
+    // сравнение против ПОЛНОГО дня прошлого месяца, занижая % искусственно. daysPassed теперь —
+    // последний ЗАКРЫТЫЙ день текущего месяца (closing_balance != null), сегодняшний
+    // незакрытый день не участвует в сравнении ни с одной из сторон (см. также getWeekShifts).
+    const closedDatesThisMonth = shifts.filter((s: any) => s.closing_balance != null).map((s: any) => Number(s.date.slice(8, 10)))
+    const daysPassed = isCurrentMonth ? (closedDatesThisMonth.length ? Math.max(...closedDatesThisMonth) : 0) : daysInMonth
+    // Equal day matching (юзер-фидбок 2026-08-20): в начале месяца daysPassed < daysInMonth —
+    // сравнивать нужно с ТЕМИ ЖЕ первыми daysPassed днями прошлого месяца, а не с целым прошлым
+    // месяцем целиком, иначе 1-5 числа % всегда «хуже», чем реально (сравниваем часть с целым).
+    const shiftsToDate = daysPassed < daysInMonth ? shifts.filter((sh: any) => Number(sh.date.slice(8, 10)) <= daysPassed) : shifts
+    const prevShiftsToDate = daysPassed < daysInMonth ? prevShifts.filter((sh: any) => Number(sh.date.slice(8, 10)) <= daysPassed) : prevShifts
+    const incomeToDate = shiftsToDate.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
+    const expenseToDate = shiftsToDate.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
+    const prevIncomeToDate = prevShiftsToDate.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
+    const prevExpenseToDate = prevShiftsToDate.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
+    const ip = pct(incomeToDate, prevIncomeToDate); const ep = pct(expenseToDate, prevExpenseToDate)
 
     return (
       <div>
@@ -994,7 +1025,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
           <StatCard label={tr('an.shiftsCount')} value={String(shifts.length)} sm t={t} />
           <StatCard label={tr('an.cInkassShort')} rawValue={totalInkass} value={`${currency}${fv(totalInkass)}`} color={t.orange} sm t={t} />
-          <StatCard label={tr('an.cKassa')} rawValue={lastShift?.closing_balance || 0} value={`${currency}${fv(lastShift?.closing_balance || 0)}`} color={t.blue} sm t={t} />
+          <StatCard label={tr('an.cKassa')} rawValue={trueCurrentBalance} value={`${currency}${fv(trueCurrentBalance)}`} color={t.blue} sm t={t} />
         </div>
 
         {/* Нал vs безнал: соотношение продаж за месяц (инкассация — всегда только нал) */}
@@ -1080,7 +1111,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       return (
         <div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-            <StatCard label={tr('an.balance')} rawValue={lastShift?.closing_balance || 0} value={`${currency}${fv(lastShift?.closing_balance || 0)}`} color={t.blue} sparkValues={balArr} t={t} />
+            <StatCard label={tr('an.balance')} rawValue={trueCurrentBalance} value={`${currency}${fv(trueCurrentBalance)}`} color={t.blue} sparkValues={balArr} t={t} />
             <StatCard label={tr('an.lastIncome')} rawValue={lastShift?.income || 0} value={`${currency}${fv(lastShift?.income || 0)}`} color={t.green} sub={lastShift ? dd(lastShift.date) : undefined} t={t} />
           </div>
           {filled.length > 1 && <>

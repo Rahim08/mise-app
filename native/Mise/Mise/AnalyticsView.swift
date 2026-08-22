@@ -463,6 +463,26 @@ final class AnalyticsModel {
     var pTotal: Double { pCash + pCard }
     var prevTotal: Double { prevShiftsRaw.reduce(0) { $0 + ($1.income ?? 0) + ($1.income_card ?? 0) } }
 
+    // Equal-day matching for month trend badge (юзер-фидбок 2026-08-22, web-эквивалент в
+    // app/analytics/page.tsx): pTotal/prevTotal сравнивают целый прошлый месяц с текущим —
+    // в начале месяца (день 5 из 31) это всегда «−N%», хотя реально ничего не упало.
+    // Сравнение режем по последнему ЗАКРЫТОМУ дню текущего месяца с обеих сторон.
+    private var monthDaysPassed: Int {
+        guard isCurrentMonth else { return daysInMonth }
+        let closed = shiftsRaw.compactMap { $0.closing_balance != nil ? Int($0.date.suffix(2)) : nil }
+        return closed.max() ?? 0
+    }
+    var pTotalToDate: Double {
+        guard monthDaysPassed < daysInMonth else { return pTotal }
+        return shiftsRaw.filter { (Int($0.date.suffix(2)) ?? 0) <= monthDaysPassed }
+            .reduce(0) { $0 + ($1.income ?? 0) + ($1.income_card ?? 0) }
+    }
+    var prevTotalToDate: Double {
+        guard monthDaysPassed < daysInMonth else { return prevTotal }
+        return prevShiftsRaw.filter { (Int($0.date.suffix(2)) ?? 0) <= monthDaysPassed }
+            .reduce(0) { $0 + ($1.income ?? 0) + ($1.income_card ?? 0) }
+    }
+
     var weekRange: (Date, Date) {
         let cal = Calendar.current
         let wd = cal.component(.weekday, from: currentDate)
@@ -1271,7 +1291,7 @@ private struct PeriodTab: View {
                     Text(t("an.income")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
                     Text(cur(total)).font(.system(size: 30, weight: .heavy)).foregroundStyle(BrandKit.analytics)
                         .minimumScaleFactor(0.7).lineLimit(1)
-                    if isMonth, let p = m.pct(m.pTotal, m.prevTotal) {
+                    if isMonth, let p = m.pct(m.pTotalToDate, m.prevTotalToDate) {
                         Text((p >= 0 ? "▲ " : "▼ ") + String(format: "%.0f%%", abs(p)))
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(p >= 0 ? BrandKit.analytics : BrandKit.menu)
