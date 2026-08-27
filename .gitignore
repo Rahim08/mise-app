@@ -54,3 +54,6 @@ mise-app/
 # Xcode build artifacts
 native/Mise/build/
 CLAUDE CONTEXT.md
+
+# Xcode user-specific IDE state (workspace UI, breakpoints — not project config)
+native/Mise/**/xcuserdata/
