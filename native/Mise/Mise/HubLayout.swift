@@ -95,6 +95,48 @@ enum HubLayoutStore {
     }
 }
 
+/// Springboard-«тряска» плиток в edit-режиме — время читается через TimelineView, а не через
+/// `withAnimation(...repeatForever...)`. ПЕРЕДЕЛКА (юзер-фидбок 2026-08-27: «лагает, когда
+/// двигаешь» — воспроизводилось именно во время drag/resize, не в покое): `repeatForever` —
+/// это АНИМАЦИЯ в терминах SwiftUI-транзакций, зарегистрированная на тех же вью-узлах, что
+/// несут `matchedGeometryEffect` (committed reflow при reorder/resize). Бесконечная implicit-
+/// анимация и explicit spring-анимация reflow конкурируют за один и тот же transform-стек —
+/// отсюда рывки именно в момент драга. TimelineView просто читает текущее время каждый кадр,
+/// это не "Animation" в терминах транзакций — конфликтовать со spring-реflow нечему. Изолирован
+/// как отдельный модификатор (не на весь ScrollView) — тикает только для тайлов, у которых
+/// `active`, не заставляет пересчитывать layout/статистику всей сетки 60 раз в секунду.
+private struct WiggleRotation: ViewModifier {
+    let idx: Int
+    let size: HubTileSize
+    let active: Bool
+
+    // Угол откалиброван per-размер (юзер-фидбок 2026-08-16: «сильно дрожат», «выглядит дёшево»)
+    // — константный угол на плитках сильно разной площади даёт разное визуальное смещение
+    // углов; амплитуда подобрана так, чтобы смещение угла карточки было примерно одинаковым
+    // на всех трёх формах.
+    private var base: Double {
+        switch size {
+        case .small: return 1.5
+        case .medium: return 0.6
+        case .large: return 0.45
+        }
+    }
+    private var period: Double { 0.26 }
+    private var phase: Double { idx % 2 == 0 ? 0 : .pi }
+
+    func body(content: Content) -> some View {
+        if active {
+            TimelineView(.animation) { timeline in
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                let angle = sin((t / period) * 2 * .pi + phase) * base
+                content.rotationEffect(.degrees(angle), anchor: .center)
+            }
+        } else {
+            content
+        }
+    }
+}
+
 struct HubGridView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -106,7 +148,6 @@ struct HubGridView: View {
     // .dropDestination (Transferable, iOS 17+), а не свой DragGesture с офсетом — см. заметку
     // о переделке 2026-08-16 ниже.
     @State private var draggingItemID: String?
-    @State private var wiggle = false
     @State private var stats = HubStatsModel()
     @State private var gridWidth: CGFloat = 0
     // Живой ресайз за уголок: preview держит форму, в которую плитка "перетекла бы" при
@@ -169,6 +210,18 @@ struct HubGridView: View {
             )
             .padding(.horizontal, 20).padding(.bottom, 20)
         }
+        // Catch-all на контейнере: если юзер отпускает драг МИМО всех тайлов (пустая зона под
+        // последним рядом, между рядами разной ширины) — per-тайловый .dropDestination внутри
+        // tile() физически не может сработать (точка вне его границ), draggingItemID навсегда
+        // остаётся выставленным → тайл-источник виснет притушенным (opacity .45) до выхода из
+        // edit-режима. Юзер это увидел на устройстве как «что-то ломается». Вложенный
+        // dropDestination на ScrollView — тот же тип (String), тот же сброс; SwiftUI отдаёт
+        // приоритет самому вложенному попаданию (тайл), этот срабатывает только на промахе.
+        .dropDestination(for: String.self) { _, _ in
+            draggingItemID = nil
+            persist()
+            return true
+        }
         // Скролл гасим только во время ресайза (свой DragGesture на ручке) — reorder теперь
         // системный .draggable внутри ScrollView, это его штатный сценарий использования,
         // насильно гасить скролл под него не нужно (и раньше было лишним источником «дёрганости»).
@@ -176,10 +229,7 @@ struct HubGridView: View {
         .onAppear { loadOrder() }
         .onChange(of: app.availableApps) { _, _ in loadOrder() }
         .onChange(of: editing) { _, now in
-            if now, !reduceMotion {
-                withAnimation(.easeInOut(duration: 0.13).repeatForever(autoreverses: true)) { wiggle = true }
-            } else {
-                wiggle = false
+            if !now {
                 // Выход из правки — жёсткий сброс любого зависшего drag/resize состояния
                 // (защита от края: если .dropDestination почему-то не отработал).
                 draggingItemID = nil
@@ -243,7 +293,11 @@ struct HubGridView: View {
                 // «живость» без искажения формы — единый лёгкий пульс по центру.
                 .scaleEffect(isResizing ? 1.025 : 1, anchor: .center)
                 .shadow(color: .black.opacity(isResizing ? 0.22 : 0), radius: 14, y: 8)
-                .rotationEffect(.degrees(rotationAngle(for: item)), anchor: .center)
+                .modifier(WiggleRotation(
+                    idx: order.firstIndex(where: { $0.id == item.id }) ?? 0,
+                    size: item.size,
+                    active: editing && !isDragging && !isResizing && !reduceMotion
+                ))
                 .zIndex(isResizing ? 10 : 0)
                 .onTapGesture { if !editing { UIImpactFeedbackGenerator(style: .medium).impactOccurred(); app.openApp(item.id) } }
                 .simultaneousGesture(
@@ -466,27 +520,6 @@ struct HubGridView: View {
     }
 
     // MARK: - drag/reorder/persist
-
-    private func rotationAngle(for item: HubItem) -> Double {
-        guard editing, draggingItemID != item.id, resizingID != item.id, !reduceMotion else { return 0 }
-        let idx = order.firstIndex(where: { $0.id == item.id }) ?? 0
-        // Угол откалиброван per-размер (юзер-фидбок 2026-08-16: «сильно дрожат», «выглядит
-        // дёшево») — константный угол на плитках сильно разной площади даёт РАЗНОЕ визуальное
-        // смещение углов: у large-плитки (350×150) дальний угол при повороте на N° улетает в
-        // разы дальше, чем у small (90×90) при том же N° — отсюда ощущение, что большие
-        // плитки трясутся сильнее и всё вместе выглядит хаотично/дёшево. Настоящий springboard
-        // так не дёргается именно потому, что там все иконки одного размера. Подбираем угол
-        // так, чтобы амплитуда смещения угла карточки была примерно одинаковой на всех трёх
-        // формах — small качает сильнее по углу, large еле заметно.
-        let base: Double
-        switch item.size {
-        case .small: base = 1.5
-        case .medium: base = 0.6
-        case .large: base = 0.45
-        }
-        let flip = idx % 2 == 0
-        return wiggle == flip ? base : -base
-    }
 
     /// Дошёл драг до тайла targetId — переставить перетаскиваемый на его место (соседи сами
     /// сдвигаются под ним/над ним, стандартное поведение springboard-реордера). Вызывается
