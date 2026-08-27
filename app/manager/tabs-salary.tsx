@@ -30,8 +30,19 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   const [open, setOpen] = useState<string | null>(null)
   const [payFor, setPayFor] = useState<any | null>(null)
   const [payError, setPayError] = useState<string | null>(null)
+  // Отдельно от payError (текст ошибки) — специально помечает случай «не хватает налички»,
+  // чтобы под ошибкой показать кнопку «Отметить как долг» (юзер-фидбок 2026-08-20).
+  const [payInsufficient, setPayInsufficient] = useState(false)
+  const [markingDebt, setMarkingDebt] = useState(false)
   const [paying, setPaying] = useState(false)
   const [debt, setDebt] = useState<{ total: number; byId: Record<string, number> }>({ total: 0, byId: {} })
+  // Долг-леджер (2026-08-20): остаток за ПРОШЛЫЕ месяцы теперь материализуется как обычная
+  // строка shift_expenses (is_paid=false, employee_id, note=SALPERIOD:<period>) — та же таблица,
+  // тот же UI «Долги», что и расходные/экстра-долги в Manager→Смена (см. app/manager/page.tsx
+  // openDebts). Здесь, в ЗП — только ЧТЕНИЕ (юзер-фидбок 2026-08-20: «взаимодействие — выплата —
+  // он делает только благодаря открытию смены»); сама галочка/оплата — только там.
+  const [ledgerRows, setLedgerRows] = useState<{ id: string; employeeId: string; employeeName: string; period: string; amount: number; date: string }[]>([])
+  const [showDebtList, setShowDebtList] = useState(false)
   const [payoutDay, setPayoutDay] = useState<number | null>(null)
   const [prevCashTotal, setPrevCashTotal] = useState(0)
   const [toast, setToast] = useState('')
@@ -102,13 +113,76 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   const loadDebt = async () => {
     const now = new Date()
     let total = 0; const byId: Record<string, number> = {}
+    // Собираем целевое состояние леджера (кто/за какой период/сколько ещё должны) по всем
+    // прошлым месяцам одним проходом, ДО похода в базу — дальше один select всех существующих
+    // SALPERIOD-строк ресторана и диффом решаем, что удалить/вставить (вместо N запросов на
+    // каждую пару сотрудник×месяц — дорого при полугодовой истории и большом штате).
+    const target: { empId: string; empName: string; period: string; monthEnd: string; amount: number }[] = []
+    // Периоды, которые реально прошли ниже (после фильтра DEBT_TRACKING_START) — ТОЛЬКО для
+    // них ниже разрешена очистка чужих строк. Иначе (баг 2026-08-20, найден при аудите): текущий
+    // месяц (i=0) в цикл не попадает вообще, а пока не пройден первый полный месяц после
+    // DEBT_TRACKING_START — цикл пуст целиком → syncLedger(target=[]) видел бы ЛЮБУЮ открытую
+    // SALPERIOD-строку как «незнакомую» и удалял её, включая ту, что markAsDebt только что
+    // создал для текущего месяца — долг стирался в том же действии, которым создавался.
+    const scannedPeriods: string[] = []
     for (let i = 1; i <= 6; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
       if (d < DEBT_TRACKING_START) continue
+      const period = `${fmtDate(d).slice(0, 7)}-01`
+      scannedPeriods.push(period)
+      const monthEnd = fmtDate(new Date(d.getFullYear(), d.getMonth() + 1, 0))
       const list = await computeMonth(fmtDate(d).slice(0, 7))
-      list.forEach((r: any) => { if (r.remaining > 0) { total += r.remaining; byId[r.id] = (byId[r.id] || 0) + r.remaining } })
+      list.forEach((r: any) => {
+        if (r.remaining > 0) {
+          total += r.remaining; byId[r.id] = (byId[r.id] || 0) + r.remaining
+          target.push({ empId: r.id, empName: r.name, period, monthEnd, amount: Math.round(r.remaining) })
+        }
+      })
     }
     setDebt({ total, byId })
+    await syncLedger(target, scannedPeriods)
+  }
+
+  const syncLedger = async (target: { empId: string; empName: string; period: string; monthEnd: string; amount: number }[], scannedPeriods: string[]) => {
+    const { data: existing } = await db.from('shift_expenses').select('id, employee_id, amount, note, shift_id').eq('restaurant_id', restaurantId).eq('is_paid', false).like('note', `${SALPERIOD_PREFIX}%`)
+    const existingByKey = new Map<string, { id: string; amount: number }>()
+    ;(existing || []).forEach((r: any) => existingByKey.set(`${r.employee_id}|${r.note}`, { id: r.id, amount: Number(r.amount || 0) }))
+    const toDelete: string[] = []; const toInsert: typeof target = []
+    const seenKeys = new Set<string>()
+    target.forEach(row => {
+      const key = `${row.empId}|${SALPERIOD_PREFIX}${row.period}`
+      seenKeys.add(key)
+      const cur = existingByKey.get(key)
+      if (!cur) { toInsert.push(row); return }
+      if (cur.amount !== row.amount) { toDelete.push(cur.id); toInsert.push(row) }
+    })
+    // Всё, что осталось в existingByKey, не встретилось в target, И относится к периоду, который
+    // этот проход реально просканировал — долг погашен обычной выплатой из ЗП напрямую
+    // (savePayment), леджер устарел, чистим. Строки за периоды ВНЕ scannedPeriods (текущий месяц,
+    // markAsDebt) — не трогаем, этот проход про них ничего не знает.
+    const scannedNotes = new Set(scannedPeriods.map(p => `${SALPERIOD_PREFIX}${p}`))
+    existingByKey.forEach((v, key) => {
+      if (seenKeys.has(key)) return
+      const note = key.slice(key.indexOf('|') + 1)
+      if (scannedNotes.has(note)) toDelete.push(v.id)
+    })
+    if (toDelete.length > 0) await db.from('shift_expenses').delete().in('id', toDelete)
+    if (toInsert.length > 0) {
+      const shiftByDate = new Map<string, string>()
+      for (const row of toInsert) {
+        if (!shiftByDate.has(row.monthEnd)) {
+          const sh = await ensureShift(row.monthEnd)
+          if (sh) shiftByDate.set(row.monthEnd, sh.id)
+        }
+      }
+      const inserts = toInsert.filter(row => shiftByDate.has(row.monthEnd)).map(row => ({
+        shift_id: shiftByDate.get(row.monthEnd), restaurant_id: restaurantId, employee_id: row.empId,
+        category_name: `${tr('pe.salaryWord')} — ${periodLabel(row.period)}`,
+        amount: row.amount, is_paid: false, note: `${SALPERIOD_PREFIX}${row.period}`,
+      }))
+      if (inserts.length > 0) await db.from('shift_expenses').insert(inserts)
+    }
+    setLedgerRows(target.map(row => ({ id: `${row.empId}|${row.period}`, employeeId: row.empId, employeeName: row.empName, period: row.period, amount: row.amount, date: row.monthEnd })))
   }
   useEffect(() => { loadDebt() }, [])
 
@@ -132,10 +206,10 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
 
   // Смена/инкассация на дату оплаты может не существовать — создаём её тем же паттерном,
   // что openShift (opening = closing предыдущей смены, gap-tolerant .lt('date', ...)).
-  const ensureShift = async (dateStr: string): Promise<string | null> => {
-    const { data: existing } = await db.from('shifts').select('id').eq('restaurant_id', restaurantId).eq('date', dateStr).order('opened_at').limit(1)
+  const ensureShift = async (dateStr: string): Promise<{ id: string; inkassation: number } | null> => {
+    const { data: existing } = await db.from('shifts').select('id, inkassation').eq('restaurant_id', restaurantId).eq('date', dateStr).order('opened_at').limit(1)
     const ex = Array.isArray(existing) ? existing[0] : existing
-    if (ex?.id) return ex.id
+    if (ex?.id) return { id: ex.id, inkassation: ex.inkassation || 0 }
     const { data: prevList } = await db.from('shifts').select('closing_balance').eq('restaurant_id', restaurantId).lt('date', dateStr).order('date', { ascending: false }).order('opened_at', { ascending: false }).limit(1)
     const opening = (Array.isArray(prevList) ? prevList[0] : prevList)?.closing_balance || 0
     const { data: sh } = await db.from('shifts').insert({
@@ -143,7 +217,33 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       opening_balance: opening, income: 0, inkassation: 0,
       closing_balance: opening, status: 'open',
     }).select().single()
-    return sh?.id ?? null
+    return sh?.id ? { id: sh.id, inkassation: 0 } : null
+  }
+
+  const SALPERIOD_PREFIX = 'SALPERIOD:'
+  const periodLabel = (period: string) => new Date(period).toLocaleDateString(tr('dash.locale'), { month: 'long', year: 'numeric' })
+
+  // Долг-леджер (юзер-фидбок 2026-08-20): остаток по ЗП за месяц материализуется как обычная
+  // строка shift_expenses (is_paid=false, employee_id, note=SALPERIOD:<period>) — та же таблица
+  // и тот же UI «Долги», что уже показывает расходные/экстра-долги в Manager→Смена (openDebts,
+  // app/manager/page.tsx). Здесь, в ЗП — только показываем; галочка/оплата — только там (юзер:
+  // «взаимодействие — выплата — он делает только благодаря открытию смены»).
+  // Идемпотентно: удаляем старую открытую запись за этот (сотрудник, период) и вставляем
+  // свежую с текущим remaining — не накапливаем/не дрейфуем при частичных доплатах между
+  // запусками (юзер-фидбок: «долг не делим по частям — платим/держим целиком»).
+  const syncSalaryLedger = async (empId: string, period: string, dateStr: string, remaining: number) => {
+    const noteTag = `${SALPERIOD_PREFIX}${period}`
+    const { data: existing } = await db.from('shift_expenses').select('id').eq('restaurant_id', restaurantId).eq('employee_id', empId).eq('note', noteTag).eq('is_paid', false)
+    const staleIds = (existing || []).map((r: any) => r.id)
+    if (staleIds.length > 0) await db.from('shift_expenses').delete().in('id', staleIds)
+    if (remaining <= 0) return
+    const sh = await ensureShift(dateStr)
+    if (!sh) return
+    await db.from('shift_expenses').insert({
+      shift_id: sh.id, restaurant_id: restaurantId, employee_id: empId,
+      category_name: `${tr('pe.salaryWord')} — ${periodLabel(period)}`,
+      amount: remaining, is_paid: false, note: noteTag,
+    })
   }
 
   // «На карту» / авансы (2026-08-14, аудит A3/A4 — веб раньше вообще не имел этой
@@ -222,7 +322,11 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
         if (!ok) showToast(tr('pe.saveFailed', { err: 'race' }))
       } else {
         const { baseAmount, newExpense, newReason, newTotal } = applyAdvance(ink)
-        await db.from('inkassations').insert({ shift_id: shift.id, restaurant_id: restaurantId, date: dateStr, amount: baseAmount, expense: newExpense, reason: newReason, salary: 0, total: newTotal })
+        // Раньше результат insert не проверялся: salary_advances уже записан (аванс числится
+        // у сотрудника), а инкассация — нет при сбое, деньги молча выпадают из кассы
+        // (money-integrity, тот же класс багов, что A5 в deleteAdvance выше).
+        const { error } = await db.from('inkassations').insert({ shift_id: shift.id, restaurant_id: restaurantId, date: dateStr, amount: baseAmount, expense: newExpense, reason: newReason, salary: 0, total: newTotal })
+        if (error) showToast(tr('pe.saveFailed', { err: error.message }))
       }
     } else {
       showToast(tr('an.advanceInkassationMissing'))
@@ -275,13 +379,14 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     if (!payFor) return
     const amount = Number(payFor.amount) || 0
     if (amount <= 0) return
-    setPaying(true); setPayError(null)
+    setPaying(true); setPayError(null); setPayInsufficient(false)
     const method = payFor.method || 'cash'
     const dateStr = payFor.date || fmtDate(new Date())
 
     if (method === 'cash') {
-      const shiftId = await ensureShift(dateStr)
-      if (!shiftId) { setPayError(tr('pe.saveFailed', { err: 'shift' })); setPaying(false); return }
+      const sh = await ensureShift(dateStr)
+      if (!sh) { setPayError(tr('pe.saveFailed', { err: 'shift' })); setPaying(false); return }
+      const shiftId = sh.id
       // Инкассация — накопительный кошелёк, не сумма конкретного дня (юзер-фидбок 2026-08-16):
       // доступно = вся инкассация по сменам минус всё уже списанное (расход+ЗП) за всё время
       // (те же cumulativeInkass, что в app/analytics/page.tsx). Раньше сверяли только с
@@ -297,6 +402,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       const cur = Array.isArray(inkList) ? inkList[0] : inkList
       if (amount > available) {
         setPayError(tr('pe.insufficientInkassationPool', { avail: eur(Math.max(0, available)) }))
+        setPayInsufficient(true)
         setPaying(false); return
       }
       // A3 (аудит 2026-08-15): свой снэпшот cur.salary/expense мог устареть к моменту записи
@@ -327,6 +433,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       if (payErr) { setPayError(tr('pe.saveFailed', { err: payErr.message })); setPaying(false); return }
 
       let ok: boolean
+      let insertErrMsg = 'race'
       if (cur?.id) {
         let { values } = applyPayment(cur)
         ok = await casUpdateInk(shiftId, 'salary', cur.salary || 0, values)
@@ -335,13 +442,19 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
           if (fresh) { ({ values } = applyPayment(fresh)); ok = await casUpdateInk(shiftId, 'salary', fresh.salary || 0, values) }
         }
       } else {
-        const { values } = applyPayment(cur)
-        const { error } = await db.from('inkassations').insert({ shift_id: shiftId, ...values })
+        // Свежая строка (для этой смены ещё не было ни расхода, ни инкассации) — в отличие
+        // от CAS-ветки выше (partial update, amount/expense не трогает), insert обязан
+        // указать amount/expense явно, иначе NOT NULL на amount валил insert, а ошибка
+        // гасилась ниже под общим ярлыком «race», хотя это вообще не гонка (баг 2026-08-16,
+        // реальный кейс юзера — платёж без существующей инкассации дня).
+        const { values } = applyPayment({ ...cur, amount: sh.inkassation, expense: 0 })
+        const { error } = await db.from('inkassations').insert({ shift_id: shiftId, amount: sh.inkassation, expense: 0, ...values })
         ok = !error
+        if (error) insertErrMsg = error.message
       }
       if (!ok) {
         if (payRow?.id) await db.from('salary_payments').delete().eq('id', payRow.id)
-        setPayError(tr('pe.saveFailed', { err: 'race' })); setPaying(false); return
+        setPayError(tr('pe.saveFailed', { err: insertErrMsg })); setPaying(false); return
       }
       setPaying(false)
       setPayFor(null)
@@ -357,6 +470,23 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     setPaying(false)
     if (payErr) { setPayError(tr('pe.saveFailed', { err: payErr.message })); return }
     setPayFor(null)
+    await load(); await loadDebt()
+  }
+
+  // «Отметить как долг» (юзер-фидбок 2026-08-20): вместо жёсткого отказа при нехватке налички —
+  // ручное действие менеджера, эксплицитно решившего «сегодня не платим, фиксируем как долг».
+  // Пишет ЦЕЛИКОМ введённую сумму (без авто-разбивки на «часть сейчас + остаток в долг» —
+  // юзер: «долг не делим по частям»); settlement (галочка в Manager→Смена) сам допишет
+  // salary_payments, remaining в ЗП после этого сойдётся сам.
+  const markAsDebt = async () => {
+    if (!payFor) return
+    const amount = Number(payFor.amount) || 0
+    if (amount <= 0) return
+    setMarkingDebt(true)
+    await syncSalaryLedger(payFor.id, `${ym}-01`, payFor.date || fmtDate(new Date()), amount)
+    setMarkingDebt(false)
+    setPayFor(null); setPayError(null); setPayInsufficient(false)
+    showToast(tr('pe.markedAsDebt'))
     await load(); await loadDebt()
   }
 
@@ -446,7 +576,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderTop: `0.5px solid ${t.sep2}` }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: st.color }}>{st.label}</span>
             {r.remaining > 0 && (
-              <button onClick={() => setPayFor({ id: r.id, name: r.name, amount: String(Math.round(r.remaining)), method: 'cash', date: fmtDate(new Date()), note: '' })}
+              <button onClick={() => { setPayError(null); setPayInsufficient(false); setPayFor({ id: r.id, name: r.name, amount: String(Math.round(r.remaining)), method: 'cash', date: fmtDate(new Date()), note: '' }) }}
                 style={{ padding: '6px 12px', borderRadius: 980, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
                 {tr('pe.markPaid')}
               </button>
@@ -458,18 +588,28 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   }
 
   const fund = rows.reduce((s, r) => s + r.total, 0)
-  const cardTotal = rows.reduce((s, r) => s + r.card, 0)
+  // Клампим advance/card по total сотрудника (юзер-фидбок 2026-08-15: «наличными» + «на карту»
+  // не давали сумму фонда) — если аванс/карта суммарно превышают total (переавансирование, или
+  // карта осталась настроена у сотрудника, чей total обнулился прогулами), излишек молча
+  // выпадал из cash (Math.max(0, …) в computeMonth), но полностью оставался в cardTotal —
+  // фонд наверху и блоки внизу расходились ровно на этот излишек. cash по каждой строке уже
+  // верно, клампим только агрегаты, чтобы cash+card+advance ВСЕГДА равнялось fund.
+  const advanceTotal = rows.reduce((s, r) => s + Math.min(r.advance, r.total), 0)
+  const cardTotal = rows.reduce((s, r) => s + Math.min(r.card, Math.max(0, r.total - Math.min(r.advance, r.total))), 0)
   const cashTotal = rows.reduce((s, r) => s + r.cash, 0)
   const accrued = computeAccruedToday({ isCurrentMonth, totalCash: cashTotal, daysInMonth, payoutDay, prevTotalCash: prevCashTotal, prevDaysInMonth })
   return (
     <div>
       <MonthNav />
       {debt.total > 0 && (
-        <div style={{ background: `${t.red}12`, borderRadius: 16, padding: '14px 16px', marginBottom: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: t.red, textTransform: 'uppercase', letterSpacing: 0.4 }}>{tr('pe.debtTitle')}</div>
+        <button onClick={() => setShowDebtList(true)} style={{ width: '100%', textAlign: 'left', background: `${t.red}12`, borderRadius: 16, padding: '14px 16px', marginBottom: 12, border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: t.red, textTransform: 'uppercase', letterSpacing: 0.4 }}>{tr('pe.debtTitle')}</div>
+            <svg width="7" height="13" fill="none" stroke={t.red} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 10 18"><path d="M2 1l7 8-7 8" /></svg>
+          </div>
           <div style={{ fontSize: 22, fontWeight: 800, color: t.red, marginTop: 2 }}>{eur(debt.total)}</div>
           <div style={{ fontSize: 12, color: t.text3, marginTop: 3 }}>{tr('pe.debtHint')}</div>
-        </div>
+        </button>
       )}
       <div style={{ background: `linear-gradient(135deg, ${accent}, ${accent}cc)`, borderRadius: 20, padding: '20px', marginBottom: 14, color: '#fff', boxShadow: `0 8px 28px ${accent}3a` }}>
         <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>{tr('pe.toPayoutTotal')}</div>
@@ -477,6 +617,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
         <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 13, fontWeight: 600, opacity: 0.92 }}>
           <span>{tr('pe.staffCountShort', { n: rows.length })}</span>
           {cardTotal > 0 && <span>{tr('pe.toCard')} {eur(cardTotal)}</span>}
+          {advanceTotal > 0 && <span>{tr('pe.advances')} {eur(advanceTotal)}</span>}
           <span>{tr('pe.inCash')} {eur(cashTotal)}</span>
         </div>
         {isCurrentMonth && (
@@ -507,10 +648,19 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
         )
       })}
       {payFor && (
-        <Sheet onClose={() => { setPayFor(null); setPayError(null) }} t={t}>
+        <Sheet onClose={() => { setPayFor(null); setPayError(null); setPayInsufficient(false) }} t={t}>
           <div style={{ padding: '4px 20px 24px' }}>
             <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 14 }}>{tr('pe.markPaid')} · {payFor.name}</div>
-            {payError && <div style={{ background: `${t.red}14`, color: t.red, borderRadius: 12, padding: '10px 12px', fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{payError}</div>}
+            {payError && (
+              <div style={{ background: `${t.red}14`, borderRadius: 12, padding: '10px 12px', marginBottom: 12 }}>
+                <div style={{ color: t.red, fontSize: 13, fontWeight: 600 }}>{payError}</div>
+                {payInsufficient && (
+                  <button onClick={markAsDebt} disabled={markingDebt} style={{ width: '100%', marginTop: 10, padding: '10px', borderRadius: 10, border: 'none', background: t.orange, color: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 700, cursor: markingDebt ? 'default' : 'pointer', opacity: markingDebt ? 0.6 : 1 }}>
+                    {tr('pe.markAsDebt')}
+                  </button>
+                )}
+              </div>
+            )}
             <label style={lbl(t)}>{tr('pe.paymentAmount')}</label>
             <input type="number" inputMode="decimal" value={payFor.amount} onChange={e => setPayFor({ ...payFor, amount: e.target.value })} style={inp(t)} />
             <label style={{ ...lbl(t), marginTop: 12 }}>{tr('pe.paymentMethod')}</label>
@@ -548,6 +698,30 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
               style={{ width: '100%', marginTop: 18, padding: '14px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', opacity: (parseFloat(advAmount) || 0) <= 0 ? 0.5 : 1, boxShadow: `0 4px 16px ${accent}44` }}>
               {tr('pe.save')}
             </button>
+          </div>
+        </Sheet>
+      )}
+      {showDebtList && (
+        <Sheet onClose={() => setShowDebtList(false)} t={t}>
+          <div style={{ padding: '4px 20px 24px' }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: t.text, marginBottom: 4 }}>{tr('pe.debtTitle')}</div>
+            <div style={{ fontSize: 13, color: t.text3, marginBottom: 14 }}>{tr('pe.debtListHint')}</div>
+            {Object.entries(
+              ledgerRows.reduce((acc: Record<string, typeof ledgerRows>, r) => { (acc[r.employeeName] = acc[r.employeeName] || []).push(r); return acc }, {})
+            ).map(([name, items]) => (
+              <div key={name} style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh, marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: `${t.red}0d` }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{name}</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: t.red }}>{eur(items.reduce((s, i) => s + i.amount, 0))}</span>
+                </div>
+                {items.sort((a, b) => a.period < b.period ? -1 : 1).map(i => (
+                  <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 16px', borderTop: `0.5px solid ${t.sep2}` }}>
+                    <span style={{ fontSize: 13, color: t.text3, textTransform: 'capitalize' as const }}>{periodLabel(i.period)}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: t.orange }}>{eur(i.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
         </Sheet>
       )}

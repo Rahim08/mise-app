@@ -95,7 +95,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   // уменьшает кассу дня, пока не погашен. Погашение — прямо при закрытии текущей смены.
   const [catUnpaid, setCatUnpaid] = useState<Record<string, boolean>>({})
   const [empUnpaid, setEmpUnpaid] = useState<Record<string, boolean>>({})
-  const [openDebts, setOpenDebts] = useState<{ id: string; shiftId: string; date: string; categoryId: string | null; categoryName: string; employeeId: string | null; amount: number }[]>([])
+  const [openDebts, setOpenDebts] = useState<{ id: string; shiftId: string; date: string; categoryId: string | null; categoryName: string; employeeId: string | null; amount: number; note: string | null }[]>([])
   const [selectedDebtIds, setSelectedDebtIds] = useState<Set<string>>(new Set())
   const [showDebts, setShowDebts] = useState(false)
   // Сумма долгов, уже погашенных ЭТОЙ сменой (settlement-строка с paid_shift_id == shift.id) —
@@ -147,14 +147,14 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   // Все открытые долги ресторана (не только за сегодня) — менеджер мог не успеть заплатить
   // неделю назад, долг всё ещё должен быть виден сегодня (паритет с ManagerView.swift).
   const loadOpenDebts = async () => {
-    const { data: unpaid } = await db.from('shift_expenses').select('id, shift_id, category_id, category_name, employee_id, amount').eq('restaurant_id', restaurantId).eq('is_paid', false)
+    const { data: unpaid } = await db.from('shift_expenses').select('id, shift_id, category_id, category_name, employee_id, amount, note').eq('restaurant_id', restaurantId).eq('is_paid', false)
     if (!unpaid || unpaid.length === 0) { setOpenDebts([]); return }
     const shiftIds = Array.from(new Set(unpaid.map((e: any) => e.shift_id).filter(Boolean)))
     const { data: shiftDates } = await db.from('shifts').select('id, date').in('id', shiftIds)
     const dateById: Record<string, string> = {}
     ;(shiftDates || []).forEach((s: any) => { dateById[s.id] = s.date })
     const rows = unpaid
-      .map((e: any) => ({ id: e.id, shiftId: e.shift_id, date: dateById[e.shift_id], categoryId: e.category_id, categoryName: e.category_name || '—', employeeId: e.employee_id, amount: Number(e.amount || 0) }))
+      .map((e: any) => ({ id: e.id, shiftId: e.shift_id, date: dateById[e.shift_id], categoryId: e.category_id, categoryName: e.category_name || '—', employeeId: e.employee_id, amount: Number(e.amount || 0), note: e.note || null }))
       .filter((d: any) => d.date)
       .sort((a: any, b: any) => a.date < b.date ? -1 : 1)
     setOpenDebts(rows)
@@ -323,11 +323,29 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   // ПЕРВОЙ, чтобы при сбое сети старый долг остался открытым, а не тихо потерялся; 2) исходная
   // строка помечается «оплачено» — paid_shift_id ≠ её собственный shift_id → навсегда исключена
   // из подсчёта своего родного дня. Паритет с ManagerView.swift persistDebtSettlements.
+  // ЗП-долг помечен note='SALPERIOD:<period>' (леджер собирается в tabs-salary.tsx syncLedger,
+  // остаток по месячному окладу материализуется как обычная строка shift_expenses). Кроме
+  // обычного погашения — параллельно пишем salary_payments, иначе вкладка ЗП не узнает, что
+  // долг закрыт именно отсюда, и продолжит показывать сотрудника неоплаченным (юзер-фидбок
+  // 2026-08-20: «взаимодействие — выплата — только через открытие смены», но remaining в ЗП
+  // должен сойтись сам). Пишем ДО shift_expenses (salary_payments — источник истины «оплачено»,
+  // паритет с C2/tabs-salary.tsx savePayment) — если запись не пройдёт, откатываем весь settle.
+  const SALPERIOD_PREFIX = 'SALPERIOD:'
   const persistDebtSettlements = async (shiftId: string, dateStr: string) => {
     const ids = Array.from(selectedDebtIds)
     if (ids.length === 0) return
     const selected = openDebts.filter(d => ids.includes(d.id))
     if (selected.length === 0) return
+    const salaryRows = selected.filter(d => d.employeeId && d.note?.startsWith(SALPERIOD_PREFIX))
+    if (salaryRows.length > 0) {
+      const payInserts = salaryRows.map(d => ({
+        employee_id: d.employeeId, period: (d.note as string).slice(SALPERIOD_PREFIX.length),
+        amount: d.amount, method: 'cash', paid_at: new Date(dateStr).toISOString(),
+        note: tr('an.debtSettleNote'), created_by: null,
+      }))
+      const { error: payErr } = await db.from('salary_payments').insert(payInserts)
+      if (payErr) throw new Error(payErr.message)
+    }
     const newRows = selected.map(d => ({
       shift_id: shiftId, restaurant_id: restaurantId, amount: d.amount,
       category_id: d.categoryId || undefined, category_name: d.categoryName,
@@ -607,20 +625,47 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                     {debtSettleTotal() > 0 && <span style={{ fontSize: 13, fontWeight: 600, color: t.orange }}>−€{fv(debtSettleTotal())}</span>}
                     <svg width="11" height="11" fill="none" stroke={t.text3} strokeWidth="2.2" viewBox="0 0 24 24" style={{ transform: showDebts ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}><path d="M6 9l6 6 6-6" /></svg>
                   </button>
-                  {showDebts && openDebts.map((d, i) => {
-                    const sel = selectedDebtIds.has(d.id)
-                    return (
-                      <button key={d.id} onClick={() => setSelectedDebtIds(prev => { const n = new Set(prev); sel ? n.delete(d.id) : n.add(d.id); return n })}
-                        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'none', border: 'none', borderTop: `0.5px solid ${t.sep2}`, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-                        <svg width="18" height="18" fill={sel ? t.orange : 'none'} stroke={sel ? t.orange : t.text4} strokeWidth="2" viewBox="0 0 24 24">{sel ? <path d="M9 12l2 2 4-4M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /> : <circle cx="12" cy="12" r="9" />}</svg>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 14, fontWeight: 500, color: t.text }}>{d.categoryName}</div>
-                          <div style={{ fontSize: 11, color: t.text3, marginTop: 1 }}>{d.date}</div>
-                        </div>
-                        <span style={{ fontSize: 14, fontWeight: 600, color: t.orange }}>€{fv(d.amount)}</span>
-                      </button>
-                    )
-                  })}
+                  {showDebts && (() => {
+                    // Группировка по сотруднику (юзер-фидбок 2026-08-20: «если два раза было
+                    // одному человеку — они объединяются в одну группу») — ЗП-долг и экстра-долг
+                    // одного человека схлопываются под общий заголовок с именем и подсуммой,
+                    // выбор всё равно галками по отдельной строке внутри. Расходы без
+                    // employee_id (категории) группировки не требуют — идут как раньше.
+                    const byEmp: Record<string, typeof openDebts> = {}
+                    const singles: typeof openDebts = []
+                    openDebts.forEach(d => { if (d.employeeId) (byEmp[d.employeeId] = byEmp[d.employeeId] || []).push(d); else singles.push(d) })
+                    const DebtRow = (d: typeof openDebts[number]) => {
+                      const sel = selectedDebtIds.has(d.id)
+                      return (
+                        <button key={d.id} onClick={() => setSelectedDebtIds(prev => { const n = new Set(prev); sel ? n.delete(d.id) : n.add(d.id); return n })}
+                          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'none', border: 'none', borderTop: `0.5px solid ${t.sep2}`, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                          <svg width="18" height="18" fill={sel ? t.orange : 'none'} stroke={sel ? t.orange : t.text4} strokeWidth="2" viewBox="0 0 24 24">{sel ? <path d="M9 12l2 2 4-4M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /> : <circle cx="12" cy="12" r="9" />}</svg>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 14, fontWeight: 500, color: t.text }}>{d.categoryName}</div>
+                            <div style={{ fontSize: 11, color: t.text3, marginTop: 1 }}>{d.date}</div>
+                          </div>
+                          <span style={{ fontSize: 14, fontWeight: 600, color: t.orange }}>€{fv(d.amount)}</span>
+                        </button>
+                      )
+                    }
+                    return <>
+                      {Object.entries(byEmp).map(([empId, items]) => {
+                        const empName = employees.find(e => e.id === empId)?.name || items[0].categoryName
+                        if (items.length === 1) return DebtRow(items[0])
+                        const groupTotal = items.reduce((s, d) => s + d.amount, 0)
+                        return (
+                          <div key={empId}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 14px', borderTop: `0.5px solid ${t.sep2}`, background: t.fill }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.3 }}>{empName}</span>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: t.orange }}>€{fv(groupTotal)}</span>
+                            </div>
+                            {items.map(DebtRow)}
+                          </div>
+                        )
+                      })}
+                      {singles.map(DebtRow)}
+                    </>
+                  })()}
                 </div>
               )}
 
