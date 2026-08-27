@@ -190,6 +190,14 @@ let STRINGS: [String: [Lang: String]] = [
     "mod.analytics.sub": tr("Revenue & analytics", "Выручка и аналитика", "Ricavi e analisi", "Revenus et analyses", "Gəlir və analitika", "Gelir ve analiz", "Виручка та аналітика", "Кіріс және аналитика"),
     "mod.stash.sub":     tr("Stock & sessions", "Склад и сессии", "Magazzino e sessioni", "Stock et sessions", "Anbar və seanslar", "Stok ve seanslar", "Склад і сесії", "Қойма және сеанстар"),
     "mod.people.sub":    tr("Team & schedule", "Команда и расписание", "Team e turni", "Équipe et planning", "Komanda və qrafik", "Ekip ve program", "Команда та розклад", "Команда және кесте"),
+
+    // Хаб — редактирование раскладки плиток (HubLayout.swift)
+    "hub.editHint":        tr("Hold a tile to reorder or resize", "Зажмите плитку, чтобы переставить или изменить размер", "Tieni premuta una scheda per riordinare o ridimensionare", "Maintenez une tuile pour la réorganiser ou la redimensionner", "Sırasını və ölçüsünü dəyişmək üçün kafeli basılı saxlayın", "Sırasını veya boyutunu değiştirmek için kutucuğa uzun basın", "Затисніть плитку, щоб переставити або змінити розмір", "Ретін немесе өлшемін өзгерту үшін плитканы басып тұрыңыз"),
+    "hub.stat.shiftOpen":  tr("Open", "Открыта", "Aperta", "Ouverte", "Açıq", "Açık", "Відкрита", "Ашық"),
+    "hub.stat.shiftClosed": tr("Closed", "Закрыта", "Chiusa", "Fermée", "Bağlı", "Kapalı", "Закрита", "Жабық"),
+    "hub.stat.lowStock":   tr("running low", "на исходе", "in esaurimento", "en rupture", "azalır", "azalıyor", "закінчується", "таусылып барады"),
+    "hub.stat.onShift":    tr("on shift", "на смене", "in turno", "en service", "növbədə", "vardiyada", "на зміні", "ауысымда"),
+    "hub.stat.unreadNews": tr("new", "новых", "nuove", "nouvelles", "yeni", "yeni", "нових", "жаңа"),
     "faceid.loginReason":  tr("Sign in to Mise", "Вход в Mise", "Accesso a Mise", "Connexion à Mise", "Mise-ə giriş", "Mise'e giriş", "Вхід у Mise", "Mise-ге кіру"),
     "pe.iLeft":      tr("I'm leaving", "Я ушёл", "Sto uscendo", "Je pars", "Mən getdim", "Çıkıyorum", "Я пішов", "Мен кеттім"),
     "pe.checkedOut": tr("Check-out recorded", "Уход отмечен", "Uscita registrata", "Départ enregistré", "Çıxış qeyd olundu", "Çıkış kaydedildi", "Вихід зафіксовано", "Кету тіркелді"),

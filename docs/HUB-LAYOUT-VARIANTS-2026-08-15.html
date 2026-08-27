@@ -1,0 +1,447 @@
+<title>Mise — варианты хаба</title>
+
+<svg style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+<defs>
+<symbol id="i-manager" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="3"/><line x1="2" y1="10" x2="22" y2="10"/></symbol>
+<symbol id="i-analytics" viewBox="0 0 24 24"><rect x="4" y="13" width="4" height="7" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="16" y="4" width="4" height="16" rx="1"/></symbol>
+<symbol id="i-stash" viewBox="0 0 24 24"><path d="M3 8 12 4l9 4-9 4-9-4Z"/><path d="M3 8v9l9 4V12"/><path d="M21 8v9l-9 4"/></symbol>
+<symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.1"/><circle cx="16.5" cy="9.3" r="2.5"/><path d="M3.5 20c.4-3.9 2.7-6 5.5-6s5.1 2.1 5.5 6"/><path d="M15.5 14.4c2.2.2 3.9 2 4.2 5.1"/></symbol>
+<symbol id="i-bookings" viewBox="0 0 24 24"><rect x="3" y="5" width="14" height="15" rx="2.4"/><line x1="7" y1="3" x2="7" y2="6.5"/><line x1="13" y1="3" x2="13" y2="6.5"/><line x1="3" y1="9.5" x2="17" y2="9.5"/><circle cx="18" cy="17" r="4.3"/><path d="M18 15v2l1.4 1"/></symbol>
+<symbol id="i-news" viewBox="0 0 24 24"><path d="M3 9.5v5h3l8 4V5.5l-8 4H3Z"/><path d="M15.5 8.3c1.3 1.4 1.3 6 0 7.4"/></symbol>
+<symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 10a6 6 0 0 1 12 0c0 4 1.4 5.4 1.4 5.4H4.6S6 14 6 10Z"/><path d="M10 19a2 2 0 0 0 4 0"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18 6l-1.5 1.5M7.5 16.5 6 18M18 18l-1.5-1.5M7.5 7.5 6 6"/></symbol>
+</defs>
+</svg>
+
+<style>
+:root{
+  --bg:#f5f5f7;
+  --bg-elev:#ffffff;
+  --ink:#16161a;
+  --ink-dim:#68686f;
+  --ink-faint:#9a9aa1;
+  --line:rgba(20,20,30,.10);
+  --accent:#5856d6;
+  --accent-soft:rgba(88,86,214,.12);
+  --c-manager:#007aff;
+  --c-analytics:#34c759;
+  --c-stash:#ff9500;
+  --c-people:#5856d6;
+  --c-bookings:#00c7be;
+  --c-news:#ff375f;
+  --warn:#ff9500;
+  --good:#34c759;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0b0d; --bg-elev:#151517; --ink:#f2f2f4; --ink-dim:#9d9da4; --ink-faint:#6f6f76; --line:rgba(255,255,255,.09); --accent:#8f8dff; --accent-soft:rgba(143,141,255,.16); }
+}
+:root[data-theme="dark"]{ --bg:#0b0b0d; --bg-elev:#151517; --ink:#f2f2f4; --ink-dim:#9d9da4; --ink-faint:#6f6f76; --line:rgba(255,255,255,.09); --accent:#8f8dff; --accent-soft:rgba(143,141,255,.16); }
+:root[data-theme="light"]{ --bg:#f5f5f7; --bg-elev:#ffffff; --ink:#16161a; --ink-dim:#68686f; --ink-faint:#9a9aa1; --line:rgba(20,20,30,.10); --accent:#5856d6; --accent-soft:rgba(88,86,214,.12); }
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.page{max-width:1180px;margin:0 auto;padding:56px 28px 80px}
+
+/* ---------- intro ---------- */
+.eyebrow{font-size:12.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+h1{font-size:clamp(28px,4vw,40px);line-height:1.12;font-weight:750;letter-spacing:-.015em;margin:0 0 18px;text-wrap:balance;max-width:16ch}
+.lede{font-size:16.5px;line-height:1.6;color:var(--ink-dim);max-width:62ch;margin:0 0 32px}
+.jump{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.jump a{font-size:13px;font-weight:600;color:var(--ink);text-decoration:none;background:var(--bg-elev);border:1px solid var(--line);padding:7px 13px;border-radius:99px;transition:border-color .15s}
+.jump a:hover,.jump a:focus-visible{border-color:var(--accent);outline:none}
+
+header.intro{padding-bottom:44px;border-bottom:1px solid var(--line);margin-bottom:56px}
+
+/* ---------- variant section ---------- */
+.variant{padding:0 0 64px;border-bottom:1px solid var(--line);margin-bottom:64px;scroll-margin-top:24px}
+.variant:last-of-type{border-bottom:none}
+.variant-head{display:flex;align-items:baseline;gap:14px;margin-bottom:6px}
+.tag{--t:var(--accent);flex:none;width:34px;height:34px;border-radius:10px;background:color-mix(in srgb, var(--t) 16%, transparent);color:var(--t);display:flex;align-items:center;justify-content:center;font-weight:750;font-size:15px}
+.variant-head h2{font-size:22px;font-weight:700;letter-spacing:-.01em;margin:0;text-wrap:balance}
+.variant-kicker{font-size:13.5px;color:var(--ink-faint);margin:0 0 28px 48px}
+
+.variant-body{display:grid;grid-template-columns:300px 1fr;gap:40px;align-items:start}
+@media (max-width:760px){ .variant-body{grid-template-columns:1fr;justify-items:center} }
+
+.notes p{font-size:15px;line-height:1.65;color:var(--ink-dim);margin:0 0 16px;max-width:52ch}
+.notes ul{margin:0 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+.notes li{font-size:14px;line-height:1.55;color:var(--ink);padding-left:18px;position:relative;max-width:50ch}
+.notes li::before{content:"";position:absolute;left:0;top:7px;width:6px;height:6px;border-radius:50%;background:var(--tag,var(--accent))}
+.notes .risk{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink-faint)}
+.notes .risk b{color:var(--ink-dim);font-weight:600}
+
+/* ---------- phone chrome ---------- */
+.phone{width:286px;height:620px;border-radius:46px;background:#000;padding:12px;box-shadow:0 30px 60px -20px rgba(0,0,0,.35),0 2px 8px rgba(0,0,0,.15);flex:none}
+.screen{position:relative;width:100%;height:100%;background:#000;border-radius:36px;overflow:hidden;color:#fff}
+.island{position:absolute;top:9px;left:50%;transform:translateX(-50%);width:84px;height:24px;background:#000;border-radius:16px;border:1px solid rgba(255,255,255,.14);z-index:5}
+.home-ind{position:absolute;bottom:7px;left:50%;transform:translateX(-50%);width:110px;height:4px;border-radius:3px;background:rgba(255,255,255,.5);z-index:5}
+
+.statusbar{display:flex;align-items:center;justify-content:space-between;padding:16px 22px 4px;font-size:14px;font-weight:650;font-variant-numeric:tabular-nums}
+.status-icons{display:flex;align-items:center;gap:5px}
+.sig{display:flex;align-items:flex-end;gap:1.5px;height:10px}
+.sig i{display:block;width:2.5px;background:#fff;border-radius:1px}
+.sig i:nth-child(1){height:40%}.sig i:nth-child(2){height:60%}.sig i:nth-child(3){height:80%}.sig i:nth-child(4){height:100%}
+.wifi{width:14px;height:10px}
+.batt{width:22px;height:11px;border:1.3px solid #fff;border-radius:2.5px;position:relative;display:flex;align-items:center;padding:1.2px}
+.batt::after{content:"";position:absolute;right:-3px;top:3px;width:1.6px;height:5px;background:#fff;border-radius:0 1px 1px 0}
+.batt i{display:block;width:88%;height:100%;background:#fff;border-radius:1px}
+
+.content{padding:6px 18px 0;height:calc(100% - 44px);overflow:hidden}
+.brand-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0 2px}
+.wordmark{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.wordmark span{background:linear-gradient(90deg,#5856d6,#ff375f);-webkit-background-clip:text;background-clip:text;color:transparent}
+.head-icons{display:flex;align-items:center;gap:14px;color:rgba(255,255,255,.55)}
+.head-icons svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+.who{padding:14px 0 16px}
+.who h3{font-size:21px;font-weight:750;margin:0 0 2px}
+.who p{font-size:12.5px;color:rgba(255,255,255,.45);margin:0}
+
+.icon{stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+/* ===== A: bento ===== */
+.bento{display:flex;flex-direction:column;gap:10px}
+.tile{display:block;border-radius:18px;padding:14px;text-decoration:none;color:#fff;border:1px solid;background:color-mix(in srgb, var(--c) 14%, #000 0%);border-color:color-mix(in srgb, var(--c) 30%, transparent)}
+.tile .chip{width:38px;height:38px;border-radius:11px;background:color-mix(in srgb, var(--c) 24%, transparent);display:flex;align-items:center;justify-content:center;color:var(--c);margin-bottom:10px}
+.tile .chip svg{width:19px;height:19px}
+.tile .ttl{font-size:15.5px;font-weight:700;margin:0}
+.tile .sub{font-size:11.5px;color:rgba(255,255,255,.5);margin:2px 0 0}
+.tile.big{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.tile.big .left{display:flex;align-items:center;gap:12px}
+.tile.big .chip{margin-bottom:0}
+.pill{font-size:10.5px;font-weight:700;padding:4px 9px;border-radius:99px;background:color-mix(in srgb, var(--c) 26%, transparent);color:var(--c)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row2 .tile{min-height:104px;display:flex;flex-direction:column;justify-content:space-between}
+.row2 .stat{font-size:11px;color:rgba(255,255,255,.55);margin-top:8px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.row3 .tile{padding:12px 10px;min-height:78px;position:relative}
+.row3 .chip{width:30px;height:30px;border-radius:9px}
+.row3 .chip svg{width:15px;height:15px}
+.row3 .ttl{font-size:12px}
+.dot-badge{position:absolute;top:10px;right:10px;width:8px;height:8px;border-radius:50%;background:var(--c-news)}
+
+/* ===== B: list ===== */
+.group-label{font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:rgba(255,255,255,.38);margin:16px 2px 8px}
+.group-label:first-child{margin-top:2px}
+.list-card{background:rgba(255,255,255,.055);border-radius:16px;overflow:hidden}
+.lrow{display:flex;align-items:center;gap:11px;padding:11px 13px}
+.lrow + .lrow{border-top:1px solid rgba(255,255,255,.08)}
+.lrow .chip{width:32px;height:32px;border-radius:9px;background:color-mix(in srgb, var(--c) 22%, transparent);color:var(--c);display:flex;align-items:center;justify-content:center;flex:none}
+.lrow .chip svg{width:16px;height:16px}
+.lrow .txt{flex:1;min-width:0}
+.lrow .ttl{font-size:14.5px;font-weight:650;margin:0}
+.lrow .sub{font-size:11px;color:rgba(255,255,255,.42);margin:1px 0 0}
+.lrow .right{font-size:12px;color:rgba(255,255,255,.4);font-variant-numeric:tabular-nums;flex:none;display:flex;align-items:center;gap:6px}
+.lrow .right .pill{font-size:10px;padding:3px 8px}
+.lrow svg.chev{width:13px;height:13px;stroke:rgba(255,255,255,.28);stroke-width:2}
+
+/* ===== C: hero + dock ===== */
+.hero{display:block;text-decoration:none;color:#fff;border-radius:22px;padding:18px;background:linear-gradient(155deg, color-mix(in srgb, var(--c-manager) 55%, #000 20%), color-mix(in srgb, var(--c-manager) 20%, #000 60%));margin-top:4px}
+.hero-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.hero-label{font-size:12px;font-weight:650;color:rgba(255,255,255,.72)}
+.hero-pill{font-size:10.5px;font-weight:700;background:rgba(255,255,255,.18);padding:4px 9px;border-radius:99px}
+.hero-num{font-size:30px;font-weight:750;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.spark{display:block;width:100%;height:34px;margin:10px 0 4px}
+.hero-cta{display:flex;align-items:center;gap:4px;font-size:12.5px;font-weight:650;color:rgba(255,255,255,.85);margin-top:8px}
+.hero-cta svg{width:13px;height:13px;stroke-width:2}
+.dock{display:flex;gap:16px;overflow-x:auto;padding:18px 2px 6px;scrollbar-width:none}
+.dock::-webkit-scrollbar{display:none}
+.dock-item{flex:none;width:60px;display:flex;flex-direction:column;align-items:center;gap:7px;text-decoration:none}
+.dock-item .circ{width:52px;height:52px;border-radius:50%;background:color-mix(in srgb, var(--c) 20%, transparent);display:flex;align-items:center;justify-content:center;color:var(--c)}
+.dock-item .circ svg{width:22px;height:22px}
+.dock-item span{font-size:10.5px;color:rgba(255,255,255,.6);font-weight:600}
+
+/* ===== D: monochrome editorial ===== */
+.mono-list{display:flex;flex-direction:column;margin-top:6px}
+.mrow{display:flex;align-items:center;gap:13px;padding:16px 2px}
+.mrow + .mrow{border-top:1px solid rgba(255,255,255,.08)}
+.mrow .dotc{width:6px;height:6px;border-radius:50%;background:var(--c);flex:none}
+.mrow svg.micon{width:20px;height:20px;stroke:rgba(255,255,255,.82);stroke-width:1.5;flex:none}
+.mrow .txt{flex:1;min-width:0}
+.mrow .ttl{font-size:15px;font-weight:600;margin:0;letter-spacing:-.005em}
+.mrow .sub{font-size:11px;color:rgba(255,255,255,.4);margin:1px 0 0}
+.mrow .num{font-size:17px;font-weight:300;color:var(--c);font-variant-numeric:tabular-nums;margin-right:2px}
+.mrow svg.chev{width:12px;height:12px;stroke:rgba(255,255,255,.25);stroke-width:2;flex:none}
+
+/* ===== E: live dashboard ===== */
+.wgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px}
+.widget{background:rgba(255,255,255,.055);border-radius:16px;padding:12px;position:relative;overflow:hidden}
+.widget::before{content:"";position:absolute;top:0;left:0;right:0;height:2.5px;background:var(--c)}
+.widget .whead{display:flex;align-items:center;gap:6px;color:var(--c);margin-bottom:10px}
+.widget .whead svg{width:13px;height:13px}
+.widget .whead span{font-size:10.5px;font-weight:700;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:.03em}
+.widget .wnum{font-size:19px;font-weight:750;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.widget .wcap{font-size:10.5px;color:rgba(255,255,255,.42);margin-top:3px}
+.widget .wcap.warn{color:var(--warn)}
+.widget .wcap.good{color:var(--good)}
+
+/* ---------- footer table ---------- */
+.wrap-table{overflow-x:auto;border-radius:16px;border:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;font-size:14px;min-width:640px}
+thead th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);font-weight:650;padding:12px 16px;background:var(--bg-elev)}
+tbody td{padding:14px 16px;border-top:1px solid var(--line);vertical-align:top;color:var(--ink-dim);line-height:1.5}
+tbody td:first-child{color:var(--ink);font-weight:650;white-space:nowrap}
+tbody tr:nth-child(even) td{background:color-mix(in srgb, var(--bg-elev) 60%, transparent)}
+footer.outro{margin-top:8px}
+footer.outro h2{font-size:20px;font-weight:700;margin:0 0 18px}
+</style>
+
+<div class="page">
+
+<header class="intro">
+  <p class="eyebrow">Mise · экран выбора модуля</p>
+  <h1>Пять способов пересобрать хаб</h1>
+  <p class="lede">Сейчас после входа — сетка 2×2, все плитки равного веса: иконка, заголовок, подпись (<code>MainView.swift</code>, <code>LauncherView</code>). Ниже — пять самостоятельных направлений: от лёгкой перекомпоновки веса до смены самой идеи экрана — из навигационного меню в живой дашборд. Цвета и иконки взяты из <code>Theme.swift</code>, контент — реальные модули (Manager, Analytics, Stash, People, Bookings, News).</p>
+  <nav class="jump">
+    <a href="#a">A · Бенто по частоте</a>
+    <a href="#b">B · Список (Settings-style)</a>
+    <a href="#c">C · Герой + док</a>
+    <a href="#d">D · Монохром-редакториал</a>
+    <a href="#e">E · Живой дашборд</a>
+  </nav>
+</header>
+
+<!-- ================= A ================= -->
+<section class="variant" id="a">
+  <div class="variant-head"><span class="tag" style="--t:var(--c-manager)">A</span><h2>Бенто-грид: размер плитки = частота обращения</h2></div>
+  <p class="variant-kicker">Manager открывают каждую смену — остальное реже. Вес плиток это отражает.</p>
+  <div class="variant-body">
+
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="statusbar"><span>9:41</span><span class="status-icons">
+        <span class="sig"><i></i><i></i><i></i><i></i></span>
+        <svg class="wifi" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M1 4.5a10 10 0 0 1 14 0M3.3 7.3a6.3 6.3 0 0 1 9.4 0M5.7 10a2.8 2.8 0 0 1 4.6 0"/></svg>
+        <span class="batt"><i></i></span>
+      </span></div>
+      <div class="content">
+        <div class="brand-row"><div class="wordmark">mis<span>e</span></div><div class="head-icons"><svg><use href="#i-bell"/></svg><svg><use href="#i-gear"/></svg></div></div>
+        <div class="who"><h3>SO</h3><p>Рахим</p></div>
+        <div class="bento">
+          <a class="tile big" style="--c:var(--c-manager)">
+            <div class="left"><div class="chip"><svg><use href="#i-manager"/></svg></div><div><p class="ttl">Manager</p><p class="sub">Смены и касса</p></div></div>
+            <span class="pill">Открыта · 14:32</span>
+          </a>
+          <div class="row2">
+            <a class="tile" style="--c:var(--c-analytics)"><div><div class="chip"><svg><use href="#i-analytics"/></svg></div><p class="ttl">Analytics</p><p class="sub">Выручка</p></div><p class="stat">▲ 12% к вчера</p></a>
+            <a class="tile" style="--c:var(--c-stash)"><div><div class="chip"><svg><use href="#i-stash"/></svg></div><p class="ttl">Stash</p><p class="sub">Склад</p></div><p class="stat">2 на исходе</p></a>
+          </div>
+          <div class="row3">
+            <a class="tile" style="--c:var(--c-people)"><div class="chip"><svg><use href="#i-people"/></svg></div><p class="ttl">People</p></a>
+            <a class="tile" style="--c:var(--c-bookings)"><div class="chip"><svg><use href="#i-bookings"/></svg></div><p class="ttl">Bookings</p></a>
+            <a class="tile" style="--c:var(--c-news)"><div class="chip"><svg><use href="#i-news"/></svg></div><p class="ttl">News</p><span class="dot-badge"></span></a>
+          </div>
+        </div>
+      </div>
+      <div class="home-ind"></div>
+    </div></div>
+
+    <div class="notes" style="--tag:var(--c-manager)">
+      <p>Manager получает полноширинную плитку с живым статусом смены прямо на хабе — не нужно заходить, чтобы понять, открыта ли касса. Analytics и Stash — на второй по значимости уровень, с одной ключевой цифрой каждая. People/Bookings/News — компактный ряд для точечных заходов.</p>
+      <ul>
+        <li>Иерархия считывается за долю секунды — не все шесть модулей соревнуются за внимание</li>
+        <li>Заготовка под будущее: новый модуль просто занимает своё место в третьем ряду</li>
+        <li>Мини-статы (12%, «2 на исходе») дают повод открыть приложение не только для навигации</li>
+      </ul>
+      <p class="risk"><b>Риск.</b> Вес плитки — решение продукта, не пользователя: если у ресторана Analytics важнее Manager, сетку придётся либо адаптировать по роли, либо смириться с неидеальным умолчанием.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= B ================= -->
+<section class="variant" id="b">
+  <div class="variant-head"><span class="tag" style="--t:var(--c-people)">B</span><h2>Список в духе Settings.app: группы вместо сетки</h2></div>
+  <p class="variant-kicker">Группировка сама по себе несёт смысл: «Операции» — деньги и склад, «Команда» — люди и коммуникация.</p>
+  <div class="variant-body">
+
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="statusbar"><span>9:41</span><span class="status-icons">
+        <span class="sig"><i></i><i></i><i></i><i></i></span>
+        <svg class="wifi" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M1 4.5a10 10 0 0 1 14 0M3.3 7.3a6.3 6.3 0 0 1 9.4 0M5.7 10a2.8 2.8 0 0 1 4.6 0"/></svg>
+        <span class="batt"><i></i></span>
+      </span></div>
+      <div class="content">
+        <div class="brand-row"><div class="wordmark">mis<span>e</span></div><div class="head-icons"><svg><use href="#i-bell"/></svg><svg><use href="#i-gear"/></svg></div></div>
+        <div class="who"><h3>SO</h3><p>Рахим</p></div>
+
+        <p class="group-label">Операции</p>
+        <div class="list-card">
+          <div class="lrow" style="--c:var(--c-manager)"><div class="chip"><svg><use href="#i-manager"/></svg></div><div class="txt"><p class="ttl">Manager</p><p class="sub">Смены и касса</p></div><div class="right"><span class="pill">Открыта</span><svg class="chev"><use href="#i-chevron"/></svg></div></div>
+          <div class="lrow" style="--c:var(--c-analytics)"><div class="chip"><svg><use href="#i-analytics"/></svg></div><div class="txt"><p class="ttl">Analytics</p><p class="sub">Выручка и аналитика</p></div><div class="right">184 400 ₽<svg class="chev"><use href="#i-chevron"/></svg></div></div>
+          <div class="lrow" style="--c:var(--c-stash)"><div class="chip"><svg><use href="#i-stash"/></svg></div><div class="txt"><p class="ttl">Stash</p><p class="sub">Склад и сессии</p></div><div class="right"><span class="pill" style="background:color-mix(in srgb, var(--warn) 26%, transparent);color:var(--warn)">2</span><svg class="chev"><use href="#i-chevron"/></svg></div></div>
+        </div>
+
+        <p class="group-label">Команда</p>
+        <div class="list-card">
+          <div class="lrow" style="--c:var(--c-people)"><div class="chip"><svg><use href="#i-people"/></svg></div><div class="txt"><p class="ttl">People</p><p class="sub">Команда и расписание</p></div><div class="right">6 на смене<svg class="chev"><use href="#i-chevron"/></svg></div></div>
+          <div class="lrow" style="--c:var(--c-bookings)"><div class="chip"><svg><use href="#i-bookings"/></svg></div><div class="txt"><p class="ttl">Bookings</p><p class="sub">Брони столов</p></div><div class="right">19:30<svg class="chev"><use href="#i-chevron"/></svg></div></div>
+          <div class="lrow" style="--c:var(--c-news)"><div class="chip"><svg><use href="#i-news"/></svg></div><div class="txt"><p class="ttl">News</p><p class="sub">Лента и объявления</p></div><div class="right"><span class="pill" style="background:color-mix(in srgb, var(--c-news) 26%, transparent);color:var(--c-news)">3</span><svg class="chev"><use href="#i-chevron"/></svg></div></div>
+        </div>
+      </div>
+      <div class="home-ind"></div>
+    </div></div>
+
+    <div class="notes" style="--tag:var(--c-people)">
+      <p>Ближе всего к нативному iOS-языку — одна колонка, построчно, точно как экран настроек. Правый край строки — самое ценное место: короткий статус (пилюля, число, время) без захода в модуль.</p>
+      <ul>
+        <li>Масштабируется без переверстки — седьмой модуль это ещё одна строка, не новая сетка</li>
+        <li>Группы «Операции» / «Команда» готовят почву под ролевые права: сотруднику можно скрыть всю группу «Операции»</li>
+        <li>Меньше визуального шума, чем цветные плитки — читается как рабочий инструмент, не витрина</li>
+      </ul>
+      <p class="risk"><b>Риск.</b> Теряется часть бренд-энергии текущих цветных иконок — список менее «глянцевый», больше про скорость, чем про впечатление при первом входе.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= C ================= -->
+<section class="variant" id="c">
+  <div class="variant-head"><span class="tag" style="--t:var(--c-bookings)">C</span><h2>Герой + док: один главный жест, остальное — под рукой</h2></div>
+  <p class="variant-kicker">Владелец открывает Mise в основном ради одного вопроса: «сколько в кассе». Остальное — на подхвате.</p>
+  <div class="variant-body">
+
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="statusbar"><span>9:41</span><span class="status-icons">
+        <span class="sig"><i></i><i></i><i></i><i></i></span>
+        <svg class="wifi" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M1 4.5a10 10 0 0 1 14 0M3.3 7.3a6.3 6.3 0 0 1 9.4 0M5.7 10a2.8 2.8 0 0 1 4.6 0"/></svg>
+        <span class="batt"><i></i></span>
+      </span></div>
+      <div class="content">
+        <div class="brand-row"><div class="wordmark">mis<span>e</span></div><div class="head-icons"><svg><use href="#i-bell"/></svg><svg><use href="#i-gear"/></svg></div></div>
+        <div class="who"><h3>SO</h3><p>Рахим</p></div>
+
+        <a class="hero">
+          <div class="hero-top"><span class="hero-label">КАССА СЕГОДНЯ</span><span class="hero-pill">Смена открыта</span></div>
+          <div class="hero-num">184 400 ₽</div>
+          <svg class="spark" viewBox="0 0 240 34" preserveAspectRatio="none"><polyline points="0,26 30,22 60,24 90,14 120,17 150,8 180,11 210,4 240,7" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="240" cy="7" r="3" fill="#fff"/></svg>
+          <div class="hero-cta">Открыть Manager <svg><use href="#i-chevron"/></svg></div>
+        </a>
+
+        <p class="group-label">Остальное</p>
+        <div class="dock">
+          <a class="dock-item" style="--c:var(--c-analytics)"><div class="circ"><svg><use href="#i-analytics"/></svg></div><span>Analytics</span></a>
+          <a class="dock-item" style="--c:var(--c-stash)"><div class="circ"><svg><use href="#i-stash"/></svg></div><span>Stash</span></a>
+          <a class="dock-item" style="--c:var(--c-people)"><div class="circ"><svg><use href="#i-people"/></svg></div><span>People</span></a>
+          <a class="dock-item" style="--c:var(--c-bookings)"><div class="circ"><svg><use href="#i-bookings"/></svg></div><span>Bookings</span></a>
+          <a class="dock-item" style="--c:var(--c-news)"><div class="circ"><svg><use href="#i-news"/></svg></div><span>News</span></a>
+        </div>
+      </div>
+      <div class="home-ind"></div>
+    </div></div>
+
+    <div class="notes" style="--tag:var(--c-bookings)">
+      <p>Верх экрана — не навигация, а ответ. Карточка кассы с суммой и мини-графиком закрывает самый частый вопрос без единого тапа. Остальные пять модулей уходят в горизонтальный док — доступны, но не спорят за внимание с главным числом.</p>
+      <ul>
+        <li>Первый экран отвечает на вопрос, а не просто предлагает выбор — экономит один переход почти всегда</li>
+        <li>Док легко переставить под роль: у бухгалтера первым в доке может стоять Analytics</li>
+        <li>Свайпаемый ряд не ограничен шестью иконками — растёт вбок, не вниз</li>
+      </ul>
+      <p class="risk"><b>Риск.</b> Работает, только если у роли есть один явный «главный» модуль. Для менеджера без доступа к кассе герою нечем быть — нужен второй вариант героя или откат к плоскому доку.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= D ================= -->
+<section class="variant" id="d">
+  <div class="variant-head"><span class="tag" style="--t:var(--ink-dim)">D</span><h2>Монохром-редакториал: цвет — только как метка</h2></div>
+  <p class="variant-kicker">Без заливок и чипов. Один тонкий акцент на модуль — и много воздуха.</p>
+  <div class="variant-body">
+
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="statusbar"><span>9:41</span><span class="status-icons">
+        <span class="sig"><i></i><i></i><i></i><i></i></span>
+        <svg class="wifi" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M1 4.5a10 10 0 0 1 14 0M3.3 7.3a6.3 6.3 0 0 1 9.4 0M5.7 10a2.8 2.8 0 0 1 4.6 0"/></svg>
+        <span class="batt"><i></i></span>
+      </span></div>
+      <div class="content">
+        <div class="brand-row"><div class="wordmark">mis<span>e</span></div><div class="head-icons"><svg><use href="#i-bell"/></svg><svg><use href="#i-gear"/></svg></div></div>
+        <div class="who"><h3>SO</h3><p>Рахим</p></div>
+
+        <div class="mono-list">
+          <div class="mrow" style="--c:var(--c-manager)"><span class="dotc"></span><svg class="micon"><use href="#i-manager"/></svg><div class="txt"><p class="ttl">Manager</p><p class="sub">Смены и касса</p></div><svg class="chev"><use href="#i-chevron"/></svg></div>
+          <div class="mrow" style="--c:var(--c-analytics)"><span class="dotc"></span><svg class="micon"><use href="#i-analytics"/></svg><div class="txt"><p class="ttl">Analytics</p><p class="sub">Выручка и аналитика</p></div><svg class="chev"><use href="#i-chevron"/></svg></div>
+          <div class="mrow" style="--c:var(--c-stash)"><span class="dotc"></span><svg class="micon"><use href="#i-stash"/></svg><div class="txt"><p class="ttl">Stash</p><p class="sub">Склад и сессии</p></div><span class="num">2</span><svg class="chev"><use href="#i-chevron"/></svg></div>
+          <div class="mrow" style="--c:var(--c-people)"><span class="dotc"></span><svg class="micon"><use href="#i-people"/></svg><div class="txt"><p class="ttl">People</p><p class="sub">Команда и расписание</p></div><svg class="chev"><use href="#i-chevron"/></svg></div>
+          <div class="mrow" style="--c:var(--c-bookings)"><span class="dotc"></span><svg class="micon"><use href="#i-bookings"/></svg><div class="txt"><p class="ttl">Bookings</p><p class="sub">Брони столов</p></div><svg class="chev"><use href="#i-chevron"/></svg></div>
+          <div class="mrow" style="--c:var(--c-news)"><span class="dotc"></span><svg class="micon"><use href="#i-news"/></svg><div class="txt"><p class="ttl">News</p><p class="sub">Лента и объявления</p></div><span class="num">3</span><svg class="chev"><use href="#i-chevron"/></svg></div>
+        </div>
+      </div>
+      <div class="home-ind"></div>
+    </div></div>
+
+    <div class="notes" style="--tag:var(--ink-dim)">
+      <p>Иконки — просто линии белого цвета, без цветной подложки. Бренд-цвет модуля сжимается до точки слева — метка, не украшение. Число справа появляется только там, где есть что показать (склад на исходе, непрочитанные новости).</p>
+      <ul>
+        <li>Меньше всего конкурирует с данными внутри модулей — хаб не «кричит» громче, чем экраны за ним</li>
+        <li>Близко к направлению iOS 18 (Shortcuts, Journal) — тонкие линии, точка вместо чипа</li>
+        <li>Число вместо статус-пилюли компактнее — влезает больше строк без скролла</li>
+      </ul>
+      <p class="risk"><b>Риск.</b> Шесть ярких плиток сейчас — часть первого впечатления при входе; монохром спокойнее, но менее «вау» в момент онбординга нового пользователя.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= E ================= -->
+<section class="variant" id="e">
+  <div class="variant-head"><span class="tag" style="--t:var(--c-analytics)">E</span><h2>Живой дашборд: каждая плитка — мини-виджет</h2></div>
+  <p class="variant-kicker">Не «куда зайти», а «что происходит прямо сейчас» — с переходом в модуль по тапу.</p>
+  <div class="variant-body">
+
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="statusbar"><span>9:41</span><span class="status-icons">
+        <span class="sig"><i></i><i></i><i></i><i></i></span>
+        <svg class="wifi" viewBox="0 0 16 12" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M1 4.5a10 10 0 0 1 14 0M3.3 7.3a6.3 6.3 0 0 1 9.4 0M5.7 10a2.8 2.8 0 0 1 4.6 0"/></svg>
+        <span class="batt"><i></i></span>
+      </span></div>
+      <div class="content">
+        <div class="brand-row"><div class="wordmark">mis<span>e</span></div><div class="head-icons"><svg><use href="#i-bell"/></svg><svg><use href="#i-gear"/></svg></div></div>
+        <div class="who"><h3>SO</h3><p>Рахим</p></div>
+
+        <div class="wgrid">
+          <div class="widget" style="--c:var(--c-manager)"><div class="whead"><svg><use href="#i-manager"/></svg><span>Manager</span></div><div class="wnum">184 400 ₽</div><p class="wcap good">Смена открыта</p></div>
+          <div class="widget" style="--c:var(--c-analytics)"><div class="whead"><svg><use href="#i-analytics"/></svg><span>Analytics</span></div><div class="wnum">+12%</div><p class="wcap">к вчерашнему дню</p></div>
+          <div class="widget" style="--c:var(--c-stash)"><div class="whead"><svg><use href="#i-stash"/></svg><span>Stash</span></div><div class="wnum">2</div><p class="wcap warn">позиции на исходе</p></div>
+          <div class="widget" style="--c:var(--c-people)"><div class="whead"><svg><use href="#i-people"/></svg><span>People</span></div><div class="wnum">6/8</div><p class="wcap">на смене сейчас</p></div>
+          <div class="widget" style="--c:var(--c-bookings)"><div class="whead"><svg><use href="#i-bookings"/></svg><span>Bookings</span></div><div class="wnum">19:30</div><p class="wcap">Мельник, стол 4</p></div>
+          <div class="widget" style="--c:var(--c-news)"><div class="whead"><svg><use href="#i-news"/></svg><span>News</span></div><div class="wnum">3</div><p class="wcap">новых записи</p></div>
+        </div>
+      </div>
+      <div class="home-ind"></div>
+    </div></div>
+
+    <div class="notes" style="--tag:var(--c-analytics)">
+      <p>Плитка перестаёт быть просто ярлыком и показывает главную цифру модуля: касса, дельта выручки, дефицит склада, кто на смене, ближайшая бронь, непрочитанные новости. Данные для всего этого уже считаются — тот же снэпшот, что питает виджет на домашнем экране (<code>SnapshotWriter</code>).</p>
+      <ul>
+        <li>Единственный вариант, где хаб полезен даже без единого тапа — как утренняя сводка</li>
+        <li>Переиспользует готовую инфраструктуру расчётов, а не только UI-слой</li>
+        <li>Настраивается по роли естественно: сотруднику можно скрыть цифру кассы, оставив только статус</li>
+      </ul>
+      <p class="risk"><b>Риск.</b> Больше всего работы на бэкенде экрана — шесть живых чисел вместо одной загрузки списка; нужна и оффлайн/skeleton-раскладка на время подгрузки данных.</p>
+    </div>
+  </div>
+</section>
+
+<footer class="outro">
+  <h2>Коротко</h2>
+  <div class="wrap-table"><table>
+    <thead><tr><th>Вариант</th><th>Лучше всего при…</th><th>Цена</th></tr></thead>
+    <tbody>
+      <tr><td>A · Бенто</td><td>Есть чёткий «модуль дня» (Manager), остальные — вспомогательные</td><td>Вес плиток надо поддерживать вручную или по роли</td></tr>
+      <tr><td>B · Список</td><td>Много модулей, важна скорость сканирования и ролевые группы</td><td>Меньше визуальной яркости при первом входе</td></tr>
+      <tr><td>C · Герой + док</td><td>У роли есть один доминирующий сценарий («сколько в кассе»)</td><td>Нет универсального героя для всех ролей</td></tr>
+      <tr><td>D · Монохром</td><td>Хаб не должен спорить за внимание с экранами внутри</td><td>Меньше «вау»-эффекта при онбординге</td></tr>
+      <tr><td>E · Дашборд</td><td>Хаб как источник инфы, не только переход</td><td>Больше бэкенд-работы, нужен skeleton-стейт</td></tr>
+    </tbody>
+  </table></div>
+</footer>
+
+</div>

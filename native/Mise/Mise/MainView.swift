@@ -63,18 +63,26 @@ struct MainView: View {
 private struct LauncherView: View {
     @Environment(AppModel.self) private var app
 
-    private let cols = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
     @State private var showSettings = false
+    @State private var editing = false
+    @State private var showEditHint = !UserDefaults.standard.bool(forKey: "mise_hub_edit_hint_seen")
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Wordmark(size: 24)
                 Spacer()
-                NotificationBell()
-                Button { showSettings = true } label: {
-                    Image(systemName: "gearshape.fill")
-                        .font(.system(size: 17)).foregroundStyle(.primary.opacity(0.6))
+                if editing {
+                    Button(t("done")) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { editing = false }
+                    }
+                    .font(.system(size: 15, weight: .semibold))
+                } else {
+                    NotificationBell()
+                    Button { showSettings = true } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 17)).foregroundStyle(.primary.opacity(0.6))
+                    }
                 }
             }
             .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 4)
@@ -87,40 +95,22 @@ private struct LauncherView: View {
                     .font(.system(size: 14)).foregroundStyle(.primary.opacity(0.5))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 22)
+            .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 14)
 
-            ScrollView {
-                LazyVGrid(columns: cols, spacing: 14) {
-                    ForEach(app.availableApps.compactMap { miseModules[$0] }) { mod in
-                        Button {
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            app.openApp(mod.id)
-                        } label: { tile(mod) }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 20)
+            if showEditHint {
+                Text(t("hub.editHint"))
+                    .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
+                    .padding(.horizontal, 20).padding(.bottom, 10)
+                    .transition(.opacity)
             }
-            Spacer(minLength: 0)
-        }
-    }
 
-    private func tile(_ mod: MiseModule) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous).fill(mod.color.opacity(0.18))
-                    .frame(width: 54, height: 54)
-                Image(systemName: mod.symbol).font(.system(size: 24)).foregroundStyle(mod.color)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(mod.title).font(.system(size: 17, weight: .bold)).foregroundStyle(.primary)
-                Text(t("mod.\(mod.id).sub")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.45))
-                    .lineLimit(2, reservesSpace: true)
-            }
+            HubGridView(editing: $editing)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .onChange(of: editing) { _, now in
+            guard now, showEditHint else { return }
+            UserDefaults.standard.set(true, forKey: "mise_hub_edit_hint_seen")
+            withAnimation { showEditHint = false }
+        }
     }
 }
 
