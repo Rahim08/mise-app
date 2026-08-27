@@ -187,11 +187,16 @@ final class ManagerSalaryModel {
                 if !ok { flash(t("bk.saveFailed")) }
             } else {
                 let (baseAmount, newExpense, newReason, newTotal) = applyAdvance(ink)
-                try? await DB.from("inkassations").insert([
-                    "shift_id": shift.id, "restaurant_id": rid, "date": shift.date,
-                    "amount": baseAmount, "expense": newExpense, "reason": newReason,
-                    "salary": 0, "total": newTotal,
-                ] as [String: Any]).run()
+                // Раньше `try?` глотал ошибку insert без единого следа: salary_advances уже
+                // записан (аванс числится в списке сотрудника), а инкассация — нет, деньги
+                // молча выпадают из кассы (money-integrity, тот же класс багов, что A5 выше).
+                do {
+                    try await DB.from("inkassations").insert([
+                        "shift_id": shift.id, "restaurant_id": rid, "date": shift.date,
+                        "amount": baseAmount, "expense": newExpense, "reason": newReason,
+                        "salary": 0, "total": newTotal,
+                    ] as [String: Any]).run()
+                } catch { flash(t("saveFailed", ["err": error.localizedDescription])) }
             }
         } else {
             flash(t("bk.advanceInkassationMissing"))
@@ -286,9 +291,9 @@ final class ManagerSalaryModel {
             .lte("date", key(y)).order("date", ascending: false).order("opened_at", ascending: false).limit(1).list(ClosingOnly.self)
         return rows.first?.closing_balance ?? 0
     }
-    private func ensureShift(dateStr: String, before date: Date) async -> String? {
+    private func ensureShift(dateStr: String, before date: Date) async -> (id: String, inkassation: Double)? {
         if let existing = try? await DB.from("shifts").select().eq("date", dateStr).order("opened_at").list(Shift.self), let sh = existing.first {
-            return sh.id
+            return (sh.id, sh.inkassation ?? 0)
         }
         guard let opening = try? await prevClosingForPayout(before: date) else { return nil }
         let values: [String: Any] = [
@@ -297,7 +302,7 @@ final class ManagerSalaryModel {
             "closing_balance": opening, "status": "open",
         ]
         guard let sh = try? await DB.from("shifts").insert(values).single(Shift.self) else { return nil }
-        return sh.id
+        return (sh.id, 0)
     }
 
     // Выплата ЗП «прямо из инкассации» (юзер-фидбок 2026-08-13): одно действие одновременно
@@ -317,7 +322,7 @@ final class ManagerSalaryModel {
         let dateStr = key(date)
 
         if method == "cash" {
-            guard let shiftId = await ensureShift(dateStr: dateStr, before: date) else {
+            guard let (shiftId, shiftInk) = await ensureShift(dateStr: dateStr, before: date) else {
                 flash(t("saveFailed", ["err": "shift"])); return false
             }
             struct InkRow: Codable, Sendable { let id: String; let amount: Double?; let expense: Double?; let salary: Double?; let salary_note: String? }
@@ -372,6 +377,7 @@ final class ManagerSalaryModel {
             } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return false }
 
             var ok: Bool
+            var errMsg = "race"
             if let cur = current {
                 var values = applyPayment((cur.amount, cur.expense, cur.salary, cur.salary_note))
                 ok = await casUpdateInk(shiftId: shiftId, casField: "salary", casValue: cur.salary ?? 0, values: values)
@@ -380,13 +386,19 @@ final class ManagerSalaryModel {
                     ok = await casUpdateInk(shiftId: shiftId, casField: "salary", casValue: fresh.salary ?? 0, values: values)
                 }
             } else {
-                let values = applyPayment((nil, nil, nil, nil))
+                // Свежая строка (для этой смены ещё не было ни расхода, ни инкассации) — в
+                // отличие от update-ветки выше, insert должен нести amount/expense явно
+                // (иначе NOT NULL на amount валил insert, а ошибка гасилась ниже под ярлыком
+                // «race», хотя это вообще не гонка — баг 2026-08-16, реальный кейс юзера).
+                var values = applyPayment((shiftInk, 0, nil, nil))
+                values["amount"] = shiftInk
+                values["expense"] = 0.0
                 do { try await DB.from("inkassations").insert(values.merging(["shift_id": shiftId]) { a, _ in a }).run(); ok = true }
-                catch { ok = false }
+                catch { ok = false; errMsg = error.localizedDescription }
             }
             guard ok else {
                 if let payId = payRow?.id { try? await DB.from("salary_payments").delete().eq("id", payId).run() }
-                flash(t("saveFailed", ["err": "race"])); return false
+                flash(t("saveFailed", ["err": errMsg])); return false
             }
             flash(t("pe.paymentSaved"))
             await load()
@@ -560,7 +572,16 @@ private struct ManagerSalaryBody: View {
 
     private var heroCard: some View {
         let totalCash = sm.rows.reduce(0) { $0 + $1.cash }
-        let totalCard = sm.rows.reduce(0) { $0 + $1.card }
+        // Клампим advance/card по total сотрудника (юзер-фидбок 2026-08-15: «наличными» +
+        // «на карту» не давали сумму фонда) — если аванс/карта суммарно ПРЕВЫШАЮТ total
+        // (переавансирование, или карта осталась настроена у сотрудника, чей total обнулился
+        // прогулами), излишек молча выпадал из cash (max(0, …) в computeSalary), но полностью
+        // оставался в totalCard/totalAdvance — фонд наверху и три блока внизу расходились
+        // ровно на этот излишек. Приоритет: аванс списывается из total первым, карта — из
+        // остатка. cash по каждой строке уже верно (max(0, total-advance-card)), клампим
+        // только для агрегатов, чтобы cash+card+advance ВСЕГДА равнялось fund.
+        let totalAdvance = sm.rows.reduce(0) { $0 + min($1.advance, $1.total) }
+        let totalCard = sm.rows.reduce(0) { s, r in s + min(r.card, max(0, r.total - min(r.advance, r.total))) }
         return VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(t("an.payrollFund")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.75)).kerning(0.4)
@@ -573,6 +594,10 @@ private struct ManagerSalaryBody: View {
                 heroMini(t("byCash"), eur(totalCash), .white)
                 Divider().frame(height: 28).overlay(Color.white.opacity(0.15))
                 heroMini(t("toCard"), eur(totalCard), .white.opacity(0.85))
+                if totalAdvance > 0 {
+                    Divider().frame(height: 28).overlay(Color.white.opacity(0.15))
+                    heroMini(t("an.advance"), eur(totalAdvance), .white.opacity(0.85))
+                }
             }
             .padding(.vertical, 10)
             if sm.isCurrentMonth {
@@ -694,6 +719,13 @@ private struct ManagerMarkPaidSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                // Ошибка из markSalaryPaid (недостаточно в инкассации, гонка, нет смены) раньше
+                // уходила в sm.toast, который рендерится в ManagerSalaryBody — под этой шторкой,
+                // невидимо. Юзер жал «Сохранить выплату», шторка не закрывалась, а почему —
+                // не было видно совсем: выглядело как «кнопка ничего не делает».
+                if let toast = sm.toast {
+                    Section { Text(toast).font(.system(size: 13, weight: .semibold)).foregroundStyle(.red) }
+                }
                 Section {
                     HStack {
                         Text(t("pe.paymentAmount"))
