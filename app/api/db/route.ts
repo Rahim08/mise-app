@@ -80,6 +80,16 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   bank_transactions:           { read: ['manager', 'analytics'], write: [] },
 }
 
+// RPC allowlist — same per-app authorization model as POLICY, for atomic SQL functions a
+// client can't express as a plain insert/update (e.g. `quantity_g = quantity_g + delta`,
+// which a read-then-write from the client can't do atomically). `restaurantArg` is the
+// name of the scoping parameter in the SQL function signature — always overwritten with
+// caller.rid below, never trusted from client-supplied args (audit MISE-006, 2026-08-28).
+const RPC_POLICY: Record<string, { write: AppId[]; restaurantArg: string }> = {
+  increment_tobacco_stock: { write: ['stash'], restaurantArg: 'p_restaurant_id' },
+  settle_debts: { write: ['manager'], restaurantArg: 'p_restaurant_id' },
+}
+
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'like', 'ilike'])
 
 // Generic backstop against a runaway client (retry loop with no backoff, scripted staff
@@ -210,7 +220,33 @@ export async function POST(req: NextRequest) {
   let body: any
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Bad request' }, { status: 400 }) }
 
-  const { table, op, columns, values, filters, order, limit, returning, onConflict } = body || {}
+  const { table, op, columns, values, filters, order, limit, returning, onConflict, fn, args } = body || {}
+
+  if (op === 'rpc') {
+    const rpcPolicy = RPC_POLICY[fn]
+    if (!rpcPolicy) return NextResponse.json({ error: 'Unknown function' }, { status: 400 })
+    if (!authorized(caller, rpcPolicy.write)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    // settle_debts может писать salary_payments (POLICY выше ограничивает эту таблицу
+    // 'people'-приложением, не 'manager') — сохраняем ту же границу здесь: менеджер без
+    // доступа к People не должен получить возможность создавать записи о выплате ЗП через
+    // этот RPC только потому, что он умеет settle_debts для обычных expense-долгов.
+    if (fn === 'settle_debts') {
+      const debts = Array.isArray((args as any)?.p_debts) ? (args as any).p_debts : []
+      const hasSalary = debts.some((d: any) => d && d.is_salary)
+      if (hasSalary && !authorized(caller, ['people'])) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
+    const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    const safeArgs = { ...(args && typeof args === 'object' ? args : {}), [rpcPolicy.restaurantArg]: caller.rid }
+    const { data, error } = await admin.rpc(fn, safeArgs)
+    if (error) {
+      console.error(`[api/db] rpc ${fn} failed:`, error)
+      return NextResponse.json({ error: clientSafeError(error), code: (error as any).code }, { status: 400 })
+    }
+    return NextResponse.json({ data })
+  }
+
   const policy = POLICY[table]
   if (!policy) return NextResponse.json({ error: 'Unknown table' }, { status: 400 })
 
