@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
           { role: 'user', content: userMessage },
         ],
         temperature: 0.2,
-        max_tokens: 512,
+        max_tokens: 900,
       }),
     })
     const d = await r.json()
@@ -98,7 +98,14 @@ export async function POST(req: NextRequest) {
       system = MANAGER_SYSTEM
       user = `${context ? 'Context: ' + context + '\n\n' : ''}User: ${message}`
     } else {
-      system = `You are a concise restaurant analytics assistant. ${langInstruction}Give a direct answer in 1-2 short sentences. No preamble, no suggestions, just the answer.`
+      // Professional-analyst tone + no-names-on-payroll rule (owner feedback 2026-08-30):
+      // the model was transliterating a Cyrillic employee name into Latin script mid-reply
+      // ("Рахим" → "Rahim"), and separately naming specific staff in pay-cut suggestions —
+      // uncomfortable for an owner-facing tool. Banning individual names in payroll context
+      // fixes both: no name in the output, no name left to mis-transliterate.
+      system = `You are a senior restaurant financial analyst reviewing this venue's numbers for its owner. ${langInstruction}Be precise, data-grounded and professional — reference concrete figures and trends from the data, not generic advice. Answer directly, no preamble, no filler.
+Output plain text only — no markdown (no **bold**, no #headers, no numbered lists). One observation or recommendation per line, each a complete short sentence or two, nothing more.
+HARD RULE, no exceptions: the data may list individual employee names next to payroll, extra-payment, absence, or cost figures — you must NEVER repeat any of those names in your answer, not even in passing. Talk about the money only ("extra payments totaled X", "payroll costs rose Y%"), never who received it. Bad: "1000 paid to Oleg and 700 to Dasha, review these". Good: "two extra payments of 1000 and 700 stand out as irregular — worth reviewing". The only exception is if the owner's question explicitly asks about one specific named person — then that one name is fine. Also never transliterate or otherwise alter any name that does appear — copy it exactly as given in the data.`
       user = `${context ? 'Data: ' + context + '\n\n' : ''}Question: ${message}`
     }
 
