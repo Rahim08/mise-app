@@ -1,24 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
-import { verifyStaffToken, STAFF_COOKIE } from '@/lib/staffToken'
+import { resolveCaller } from '@/lib/apiAuth'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
+// MISE-011 (аудит 2026-08-28): раньше здесь был отдельный verifyStaffToken(), в обход
+// resolveCaller() и его staffTokenRevoked()-проверки (lib/apiAuth.ts) — уволенный сотрудник
+// с валидной 10-летней кукой мог дёргать этот эндпоинт бесконечно после увольнения. Impact был
+// ограничен (эндпоинт не читает/не пишет бизнес-данные, только расходует AI-квоту под
+// rate-limit 20/мин), но нет причины держать отдельный auth-путь без ревокации.
 async function getRestaurantId(req: NextRequest): Promise<string | null> {
-  const staff = verifyStaffToken(req.cookies.get(STAFF_COOKIE)?.value)
-  if (staff) return staff.rid
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => req.cookies.getAll(), setAll: () => {} } }
-  )
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-
-  const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-  const { data } = await admin.from('restaurants').select('id').eq('owner_id', user.id).single()
-  return data?.id ?? null
+  const caller = await resolveCaller(req)
+  return caller?.rid ?? null
 }
 
 const STASH_SYSTEM = `You extract tobacco stock movement data from speech or text.
@@ -59,7 +51,11 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        // llama-3.3-70b-versatile retired on Groq (2026-08-30, prod outage — "model_not_found").
+        // gpt-oss-120b is a reasoning model: without reasoning_effort:'low' it can burn the
+        // whole max_tokens budget on the hidden reasoning trace and return empty content.
+        model: 'openai/gpt-oss-120b',
+        reasoning_effort: 'low',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage },
