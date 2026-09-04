@@ -184,7 +184,12 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     }
     setLedgerRows(target.map(row => ({ id: `${row.empId}|${row.period}`, employeeId: row.empId, employeeName: row.empName, period: row.period, amount: row.amount, date: row.monthEnd })))
   }
-  useEffect(() => { loadDebt() }, [])
+  // Долг-леджер отключён по запросу юзера (2026-09-04) — при каждом открытии вкладки ЗП
+  // автоматом материализовал остаток оклада прошлых месяцев как is_paid=false строки в
+  // shift_expenses (SALPERIOD:...), они же лезли в общий список «Долги» в Manager→Смена
+  // (loadOpenDebts тянет ВСЕ is_paid=false без фильтра по note) — юзер это не ожидал и не
+  // хочет сейчас. Ничего не удаляет и не пишет, пока не включат обратно.
+  // useEffect(() => { loadDebt() }, [])
 
   const changeMonth = (dir: number) => { const d = new Date(viewDate); d.setDate(1); d.setMonth(d.getMonth() + dir); setViewDate(d) }
 
