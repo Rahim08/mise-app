@@ -13,6 +13,7 @@ import { createClient } from '@supabase/supabase-js'
 import { resolveCaller, isOfficial, type Caller } from '@/lib/apiAuth'
 import { entitlements, isActiveStatus } from '@/lib/plans'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
+import { AUDITED_TABLES, auditWrite, auditRpc } from '@/lib/financialAudit'
 
 type AppId = 'manager' | 'analytics' | 'stash' | 'people'
 
@@ -23,6 +24,7 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   restaurant_settings:  { read: ['manager', 'analytics', 'people', 'stash'], write: [] },
   staff:                { read: [], write: [] },
   employees:            { read: ['manager', 'analytics', 'people'], write: [] }, // people: свой расчёт зарплаты
+  salary_history:       { read: ['manager', 'analytics', 'people'], write: [] }, // снэпшоты оклада по месяцам; пишет только dashboard (owner), как и employees
   expense_categories:   { read: ['manager', 'analytics'], write: [] },
   shifts:               { read: ['manager', 'analytics', 'people'], write: ['manager'] }, // people: чек-лист привязан к открытой смене
   shift_expenses:       { read: ['manager', 'analytics'], write: ['manager'] },
@@ -244,6 +246,7 @@ export async function POST(req: NextRequest) {
       console.error(`[api/db] rpc ${fn} failed:`, error)
       return NextResponse.json({ error: clientSafeError(error), code: (error as any).code }, { status: 400 })
     }
+    if (fn === 'settle_debts') await auditRpc(admin, caller, fn, safeArgs)
     return NextResponse.json({ data })
   }
 
@@ -308,6 +311,17 @@ export async function POST(req: NextRequest) {
     staffDeactivatedIds = (rows || []).map((r: any) => r.id)
   }
 
+  // Журнал финансов (lib/financialAudit.ts): для правок денежных таблиц запоминаем строки ДО
+  // (update/delete) и берём строки ПОСЛЕ, чтобы записать «кто/когда/что изменил».
+  const audited = isWrite && AUDITED_TABLES.has(table)
+  let auditOldRows: any[] = []
+  if (audited && (op === 'update' || op === 'delete')) {
+    let pq: any = admin.from(table).select('*').eq(scope, caller.rid)
+    pq = applyFilters(pq)
+    const { data: pre } = await pq.limit(500)
+    auditOldRows = pre || []
+  }
+
   try {
     let q: any
     if (op === 'select') {
@@ -319,11 +333,11 @@ export async function POST(req: NextRequest) {
       else if (returning === 'maybeSingle') q = q.maybeSingle()
     } else if (op === 'insert') {
       q = admin.from(table).insert(forceScope(values))
-      if (returning) q = q.select()
+      if (returning || audited) q = q.select()
       if (returning === 'single') q = q.single()
     } else if (op === 'upsert') {
       q = admin.from(table).upsert(forceScope(values), onConflict ? { onConflict } : undefined)
-      if (returning) q = q.select()
+      if (returning || audited) q = q.select()
       if (returning === 'single') q = q.single()
     } else if (op === 'update') {
       // Без фильтра .eq(scope, rid) — единственное условие, значит update бьёт по ВСЕМ
@@ -341,7 +355,7 @@ export async function POST(req: NextRequest) {
       }
       q = admin.from(table).update(safeValues).eq(scope, caller.rid)
       q = applyFilters(q)
-      if (returning) q = q.select()
+      if (returning || audited) q = q.select()
       if (returning === 'single') q = q.single()
     } else if (op === 'delete') {
       // Тот же риск, ещё необратимее: {table:'shifts',op:'delete'} без фильтра стирает
@@ -363,7 +377,16 @@ export async function POST(req: NextRequest) {
     if (staffDeactivatedIds.length) {
       await admin.from('push_subscriptions').delete().in('staff_id', staffDeactivatedIds)
     }
-    return NextResponse.json({ data: stripOwnerOnlyColumns(table, data, caller) })
+    if (audited) {
+      await auditWrite(admin, caller, {
+        table, op, filters,
+        oldRows: auditOldRows,
+        newRows: op === 'delete' ? [] : (Array.isArray(data) ? data : data ? [data] : []),
+      })
+    }
+    // Без `returning` клиент раньше получал null — не меняем форму ответа из-за внутреннего .select() выше.
+    const respData = audited && !returning ? null : data
+    return NextResponse.json({ data: stripOwnerOnlyColumns(table, respData, caller) })
   } catch (err: any) {
     console.error(`[api/db] ${table}.${op} threw:`, err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })

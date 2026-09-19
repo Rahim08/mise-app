@@ -109,4 +109,21 @@ class Query<T = any> implements PromiseLike<Result<T>> {
 
 export const db = {
   from(table: string) { return new Query(table) },
+  // Calls an allowlisted atomic SQL function via /api/db (see RPC_POLICY there). Not
+  // idempotent — never retried, same rule as insert/upsert in Query.exec above.
+  async rpc<T = any>(fn: string, args?: Record<string, unknown>): Promise<Result<T>> {
+    try {
+      const res = await fetch('/api/db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: 'rpc', fn, args }),
+        credentials: 'same-origin',
+      })
+      const json = await res.json()
+      if (!res.ok) return { data: null as any, error: { message: json?.error || `HTTP ${res.status}`, code: json?.code } }
+      return { data: json.data as T, error: null }
+    } catch (err: unknown) {
+      return { data: null as any, error: { message: err instanceof Error ? err.message : 'Network error' } }
+    }
+  },
 }

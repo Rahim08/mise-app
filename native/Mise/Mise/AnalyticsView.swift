@@ -80,6 +80,10 @@ final class AnalyticsModel {
     var prevCardAmounts: [CardAmount] = []
     var prevAbsences: [Absence] = []
     var prevAdvances: [SalaryAdvance] = []
+    // Полная история оклада/вычета-за-прогул (salary-history-2026-09.sql). `employees`
+    // резолвится к текущему просматриваемому месяцу в load() ниже — это отдельное
+    // состояние нужно только для прошлого месяца в prevSalCash (может быть другой оклад).
+    var salaryHistory: [SalaryHistoryRow] = []
 
     func handleAI(_ message: String) async -> String? {
         // expenses by category (current period)
@@ -227,10 +231,14 @@ final class AnalyticsModel {
         // Фильтр по period (месяц ЗП), не по date (день списания из кассы) — паритет с
         // ManagerSalary.computeSalary (юзер-фидбок 2026-08-15).
         async let prevAdv = try? DB.from("salary_advances").select().eq("period", prevYm + "-01").list(SalaryAdvance.self)
+        // Оклад/вычет по месяцам (salary-history-2026-09.sql) — иначе правка оклада сегодня
+        // меняет расчёт за просматриваемый прошлый месяц задним числом.
+        async let salHist = try? DB.from("salary_history").select("employee_id, salary, deduct_per_absence, effective_from").list(SalaryHistoryRow.self)
 
         shiftsRaw = (await sh) ?? shiftsRaw
         prevShiftsRaw = (await prev) ?? prevShiftsRaw
-        employees = (await emps) ?? employees
+        if let h = await salHist { salaryHistory = h }
+        if let rawEmps = await emps { employees = resolveEmployees(rawEmps, history: salaryHistory, monthStart: key(monthStart)) }
         cardAmounts = (await cards) ?? cardAmounts
         if let a = await abs { absences = a.filter { $0.source != "auto" } }
         hookahRows = (await hk) ?? hookahRows
@@ -577,13 +585,23 @@ final class AnalyticsModel {
     func prevCardOf(_ e: Employee) -> Double {
         prevCardAmounts.first(where: { $0.employee_id == e.id })?.card_amount ?? 0
     }
+    var prevMonthStart: String {
+        let cal = Calendar.current
+        let start = cal.date(from: cal.dateComponents([.year, .month], from: currentDate)) ?? currentDate
+        let prev = cal.date(byAdding: .month, value: -1, to: start) ?? start
+        return key(prev)
+    }
     var prevSalCash: Double {
-        employees.reduce(0.0) { s, e in
+        // employees уже резолвлен к текущему месяцу (load()) — для прошлого месяца оклад
+        // может быть другим, поэтому здесь отдельный резолв по salaryHistory.
+        let ms = prevMonthStart
+        return employees.reduce(0.0) { s, e in
+            let prevPay = resolveSalary(salaryHistory, employeeId: e.id, monthStart: ms)
             let absN = prevAbsences.filter { $0.employee_id == e.id }.count
-            let deduct = Double(absN) * (e.deduct_per_absence ?? 0)
+            let deduct = Double(absN) * ((prevPay?.deduct) ?? (e.deduct_per_absence ?? 0))
             let card = prevCardOf(e)
             let advance = prevAdvances.filter { $0.employee_id == e.id }.reduce(0) { $0 + ($1.amount ?? 0) }
-            let total = max(0, (e.salary ?? 0) - deduct)
+            let total = max(0, (prevPay?.salary ?? (e.salary ?? 0)) - deduct)
             return s + max(0, total - advance - card)
         }
     }
@@ -638,6 +656,11 @@ final class AnalyticsModel {
     var debts: [DebtRow] = []
     var debtHistory: [DebtRow] = []
     var debtTotal: Double { debts.reduce(0) { $0 + $1.amount } }
+    // MISE-009 (аудит 2026-08-28): try? ?? [] ниже раньше тихо превращал сетевой/серверный
+    // сбой в «долгов нет» — owner получал ложное финансовое спокойствие вместо честного «не
+    // удалось проверить». debts/debtHistory при сбое теперь НЕ трогаются (остаётся последнее
+    // успешно загруженное значение, не обнуляется) — только поднимается флаг для баннера.
+    var debtsLoadFailed = false
 
     // Считается ли строка расходом в отчётах — см. правило выше.
     func countsInRollup(_ e: ShiftExpense) -> Bool {
@@ -655,25 +678,33 @@ final class AnalyticsModel {
         // Долг = ещё не оплачен (is_paid=false) ИЛИ историческая запись погашённого долга
         // (paid_shift_id указывает на ДРУГУЮ смену, не свою — п.1 выше). Два отдельных запроса,
         // «или» по paid_shift_id != shift_id нельзя выразить в PostgREST-фильтре напрямую.
-        async let unpaidQ = (try? await DB.from("shift_expenses").select("id, shift_id, category_id, category_name, employee_id, amount, is_paid, paid_at, paid_shift_id").eq("is_paid", false).list(DebtExp.self)) ?? []
+        async let unpaidQ = DB.from("shift_expenses").select("id, shift_id, category_id, category_name, employee_id, amount, is_paid, paid_at, paid_shift_id").eq("is_paid", false).list(DebtExp.self)
         // DB.swift не даёт IS NOT NULL — neq на заведомо невозможный uuid даёт тот же результат
         // (NULL≠X в SQL не true, такие строки не пройдут фильтр — ровно то, что нужно).
-        async let settledQ = (try? await DB.from("shift_expenses").select("id, shift_id, category_id, category_name, employee_id, amount, is_paid, paid_at, paid_shift_id").neq("paid_shift_id", "00000000-0000-0000-0000-000000000000").list(DebtExp.self)) ?? []
-        let unpaid = await unpaidQ
-        let settled = (await settledQ).filter { $0.paid_shift_id != $0.shift_id }
-        let all = unpaid + settled
-        guard !all.isEmpty else { debts = []; debtHistory = []; return }
-        let shiftIds = Array(Set(all.compactMap { $0.shift_id }))
-        nonisolated struct ShiftDateRow: Codable, Sendable { let id: String; let date: String }
-        let shiftDates = (try? await DB.from("shifts").select("id, date").in("id", shiftIds).list(ShiftDateRow.self)) ?? []
-        let dateById = Dictionary(uniqueKeysWithValues: shiftDates.map { ($0.id, $0.date) })
-        func toRow(_ e: DebtExp) -> DebtRow? {
-            guard let sid = e.shift_id, let date = dateById[sid] else { return nil }
-            return DebtRow(id: e.id, shiftId: sid, date: date, categoryId: e.category_id,
-                categoryName: e.category_name ?? "—", employeeId: e.employee_id, amount: e.amount ?? 0, paidAt: e.paid_at)
+        async let settledQ = DB.from("shift_expenses").select("id, shift_id, category_id, category_name, employee_id, amount, is_paid, paid_at, paid_shift_id").neq("paid_shift_id", "00000000-0000-0000-0000-000000000000").list(DebtExp.self)
+        do {
+            let unpaid = try await unpaidQ
+            let settled = (try await settledQ).filter { $0.paid_shift_id != $0.shift_id }
+            let all = unpaid + settled
+            guard !all.isEmpty else { debts = []; debtHistory = []; debtsLoadFailed = false; return }
+            let shiftIds = Array(Set(all.compactMap { $0.shift_id }))
+            nonisolated struct ShiftDateRow: Codable, Sendable { let id: String; let date: String }
+            let shiftDates = try await DB.from("shifts").select("id, date").in("id", shiftIds).list(ShiftDateRow.self)
+            let dateById = Dictionary(uniqueKeysWithValues: shiftDates.map { ($0.id, $0.date) })
+            func toRow(_ e: DebtExp) -> DebtRow? {
+                guard let sid = e.shift_id, let date = dateById[sid] else { return nil }
+                return DebtRow(id: e.id, shiftId: sid, date: date, categoryId: e.category_id,
+                    categoryName: e.category_name ?? "—", employeeId: e.employee_id, amount: e.amount ?? 0, paidAt: e.paid_at)
+            }
+            debts = unpaid.compactMap(toRow).sorted { $0.date < $1.date }
+            debtHistory = settled.compactMap(toRow).sorted { $0.date > $1.date }
+            debtsLoadFailed = false
+        } catch {
+            // MISE-009: не обнуляем debts/debtHistory — оставляем последнее успешно
+            // загруженное значение на экране, только сигнализируем баннером, что цифра
+            // может быть устаревшей (честнее, чем молча показать «0 долгов»).
+            debtsLoadFailed = true
         }
-        debts = unpaid.compactMap(toRow).sorted { $0.date < $1.date }
-        debtHistory = settled.compactMap(toRow).sorted { $0.date > $1.date }
     }
 
     // кальян
@@ -1432,6 +1463,13 @@ private struct DebtsTab: View {
             Text(t("an.debts")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.primary.opacity(0.45)).kerning(0.5)
             Text(cur(m.debtTotal)).font(.system(size: 30, weight: .heavy)).foregroundStyle(BrandKit.stash)
             Text(t("an.debtTotalHint")).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
+            // MISE-009 (аудит 2026-08-28): loadDebts() раньше молча превращал сетевой сбой в
+            // «долгов нет» — owner получал ложное финансовое спокойствие. Теперь честный
+            // баннер вместо тихого нуля.
+            if m.debtsLoadFailed {
+                Label(t("an.debtsLoadFailed"), systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(.orange)
+            }
         }
         .frame(maxWidth: .infinity).padding(.vertical, 18)
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))

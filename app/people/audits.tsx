@@ -2,7 +2,6 @@
 import React, { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { notify as pushNotify } from '@/lib/notifyClient'
 import { renderNotify, renderCategory, renderSegments } from '@/lib/notifyStrings'
@@ -85,13 +84,24 @@ export function normState(x: any): ItemState {
   return { ...x, done: !!x.done, photo_url: x.photo_url ?? null }
 }
 
+// MISE-012 (аудит 2026-08-28): раньше грузили напрямую в Supabase Storage через
+// supabase-js anon-key с браузера — работало только пока в браузере была авторизованная
+// Supabase-сессия (owner), для PIN-сотрудника (только mise_staff_token, без Supabase Auth)
+// зависело от Storage-policy бакета. Теперь тот же серверный путь, что у iOS
+// (/api/storage/audit-photo) — не зависит от Storage-policy вообще, restaurant_id всегда
+// из проверенной сессии на сервере.
 async function uploadAuditPhoto(restaurantId: string, folder: string, file: File): Promise<string | null> {
-  const ext = file.name.split('.').pop() || 'jpg'
-  const path = `audits/${restaurantId}/${folder}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-  const { error } = await supabase.storage.from('restaurant-assets').upload(path, file, { upsert: true })
-  if (error) return null
-  const { data: { publicUrl } } = supabase.storage.from('restaurant-assets').getPublicUrl(path)
-  return publicUrl
+  const buf = await file.arrayBuffer()
+  const base64 = btoa(Array.from(new Uint8Array(buf), b => String.fromCharCode(b)).join(''))
+  const res = await fetch('/api/storage/audit-photo', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder, data_base64: base64 }),
+    credentials: 'same-origin',
+  })
+  if (!res.ok) return null
+  const json = await res.json()
+  return json?.url ?? null
 }
 
 // Провал пункта → задача (staff_tasks). Дедуп на уже открытую задачу по тому же пункту за

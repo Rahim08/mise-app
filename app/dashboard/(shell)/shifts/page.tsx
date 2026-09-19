@@ -287,14 +287,16 @@ export default function ShiftsPage() {
 
     // UPDATE по id вместо delete+insert (A2, аудит 2026-08-09) — delta-merge поверх актуального
     // значения в БД, чтобы не затирать то, что параллельно записал addAdvance/settleDebt.
-    const { data: curInkList, error: curInkErr } = await db.from('inkassations').select('id, expense, reason').eq('shift_id', sh.id).limit(1)
+    const { data: curInkList, error: curInkErr } = await db.from('inkassations').select('id, expense, salary, reason').eq('shift_id', sh.id).limit(1)
     if (curInkErr) throw new Error(curInkErr.message)
     const curInk = Array.isArray(curInkList) ? curInkList[0] : curInkList
     const finalExpense = (curInk?.expense || 0) + ((parseFloat(inkExpense) || 0) - (parseFloat(loadedInkExpense) || 0))
     const curReason = curInk?.reason || ''
     const finalReason = (curReason === loadedInkReason || inkReason !== loadedInkReason) ? inkReason : curReason
-    const finalTotal = ink - finalExpense
-    if (ink > 0 || finalExpense !== 0 || finalReason) {
+    // См. app/manager/page.tsx: строка с одной выплатой ЗП (salary) не «пустая» — не удалять.
+    const curSalary = curInk?.salary || 0
+    const finalTotal = ink - finalExpense - curSalary
+    if (ink > 0 || finalExpense !== 0 || finalReason || curSalary !== 0) {
       const values = { restaurant_id: restaurantId, date: fmtDate(dateForInk), amount: ink, expense: finalExpense, reason: finalReason, total: finalTotal }
       const { error: inkErr } = curInk
         ? await db.from('inkassations').update(values).eq('id', curInk.id)

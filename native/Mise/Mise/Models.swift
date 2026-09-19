@@ -11,6 +11,33 @@ nonisolated struct Employee: Codable, Identifiable, Sendable {
     var card_amount: Double?
 }
 
+// Снэпшот оклада/вычета-за-прогул по месяцам (docs/migrations/salary-history-2026-09.sql).
+// Без этого правка оклада сегодня меняла бы расчёт зарплаты за прошлые месяцы задним
+// числом (веб-паритет: lib/salaryHistory.ts, PeopleModel.computeSalary/ManagerSalary/
+// AnalyticsModel уже читают эту таблицу тем же способом).
+nonisolated struct SalaryHistoryRow: Codable, Sendable {
+    let employee_id: String
+    let salary: Double?
+    let deduct_per_absence: Double?
+    let effective_from: String
+}
+
+// Последняя запись истории с effective_from <= начало месяца; nil, если истории ещё нет
+// (сотрудник без единой правки оклада после введения фичи — вызывающий код делает fallback
+// на e.salary/e.deduct_per_absence).
+nonisolated func resolveSalary(_ history: [SalaryHistoryRow], employeeId: String, monthStart: String) -> (salary: Double, deduct: Double)? {
+    let rows = history.filter { $0.employee_id == employeeId && $0.effective_from <= monthStart }
+    guard let best = rows.max(by: { $0.effective_from < $1.effective_from }) else { return nil }
+    return (best.salary ?? 0, best.deduct_per_absence ?? 0)
+}
+
+nonisolated func resolveEmployees(_ employees: [Employee], history: [SalaryHistoryRow], monthStart: String) -> [Employee] {
+    employees.map { e in
+        guard let r = resolveSalary(history, employeeId: e.id, monthStart: monthStart) else { return e }
+        return Employee(id: e.id, name: e.name, deduct_per_absence: r.deduct, salary: r.salary, card_amount: e.card_amount)
+    }
+}
+
 nonisolated struct Category: Codable, Identifiable, Sendable {
     let id: String
     let name: String

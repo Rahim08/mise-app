@@ -6,6 +6,7 @@ import { QRCodeSVG as QRCode } from 'qrcode.react'
 import { track } from '@/lib/analytics'
 import { useI18n } from '@/lib/i18n'
 import { entitlements } from '@/lib/plans'
+import { fmtDate } from '@/lib/format'
 import { Card, Btn, Field, Spinner, SectionTitle, inputStyle, Container, Table, type TableColumn } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
 import { APPS, ROLE_OPTS, roleLabel } from '@/components/dash/shared'
@@ -76,6 +77,25 @@ export default function TeamPage() {
   const staffFor = (emp: { id: string; name: string }) =>
     staff.find(s => s.employee_id === emp.id) ?? staff.find(s => !s.employee_id && s.name === emp.name)
 
+  // Снэпшот оклада на месяц правки (salary-history-2026-09.sql). При первой правке
+  // сотруднику сначала фиксируем СТАРОЕ значение сентинелем '2000-01-01' («действовало
+  // всегда до сих пор» — момент начала старого оклада неизвестен), иначе прошлые месяцы
+  // до первой правки остались бы без истории и падали бы на текущее (уже новое) значение.
+  const recordSalaryChange = async (employeeId: string, oldSalary: number, oldDeduct: number, newSalary: number, newDeduct: number) => {
+    const { data: hist } = await db.from('salary_history').select('id, effective_from').eq('employee_id', employeeId)
+    const rows = hist || []
+    if (rows.length === 0) {
+      await db.from('salary_history').insert({ employee_id: employeeId, salary: oldSalary, deduct_per_absence: oldDeduct, effective_from: '2000-01-01' })
+    }
+    const thisMonthStart = fmtDate(new Date()).slice(0, 7) + '-01'
+    const currentRow = rows.find(r => r.effective_from === thisMonthStart)
+    if (currentRow) {
+      await db.from('salary_history').update({ salary: newSalary, deduct_per_absence: newDeduct }).eq('id', currentRow.id)
+    } else {
+      await db.from('salary_history').insert({ employee_id: employeeId, salary: newSalary, deduct_per_absence: newDeduct, effective_from: thisMonthStart })
+    }
+  }
+
   // One save handles both HR (employees) and access (staff).
   const save = async () => {
     if (!form.name.trim()) { alert(tr('dash.enterName')); return }
@@ -84,8 +104,15 @@ export default function TeamPage() {
     const empPayload = { restaurant_id: restaurantId, name, salary: +form.salary || 0, deduct_per_absence: +form.deduct || 0, card_amount: +form.card || 0, is_active: true }
     let empId = editingEmpId
     if (editingEmpId) {
+      const before = employees.find(e => e.id === editingEmpId)
       const { error } = await db.from('employees').update(empPayload).eq('id', editingEmpId)
       if (error) { alert(tr('dash.notSaved') + error.message); setSaving(false); return }
+      // История окладов (salary-history-2026-09.sql): без этого правка оклада сегодня
+      // задним числом меняла начисление за все прошлые месяцы. Пишем только при реальном
+      // изменении salary/deduct_per_absence — не на каждое сохранение формы.
+      if (before && (Number(before.salary || 0) !== empPayload.salary || Number(before.deduct_per_absence || 0) !== empPayload.deduct_per_absence)) {
+        await recordSalaryChange(editingEmpId, Number(before.salary || 0), Number(before.deduct_per_absence || 0), empPayload.salary, empPayload.deduct_per_absence)
+      }
     } else {
       const { data: newEmp, error } = await db.from('employees').insert(empPayload).select().single()
       // Раньше ошибка insert не проверялась: empId оставался null, а staff всё равно
@@ -116,11 +143,23 @@ export default function TeamPage() {
   }
 
   const removePerson = async (emp: any) => {
-    await db.from('employees').update({ is_active: false }).eq('id', emp.id)
-    const s = staffFor(emp); if (s) await db.from('staff').update({ is_active: false }).eq('id', s.id)
+    if (!confirm(tr('dash.confirmRemovePerson'))) return
+    const { error: e1 } = await db.from('employees').update({ is_active: false }).eq('id', emp.id)
+    if (e1) { alert(e1.message || tr('dash.removeFailed')); return }
+    const s = staffFor(emp)
+    if (s) {
+      const { error: e2 } = await db.from('staff').update({ is_active: false }).eq('id', s.id)
+      // employees.is_active уже снят выше — если это упадёт, сотрудник пропадёт из HR-списка,
+      // но staff.is_active останется true (PIN продолжит работать) без единого сообщения об этом.
+      if (e2) { alert(e2.message || tr('dash.removeFailed')); load(); return }
+    }
     load()
   }
-  const resetDevice = async (id: string) => { await db.from('staff').update({ device_id: null }).eq('id', id); load() }
+  const resetDevice = async (id: string) => {
+    const { error } = await db.from('staff').update({ device_id: null }).eq('id', id)
+    if (error) { alert(error.message || tr('dash.resetDeviceFailed')); return }
+    load()
+  }
 
   const startEdit = (emp: any) => {
     const s = staffFor(emp)

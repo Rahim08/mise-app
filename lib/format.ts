@@ -6,6 +6,23 @@ export function fmtDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+/**
+ * "Today" of the venue's operating day — before day_start_hour it's still yesterday's
+ * business day (a venue open past midnight). Port of AppModel.businessDate (iOS,
+ * AppModel.swift) — web had no equivalent at all (MISE-003, full-system audit
+ * 2026-08-28): a manager active after midnight saw a different "today" on web than on
+ * iOS, and since shifts is unique on (restaurant_id, date), one operating night could
+ * split into two shift rows depending on which client was used.
+ */
+export function businessDate(dayStartHour: number, now: Date = new Date()): Date {
+  if (now.getHours() < dayStartHour) {
+    const d = new Date(now)
+    d.setDate(d.getDate() - 1)
+    return d
+  }
+  return now
+}
+
 /** Format number with 2 decimal places (de-DE locale: 1.234,56). */
 export function fv(v: number): string {
   return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })

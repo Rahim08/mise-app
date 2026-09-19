@@ -9,8 +9,9 @@ import { AppLoading } from '@/components/AppLoading'
 import { Spinner } from '@/components/ui'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n, tCurrent } from '@/lib/i18n'
-import { fmtDate, fv, dd, displayReason } from '@/lib/format'
+import { fmtDate, fv, dd, displayReason, businessDate } from '@/lib/format'
 import { computeAccruedToday } from '@/lib/analytics'
+import { resolveEmployeesForMonth, resolveSalaryFor } from '@/lib/salaryHistory'
 const COLORS = ['#34c759', '#ff3b30', '#007aff', '#ff9500', '#af52de', '#00c7be', '#ff6b35', '#5856d6']
 
 // Банк (Open Banking) — короткий список стран для поиска института в GoCardless
@@ -438,6 +439,9 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [periodMode, setPeriodMode] = useState<'day' | 'week' | 'month'>('month')
   const [kassaMode, setKassaMode] = useState<'kassa' | 'inkass'>('kassa')
   const [currentDate, setCurrentDate] = useState(new Date())
+  // MISE-003 (аудит 2026-08-28): применяется один раз при первой загрузке настроек — если
+  // юзер уже успел вручную переключить дату до того, как ответ пришёл, его выбор не трогаем.
+  const businessDateAppliedRef = useRef(false)
   const [includeCard, setIncludeCard] = useState(false) // restaurant_settings.include_card_in_analytics
   const [payoutDay, setPayoutDay] = useState<number | null>(null) // restaurant_settings.salary_payout_day — только для «до выплаты N дн.», в рамп начисления НЕ входит
   // Банк (Open Banking, GoCardless) — вкладка «Банк» заменила «Прогноз» (юзер-фидбок
@@ -467,6 +471,10 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [allExpenses, setAllExpenses] = useState<any[]>([])
   const [pinnedCats, setPinnedCats] = useState<Set<string>>(new Set())
   const [employees, setEmployees] = useState<any[]>([])
+  // Полная история оклада/вычета-за-прогул по всем сотрудникам ресторана (salary-history-
+  // 2026-09.sql) — employees выше уже резолвится к просматриваемому месяцу (date), это
+  // отдельное состояние нужно только для прошлого месяца в renderPeriod (prevTotalCash).
+  const [salaryHistory, setSalaryHistory] = useState<any[]>([])
   const [cardAmounts, setCardAmounts] = useState<any[]>([])
   const [absences, setAbsences] = useState<any[]>([])
   const [advances, setAdvances] = useState<any[]>([])
@@ -505,6 +513,14 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       setIncludeCard(!!r?.include_card_in_analytics)
       setPayoutDay(r?.salary_payout_day ?? null)
       setHk(h => ({ ...h, price: Number(r?.hookah_price || 0), portion: Number(r?.hookah_portion_g || 20) }))
+      // MISE-003 (аудит 2026-08-28): раньше веб вообще не знал про операционный день —
+      // ресторан открыт за полночь, менеджер видел "сегодня" = новую календарную дату,
+      // тогда как iOS ещё вчерашний business-day до day_start_hour. Паритет с
+      // AppModel.businessDate (iOS).
+      if (typeof r?.day_start_hour === 'number' && !businessDateAppliedRef.current) {
+        businessDateAppliedRef.current = true
+        setCurrentDate(businessDate(r.day_start_hour))
+      }
     })
     // Кальян: склад, выдано в зал (all-time) и продано (all-time) — для остатка «в заведении»
     db.from('tobacco_stock').select('brand, flavor, flavor_name, quantity_g, min_quantity_g').then(({ data }: any) =>
@@ -568,7 +584,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     const prevStart = fmtDate(new Date(date.getFullYear(), date.getMonth() - 1, 1))
     const prevEnd = fmtDate(new Date(date.getFullYear(), date.getMonth(), 0))
 
-    const [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11] = await Promise.all([
+    const [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12] = await Promise.all([
       db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd).order('date'),
       db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', prevStart).lte('date', prevEnd).order('date'),
       db.from('employees').select('*').eq('restaurant_id', rid).eq('is_active', true).order('name'),
@@ -586,6 +602,9 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       // Паритет с PeopleModel.computeSalary (canon-расчёт 2026-07-28) — без этого Analytics
       // показывала «к выплате» без учёта уже выданного (аудит 2026-08-09).
       db.from('salary_payments').select('*').eq('period', fmtDate(date).slice(0, 7) + '-01'),
+      // Оклад/вычет-за-прогул по месяцам (salary-history-2026-09.sql) — без этого правка
+      // оклада сегодня задним числом меняла бы начисление за просматриваемый прошлый месяц.
+      db.from('salary_history').select('employee_id, salary, deduct_per_absence, effective_from'),
     ])
     setAdvances(s7.data || [])
     setPayments(s11.data || [])
@@ -593,13 +612,17 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     setPrevAbsences((s8.data || []).filter((a: any) => a.source !== 'auto'))
     setPrevAdvances(s9.data || [])
     setPrevCardAmounts(s10.data || [])
+    const salHist = s12.data || []
+    setSalaryHistory(salHist)
 
     const shiftList = s1.data || []
     setShifts(shiftList); setPrevShifts(s2.data || [])
     // Авто-прогулы (source='auto') — черновик до подтверждения менеджером при закрытии смены.
     // Исключаем из расчёта ЗП, пока не подтверждены (тогда source='manager'). Фильтр в JS —
     // чтобы не падать до применения миграции (у старых строк source отсутствует → учитываются).
-    setEmployees(s3.data || []); setCardAmounts(s4.data || []); setAbsences((s5.data || []).filter((a: any) => a.source !== 'auto'))
+    // employees резолвится к просматриваемому месяцу (monthStart) — иначе правка оклада
+    // сегодня меняла бы «Зарплату»/экспорт/ФОТ за прошлый открытый месяц задним числом.
+    setEmployees(resolveEmployeesForMonth(s3.data || [], salHist, monthStart)); setCardAmounts(s4.data || []); setAbsences((s5.data || []).filter((a: any) => a.source !== 'auto'))
 
     if (shiftList.length > 0) {
       const ids = shiftList.map((s: any) => s.id)
@@ -1179,12 +1202,17 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       return s + Math.max(0, total - advanceOf(e) - cardOf(e))
     }, 0)
     // Та же формула, но по прошлому месяцу — нужна, пока не наступил payout_day (см. ниже).
+    // employees уже резолвлен к ТЕКУЩЕМУ просматриваемому месяцу (loadAll) — для прошлого
+    // месяца оклад может быть другим, поэтому здесь отдельный резолв по salaryHistory
+    // (salary-history-2026-09.sql), а не e.salary/e.deduct_per_absence.
+    const prevMonthStart = fmtDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))
     const prevCardOf = (emp: any) => Number(prevCardAmounts.find((c: any) => c.employee_id === emp.id)?.card_amount || 0)
     const prevAdvanceOf = (emp: any) => prevAdvances.filter((a: any) => a.employee_id === emp.id).reduce((s: number, a: any) => s + Number(a.amount || 0), 0)
     const prevTotalCash = employees.reduce((s: number, e: any) => {
+      const prevPay = resolveSalaryFor(salaryHistory, e.id, prevMonthStart)
       const abs = prevAbsences.filter((a: any) => a.employee_id === e.id).length
-      const deduct = abs * Number(e.deduct_per_absence || 0)
-      const total = Math.max(0, Number(e.salary || 0) - deduct)
+      const deduct = abs * Number((prevPay ? prevPay.deduct_per_absence : e.deduct_per_absence) || 0)
+      const total = Math.max(0, Number((prevPay ? prevPay.salary : e.salary) || 0) - deduct)
       return s + Math.max(0, total - prevAdvanceOf(e) - prevCardOf(e))
     }, 0)
     // Рамп завязан на РЕАЛЬНУЮ сегодняшнюю дату — при просмотре прошлого/будущего месяца

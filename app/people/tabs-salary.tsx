@@ -14,6 +14,7 @@ import { fmtDate } from '@/lib/format'
 import { tCurrent } from '@/lib/i18n'
 import { ScheduleTab } from '@/components/people/ScheduleTab'
 import { hoursOf, fmtHours } from './shared'
+import { resolveEmployeesForMonth } from '@/lib/salaryHistory'
 
 
 // Зарплата — личный вид (одинаковый у сотрудника и менеджера, реструктура 2026-08-13,
@@ -43,7 +44,7 @@ export function SalaryTab({ me, accent, t }: { me: any; accent: string; t: any }
   const computeMonth = async (targetYm: string) => {
     const monthStart = `${targetYm}-01`
     const monthEnd = fmtDate(new Date(Number(targetYm.slice(0, 4)), Number(targetYm.slice(5, 7)), 0))
-    const [{ data: emps }, { data: abs }, { data: cards }, { data: att }, { data: dir }, { data: advs }, { data: pays }] = await Promise.all([
+    const [{ data: rawEmps }, { data: abs }, { data: cards }, { data: att }, { data: dir }, { data: advs }, { data: pays }, { data: salHist }] = await Promise.all([
       db.from('employees').select('id, name, salary, deduct_per_absence').eq('is_active', true).order('name'),
       db.from('shift_absences').select('employee_id, date, source').gte('date', monthStart).lte('date', monthEnd),
       db.from('monthly_card_amounts').select('employee_id, card_amount').eq('month', targetYm),
@@ -53,7 +54,11 @@ export function SalaryTab({ me, accent, t }: { me: any; accent: string; t: any }
       // app/manager/tabs-salary.tsx (юзер-фидбок 2026-08-15).
       db.from('salary_advances').select('*').eq('period', monthStart),
       db.from('salary_payments').select('*').eq('period', monthStart),
+      // Оклад/вычет-за-прогул, действовавшие в targetYm (salary-history-2026-09.sql) —
+      // без этого правка оклада сегодня меняла бы расчёт за прошлые месяцы задним числом.
+      db.from('salary_history').select('employee_id, salary, deduct_per_absence, effective_from').lte('effective_from', monthStart),
     ])
+    const emps = resolveEmployeesForMonth(rawEmps || [], salHist || [], monthStart)
     const staffName: Record<string, string> = {}; (dir || []).forEach((s: any) => { staffName[s.id] = s.name })
     const hoursByName: Record<string, number> = {}
     ;(att || []).forEach((r: any) => { const n = staffName[r.staff_id]; if (n) hoursByName[n] = (hoursByName[n] || 0) + hoursOf(r) })

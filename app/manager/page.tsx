@@ -11,7 +11,7 @@ import { AuthGate } from '@/components/AuthGate'
 import { AppLoading } from '@/components/AppLoading'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n } from '@/lib/i18n'
-import { fmtDate, fv, displayDate, dd } from '@/lib/format'
+import { fmtDate, fv, displayDate, dd, businessDate } from '@/lib/format'
 import { ManagerSalaryTab } from './tabs-salary'
 import { ManagerReportsTab } from './tabs-reports'
 import { ManagerChecklistsTab } from './tabs-checklists'
@@ -134,13 +134,22 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   }, [])
 
   const init = async () => {
-    const [empsRes, catsRes] = await Promise.all([
+    const [empsRes, catsRes, settingsRes] = await Promise.all([
       db.from('employees').select('id,name,deduct_per_absence').eq('restaurant_id', restaurantId).eq('is_active', true).order('name'),
-      db.from('expense_categories').select('id,name').eq('restaurant_id', restaurantId).eq('is_active', true).order('name')
+      db.from('expense_categories').select('id,name').eq('restaurant_id', restaurantId).eq('is_active', true).order('name'),
+      db.from('restaurant_settings').select('day_start_hour').limit(1),
     ])
     setEmployees(empsRes.data || [])
     setCategories(catsRes.data || [])
-    await loadDay(restaurantId, new Date(), empsRes.data || [], catsRes.data || [])
+    // MISE-003 (аудит 2026-08-28): раньше здесь всегда была голая календарная дата — ресторан
+    // открыт за полночь, менеджер видел "сегодня" = новый календарный день, тогда как iOS ещё
+    // вчерашний business-day до day_start_hour. shifts уникален по (restaurant_id, date) — при
+    // расхождении одна операционная ночь могла расколоться на два ряда в зависимости от
+    // клиента. Паритет с AppModel.businessDate (iOS, ManagerView.swift currentDate).
+    const settingsRow = Array.isArray(settingsRes.data) ? settingsRes.data[0] : settingsRes.data
+    const today = typeof settingsRow?.day_start_hour === 'number' ? businessDate(settingsRow.day_start_hour) : new Date()
+    setCurrentDate(today)
+    await loadDay(restaurantId, today, empsRes.data || [], catsRes.data || [])
     await loadOpenDebts()
   }
 
@@ -331,31 +340,31 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   // должен сойтись сам). Пишем ДО shift_expenses (salary_payments — источник истины «оплачено»,
   // паритет с C2/tabs-salary.tsx savePayment) — если запись не пройдёт, откатываем весь settle.
   const SALPERIOD_PREFIX = 'SALPERIOD:'
+  // Один RPC вместо 2-3 независимых запросов (MISE-002, аудит 2026-08-28): раньше сбой сети
+  // между шагами оставлял систему в несогласованном состоянии (например, salary_payments
+  // записан — «оплачено» в ЗП, — а shift_expenses не обновлён — долг всё ещё «открыт» в
+  // Manager, касса дня его не видит). settle_debts (см. docs/migrations/
+  // atomic-debt-settlement-2026-08.sql) выполняет все шаги в одной транзакции: либо все,
+  // либо ни один.
   const persistDebtSettlements = async (shiftId: string, dateStr: string) => {
     const ids = Array.from(selectedDebtIds)
     if (ids.length === 0) return
     const selected = openDebts.filter(d => ids.includes(d.id))
     if (selected.length === 0) return
-    const salaryRows = selected.filter(d => d.employeeId && d.note?.startsWith(SALPERIOD_PREFIX))
-    if (salaryRows.length > 0) {
-      const payInserts = salaryRows.map(d => ({
-        employee_id: d.employeeId, period: (d.note as string).slice(SALPERIOD_PREFIX.length),
-        amount: d.amount, method: 'cash', paid_at: new Date(dateStr).toISOString(),
-        note: tr('an.debtSettleNote'), created_by: null,
-      }))
-      const { error: payErr } = await db.from('salary_payments').insert(payInserts)
-      if (payErr) throw new Error(payErr.message)
-    }
-    const newRows = selected.map(d => ({
-      shift_id: shiftId, restaurant_id: restaurantId, amount: d.amount,
-      category_id: d.categoryId || undefined, category_name: d.categoryName,
-      employee_id: d.employeeId || undefined, is_paid: true, paid_shift_id: shiftId,
-      note: `${tr('an.debtSettleNote')} (${d.date})`,
-    }))
-    const { error: insErr } = await db.from('shift_expenses').insert(newRows)
-    if (insErr) throw new Error(insErr.message)
-    const { error: updErr } = await db.from('shift_expenses').update({ is_paid: true, paid_at: dateStr, paid_shift_id: shiftId }).in('id', ids)
-    if (updErr) throw new Error(updErr.message)
+    const debts = selected.map(d => {
+      const isSalary = !!(d.employeeId && d.note?.startsWith(SALPERIOD_PREFIX))
+      return {
+        id: d.id, amount: d.amount,
+        category_id: d.categoryId || null, category_name: d.categoryName || null,
+        employee_id: d.employeeId || null,
+        is_salary: isSalary,
+        salary_period: isSalary ? (d.note as string).slice(SALPERIOD_PREFIX.length) : null,
+        salary_note: tr('an.debtSettleNote'),
+        expense_note: `${tr('an.debtSettleNote')} (${d.date})`,
+      }
+    })
+    const { error } = await db.rpc('settle_debts', { p_shift_id: shiftId, p_date_str: dateStr, p_debts: debts })
+    if (error) throw new Error(error.message)
   }
 
   const persistShift = async (sh = shift, dateForInk = currentDate) => {
@@ -399,14 +408,18 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     // settleDebt) успел дописать туда свою правку. Delta-merge: переносим то, что поменял
     // МЕНЕДЖЕР (разницу между текущим полем формы и снэпшотом на момент loadDay), поверх
     // АКТУАЛЬНОГО значения в БД на момент сохранения.
-    const { data: curInkList, error: curInkErr } = await db.from('inkassations').select('id, expense, reason').eq('shift_id', sh.id).limit(1)
+    const { data: curInkList, error: curInkErr } = await db.from('inkassations').select('id, expense, salary, reason').eq('shift_id', sh.id).limit(1)
     if (curInkErr) throw new Error(curInkErr.message)
     const curInk = Array.isArray(curInkList) ? curInkList[0] : curInkList
     const finalExpense = (curInk?.expense || 0) + ((parseFloat(inkExpense) || 0) - (parseFloat(loadedInkExpense) || 0))
     const curReason = curInk?.reason || ''
     const finalReason = (curReason === loadedInkReason || inkReason !== loadedInkReason) ? inkReason : curReason
-    const finalTotal = ink - finalExpense
-    if (ink > 0 || finalExpense !== 0 || finalReason) {
+    // salary — выплата ЗП из инкассации (пишется отдельно, tabs-salary.tsx savePayment): строка
+    // только с ней (инкассация дня 0, расхода/причины нет) не «пустая» — иначе сохранение смены
+    // удаляло её вместе с списанием (потеря €1100, Владимир, SO, 2026-09-14).
+    const curSalary = curInk?.salary || 0
+    const finalTotal = ink - finalExpense - curSalary
+    if (ink > 0 || finalExpense !== 0 || finalReason || curSalary !== 0) {
       const values = { restaurant_id: restaurantId, date: fmtDate(dateForInk), amount: ink, expense: finalExpense, reason: finalReason, total: finalTotal }
       const { error: inkErr } = curInk
         ? await db.from('inkassations').update(values).eq('id', curInk.id)

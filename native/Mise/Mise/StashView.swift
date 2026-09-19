@@ -437,9 +437,11 @@ final class StashModel {
                         try await DB.from("tobacco_movements").insert(values).run()
                         if let ex = existing {
                             let delta = mode == "in" ? qty : -qty
-                            // Клампим в 0 — иначе гонка параллельных списаний могла увести остаток
-                            // в минус, а такая позиция выпадала из всех фильтров UI (ни «в наличии», ни «нет»).
-                            try await DB.from("tobacco_stock").update(["quantity_g": max(0, ex.quantity_g + delta)]).eq("id", ex.id).run()
+                            // Атомарный инкремент на сервере, не read-modify-write с клиента —
+                            // иначе параллельное списание с другого устройства читает тот же
+                            // ex.quantity_g и второй write молча теряет эффект первого (MISE-006,
+                            // аудит 2026-08-28). Клампит в 0 сама SQL-функция.
+                            try await DB.rpc("increment_tobacco_stock", args: ["p_id": ex.id, "p_delta": delta], cacheInvalidate: ["tobacco_stock"])
                         } else if mode == "in" {
                             try await DB.from("tobacco_stock").insert([
                                 "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty, "flavor_name": flavor,
@@ -549,8 +551,9 @@ final class StashModel {
         }
         var ok = true
         for (id, delta) in adjust {
-            guard let ex = exById[id] else { continue }
-            do { try await DB.from("tobacco_stock").update(["quantity_g": max(0, ex.quantity_g + delta)]).eq("id", id).run() }
+            guard exById[id] != nil else { continue }
+            // Атомарный инкремент — см. комментарий MISE-006 выше в этом файле.
+            do { try await DB.rpc("increment_tobacco_stock", args: ["p_id": id, "p_delta": delta], cacheInvalidate: ["tobacco_stock"]) }
             catch { ok = false }
         }
         for mv in items {

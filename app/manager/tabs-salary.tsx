@@ -1,5 +1,5 @@
 'use client'
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { db } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
@@ -35,6 +35,9 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   const [payInsufficient, setPayInsufficient] = useState(false)
   const [markingDebt, setMarkingDebt] = useState(false)
   const [paying, setPaying] = useState(false)
+  // Синхронный замок от двойного нажатия: state (paying) обновляется асинхронно, второй тап
+  // успевал пройти до перерисовки — так появилась дублирующая выплата €1530 (SO, 2026-09-14).
+  const moneyBusy = useRef(false)
   const [debt, setDebt] = useState<{ total: number; byId: Record<string, number> }>({ total: 0, byId: {} })
   // Долг-леджер (2026-08-20): остаток за ПРОШЛЫЕ месяцы теперь материализуется как обычная
   // строка shift_expenses (is_paid=false, employee_id, note=SALPERIOD:<period>) — та же таблица,
@@ -110,6 +113,12 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   useEffect(() => { load() }, [ym])
 
   const DEBT_TRACKING_START = new Date(2026, 7, 1) // 2026-08-01
+  // Долг-леджер (SALPERIOD-строки в shift_expenses) выключен по запросу юзера 2026-09-04, но
+  // коммит 920e207 отключил только запуск при открытии вкладки — loadDebt() всё равно звался
+  // после каждой операции (аванс/выплата/удаление) и продолжал создавать/удалять строки, в т.ч.
+  // дубли (две «ЗП — август 2026» по 1280 с разницей 0,2с, SO 2026-09-14). Теперь loadDebt только
+  // СЧИТАЕТ долг для экрана и ничего не пишет; вернуть синхронизацию — включить флаг.
+  const LEDGER_SYNC_ENABLED = false
   const loadDebt = async () => {
     const now = new Date()
     let total = 0; const byId: Record<string, number> = {}
@@ -140,7 +149,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       })
     }
     setDebt({ total, byId })
-    await syncLedger(target, scannedPeriods)
+    if (LEDGER_SYNC_ENABLED) await syncLedger(target, scannedPeriods)
   }
 
   const syncLedger = async (target: { empId: string; empName: string; period: string; monthEnd: string; amount: number }[], scannedPeriods: string[]) => {
@@ -288,7 +297,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     return Array.isArray(data) && data.length > 0
   }
 
-  const addAdvance = async (empId: string, empName: string, amount: number, dateStr: string) => {
+  const addAdvanceInner = async (empId: string, empName: string, amount: number, dateStr: string) => {
     // Аванс не может увести сотрудника в минус по ЗП (юзер-фидбок 2026-08-14) — row.remaining
     // уже = max(0, cash − paid), т.е. именно то, что ещё можно выдать до конца месяца.
     // fail-closed (паритет с iOS addAdvance, аудит 2026-08-15): если строка сотрудника почему-то
@@ -304,8 +313,21 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     // A4 (аудит 2026-08-15): тег с id аванса вместо голого «Имя аванс» — иначе deleteAdvance
     // ниже стирал бы фрагмент reason ЛЮБОГО аванса этого сотрудника за день, а не только удаляемый.
     const advTag = advanceTag(empName, amount, advRow?.id || '')
-    const shift = await findShiftForDate(dateStr)
-    if (shift) {
+    // Аванс и списание из инкассации — «оба или ничего»: раньше при любом сбое списания (нет смены,
+    // гонка, ошибка insert) аванс оставался в salary_advances, а деньги из инкассации не
+    // списывались — только тост (реальный случай: Ера €100, SO, 2026-08-11). Теперь при сбое
+    // аванс откатывается, а если смены на дату нет — она создаётся (как для выплаты ЗП).
+    const rollbackAdvance = async () => {
+      if (!advRow?.id) return
+      const { error } = await db.from('salary_advances').delete().eq('id', advRow.id)
+      if (error) showToast(tr('pe.saveFailed', { err: `откат аванса не удался, проверьте вручную: ${error.message}` }))
+    }
+    const shift = (await findShiftForDate(dateStr)) || (await ensureShift(dateStr))
+    let ok = false
+    let errMsg = 'race'
+    if (!shift) {
+      errMsg = 'shift'
+    } else {
       let ink = await findInkassation(shift.id)
       const applyAdvance = (base: any) => {
         const baseAmount = base?.amount ?? shift.inkassation ?? 0
@@ -316,7 +338,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       }
       if (ink) {
         let { newExpense, newReason, newTotal } = applyAdvance(ink)
-        let ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
+        ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
         if (!ok) {
           ink = await findInkassation(shift.id)
           if (ink) {
@@ -324,19 +346,24 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
             ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
           }
         }
-        if (!ok) showToast(tr('pe.saveFailed', { err: 'race' }))
       } else {
         const { baseAmount, newExpense, newReason, newTotal } = applyAdvance(ink)
-        // Раньше результат insert не проверялся: salary_advances уже записан (аванс числится
-        // у сотрудника), а инкассация — нет при сбое, деньги молча выпадают из кассы
-        // (money-integrity, тот же класс багов, что A5 в deleteAdvance выше).
         const { error } = await db.from('inkassations').insert({ shift_id: shift.id, restaurant_id: restaurantId, date: dateStr, amount: baseAmount, expense: newExpense, reason: newReason, salary: 0, total: newTotal })
-        if (error) showToast(tr('pe.saveFailed', { err: error.message }))
+        ok = !error
+        if (error) errMsg = error.message
       }
-    } else {
-      showToast(tr('an.advanceInkassationMissing'))
+    }
+    if (!ok) {
+      await rollbackAdvance()
+      showToast(tr('pe.saveFailed', { err: errMsg }))
+      return
     }
     await load(); await loadDebt()
+  }
+  const addAdvance = async (empId: string, empName: string, amount: number, dateStr: string) => {
+    if (moneyBusy.current) return
+    moneyBusy.current = true
+    try { await addAdvanceInner(empId, empName, amount, dateStr) } finally { moneyBusy.current = false }
   }
 
   const deleteAdvance = async (a: any, empName: string) => {
@@ -381,12 +408,26 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   // в минус» сверяется с накопительным кошельком инкассации (см. ниже), не с суммой этого дня.
   // Карта — безнал, кассы не касается.
   const savePayment = async () => {
+    if (moneyBusy.current) return
+    moneyBusy.current = true
+    try { await savePaymentInner() } finally { moneyBusy.current = false }
+  }
+  const savePaymentInner = async () => {
     if (!payFor) return
     const amount = Number(payFor.amount) || 0
     if (amount <= 0) return
     setPaying(true); setPayError(null); setPayInsufficient(false)
     const method = payFor.method || 'cash'
     const dateStr = payFor.date || fmtDate(new Date())
+
+    // Вторая защита от дубля (помимо замка moneyBusy — ловит и второе устройство): такая же
+    // выплата тому же сотруднику за тот же период за последние 2 минуты — повторное нажатие.
+    const since = new Date(Date.now() - 120000).toISOString()
+    const { data: recentDup } = await db.from('salary_payments').select('id').eq('employee_id', payFor.id).eq('period', `${ym}-01`).eq('amount', amount).eq('method', method).gte('created_at', since).limit(1)
+    if (Array.isArray(recentDup) && recentDup.length > 0) {
+      setPayError(tr('pe.saveFailed', { err: 'такая же выплата уже записана меньше 2 минут назад (повторное нажатие?)' }))
+      setPaying(false); return
+    }
 
     if (method === 'cash') {
       const sh = await ensureShift(dateStr)

@@ -290,9 +290,13 @@ final class PeopleModel {
         // ManagerModel.computeSalary (ManagerSalary.swift, юзер-фидбок 2026-08-15).
         async let advR = try? DB.from("salary_advances").select().eq("period", ym + "-01").list(SalaryAdvance.self)
         async let paysR = try? DB.from("salary_payments").select().eq("period", ym + "-01").list(SalaryPayment.self)
-        guard let employees = await empsR else { return [] }
+        // Оклад/вычет, действовавшие в этом месяце (salary-history-2026-09.sql) — иначе
+        // правка оклада сегодня меняет расчёт за прошлые месяцы задним числом.
+        async let salHistR = try? DB.from("salary_history").select("employee_id, salary, deduct_per_absence, effective_from").lte("effective_from", key(monthStart)).list(SalaryHistoryRow.self)
+        guard let rawEmployees = await empsR else { return [] }
         let absences = (await absR) ?? [], cardAmounts = (await cardsR) ?? []
         let advances = (await advR) ?? [], payments = (await paysR) ?? []
+        let employees = resolveEmployees(rawEmployees, history: (await salHistR) ?? [], monthStart: key(monthStart))
 
         return employees.map { e -> SalRow in
             let absForEmp = absences.filter { $0.employee_id == e.id && $0.source != "auto" }

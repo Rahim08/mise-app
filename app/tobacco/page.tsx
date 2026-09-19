@@ -575,10 +575,13 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
           await db.from('tobacco_stock').insert({ restaurant_id: restaurantId, brand: r.brand, flavor: r.flavor, quantity_g: qty, flavor_name: r.flavor, updated_at: new Date().toISOString() })
         }
       }
+      // Атомарный инкремент на сервере (не read-modify-write с клиента) — иначе два
+      // устройства, почти одновременно пишущих движение по одной позиции, читают один и
+      // тот же base.quantity_g, и второй write молча теряет эффект первого (MISE-006,
+      // аудит 2026-08-28).
       for (const id of Object.keys(deltas)) {
-        const base = byId[id]
-        if (!base) continue
-        await db.from('tobacco_stock').update({ quantity_g: Math.max(0, base.quantity_g + deltas[id]), updated_at: new Date().toISOString() }).eq('id', id)
+        if (!byId[id]) continue
+        await db.rpc('increment_tobacco_stock', { p_id: id, p_delta: deltas[id] })
       }
 
       await loadAll(restaurantId)

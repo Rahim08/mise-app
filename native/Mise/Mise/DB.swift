@@ -9,6 +9,18 @@ import Foundation
 enum DB {
     static func from(_ table: String) -> DBQuery { DBQuery(table) }
 
+    /// Calls an allowlisted atomic SQL function via /api/db (see RPC_POLICY server-side,
+    /// app/api/db/route.ts). Not retried — a retry after a lost response would double-apply
+    /// the delta/write, same rule as insert/update on DBQuery. `cacheInvalidate` should name
+    /// every table the function mutates, so stale reads don't outlive the write (MISE-006,
+    /// MISE-002, audit 2026-08-28 — replaces client read-modify-write / multi-step writes
+    /// with a server-side atomic function).
+    static func rpc(_ fn: String, args: [String: Any] = [:], cacheInvalidate tables: [String]) async throws {
+        let payload: [String: Any] = ["op": "rpc", "fn": fn, "args": args]
+        _ = try await API.dbRequest(payload)
+        for table in tables { invalidateCache(table: table) }
+    }
+
     /// Очистить кеш для конкретной таблицы (вызывать после мутаций).
     /// Fire-and-forget: порядок не критичен — кеш и так живёт максимум 5 минут (TTL).
     static func invalidateCache(table: String) { Task { await CacheStore.shared.invalidate(table: table) } }

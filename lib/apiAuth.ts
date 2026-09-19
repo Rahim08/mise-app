@@ -8,7 +8,9 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { verifyStaffToken, STAFF_COOKIE, verifyAdminViewToken, ADMIN_VIEW_COOKIE_NAME } from '@/lib/staffToken'
 
-export interface Caller { rid: string; owner: boolean; apps: string[]; sid?: string }
+// uid/email — владелец (Supabase-аккаунт), via — суперадмин «глазами клиента»; нужны только
+// для журнала финансов (lib/financialAudit.ts), на авторизацию не влияют.
+export interface Caller { rid: string; owner: boolean; apps: string[]; sid?: string; uid?: string; email?: string; via?: 'admin_view' }
 
 function serviceRoleClient() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
@@ -30,7 +32,7 @@ export async function resolveCaller(req: NextRequest): Promise<Caller | null> {
   // admin's own Supabase session (they may own a restaurant themselves) would otherwise
   // win below. Scope: full owner access to the impersonated restaurant only.
   const adminView = verifyAdminViewToken(req.cookies.get(ADMIN_VIEW_COOKIE_NAME)?.value)
-  if (adminView) return { rid: adminView.rid, owner: true, apps: ['manager', 'analytics', 'stash', 'people'] }
+  if (adminView) return { rid: adminView.rid, owner: true, apps: ['manager', 'analytics', 'stash', 'people'], via: 'admin_view' }
 
   const staff = verifyStaffToken(req.cookies.get(STAFF_COOKIE)?.value)
 
@@ -62,7 +64,7 @@ export async function resolveCaller(req: NextRequest): Promise<Caller | null> {
     if (await staffTokenRevoked(admin, staff)) return null
     return { rid: staff.rid, owner: staff.owner, apps: staff.apps || [], sid: staff.sid }
   }
-  return { rid: data.id, owner: true, apps: ['manager', 'analytics', 'stash', 'people'] }
+  return { rid: data.id, owner: true, apps: ['manager', 'analytics', 'stash', 'people'], uid: user.id, email: user.email ?? undefined }
 }
 
 // «Должностное лицо» — owner или staff.role в manager/admin (то же правило, что iOS

@@ -23,27 +23,44 @@ final class HubStatsModel {
     func load(canSeeMoney: Bool, dayStartHour: Int) async {
         let today = Self.dfKey.string(from: AppModel.businessDate(dayStartHour: dayStartHour))
 
-        async let shiftR: Shift? = canSeeMoney ? Self.loadLatestShift(today: today) : nil
+        // Статус Manager относится только к текущему операционному дню. Аналитика
+        // должна оставаться полезной и до открытия сегодняшней смены, поэтому для неё
+        // отдельно берём последнюю доступную смену.
+        async let todayShiftR: Shift? = Self.loadTodayShift(today: today)
+        async let analyticsShiftR: Shift? = canSeeMoney ? Self.loadLatestShift(upTo: today) : nil
         async let lowR = Self.loadStashLow()
         async let onShiftR = Self.loadOnShift(today: today)
         async let bookingR = Self.loadNextBookingTime(today: today)
 
-        let (sh, low, onShift, booking) = await (shiftR, lowR, onShiftR, bookingR)
+        let (todayShift, analyticsShift, low, onShift, booking) = await (todayShiftR, analyticsShiftR, lowR, onShiftR, bookingR)
 
-        if let sh {
+        if let todayShift {
             // Как в ManagerView/SnapshotWriter: касса на руках — closing_balance, если ещё
             // не посчитан (смена только открыта) — падать на доход наличными+картой.
-            managerCash = sh.closing_balance ?? ((sh.income ?? 0) + (sh.income_card ?? 0))
-            managerOpen = sh.status == "open"
-            analyticsIncome = (sh.income ?? 0) + (sh.income_card ?? 0)
+            managerOpen = todayShift.status == "open"
+            if canSeeMoney {
+                managerCash = todayShift.closing_balance ?? ((todayShift.income ?? 0) + (todayShift.income_card ?? 0))
+            } else {
+                managerCash = nil
+            }
+        } else {
+            managerCash = nil
+            managerOpen = false
         }
+        analyticsIncome = canSeeMoney ? analyticsShift.map { ($0.income ?? 0) + ($0.income_card ?? 0) } : nil
         stashLowCount = low
         peopleOnShift = onShift
         nextBookingTime = booking
     }
 
-    private static func loadLatestShift(today: String) async -> Shift? {
-        (try? await DB.from("shifts").select()
+    private static func loadTodayShift(today: String) async -> Shift? {
+        (try? await DB.from("shifts").fresh().select()
+            .eq("date", today).order("opened_at", ascending: false)
+            .limit(1).list(Shift.self))?.first
+    }
+
+    private static func loadLatestShift(upTo today: String) async -> Shift? {
+        (try? await DB.from("shifts").fresh().select()
             .lte("date", today).order("date", ascending: false).order("opened_at", ascending: false)
             .limit(1).list(Shift.self))?.first
     }

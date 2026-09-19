@@ -37,6 +37,10 @@ final class ManagerModel {
     struct DebtRow: Identifiable, Sendable {
         let id: String; let shiftId: String; let date: String
         let categoryId: String?; let categoryName: String; let employeeId: String?; let amount: Double
+        // note — нужен только чтобы отличить ЗП-долг (note начинается с "SALPERIOD:", см.
+        // ManagerSalary.swift syncLedger) от обычного expense-долга при погашении (MISE-001,
+        // аудит 2026-08-28) — сама карточка долга его не показывает.
+        let note: String?
     }
     var openDebts: [DebtRow] = []
     var selectedDebtIds: Set<String> = []
@@ -139,10 +143,10 @@ final class ManagerModel {
     func loadOpenDebts() async {
         nonisolated struct DebtExp: Codable, Sendable {
             let id: String; let shift_id: String?; let category_id: String?; let category_name: String?
-            let employee_id: String?; let amount: Double?
+            let employee_id: String?; let amount: Double?; let note: String?
         }
         guard let unpaid = try? await DB.from("shift_expenses")
-            .select("id, shift_id, category_id, category_name, employee_id, amount")
+            .select("id, shift_id, category_id, category_name, employee_id, amount, note")
             .eq("is_paid", false).list(DebtExp.self), !unpaid.isEmpty else { openDebts = []; return }
         let shiftIds = Array(Set(unpaid.compactMap { $0.shift_id }))
         nonisolated struct ShiftDateRow: Codable, Sendable { let id: String; let date: String }
@@ -151,7 +155,7 @@ final class ManagerModel {
         openDebts = unpaid.compactMap { e -> DebtRow? in
             guard let sid = e.shift_id, let date = dateById[sid] else { return nil }
             return DebtRow(id: e.id, shiftId: sid, date: date, categoryId: e.category_id,
-                categoryName: e.category_name ?? "—", employeeId: e.employee_id, amount: e.amount ?? 0)
+                categoryName: e.category_name ?? "—", employeeId: e.employee_id, amount: e.amount ?? 0, note: e.note)
         }.sorted { $0.date < $1.date }
     }
 
@@ -426,8 +430,8 @@ final class ManagerModel {
     // (разницу между текущим полем формы и снэпшотом на момент loadDay), поверх АКТУАЛЬНОГО
     // значения в БД на момент сохранения — а не поверх устаревшего снэпшота.
     private func persistInkassation(shiftId: String, _ c: Calc) async throws {
-        struct InkRow: Codable, Sendable { let id: String; let expense: Double?; let reason: String? }
-        let current = try await DB.from("inkassations").select("id, expense, reason")
+        struct InkRow: Codable, Sendable { let id: String; let expense: Double?; let salary: Double?; let reason: String? }
+        let current = try await DB.from("inkassations").select("id, expense, salary, reason")
             .eq("shift_id", shiftId).limit(1).list(InkRow.self).first
 
         let finalExpense = (current?.expense ?? 0) + (num(inkExpense) - num(loadedInkExpense))
@@ -436,9 +440,13 @@ final class ManagerModel {
         // менеджер сам не редактировал поле, а в БД оно уже другое — не затираем чужую правку.
         let finalReason = (currentReason == loadedInkReason || inkReason != loadedInkReason)
             ? inkReason : currentReason
-        let finalTotal = c.ink - finalExpense
+        // salary — выплата ЗП из инкассации (ManagerSalary.markSalaryPaid): строка только с ней
+        // (инкассация дня 0, расхода/причины нет) не «пустая» — иначе сохранение смены удаляло
+        // её вместе со списанием (потеря €1100, Владимир, SO, 2026-09-14).
+        let curSalary = current?.salary ?? 0
+        let finalTotal = c.ink - finalExpense - curSalary
 
-        guard c.ink > 0 || finalExpense != 0 || !finalReason.isEmpty else {
+        guard c.ink > 0 || finalExpense != 0 || !finalReason.isEmpty || curSalary != 0 else {
             if let id = current?.id { try await DB.from("inkassations").delete().eq("id", id).run() }
             return
         }
@@ -459,25 +467,39 @@ final class ManagerModel {
     // (видимо и безопасно), а не тихо потерялся; 2) исходная строка помечается «оплачено» —
     // статус для истории, paid_shift_id ≠ её собственный shift_id → навсегда исключена из
     // подсчёта своего родного дня (Analytics.countsInRollup).
+    // Один RPC вместо 2-3 независимых запросов (MISE-002, аудит 2026-08-28): раньше сбой сети
+    // между insert новой строки и update исходной оставлял систему в несогласованном
+    // состоянии — settle_debts (docs/migrations/atomic-debt-settlement-2026-08.sql) делает
+    // всё в одной транзакции. Тот же RPC, что и на вебе (app/manager/page.tsx). ЗП-долг
+    // определяется по префиксу note (MISE-001, аудит 2026-08-28: iOS теперь тоже
+    // материализует его через ManagerSalaryModel.syncLedger, той же строкой shift_expenses,
+    // что и обычные expense-долги — так это уже видно здесь, без отдельного UI).
+    private static let salperiodPrefix = "SALPERIOD:"
     private func persistDebtSettlements(shiftId: String) async throws {
         let ids = selectedDebtIds
         guard !ids.isEmpty else { return }
         let selected = openDebts.filter { ids.contains($0.id) }
         guard !selected.isEmpty else { return }
-        let newRows: [[String: Any]] = selected.map { d in
+        let debts: [[String: Any]] = selected.map { d in
+            let isSalary = d.employeeId != nil && (d.note?.hasPrefix(Self.salperiodPrefix) ?? false)
             var row: [String: Any] = [
-                "shift_id": shiftId, "restaurant_id": rid, "amount": d.amount,
-                "category_name": d.categoryName, "is_paid": true, "paid_shift_id": shiftId,
-                "note": t("an.debtSettleNote") + " (\(d.date))",
+                "id": d.id, "amount": d.amount,
+                "category_id": d.categoryId ?? NSNull(), "category_name": d.categoryName,
+                "employee_id": d.employeeId ?? NSNull(),
+                "is_salary": isSalary,
+                "expense_note": t("an.debtSettleNote") + " (\(d.date))",
             ]
-            if let cid = d.categoryId { row["category_id"] = cid }
-            if let eid = d.employeeId { row["employee_id"] = eid }
+            if isSalary {
+                row["salary_period"] = String((d.note ?? "").dropFirst(Self.salperiodPrefix.count))
+                row["salary_note"] = t("an.debtSettleNote")
+            }
             return row
         }
-        try await DB.from("shift_expenses").insert(newRows).run()
-        try await DB.from("shift_expenses").update([
-            "is_paid": true, "paid_at": key(currentDate), "paid_shift_id": shiftId,
-        ] as [String: Any]).in("id", Array(ids)).run()
+        try await DB.rpc(
+            "settle_debts",
+            args: ["p_shift_id": shiftId, "p_date_str": key(currentDate), "p_debts": debts],
+            cacheInvalidate: ["shift_expenses", "salary_payments"]
+        )
     }
 
     @discardableResult
