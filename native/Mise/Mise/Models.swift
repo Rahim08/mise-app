@@ -105,6 +105,11 @@ nonisolated struct InkTopup: Codable, Identifiable, Sendable {
     let reason: String?
 }
 
+// Готовый агрегат баланса инкассации (VIEW inkassation_balance, считает сумма на стороне
+// Postgres) — вместо перекачки всей истории shifts+inkassations+topups ради одной цифры
+// (юзер-фидбок 2026-09-23: «общая сумма инкассации» долго грузилась, кнопка выплаты ЗП тупила).
+nonisolated struct InkBalanceRow: Codable, Sendable { let balance: Double? }
+
 nonisolated struct ClosingOnly: Codable, Sendable { let closing_balance: Double? }
 nonisolated struct InkOnly: Codable, Sendable { let inkassation: Double? }
 nonisolated struct InkTotalOnly: Codable, Sendable { let total: Double? }

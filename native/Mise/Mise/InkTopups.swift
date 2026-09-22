@@ -27,20 +27,14 @@ final class InkTopupsModel {
         }
     }
 
-    private struct ShiftInk: Codable, Sendable { let inkassation: Double? }
-    private struct InkDeduct: Codable, Sendable { let expense: Double?; let salary: Double? }
-    private struct Amt: Codable, Sendable { let amount: Double? }
-
-    /// Баланс инкассации «сейчас» (та же формула, что в Analytics/выплате ЗП): валовая инкассация −
-    /// (расход + ЗП) + поступления. nil — не удалось прочитать (fail-closed: правку не пускаем).
+    /// Баланс инкассации «сейчас» — готовый агрегат из VIEW inkassation_balance (1 строка)
+    /// вместо перекачки всей истории shifts+inkassations+topups на каждое открытие формы
+    /// (юзер-фидбок 2026-09-22/23: тормозило именно то, что тут проверялось на каждый чих).
+    /// nil — не удалось прочитать (fail-closed: правку не пускаем).
     private func inkBalance() async -> Double? {
-        async let a = DB.from("shifts").select("inkassation").eq("restaurant_id", rid).fresh().list(ShiftInk.self)
-        async let b = DB.from("inkassations").select("expense, salary").eq("restaurant_id", rid).fresh().list(InkDeduct.self)
-        async let c = DB.from("inkassation_topups").select("amount").eq("restaurant_id", rid).fresh().list(Amt.self)
-        guard let sh = try? await a, let ink = try? await b, let tp = try? await c else { return nil }
-        return sh.reduce(0) { $0 + ($1.inkassation ?? 0) }
-            - ink.reduce(0) { $0 + ($1.expense ?? 0) + ($1.salary ?? 0) }
-            + tp.reduce(0) { $0 + ($1.amount ?? 0) }
+        guard let row = (try? await DB.from("inkassation_balance").select("balance")
+            .eq("restaurant_id", rid).fresh().list(InkBalanceRow.self))?.first else { return nil }
+        return row.balance ?? 0
     }
     /// Уменьшение/удаление поступления, из которого уже платили (ЗП, расход), увело бы баланс в минус.
     private func guardReduction(_ reduceBy: Double) async -> String? {

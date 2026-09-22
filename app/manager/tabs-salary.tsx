@@ -434,20 +434,15 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       if (!sh) { setPayError(tr('pe.saveFailed', { err: 'shift' })); setPaying(false); return }
       const shiftId = sh.id
       // Инкассация — накопительный кошелёк, не сумма конкретного дня (юзер-фидбок 2026-08-16):
-      // доступно = вся инкассация по сменам минус всё уже списанное (расход+ЗП) за всё время
-      // (те же cumulativeInkass, что в app/analytics/page.tsx). Раньше сверяли только с
-      // инкассацией дня выплаты — ложно блокировало или пропускало мимо реального остатка.
-      const [{ data: shAll }, { data: inkAll }, { data: inkList }, { data: tpAll }] = await Promise.all([
-        db.from('shifts').select('inkassation').eq('restaurant_id', restaurantId),
-        db.from('inkassations').select('expense, salary').eq('restaurant_id', restaurantId),
+      // доступно = вся инкассация по сменам минус всё уже списанное (расход+ЗП) за всё время.
+      // Баланс — готовый агрегат из VIEW inkassation_balance (1 строка) вместо перекачки всей
+      // истории shifts+inkassations+topups на каждое нажатие «Выплатить» (юзер-фидбок
+      // 2026-09-22: кнопки выплаты ЗП стали медленно реагировать).
+      const [{ data: balRows }, { data: inkList }] = await Promise.all([
+        db.from('inkassation_balance').select('balance').eq('restaurant_id', restaurantId).limit(1),
         db.from('inkassations').select('id, amount, expense, salary, salary_note').eq('shift_id', shiftId).limit(1),
-        db.from('inkassation_topups').select('amount').eq('restaurant_id', restaurantId),
       ])
-      // Поступления (inkassation_topups) — часть баланса инкассации, доступного для выплаты.
-      const topupsSum = (tpAll || []).reduce((s: number, r: any) => s + Number(r.amount || 0), 0)
-      const grossInk = (shAll || []).reduce((s: number, r: any) => s + (r.inkassation || 0), 0) + topupsSum
-      const deducted = (inkAll || []).reduce((s: number, r: any) => s + (r.expense || 0) + (r.salary || 0), 0)
-      const available = grossInk - deducted
+      const available = Number(balRows?.[0]?.balance || 0)
       const cur = Array.isArray(inkList) ? inkList[0] : inkList
       if (amount > available) {
         setPayError(tr('pe.insufficientInkassationPool', { avail: eur(Math.max(0, available)) }))

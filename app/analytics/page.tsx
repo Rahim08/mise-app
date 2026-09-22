@@ -462,7 +462,10 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [shiftsRaw, setShifts] = useState<any[]>([])
   const [prevShiftsRaw, setPrevShifts] = useState<any[]>([])
   const [allShiftsRaw, setAllShifts] = useState<any[]>([])
-  const [inkDeductions, setInkDeductions] = useState<any[]>([])
+  // Баланс инкассации — готовый агрегат из VIEW inkassation_balance (см. loadAllHistory),
+  // не сумма на клиенте по всей истории shifts+inkassations+topups (юзер-фидбок 2026-09-23:
+  // плашка «общая инкассация» не ускорилась вместе с остальным именно из-за этого пересчёта).
+  const [cumulativeInkass, setCumulativeInkass] = useState(0)
   // Поступления в инкассацию (inkassation_topups): входят в баланс, но не в кассу/выручку.
   const [allTopups, setAllTopups] = useState<any[]>([])
   // C6 (юзер-фидбок 2026-08-15): дневная карточка «Инкассация» была хардкод-заглушкой
@@ -639,21 +642,22 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   }
 
   const loadAllHistory = async (rid: string) => {
-    // Без нижней границы даты: cumulativeInkass вычитает inkDeductions ЗА ВСЁ ВРЕМЯ (тоже
-    // без границы, см. ниже) из этого gross — граница только с одной стороны занижала бы
-    // накопительный остаток, как только истории станет больше года.
-    const { data: sh } = await db.from('shifts').select('*').eq('restaurant_id', rid).order('date')
+    // Баланс (VIEW), all-time shifts и топ-апы не зависят друг от друга — параллельно, не
+    // одно за другим (было 3-4 последовательных запроса на каждый pull-to-refresh).
+    const [{ data: bal }, { data: sh }, { data: tp }] = await Promise.all([
+      db.from('inkassation_balance').select('balance').limit(1),
+      // Инкассация копится через месяцы, не обнуляется 1-го числа (как «Касса» на iOS) —
+      // отсюда all-time; сам баланс теперь считает Postgres, см. cumulativeInkass выше.
+      db.from('shifts').select('*').eq('restaurant_id', rid).order('date'),
+      db.from('inkassation_topups').select('id, date, amount, reason').order('date'),
+    ])
+    setCumulativeInkass(Number(bal?.[0]?.balance || 0))
     setAllShifts(sh || [])
+    setAllTopups(tp || [])
     if (sh && sh.length > 0) {
       const { data: ex } = await db.from('shift_expenses').select('*').in('shift_id', sh.map((s: any) => s.id))
       setAllExpenses(ex || [])
     }
-    // Инкассация копится через месяцы, не обнуляется 1-го числа (как «Касса» на iOS):
-    // валовая инкассация по сменам минус всё списанное из неё (расход + выплаченная ЗП).
-    const { data: ink } = await db.from('inkassations').select('expense, salary')
-    setInkDeductions(ink || [])
-    const { data: tp } = await db.from('inkassation_topups').select('id, date, amount, reason').order('date')
-    setAllTopups(tp || [])
   }
 
   // ── COMPUTED ──
@@ -675,9 +679,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const totalIncome = shifts.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
   const totalExpense = shifts.reduce((s: number, sh: any) => s + (sh.total_expense || 0), 0)
   const totalInkass = shifts.reduce((s: number, sh: any) => s + (sh.inkassation || 0), 0)
-  const cumulativeInkass = allShifts.reduce((s: number, sh: any) => s + (sh.inkassation || 0), 0)
-    - inkDeductions.reduce((s: number, d: any) => s + (d.expense || 0) + (d.salary || 0), 0)
-    + allTopups.reduce((s: number, tp: any) => s + Number(tp.amount || 0), 0)
+  // cumulativeInkass — state, см. loadAllHistory (VIEW inkassation_balance).
   const lastShift = shifts[shifts.length - 1]
   // Фактический баланс кассы «сейчас» (юзер-фидбок 2026-08-20): не должен меняться от
   // пролистывания старых месяцев — allShifts не фильтрован по periodMode/currentDate (вся

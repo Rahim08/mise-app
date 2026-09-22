@@ -483,21 +483,14 @@ final class ManagerSalaryModel {
                 flash(t("saveFailed", ["err": "shift"])); return false
             }
             nonisolated struct InkRow: Codable, Sendable { let id: String; let amount: Double?; let expense: Double?; let salary: Double?; let salary_note: String? }
-            nonisolated struct ShiftInkRow: Codable, Sendable { let inkassation: Double? }
-            nonisolated struct InkDeductRow: Codable, Sendable { let expense: Double?; let salary: Double? }
             async let currentTask = DB.from("inkassations").select("id, amount, expense, salary, salary_note")
                 .eq("shift_id", shiftId).limit(1).list(InkRow.self).first
-            async let shAllTask = DB.from("shifts").select("inkassation").eq("restaurant_id", rid).list(ShiftInkRow.self)
-            async let inkAllTask = DB.from("inkassations").select("expense, salary").eq("restaurant_id", rid).list(InkDeductRow.self)
-            async let topupsTask = DB.from("inkassation_topups").select("id, date, amount, reason").eq("restaurant_id", rid).list(InkTopup.self)
+            // Баланс — готовый агрегат из VIEW (1 строка) вместо перекачки всей истории
+            // shifts+inkassations+topups ресторана на каждое нажатие «Выплатить» (юзер-фидбок
+            // 2026-09-22: кнопки выплаты ЗП стали медленно реагировать).
+            async let balanceTask = DB.from("inkassation_balance").select("balance").eq("restaurant_id", rid).limit(1).list(InkBalanceRow.self)
             let current = try? await currentTask
-            let shAll = (try? await shAllTask) ?? []
-            let inkAll = (try? await inkAllTask) ?? []
-            // Поступления в инкассацию — часть доступного баланса (паритет с tabs-salary.tsx).
-            let topupsSum = ((try? await topupsTask) ?? []).reduce(0.0) { $0 + $1.amount }
-            let grossInk = shAll.reduce(0.0) { $0 + ($1.inkassation ?? 0) } + topupsSum
-            let deducted = inkAll.reduce(0.0) { $0 + ($1.expense ?? 0) + ($1.salary ?? 0) }
-            let available = grossInk - deducted
+            let available = ((try? await balanceTask)?.first?.balance) ?? 0
             guard amount <= available else {
                 flash(t("pe.insufficientInkassationPool", ["avail": Money.s(max(0, available))]))
                 insufficientFunds = true

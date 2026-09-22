@@ -8,7 +8,7 @@
 // NOTE: the public guest menu (read published menu + create order) is intentionally NOT routed
 // here — it stays anon and is guarded by narrow public RLS policies.
 
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { resolveCaller, isOfficial, type Caller } from '@/lib/apiAuth'
 import { entitlements, isActiveStatus } from '@/lib/plans'
@@ -31,6 +31,9 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   shift_absences:       { read: ['manager', 'analytics', 'people'], write: ['manager'] },
   inkassations:         { read: ['manager', 'analytics'], write: ['manager', 'analytics'] },
   inkassation_topups:   { read: ['manager', 'analytics'], write: ['manager'] }, // поступления в баланс инкассации (не касса); правит только Manager
+  // VIEW (docs/migrations/inkassation-balance-view-2026-09-23.sql): готовый агрегат вместо
+  // перекачки всей истории shifts+inkassations+topups на клиент ради одной цифры. Read-only.
+  inkassation_balance:  { read: ['manager', 'analytics'], write: [] },
   transactions:         { read: ['manager', 'analytics'], write: ['manager'] },
   monthly_card_amounts: { read: ['analytics', 'people'], write: ['analytics'] }, // помесячная сумма на карту правится в Analytics
   salary_advances:      { read: ['analytics', 'people'], write: ['analytics'] }, // авансы по зарплате
@@ -247,7 +250,10 @@ export async function POST(req: NextRequest) {
       console.error(`[api/db] rpc ${fn} failed:`, error)
       return NextResponse.json({ error: clientSafeError(error), code: (error as any).code }, { status: 400 })
     }
-    if (fn === 'settle_debts') await auditRpc(admin, caller, fn, safeArgs)
+    // Off the critical path (Next.js `after`): the actor lookup + audit insert added 1-2
+    // sequential Supabase round-trips to every settle_debts call, felt as sluggish buttons.
+    // Logging must never delay the response the client is waiting on.
+    if (fn === 'settle_debts') after(() => auditRpc(admin, caller, fn, safeArgs))
     return NextResponse.json({ data })
   }
 
@@ -379,11 +385,13 @@ export async function POST(req: NextRequest) {
       await admin.from('push_subscriptions').delete().in('staff_id', staffDeactivatedIds)
     }
     if (audited) {
-      await auditWrite(admin, caller, {
-        table, op, filters,
-        oldRows: auditOldRows,
-        newRows: op === 'delete' ? [] : (Array.isArray(data) ? data : data ? [data] : []),
-      })
+      // Off the critical path (Next.js `after`): resolveActor (staff lookup) + the audit
+      // insert added 2 sequential Supabase round-trips to every write on a money table —
+      // felt as sluggish buttons/saves. The response below no longer waits on them; the
+      // DB trigger (source='db') still logs synchronously either way, so nothing is lost
+      // if this callback is ever cut short.
+      const newRows = op === 'delete' ? [] : (Array.isArray(data) ? data : data ? [data] : [])
+      after(() => auditWrite(admin, caller, { table, op, filters, oldRows: auditOldRows, newRows }))
     }
     // Без `returning` клиент раньше получал null — не меняем форму ответа из-за внутреннего .select() выше.
     const respData = audited && !returning ? null : data

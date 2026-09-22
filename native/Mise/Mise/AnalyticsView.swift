@@ -186,16 +186,11 @@ final class AnalyticsModel {
         return key(end)
     }
 
-    // Кэш all-time данных (инкассация-история для cumulativeInkass, кальян-склад) — эти
-    // запросы шли БЕЗ границы даты вообще и гонялись заново на КАЖДУЮ навигацию по месяцам
-    // (каждая стрелка, каждая вкладка), хотя основа не зависит от currentDate — только verdict
-    // "на конец какого месяца" считается локально. Теперь фетчатся один раз за сессию,
-    // обновляются только явным pull-to-refresh (forceRefresh: true).
+    // Кэш all-time данных (кальян-склад) — эти запросы шли БЕЗ границы даты вообще и гонялись
+    // заново на КАЖДУЮ навигацию по месяцам (каждая стрелка, каждая вкладка), хотя основа не
+    // зависит от currentDate — только verdict "на конец какого месяца" считается локально.
+    // Теперь фетчатся один раз за сессию, обновляются только явным pull-to-refresh (forceRefresh: true).
     private var histLoaded = false
-    nonisolated struct ShiftInkRow: Codable, Sendable { let date: String; let inkassation: Double? }
-    nonisolated struct InkDeductRow: Codable, Sendable { let date: String?; let expense: Double?; let salary: Double? }
-    private var allShiftInkRows: [ShiftInkRow] = []
-    private var allInkDedRows: [InkDeductRow] = []
     // Поступления в инкассацию (inkassation_topups) — в баланс входят, в кассу/выручку нет.
     // Грузим на каждый load (одним лёгким запросом), не кэшируем в histLoaded — правятся в Manager.
     var allTopups: [InkTopup] = []
@@ -249,40 +244,46 @@ final class AnalyticsModel {
         if let pa = await prevAbs { prevAbsences = pa.filter { $0.source != "auto" } }
         prevAdvances = (await prevAdv) ?? prevAdvances
 
+        // Всё ниже — независимые чтения (разные таблицы/состояния), раньше шли одно за другим
+        // (каждый лишний последовательный await — это ещё один сетевой round-trip до Supabase,
+        // юзер-фидбок 2026-09-22: "кнопки/баланс стали дольше грузиться"). async let запускает
+        // их одновременно, ждём все разом — то же самое присваивание state, тот же результат.
         let ids = shiftsRaw.map(\.id)
-        if !ids.isEmpty {
-            if let e = try? await DB.from("shift_expenses").select().in("shift_id", ids).list(ShiftExpense.self) { expenses = e }
-            if let inks = try? await DB.from("inkassations").select("shift_id, amount, expense, reason, total, salary, salary_note").in("shift_id", ids).list(Inkassation.self) {
-                var d: [String: Inkassation] = [:]
-                for ink in inks { if let sid = ink.shift_id { d[sid] = ink } }
-                inkDetails = d
-            }
-        } else { expenses = []; inkDetails = [:] }
-
         let prevIds = prevShiftsRaw.map(\.id)
-        if !prevIds.isEmpty {
-            if let pe = try? await DB.from("shift_expenses").select().in("shift_id", prevIds).list(ShiftExpense.self) { prevExpenses = pe }
-        } else { prevExpenses = [] }
-
+        async let expensesRes: [ShiftExpense]? = ids.isEmpty ? [] : (try? await DB.from("shift_expenses").select().in("shift_id", ids).list(ShiftExpense.self))
+        async let inksRes: [Inkassation]? = ids.isEmpty ? [] : (try? await DB.from("inkassations").select("shift_id, amount, expense, reason, total, salary, salary_note").in("shift_id", ids).list(Inkassation.self))
+        async let prevExpRes: [ShiftExpense]? = prevIds.isEmpty ? [] : (try? await DB.from("shift_expenses").select().in("shift_id", prevIds).list(ShiftExpense.self))
         // Фильтр по period (месяц ЗП), не по date (день списания из кассы) — паритет с
         // ManagerSalary.computeSalary (юзер-фидбок 2026-08-15).
-        if let adv = try? await DB.from("salary_advances").select()
-            .eq("period", ym + "-01").list(SalaryAdvance.self) { advances = adv }
-        if let pays = try? await DB.from("salary_payments").select()
-            .eq("period", String(key(monthStart).prefix(7)) + "-01").list(SalaryPayment.self) { payments = pays }
-
+        async let advRes = try? DB.from("salary_advances").select()
+            .eq("period", ym + "-01").list(SalaryAdvance.self)
+        async let paysRes = try? DB.from("salary_payments").select()
+            .eq("period", String(key(monthStart).prefix(7)) + "-01").list(SalaryPayment.self)
         // Закреплённые категории расходов — показываются первыми в разбивке.
         nonisolated struct CatPin: Codable, Sendable { let name: String?; let is_pinned: Bool? }
-        if let cats = try? await DB.from("expense_categories").select("name, is_pinned").list(CatPin.self) {
+        async let catsRes = try? DB.from("expense_categories").select("name, is_pinned").list(CatPin.self)
+        // Поступления в инкассацию — не зависят ни от ids, ни от histLoaded; запускаем в той
+        // же волне вместо отдельного await в конце функции (было ещё одним лишним round-trip).
+        async let topupsRes = try? DB.from("inkassation_topups").select("id, date, amount, reason").order("date").list(InkTopup.self)
+        // Баланс инкассации — готовый агрегат из VIEW (1 строка), не all-time перекачка
+        // shifts+inkassations (юзер-фидбок 2026-09-23: плашка не ускорилась вместе с остальным
+        // потому что этот кусок так и тянул всю историю заведения на каждый refresh).
+        async let balanceRes = try? DB.from("inkassation_balance").select("balance").limit(1).list(InkBalanceRow.self)
+
+        if let e = await expensesRes { expenses = e }
+        if let inks = await inksRes {
+            var d: [String: Inkassation] = [:]
+            for ink in inks { if let sid = ink.shift_id { d[sid] = ink } }
+            inkDetails = d
+        }
+        if let pe = await prevExpRes { prevExpenses = pe }
+        if let adv = await advRes { advances = adv }
+        if let pays = await paysRes { payments = pays }
+        if let cats = await catsRes {
             pinnedCats = Set(cats.filter { $0.is_pinned == true }.compactMap { $0.name })
         }
 
         if !histLoaded {
-            async let allShiftInk = try? DB.from("shifts").select("date, inkassation").list(ShiftInkRow.self)
-            async let allInkDed = try? DB.from("inkassations").select("date, expense, salary").list(InkDeductRow.self)
-            allShiftInkRows = (await allShiftInk) ?? allShiftInkRows
-            allInkDedRows = (await allInkDed) ?? allInkDedRows
-
             // кальян all-time + склад — тоже не зависит от currentDate, грузим вместе с историей
             async let allHk = try? DB.from("hookah_sales").select("quantity, portion_g").list(HookahSale.self)
             async let stock = try? DB.from("tobacco_stock").select("id, brand, flavor, quantity_g, min_quantity_g").list(StockItem.self)
@@ -300,14 +301,9 @@ final class AnalyticsModel {
 
         // Инкассация — общий баланс заведения, не привязан к просматриваемому месяцу
         // (юзер-фидбок 2026-08-16: цифра не должна ехать при пролистывании назад/вперёд).
-        // Вся валовая инкассация по сменам ЗА ВСЁ ВРЕМЯ минус все списания из неё (расход +
-        // выплаченная ЗП) — без фильтра по monthEnd (тот был багом: паритет с вебом
-        // app/analytics/page.tsx cumulativeInkass, который всегда all-time).
-        if let tp = try? await DB.from("inkassation_topups").select("id, date, amount, reason").order("date").list(InkTopup.self) { allTopups = tp }
-        let grossInk = allShiftInkRows.reduce(0) { $0 + ($1.inkassation ?? 0) }
-        let dedInk = allInkDedRows.reduce(0) { $0 + (($1.expense ?? 0) + ($1.salary ?? 0)) }
-        let topupsInk = allTopups.reduce(0) { $0 + $1.amount }
-        cumulativeInkass = grossInk - dedInk + topupsInk
+        // Считает Postgres (VIEW inkassation_balance), клиент только читает готовое число.
+        if let tp = await topupsRes { allTopups = tp }
+        if let b = (await balanceRes)?.first { cumulativeInkass = b.balance ?? 0 }
     }
 
     // MARK: - Банк (Open Banking)

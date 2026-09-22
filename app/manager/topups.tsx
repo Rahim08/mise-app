@@ -30,17 +30,14 @@ export function InkassationTopups({ restaurantId, t, toast }: { restaurantId: st
   }
   useEffect(() => { load() }, [restaurantId])
 
-  // Баланс инкассации «сейчас» (та же формула, что Analytics/выплата ЗП): валовая инкассация −
-  // (расход + ЗП) + поступления. null — не удалось прочитать (fail-closed: правку не пускаем).
+  // Баланс инкассации «сейчас» — готовый агрегат из VIEW inkassation_balance (1 строка)
+  // вместо перекачки всей истории shifts+inkassations+topups на каждое открытие формы
+  // (юзер-фидбок 2026-09-22/23: тормозило именно то, что тут проверялось на каждый чих).
+  // null — не удалось прочитать (fail-closed: правку не пускаем).
   const inkBalance = async (): Promise<number | null> => {
-    const [a, b, c] = await Promise.all([
-      db.from('shifts').select('inkassation').eq('restaurant_id', restaurantId),
-      db.from('inkassations').select('expense, salary').eq('restaurant_id', restaurantId),
-      db.from('inkassation_topups').select('amount').eq('restaurant_id', restaurantId),
-    ])
-    if (a.error || b.error || c.error) return null
-    const sum = (rows: any[] | null, f: (r: any) => number) => (rows || []).reduce((s, r) => s + f(r), 0)
-    return sum(a.data, r => Number(r.inkassation || 0)) - sum(b.data, r => Number(r.expense || 0) + Number(r.salary || 0)) + sum(c.data, r => Number(r.amount || 0))
+    const { data, error } = await db.from('inkassation_balance').select('balance').eq('restaurant_id', restaurantId).limit(1)
+    if (error) return null
+    return Number(data?.[0]?.balance || 0)
   }
   // Уменьшение/удаление поступления, из которого уже платили (ЗП, расход), увело бы баланс в минус.
   // Возвращает текст ошибки или '' если можно.
