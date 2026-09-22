@@ -134,14 +134,20 @@ final class ManagerModel {
             seedDemo(); return
         }
         #endif
+        // 4 независимых загрузки — раньше шли одна за другой (юзер-фидбок 2026-09-23:
+        // «зона смены в Manager долго грузится»). loadDay/loadOpenDebts не читают
+        // employees/categories на этапе загрузки (только на этапе рендера calc), так что
+        // все четыре можно запускать одновременно, а не ждать сотрудников/категории первыми.
         async let emps = (try? DB.from("employees").select("id,name,deduct_per_absence")
             .eq("is_active", true).order("name").list(Employee.self)) ?? []
         async let cats = (try? DB.from("expense_categories").select("id,name")
             .eq("is_active", true).order("name").list(Category.self)) ?? []
+        async let dayTask: () = loadDay(currentDate)
+        async let debtsTask: () = loadOpenDebts()
         employees = await emps
         categories = await cats
-        await loadDay(currentDate)
-        await loadOpenDebts()
+        await dayTask
+        await debtsTask
     }
 
     func loadOpenDebts() async {
