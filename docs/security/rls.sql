@@ -30,6 +30,7 @@ alter table public.salary_records       enable row level security;
 alter table public.monthly_card_amounts enable row level security;
 alter table public.expense_categories   enable row level security;
 alter table public.inkassations         enable row level security;
+alter table public.inkassation_topups   enable row level security;
 alter table public.tobacco_stock        enable row level security;
 alter table public.tobacco_movements    enable row level security;
 alter table public.tobacco_flavors      enable row level security;

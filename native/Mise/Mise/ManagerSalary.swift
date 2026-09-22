@@ -489,10 +489,13 @@ final class ManagerSalaryModel {
                 .eq("shift_id", shiftId).limit(1).list(InkRow.self).first
             async let shAllTask = DB.from("shifts").select("inkassation").eq("restaurant_id", rid).list(ShiftInkRow.self)
             async let inkAllTask = DB.from("inkassations").select("expense, salary").eq("restaurant_id", rid).list(InkDeductRow.self)
+            async let topupsTask = DB.from("inkassation_topups").select("id, date, amount, reason").eq("restaurant_id", rid).list(InkTopup.self)
             let current = try? await currentTask
             let shAll = (try? await shAllTask) ?? []
             let inkAll = (try? await inkAllTask) ?? []
-            let grossInk = shAll.reduce(0.0) { $0 + ($1.inkassation ?? 0) }
+            // Поступления в инкассацию — часть доступного баланса (паритет с tabs-salary.tsx).
+            let topupsSum = ((try? await topupsTask) ?? []).reduce(0.0) { $0 + $1.amount }
+            let grossInk = shAll.reduce(0.0) { $0 + ($1.inkassation ?? 0) } + topupsSum
             let deducted = inkAll.reduce(0.0) { $0 + ($1.expense ?? 0) + ($1.salary ?? 0) }
             let available = grossInk - deducted
             guard amount <= available else {

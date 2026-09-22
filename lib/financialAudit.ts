@@ -14,7 +14,7 @@ import type { Caller } from '@/lib/apiAuth'
 
 // Money tables. Anything a manager/owner can edit that moves cash, payroll or the inkassation fund.
 export const AUDITED_TABLES = new Set([
-  'shifts', 'shift_expenses', 'shift_absences', 'inkassations', 'transactions',
+  'shifts', 'shift_expenses', 'shift_absences', 'inkassations', 'inkassation_topups', 'transactions',
   'salary_payments', 'salary_advances', 'salary_records', 'monthly_card_amounts',
   'employees', 'salary_history', 'expense_categories', 'restaurant_settings',
 ])

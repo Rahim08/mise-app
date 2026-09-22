@@ -74,8 +74,12 @@ final class ManagerModel {
     // Вкладки Manager (реструктура 2026-08-13): Смена/Зарплата/Настройки/Дисциплина.
     var tab = "shift"
 
+    // Поступления в баланс инкассации — отдельная таблица, не часть смены (см. InkTopups.swift).
+    let topups: InkTopupsModel
+
     init(rid: String, dayStartHour: Int = 6) {
         self.rid = rid
+        self.topups = InkTopupsModel(rid: rid)
         self.currentDate = AppModel.businessDate(dayStartHour: dayStartHour)
     }
 
@@ -755,8 +759,12 @@ private struct ManagerBody: View {
                                 loadErrorState
                                     .transition(.opacity)
                             } else if m.shift == nil {
-                                emptyState
-                                    .transition(.opacity)
+                                VStack(spacing: 24) {
+                                    emptyState
+                                    // Поступление можно внести и в день без смены (задним числом)
+                                    InkTopupsCard(m: m.topups)
+                                }
+                                .transition(.opacity)
                             } else {
                                 shiftBody
                                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -879,6 +887,9 @@ private struct ManagerBody: View {
         // поверх — статус «Смена закрыта» и кнопка открыть на редактирование.
         ZStack(alignment: .top) {
             VStack(spacing: 14) {
+              // Блок поступлений стоит между двумя «закрываемыми» группами и остаётся
+              // доступным при закрытой смене: он не часть смены (свои записи, своя таблица).
+              Group {
                 staffSection
                 if !m.openDebts.isEmpty {
                     debtsBadge
@@ -906,6 +917,14 @@ private struct ManagerBody: View {
                     divider
                     textRow(t("mg.inkReason"), text: $m.inkReason)
                 }
+              }
+              .blur(radius: m.locked ? 3.5 : 0)
+              .disabled(m.locked)
+              .allowsHitTesting(!m.locked)
+
+              InkTopupsCard(m: m.topups)
+
+              Group {
                 sectionTitle(t("mg.cash"))
                 card {
                     fieldRow(t("mg.cashIncome"), text: $m.income)
@@ -913,10 +932,11 @@ private struct ManagerBody: View {
                     fieldRow(t("mg.cardIncome"), text: $m.incomeCard)
                 }
                 summary(c)
+              }
+              .blur(radius: m.locked ? 3.5 : 0)
+              .disabled(m.locked)
+              .allowsHitTesting(!m.locked)
             }
-            .blur(radius: m.locked ? 3.5 : 0)
-            .disabled(m.locked)
-            .allowsHitTesting(!m.locked)
 
             if m.locked { closedOverlay }
         }

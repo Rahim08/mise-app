@@ -196,6 +196,9 @@ final class AnalyticsModel {
     nonisolated struct InkDeductRow: Codable, Sendable { let date: String?; let expense: Double?; let salary: Double? }
     private var allShiftInkRows: [ShiftInkRow] = []
     private var allInkDedRows: [InkDeductRow] = []
+    // Поступления в инкассацию (inkassation_topups) — в баланс входят, в кассу/выручку нет.
+    // Грузим на каждый load (одним лёгким запросом), не кэшируем в histLoaded — правятся в Manager.
+    var allTopups: [InkTopup] = []
 
     func load(forceRefresh: Bool = false) async {
         #if DEBUG
@@ -300,9 +303,11 @@ final class AnalyticsModel {
         // Вся валовая инкассация по сменам ЗА ВСЁ ВРЕМЯ минус все списания из неё (расход +
         // выплаченная ЗП) — без фильтра по monthEnd (тот был багом: паритет с вебом
         // app/analytics/page.tsx cumulativeInkass, который всегда all-time).
+        if let tp = try? await DB.from("inkassation_topups").select("id, date, amount, reason").order("date").list(InkTopup.self) { allTopups = tp }
         let grossInk = allShiftInkRows.reduce(0) { $0 + ($1.inkassation ?? 0) }
         let dedInk = allInkDedRows.reduce(0) { $0 + (($1.expense ?? 0) + ($1.salary ?? 0)) }
-        cumulativeInkass = grossInk - dedInk
+        let topupsInk = allTopups.reduce(0) { $0 + $1.amount }
+        cumulativeInkass = grossInk - dedInk + topupsInk
     }
 
     // MARK: - Банк (Open Banking)
@@ -440,6 +445,21 @@ final class AnalyticsModel {
         shifts.filter {
             ($0.inkassation ?? 0) > 0 || (inkDetails[$0.id]?.expense ?? 0) > 0 || (inkDetails[$0.id]?.salary ?? 0) > 0
         }
+    }
+
+    /// Строка истории инкассации: день смены или поступление (синяя строка, без «расхода»).
+    enum InkHistRow: Identifiable {
+        case shift(Shift), topup(InkTopup)
+        var id: String { switch self { case .shift(let s): return "s-" + s.id; case .topup(let t): return "t-" + t.id } }
+        var date: String { switch self { case .shift(let s): return s.date; case .topup(let t): return t.date } }
+        var isTopup: Bool { if case .topup = self { return true }; return false }
+    }
+    /// Смены с инкассацией + поступления просматриваемого месяца, по возрастанию даты
+    /// (в один день поступление идёт после смены).
+    var inkHistory: [InkHistRow] {
+        let ym = String(key(currentDate).prefix(7))
+        let rows = shiftsWithInk.map(InkHistRow.shift) + allTopups.filter { $0.date.hasPrefix(ym) }.map(InkHistRow.topup)
+        return rows.sorted { a, b in a.date != b.date ? a.date < b.date : (!a.isTopup && b.isTopup) }
     }
 
     // прогноз
@@ -1859,7 +1879,7 @@ private struct KassaTab: View {
                 stat(t("an.totalInkass"), cur(m.cumulativeInkass), BrandKit.stash)
                 stat(t("an.salaryToday"), cur(salToday), diff >= 0 ? BrandKit.analytics : BrandKit.menu)
             }
-            if m.shiftsWithInk.isEmpty {
+            if m.inkHistory.isEmpty {
                 Text(t("an.noInkass")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 30)
             } else {
                 VStack(spacing: 0) {
@@ -1873,7 +1893,29 @@ private struct KassaTab: View {
                     .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.35))
                     .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
                     Divider().overlay(Color.primary.opacity(0.08))
-                    ForEach(Array(m.shiftsWithInk.enumerated()), id: \.element.id) { i, s in
+                    ForEach(Array(m.inkHistory.enumerated()), id: \.element.id) { i, row in
+                      Group {
+                        switch row {
+                        case .topup(let tp):
+                            // Поступление: та же строка, сумма синяя (как карта), «расхода» нет;
+                            // причина — под строкой (в шапке нет места, попап не нужен).
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    Text(dd(tp.date)).frame(width: 32, alignment: .leading).foregroundStyle(.primary.opacity(0.5))
+                                    Text("+" + cur(tp.amount)).frame(maxWidth: .infinity, alignment: .trailing)
+                                        .foregroundStyle(BrandKit.manager).lineLimit(1).minimumScaleFactor(0.75)
+                                    Text("—").frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.menu)
+                                    Spacer().frame(width: 26)
+                                    Text(cur(tp.amount)).frame(width: 84, alignment: .trailing).fontWeight(.semibold)
+                                        .lineLimit(1).minimumScaleFactor(0.7)
+                                }
+                                .font(.system(size: 12))
+                                Text(t("an.topup") + ((tp.reason ?? "").isEmpty ? "" : " · " + (tp.reason ?? "")))
+                                    .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.5))
+                                    .padding(.leading, 32)
+                            }
+                            .padding(.vertical, 9).padding(.horizontal, 14)
+                        case .shift(let s):
                         let ink = m.inkDetails[s.id]
                         // C6 (юзер-фидбок 2026-08-15): иконка заметки проверяла только reason,
                         // salary_note (выплаты ЗП) не подсвечивала — записи о зарплате были
@@ -1927,7 +1969,9 @@ private struct KassaTab: View {
                                 .lineLimit(1).minimumScaleFactor(0.7)
                         }
                         .font(.system(size: 12)).padding(.vertical, 9).padding(.horizontal, 14)
-                        if i < m.shiftsWithInk.count - 1 { Divider().overlay(Color.primary.opacity(0.07)) }
+                        }
+                        if i < m.inkHistory.count - 1 { Divider().overlay(Color.primary.opacity(0.07)) }
+                      }
                     }
                 }
                 .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))

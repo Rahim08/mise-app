@@ -385,7 +385,9 @@ async function remindSalaryPayout(admin: any, now: Date, tzMap: Record<string, s
         due += await monthSalaryRemaining(admin, s.restaurant_id, fmtDate(d).slice(0, 7))
       }
       const { data: inkRows } = await admin.from('inkassations').select('total').eq('restaurant_id', s.restaurant_id)
+      const { data: topupRows } = await admin.from('inkassation_topups').select('amount').eq('restaurant_id', s.restaurant_id)
       const reserve = (inkRows || []).reduce((sum: number, r: any) => sum + (r.total || 0), 0)
+        + (topupRows || []).reduce((sum: number, r: any) => sum + Number(r.amount || 0), 0)
 
       await dispatchNotification(admin, s.restaurant_id, {
         type: 'salary_payout_reminder', title: 'Salary payout soon', body: `${REMIND_DAYS_BEFORE} days left — due ${fmt(due)}, reserve ${fmt(reserve)}`,

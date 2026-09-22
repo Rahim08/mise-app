@@ -13,6 +13,7 @@ import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate, fv, displayDate, dd, businessDate } from '@/lib/format'
 import { ManagerSalaryTab } from './tabs-salary'
+import { InkassationTopups } from './topups'
 import { ManagerReportsTab } from './tabs-reports'
 import { ManagerChecklistsTab } from './tabs-checklists'
 import { ManagerDisciplineTab } from './tabs-discipline'
@@ -572,6 +573,10 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
               <button onClick={openShift} disabled={saving} style={{ padding: '16px 40px', borderRadius: 16, background: t.blue, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${t.blue}44` }}>
                 {tr('mg.openShift')}
               </button>
+              {/* Поступление можно внести и в день без смены (задним числом) */}
+              <div style={{ textAlign: 'left', marginTop: 36 }}>
+                <InkassationTopups restaurantId={restaurantId} t={t} toast={showToast} />
+              </div>
             </div>
           ) : (
             <div style={{ position: 'relative' }}>
@@ -743,6 +748,9 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
                   />
                 </div>
               </div>
+
+              {/* ПОСТУПЛЕНИЯ В ИНКАССАЦИЮ — отдельно от кассы смены, см. topups.tsx */}
+              <InkassationTopups restaurantId={restaurantId} t={t} toast={showToast} />
 
               {/* КАССА */}
               <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('mg.secRegister')}</div>

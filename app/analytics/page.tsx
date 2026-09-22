@@ -463,6 +463,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [prevShiftsRaw, setPrevShifts] = useState<any[]>([])
   const [allShiftsRaw, setAllShifts] = useState<any[]>([])
   const [inkDeductions, setInkDeductions] = useState<any[]>([])
+  // Поступления в инкассацию (inkassation_topups): входят в баланс, но не в кассу/выручку.
+  const [allTopups, setAllTopups] = useState<any[]>([])
   // C6 (юзер-фидбок 2026-08-15): дневная карточка «Инкассация» была хардкод-заглушкой
   // (expense:0, reason:null) — не читала реальную запись вообще. Полные строки по shift_id,
   // включая salary_note (выплаты ЗП), для дневного вида периода.
@@ -650,6 +652,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     // валовая инкассация по сменам минус всё списанное из неё (расход + выплаченная ЗП).
     const { data: ink } = await db.from('inkassations').select('expense, salary')
     setInkDeductions(ink || [])
+    const { data: tp } = await db.from('inkassation_topups').select('id, date, amount, reason').order('date')
+    setAllTopups(tp || [])
   }
 
   // ── COMPUTED ──
@@ -673,6 +677,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const totalInkass = shifts.reduce((s: number, sh: any) => s + (sh.inkassation || 0), 0)
   const cumulativeInkass = allShifts.reduce((s: number, sh: any) => s + (sh.inkassation || 0), 0)
     - inkDeductions.reduce((s: number, d: any) => s + (d.expense || 0) + (d.salary || 0), 0)
+    + allTopups.reduce((s: number, tp: any) => s + Number(tp.amount || 0), 0)
   const lastShift = shifts[shifts.length - 1]
   // Фактический баланс кассы «сейчас» (юзер-фидбок 2026-08-20): не должен меняться от
   // пролистывания старых месяцев — allShifts не фильтрован по periodMode/currentDate (вся
@@ -1192,6 +1197,14 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     // Инкассация — не месячный, а накопительный счёт (не обнуляется 1-го числа): валовая
     // инкассация по сменам минус всё списанное из неё (расход + выплаченная ЗП), см. cumulativeInkass.
     const inkBal = cumulativeInkass
+    // Поступления просматриваемого месяца — отдельными синими строками рядом со сменами.
+    const tpMonthStart = fmtDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1))
+    const tpMonthEnd = fmtDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0))
+    const monthTopups = allTopups.filter((tp: any) => tp.date >= tpMonthStart && tp.date <= tpMonthEnd)
+    const histRows: { date: string; shift?: any; topup?: any }[] = ([
+      ...shiftsWithInk.map((s: any) => ({ date: s.date, shift: s })),
+      ...monthTopups.map((tp: any) => ({ date: tp.date, topup: tp })),
+    ] as { date: string; shift?: any; topup?: any }[]).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.topup ? 1 : 0) - (b.topup ? 1 : 0))
     // Нетто, не оклад: прогулы/аванс/карта уменьшают то, что реально нужно из кассы —
     // те же вычеты, что в People→Зарплата (salaryOf в exportSalary), иначе «начислено»
     // не падает при выданном авансе/выплате на карту и не совпадает с реальным долгом.
@@ -1240,7 +1253,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
         </>}
         <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.history')}</div>
         <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', boxShadow: t.sh }}>
-          {shiftsWithInk.length === 0
+          {histRows.length === 0
             ? <div style={{ padding: '32px', textAlign: 'center', color: t.text4 }}>{tr('an.noInkass')}</div>
             : <>
               {/* C4 (аудит 2026-08-15): паритет с iOS-таблицей Дата/Инкассация/Расход/Итого —
@@ -1252,7 +1265,22 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
                 <span style={{ textAlign: 'right' }}>{tr('an.expense')}</span>
                 <span style={{ textAlign: 'right' }}>{tr('an.inkNet')}</span>
               </div>
-              {shiftsWithInk.map((s: any, i: number) => {
+              {histRows.map((hr, i: number) => {
+                if (hr.topup) {
+                  const tp = hr.topup
+                  return (
+                    <div key={`tp-${tp.id}`} style={{ padding: '10px 14px', borderTop: `0.5px solid ${t.sep2}` }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '38px 1fr 1fr 1fr', gap: 4, fontSize: 13, alignItems: 'baseline' }}>
+                        <span style={{ color: t.text3 }}>{dd(tp.date)}</span>
+                        <span style={{ color: t.blue, fontWeight: 600, textAlign: 'right' }}>+{currency}{fv(Number(tp.amount))}</span>
+                        <span style={{ color: t.red, textAlign: 'right' }}>—</span>
+                        <span style={{ color: t.blue, fontWeight: 700, textAlign: 'right' }}>{currency}{fv(Number(tp.amount))}</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: t.text3, marginTop: 4 }}>{tr('an.topup')}{tp.reason ? ` · ${tp.reason}` : ''}</div>
+                    </div>
+                  )
+                }
+                const s = hr.shift
                 // C6 (юзер-фидбок 2026-08-15): истории не хватало причины/заметки — reason и
                 // salary_note (выплаты ЗП с этого дня) были невидимы нигде на вебе.
                 const row = inkByShift[s.id]

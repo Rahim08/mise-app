@@ -97,6 +97,14 @@ nonisolated struct Inkassation: Codable, Sendable {
     let salary_note: String?
 }
 
+// Поступление в баланс инкассации (inkassation_topups) — не касса, не выручка.
+nonisolated struct InkTopup: Codable, Identifiable, Sendable {
+    let id: String
+    let date: String
+    let amount: Double
+    let reason: String?
+}
+
 nonisolated struct ClosingOnly: Codable, Sendable { let closing_balance: Double? }
 nonisolated struct InkOnly: Codable, Sendable { let inkassation: Double? }
 nonisolated struct InkTotalOnly: Codable, Sendable { let total: Double? }

@@ -30,6 +30,7 @@ const POLICY: Record<string, { read: AppId[]; write: AppId[]; scope?: string }> 
   shift_expenses:       { read: ['manager', 'analytics'], write: ['manager'] },
   shift_absences:       { read: ['manager', 'analytics', 'people'], write: ['manager'] },
   inkassations:         { read: ['manager', 'analytics'], write: ['manager', 'analytics'] },
+  inkassation_topups:   { read: ['manager', 'analytics'], write: ['manager'] }, // поступления в баланс инкассации (не касса); правит только Manager
   transactions:         { read: ['manager', 'analytics'], write: ['manager'] },
   monthly_card_amounts: { read: ['analytics', 'people'], write: ['analytics'] }, // помесячная сумма на карту правится в Analytics
   salary_advances:      { read: ['analytics', 'people'], write: ['analytics'] }, // авансы по зарплате

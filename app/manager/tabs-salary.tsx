@@ -437,12 +437,15 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       // доступно = вся инкассация по сменам минус всё уже списанное (расход+ЗП) за всё время
       // (те же cumulativeInkass, что в app/analytics/page.tsx). Раньше сверяли только с
       // инкассацией дня выплаты — ложно блокировало или пропускало мимо реального остатка.
-      const [{ data: shAll }, { data: inkAll }, { data: inkList }] = await Promise.all([
+      const [{ data: shAll }, { data: inkAll }, { data: inkList }, { data: tpAll }] = await Promise.all([
         db.from('shifts').select('inkassation').eq('restaurant_id', restaurantId),
         db.from('inkassations').select('expense, salary').eq('restaurant_id', restaurantId),
         db.from('inkassations').select('id, amount, expense, salary, salary_note').eq('shift_id', shiftId).limit(1),
+        db.from('inkassation_topups').select('amount').eq('restaurant_id', restaurantId),
       ])
-      const grossInk = (shAll || []).reduce((s: number, r: any) => s + (r.inkassation || 0), 0)
+      // Поступления (inkassation_topups) — часть баланса инкассации, доступного для выплаты.
+      const topupsSum = (tpAll || []).reduce((s: number, r: any) => s + Number(r.amount || 0), 0)
+      const grossInk = (shAll || []).reduce((s: number, r: any) => s + (r.inkassation || 0), 0) + topupsSum
       const deducted = (inkAll || []).reduce((s: number, r: any) => s + (r.expense || 0) + (r.salary || 0), 0)
       const available = grossInk - deducted
       const cur = Array.isArray(inkList) ? inkList[0] : inkList
