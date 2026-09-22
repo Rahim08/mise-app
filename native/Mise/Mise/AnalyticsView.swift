@@ -1897,24 +1897,40 @@ private struct KassaTab: View {
                       Group {
                         switch row {
                         case .topup(let tp):
-                            // Поступление: та же строка, сумма синяя (как карта), «расхода» нет;
-                            // причина — под строкой (в шапке нет места, попап не нужен).
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack {
-                                    Text(dd(tp.date)).frame(width: 32, alignment: .leading).foregroundStyle(.primary.opacity(0.5))
-                                    Text("+" + cur(tp.amount)).frame(maxWidth: .infinity, alignment: .trailing)
-                                        .foregroundStyle(BrandKit.manager).lineLimit(1).minimumScaleFactor(0.75)
-                                    Text("—").frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.menu)
-                                    Spacer().frame(width: 26)
-                                    Text(cur(tp.amount)).frame(width: 84, alignment: .trailing).fontWeight(.semibold)
-                                        .lineLimit(1).minimumScaleFactor(0.7)
+                            // Поступление: тот же паритет строки, что у смены — сумма синяя,
+                            // «расхода» нет, причина по кнопке (попап), без надписи «Поступление».
+                            let tpHasReason = (tp.reason ?? "").isEmpty == false
+                            HStack {
+                                Text(dd(tp.date)).frame(width: 32, alignment: .leading).foregroundStyle(.primary.opacity(0.5))
+                                Text("+" + cur(tp.amount)).frame(maxWidth: .infinity, alignment: .trailing)
+                                    .foregroundStyle(BrandKit.manager).lineLimit(1).minimumScaleFactor(0.75)
+                                Text("—").frame(maxWidth: .infinity, alignment: .trailing).foregroundStyle(BrandKit.menu)
+                                Button {
+                                    reasonPopoverShiftID = (reasonPopoverShiftID == row.id) ? nil : row.id
+                                } label: {
+                                    Image(systemName: "note.text")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(tpHasReason ? BrandKit.stash : .primary.opacity(0.25))
                                 }
-                                .font(.system(size: 12))
-                                Text(t("an.topup") + ((tp.reason ?? "").isEmpty ? "" : " · " + (tp.reason ?? "")))
-                                    .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.5))
-                                    .padding(.leading, 32)
+                                .buttonStyle(.plain)
+                                .contentShape(Rectangle())
+                                .frame(width: 26, alignment: .center)
+                                .disabled(!tpHasReason)
+                                .popover(isPresented: Binding(
+                                    get: { reasonPopoverShiftID == row.id },
+                                    set: { if !$0 { reasonPopoverShiftID = nil } }
+                                ), attachmentAnchor: .point(.top), arrowEdge: .top) {
+                                    Text(displayReason(tp.reason ?? ""))
+                                        .font(.system(size: 13)).foregroundStyle(.primary)
+                                        .padding(14)
+                                        .frame(maxWidth: 230, alignment: .leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .presentationCompactAdaptation(.popover)
+                                }
+                                Text(cur(tp.amount)).frame(width: 84, alignment: .trailing).fontWeight(.semibold)
+                                    .lineLimit(1).minimumScaleFactor(0.7)
                             }
-                            .padding(.vertical, 9).padding(.horizontal, 14)
+                            .font(.system(size: 12)).padding(.vertical, 9).padding(.horizontal, 14)
                         case .shift(let s):
                         let ink = m.inkDetails[s.id]
                         // C6 (юзер-фидбок 2026-08-15): иконка заметки проверяла только reason,

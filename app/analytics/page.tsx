@@ -1276,7 +1276,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
                         <span style={{ color: t.red, textAlign: 'right' }}>—</span>
                         <span style={{ color: t.blue, fontWeight: 700, textAlign: 'right' }}>{currency}{fv(Number(tp.amount))}</span>
                       </div>
-                      <div style={{ fontSize: 11, color: t.text3, marginTop: 4 }}>{tr('an.topup')}{tp.reason ? ` · ${tp.reason}` : ''}</div>
+                      {tp.reason && <div style={{ fontSize: 11, color: t.text3, marginTop: 4 }}>{displayReason(tp.reason)}</div>}
                     </div>
                   )
                 }
