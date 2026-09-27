@@ -50,6 +50,12 @@ final class ManagerModel {
     // catAmounts/empExtras (см. ниже), поэтому без этого поля пересохранение того же дня
     // теряло сумму погашения из totalExp/closing_balance (A1, аудит 2026-08-13).
     var settledTodayTotal: Double = 0
+    // Оплаченные строки смены вне формы (уволенный сотрудник, выключенная категория) — форма
+    // их не показывает и не удаляет, но они остаются расходом дня (ShiftForm.swift, аудит 2026-09-27).
+    var unmanagedPaidTotal: Double = 0
+    // Загрузка сотрудников/категорий — loadDay ждёт её перед разбором строк смены (splitShiftExpenses
+    // должен знать, кто активен), не блокируя свои собственные запросы.
+    private var catalogLoad: Task<Void, Never>?
 
     var income = ""
     var incomeCard = ""
@@ -119,9 +125,9 @@ final class ManagerModel {
         // + уже погашенные сегодня в предыдущем save этого же дня (settledTodayTotal) — иначе
         // пересохранение дня теряет сумму погашения (A1, аудит 2026-08-13).
         c.debtTotal = debtSettleTotal + settledTodayTotal
-        c.totalExp = c.catTotal + c.empExtraTotal + c.debtTotal + c.ink
+        c.totalExp = round2(c.catTotal + c.empExtraTotal + c.debtTotal + unmanagedPaidTotal + c.ink)
         c.opening = shift?.opening_balance ?? 0
-        c.balance = c.opening + c.inc - c.totalExp
+        c.balance = round2(c.opening + c.inc - c.totalExp)
         c.inkNet = c.ink - num(inkExpense)
         return c
     }
@@ -138,14 +144,18 @@ final class ManagerModel {
         // «зона смены в Manager долго грузится»). loadDay/loadOpenDebts не читают
         // employees/categories на этапе загрузки (только на этапе рендера calc), так что
         // все четыре можно запускать одновременно, а не ждать сотрудников/категории первыми.
-        async let emps = (try? DB.from("employees").select("id,name,deduct_per_absence")
-            .eq("is_active", true).order("name").list(Employee.self)) ?? []
-        async let cats = (try? DB.from("expense_categories").select("id,name")
-            .eq("is_active", true).order("name").list(Category.self)) ?? []
+        let catalog = Task { @MainActor in
+            async let emps = (try? DB.from("employees").select("id,name,deduct_per_absence")
+                .eq("is_active", true).order("name").list(Employee.self)) ?? []
+            async let cats = (try? DB.from("expense_categories").select("id,name")
+                .eq("is_active", true).order("name").list(Category.self)) ?? []
+            self.employees = await emps
+            self.categories = await cats
+        }
+        catalogLoad = catalog
         async let dayTask: () = loadDay(currentDate)
         async let debtsTask: () = loadOpenDebts()
-        employees = await emps
-        categories = await cats
+        await catalog.value
         await dayTask
         await debtsTask
     }
@@ -217,7 +227,7 @@ final class ManagerModel {
             income = ""; incomeCard = ""; inkSum = ""; inkExpense = ""; inkReason = ""
             loadedInkExpense = ""; loadedInkReason = ""
             catAmounts = [:]; catNotes = [:]; empExtras = [:]; absences = []; autoAbsences = []
-            catUnpaid = [:]; empUnpaid = [:]; settledTodayTotal = 0
+            catUnpaid = [:]; empUnpaid = [:]; settledTodayTotal = 0; unmanagedPaidTotal = 0
             return
         }
         if let opening { sh.opening_balance = opening }
@@ -235,29 +245,19 @@ final class ManagerModel {
         async let absencesTask: Void = loadAbsences(dateStr)
 
         let exps = await expsTask
-        // Строки погашения долгов, вставленные ЭТОЙ же сменой (paid_shift_id == shId) —
-        // исключены из формы ниже, но их сумма должна остаться в кассе дня при пересохранении.
-        settledTodayTotal = exps.filter { $0.paid_shift_id == shId }.reduce(0.0) { $0 + ($1.amount ?? 0) }
-        var amounts: [String: String] = [:], notes: [String: String] = [:], extras: [String: String] = [:]
-        var catUn: [String: Bool] = [:], empUn: [String: Bool] = [:]
-        for e in exps {
-            // paid_shift_id != nil — строка прошла через погашение долга (Analytics→Долги):
-            // либо это историческая запись «долг был здесь, погашен в другой день» (не должна
-            // всплывать как редактируемое поле и не должна попасть под persistExpenses'
-            // delete-цикл), либо сама запись погашения (считается в отчёте на день погашения,
-            // а не здесь). Форма закрытия смены их не трогает вообще.
-            guard e.paid_shift_id == nil else { continue }
-            let unpaid = e.is_paid == false
-            if let emp = e.employee_id {
-                extras[emp] = trimNum(e.amount ?? 0)
-                if unpaid { empUn[emp] = true }
-            } else if let cat = e.category_id {
-                amounts[cat] = trimNum(e.amount ?? 0); if let n = e.note, !n.isEmpty { notes[cat] = n }
-                if unpaid { catUn[cat] = true }
-            }
-        }
-        catAmounts = amounts; catNotes = notes; empExtras = extras
-        catUnpaid = catUn; empUnpaid = empUn
+        await catalogLoad?.value
+        guard gen == loadGen else { return }
+        // Разбор строк смены — ShiftForm.swift (аудит 2026-09-27): settledTodayTotal — погашения
+        // этой сменой; ЗП-долги, строки уволенных/выключенных — вне формы, не удаляются.
+        let split = splitShiftExpenses(exps, shiftId: shId,
+                                       activeCategoryIds: Set(categories.map(\.id)),
+                                       activeEmployeeIds: Set(employees.map(\.id)))
+        settledTodayTotal = split.settledTodayTotal
+        unmanagedPaidTotal = split.unmanagedPaidTotal
+        catAmounts = split.catAmounts.mapValues { trimNum(round2($0)) }
+        catNotes = split.catNotes
+        empExtras = split.empExtras.mapValues { trimNum(round2($0)) }
+        catUnpaid = split.catUnpaid; empUnpaid = split.empUnpaid
 
         let inks = await inksTask
         await absencesTask
@@ -402,9 +402,13 @@ final class ManagerModel {
     private func persistExpenses(shiftId: String) async throws {
         // paid_shift_id != nil — строка управляется экраном «Долги» (Analytics), не формой
         // закрытия смены: удалять/пересоздавать её здесь нельзя (см. loadDay).
-        let oldExpenses = try await DB.from("shift_expenses").select("id, paid_shift_id")
+        // Удаляем только строки, которыми владеет форма (ShiftForm.swift) — по свежему чтению:
+        // ЗП-долги и строки уволенных/выключенных категорий остаются нетронутыми (аудит 2026-09-27).
+        let fresh = try await DB.from("shift_expenses").select("id, employee_id, category_id, amount, note, is_paid, paid_shift_id")
             .eq("shift_id", shiftId).list(ShiftExpense.self)
-            .filter { $0.paid_shift_id == nil }
+        let oldIds = splitShiftExpenses(fresh, shiftId: shiftId,
+                                        activeCategoryIds: Set(categories.map(\.id)),
+                                        activeEmployeeIds: Set(employees.map(\.id))).ownedIds
         var catInserts: [[String: Any]] = []
         for cat in categories {
             let amt = num(catAmounts[cat.id] ?? "")
@@ -415,9 +419,9 @@ final class ManagerModel {
             }
         }
         if !catInserts.isEmpty { try await DB.from("shift_expenses").insert(catInserts).run() }
-        // Экстры по сотрудникам — отдельной вставкой и best-effort: нужна колонка
-        // shift_expenses.employee_id (миграция shift-expenses-employee-id.sql). Без неё
-        // экстры просто не сохранятся, но касса/категории/инкассация сохранятся нормально.
+        // Экстры по сотрудникам — отдельной вставкой. Раньше try? (best-effort): при ошибке
+        // вставки старые экстры/долги сотрудников всё равно удалялись ниже — молча терялись
+        // (аудит 2026-09-27). Колонка employee_id давно есть во всех базах.
         var empInserts: [[String: Any]] = []
         for emp in employees {
             let extra = num(empExtras[emp.id] ?? "")
@@ -427,9 +431,9 @@ final class ManagerModel {
                                    "is_paid": empUnpaid[emp.id] != true])
             }
         }
-        if !empInserts.isEmpty { try? await DB.from("shift_expenses").insert(empInserts).run() }
-        if !oldExpenses.isEmpty {
-            try await DB.from("shift_expenses").delete().in("id", oldExpenses.map(\.id)).run()
+        if !empInserts.isEmpty { try await DB.from("shift_expenses").insert(empInserts).run() }
+        if !oldIds.isEmpty {
+            try await DB.from("shift_expenses").delete().in("id", oldIds).run()
         }
     }
 
@@ -1063,7 +1067,8 @@ private struct ManagerBody: View {
     private func summary(_ c: ManagerModel.Calc) -> some View {
         VStack(spacing: 0) {
             sumRow(t("mg.cashRevenue"), money(c.inc))
-            sumRow(t("mg.expenses"), "−" + money(c.catTotal + c.empExtraTotal + c.debtTotal).replacingOccurrences(of: "−", with: ""))
+            // totalExp − ink: вкл. «прочие расходы дня» вне формы (ShiftForm.swift) — сумма сходится с кассой.
+            sumRow(t("mg.expenses"), "−" + money(c.totalExp - c.ink).replacingOccurrences(of: "−", with: ""))
             sumRow(t("mg.cellInk"), money(c.ink))
             Divider().overlay(Color.primary.opacity(0.12)).padding(.vertical, 4)
             HStack {

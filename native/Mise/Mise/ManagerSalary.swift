@@ -12,6 +12,7 @@ extension ManagerModel {
         let deduct: Double; let card: Double; let advance: Double
         let advanceList: [SalaryAdvance]; let total: Double; let cash: Double
         var paid: Double = 0; var remaining: Double = 0; var lastPaidAt: String? = nil
+        var paidCash: Double = 0
     }
 }
 
@@ -33,6 +34,7 @@ final class ManagerSalaryModel {
     // C3 (аудит 2026-08-15): кэш-нал прошлого месяца для payout-day-цикла (computeAccruedToday),
     // пока не наступил payout_day текущего — паритет с Analytics.salToday. Заполняется в load().
     var prevCashTotal: Double = 0
+    var prevPaidCash: Double = 0
     // Единая формула с Analytics (computeAccruedToday, AnalyticsView.swift) — раньше здесь была
     // своя линейная рампа над daysInMonth+payoutDay, применённая к валовому fund; расходилась с
     // Analytics до ~17пп на одну и ту же ЗП. Теперь база — totalCash (нал к выплате, за вычетом
@@ -43,7 +45,8 @@ final class ManagerSalaryModel {
         let daysInMonth = cal.range(of: .day, in: .month, for: viewMonth)?.count ?? 30
         let prevDaysInMonth = cal.date(byAdding: .month, value: -1, to: Date()).flatMap { cal.range(of: .day, in: .month, for: $0)?.count } ?? 30
         let totalCash = rows.reduce(0) { $0 + $1.cash }
-        return computeAccruedToday(isCurrentMonth: isCurrentMonth, totalCash: totalCash, daysInMonth: daysInMonth, payoutDay: payoutDay, prevTotalCash: prevCashTotal, prevDaysInMonth: prevDaysInMonth)
+        return computeAccruedToday(isCurrentMonth: isCurrentMonth, totalCash: totalCash, daysInMonth: daysInMonth, payoutDay: payoutDay, prevTotalCash: prevCashTotal, prevDaysInMonth: prevDaysInMonth,
+                                   paidCash: rows.reduce(0) { $0 + $1.paidCash }, prevPaidCash: prevPaidCash)
     }
 
     private let dfKey: DateFormatter = {
@@ -65,7 +68,9 @@ final class ManagerSalaryModel {
         let ym = String(key(date).prefix(7))
         let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: date)) ?? date
         let monthEnd = cal.date(byAdding: DateComponents(month: 1, day: -1), to: monthStart) ?? monthStart
-        async let empsR = try? DB.from("employees").select("id, name, salary, deduct_per_absence").eq("is_active", true).order("name").list(Employee.self)
+        // Без фильтра is_active: уволенный остаётся в месяцах, где у него есть выплаты/авансы/
+        // прогулы/карта (аудит 2026-09-27, паритет с веб tabs-salary.tsx) — фильтр ниже.
+        async let empsR = try? DB.from("employees").select("id, name, salary, deduct_per_absence, is_active").order("name").list(Employee.self)
         async let absR = try? DB.from("shift_absences").select("employee_id, date, source").gte("date", ym + "-01").lte("date", key(monthEnd)).list(Absence.self)
         async let cardsR = try? DB.from("monthly_card_amounts").select("employee_id, card_amount").eq("month", ym).list(CardAmount.self)
         // Фильтр по period (месяц ЗП, к которому отнесён аванс), НЕ по date (день списания из
@@ -73,6 +78,10 @@ final class ManagerSalaryModel {
         // остаться в зарплате июля, а не уехать в август вслед за датой списания.
         async let advR = try? DB.from("salary_advances").select().eq("period", ym + "-01").list(SalaryAdvance.self)
         async let paysR = try? DB.from("salary_payments").select().eq("period", ym + "-01").list(SalaryPayment.self)
+        // Открытый ЗП-долг за месяц («Отметить как долг») — уже обещан к выплате через Manager→
+        // Долги; в «осталось» не дублируем, иначе можно заплатить дважды (аудит 2026-09-27).
+        nonisolated struct DebtAmt: Codable, Sendable { let employee_id: String?; let amount: Double? }
+        async let debtsR = try? DB.from("shift_expenses").select("employee_id, amount").eq("is_paid", false).eq("note", "\(Self.salperiodPrefix)\(ym)-01").list(DebtAmt.self)
         // Оклад/вычет, действовавшие в этом месяце (salary-history-2026-09.sql) — иначе
         // правка оклада сегодня меняет расчёт за прошлые месяцы задним числом, и loadDebt
         // ниже материализует фиктивный долг в syncLedger (MISE-001).
@@ -80,7 +89,15 @@ final class ManagerSalaryModel {
         guard let rawEmployees = await empsR else { return [] }
         let absences = (await absR) ?? [], cardAmounts = (await cardsR) ?? []
         let advances = (await advR) ?? [], payments = (await paysR) ?? []
-        let employees = resolveEmployees(rawEmployees, history: (await salHistR) ?? [], monthStart: key(monthStart))
+        var openDebtByEmp: [String: Double] = [:]
+        for d in (await debtsR) ?? [] { if let id = d.employee_id { openDebtByEmp[id, default: 0] += d.amount ?? 0 } }
+        var withActivity = Set<String>(openDebtByEmp.keys)
+        absences.filter { $0.source != "auto" }.forEach { if let id = $0.employee_id { withActivity.insert(id) } }
+        cardAmounts.forEach { if let id = $0.employee_id { withActivity.insert(id) } }
+        advances.forEach { if let id = $0.employee_id { withActivity.insert(id) } }
+        payments.forEach { if let id = $0.employee_id { withActivity.insert(id) } }
+        let monthEmployees = rawEmployees.filter { $0.is_active != false || withActivity.contains($0.id) }
+        let employees = resolveEmployees(monthEmployees, history: (await salHistR) ?? [], monthStart: key(monthStart))
 
         return employees.map { e -> ManagerModel.SalRow in
             let absForEmp = absences.filter { $0.employee_id == e.id && $0.source != "auto" }
@@ -99,8 +116,8 @@ final class ManagerSalaryModel {
             let lastPaidAt = paysForEmp.compactMap { $0.paid_at }.max()
             let total = max(0, (e.salary ?? 0) - deduct)
             let cash = max(0, total - advance - card)
-            let remaining = max(0, cash - paidCash)
-            return ManagerModel.SalRow(id: e.id, name: e.name, salary: e.salary ?? 0, absences: absN, absenceList: absenceList, deduct: deduct, card: card, advance: advance, advanceList: advForEmp, total: total, cash: cash, paid: paid, remaining: remaining, lastPaidAt: lastPaidAt)
+            let remaining = max(0, cash - paidCash - (openDebtByEmp[e.id] ?? 0))
+            return ManagerModel.SalRow(id: e.id, name: e.name, salary: e.salary ?? 0, absences: absN, absenceList: absenceList, deduct: deduct, card: card, advance: advance, advanceList: advForEmp, total: total, cash: cash, paid: paid, remaining: remaining, lastPaidAt: lastPaidAt, paidCash: paidCash)
         }
     }
 
@@ -114,6 +131,7 @@ final class ManagerSalaryModel {
         if isCurrentMonth, let prevMonthDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) {
             let prevRows = await computeSalary(monthOf: prevMonthDate)
             prevCashTotal = prevRows.reduce(0) { $0 + $1.cash }
+            prevPaidCash = prevRows.reduce(0) { $0 + $1.paidCash }
         }
         loaded = true
     }
@@ -166,6 +184,15 @@ final class ManagerSalaryModel {
         // до конца месяца. amount не должен его превышать.
         guard amount <= row.remaining else {
             flash(t("an.advanceExceedsRemaining", ["avail": Money.s(row.remaining)])); return
+        }
+        // Аванс уходит из инкассации — та же проверка баланса, что у выплаты ЗП (аудит 2026-09-27:
+        // раньше аванс мог увести баланс инкассации в минус без предупреждения).
+        guard let balRows = try? await DB.from("inkassation_balance").select("balance").eq("restaurant_id", rid).limit(1).list(InkBalanceRow.self) else {
+            flash(t("refreshFailed")); return
+        }
+        let available = balRows.first?.balance ?? 0
+        guard amount <= available else {
+            flash(t("pe.insufficientInkassationPool", ["avail": Money.s(max(0, available))])); return
         }
         let empName = row.name
         let period = String(key(viewMonth).prefix(7)) + "-01"
@@ -392,28 +419,52 @@ final class ManagerSalaryModel {
     // решившего «сегодня не платим, фиксируем как долг». Пишет ЦЕЛИКОМ введённую сумму (без
     // авто-разбивки — «долг не делим по частям»); settlement (галочка в Manager→Смена) сам
     // допишет salary_payments, remaining в ЗП после этого сойдётся сам.
-    private func syncSalaryLedger(empId: String, period: String, dateStr: String, remaining: Double) async {
+    // «Отметить как долг» — ЗП-долг сотрудника за месяц одной строкой shift_expenses
+    // (is_paid=false, note=SALPERIOD:<period>), гасится галочкой в Manager→Смена. Аудит
+    // 2026-09-27 (паритет с веб tabs-salary.tsx addSalaryDebt): раньше delete+insert «заменить
+    // долг этой суммой» — второй долг за месяц стирал первый, двойной тап (без замка) давал две
+    // одинаковые строки (Алима 2×€100, SO, 26.09). Теперь сумма ДОБАВЛЯЕТСЯ к открытому долгу.
+    private func addSalaryDebt(empId: String, period: String, dateStr: String, amount: Double) async -> String? {
         let noteTag = "\(Self.salperiodPrefix)\(period)"
-        nonisolated struct IdRow: Codable, Sendable { let id: String }
-        let existing = (try? await DB.from("shift_expenses").select("id")
-            .eq("employee_id", empId).eq("note", noteTag).eq("is_paid", false).list(IdRow.self)) ?? []
-        let staleIds = existing.map { $0.id }
-        if !staleIds.isEmpty { try? await DB.from("shift_expenses").delete().in("id", staleIds).run() }
-        guard remaining > 0, let dateDate = dfKey.date(from: dateStr),
-              let sh = await ensureShift(dateStr: dateStr, before: dateDate) else { return }
+        nonisolated struct DebtRowIdAmt: Codable, Sendable { let id: String; let amount: Double? }
+        let existing: [DebtRowIdAmt]
+        do {
+            existing = try await DB.from("shift_expenses").select("id, amount")
+                .eq("employee_id", empId).eq("note", noteTag).eq("is_paid", false).order("created_at").limit(1).list(DebtRowIdAmt.self)
+        } catch { return error.localizedDescription }
+        if let ex = existing.first {
+            let cur = ex.amount ?? 0
+            // CAS по amount — параллельная запись с другого устройства не теряется молча.
+            do {
+                let upd = try await DB.from("shift_expenses").update(["amount": cur + amount])
+                    .eq("id", ex.id).eq("amount", cur).single(ShiftExpense.self)
+                return upd == nil ? "race" : nil
+            } catch { return error.localizedDescription }
+        }
+        guard let dateDate = dfKey.date(from: dateStr),
+              let sh = await ensureShift(dateStr: dateStr, before: dateDate) else { return "shift" }
         let values: [String: Any] = [
             "shift_id": sh.id, "restaurant_id": rid, "employee_id": empId,
             "category_name": "\(t("pe.salaryWord")) — \(periodLabel(period))",
-            "amount": remaining, "is_paid": false, "note": noteTag,
+            "amount": amount, "is_paid": false, "note": noteTag,
         ]
-        try? await DB.from("shift_expenses").insert(values).run()
+        do { try await DB.from("shift_expenses").insert(values).run(); return nil }
+        catch { return error.localizedDescription }
     }
 
     @discardableResult
     func markAsDebt(employeeId: String, amount: Double, date: Date) async -> Bool {
-        guard amount > 0 else { return false }
+        guard amount > 0, !moneyBusy else { return false }
+        guard let row = rows.first(where: { $0.id == employeeId }), amount <= row.remaining else {
+            flash(t("pe.debtExceedsRemaining", ["avail": Money.s(rows.first(where: { $0.id == employeeId })?.remaining ?? 0)]))
+            return false
+        }
+        moneyBusy = true   // замок от двойного тапа (аудит 2026-09-27)
+        defer { moneyBusy = false }
         let period = String(key(viewMonth).prefix(7)) + "-01"
-        await syncSalaryLedger(empId: employeeId, period: period, dateStr: key(date), remaining: amount)
+        if let err = await addSalaryDebt(empId: employeeId, period: period, dateStr: key(date), amount: amount) {
+            flash(t("saveFailed", ["err": err])); return false
+        }
         insufficientFunds = false
         flash(t("pe.markedAsDebt"))
         await load(); await loadDebt()

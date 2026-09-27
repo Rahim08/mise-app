@@ -4,6 +4,8 @@ import { db } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
 import { computeAccruedToday } from '@/lib/analytics'
+import { resolveEmployeesForMonth } from '@/lib/salaryHistory'
+import { SALPERIOD_PREFIX } from '@/lib/shiftForm'
 import { inp, lbl, fmtHours, hoursOf } from '@/app/people/shared'
 import { Sheet } from '@/components/people/helpers'
 
@@ -48,6 +50,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   const [showDebtList, setShowDebtList] = useState(false)
   const [payoutDay, setPayoutDay] = useState<number | null>(null)
   const [prevCashTotal, setPrevCashTotal] = useState(0)
+  const [prevPaidCash, setPrevPaidCash] = useState(0)
   const [toast, setToast] = useState('')
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2500) }
   const [advFor, setAdvFor] = useState<{ id: string; name: string } | null>(null)
@@ -57,8 +60,10 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   const computeMonth = async (targetYm: string) => {
     const monthStart = `${targetYm}-01`
     const monthEnd = fmtDate(new Date(Number(targetYm.slice(0, 4)), Number(targetYm.slice(5, 7)), 0))
-    const [{ data: emps }, { data: abs }, { data: cards }, { data: att }, { data: dir }, { data: advs }, { data: pays }] = await Promise.all([
-      db.from('employees').select('id, name, salary, deduct_per_absence').eq('is_active', true).order('name'),
+    const [{ data: rawEmps }, { data: abs }, { data: cards }, { data: att }, { data: dir }, { data: advs }, { data: pays }, { data: debtRows }, { data: salHist }] = await Promise.all([
+      // Без фильтра is_active: уволенный сотрудник должен остаться в тех месяцах, где у него
+      // есть выплаты/авансы/прогулы/карта (аудит 2026-09-27) — фильтр ниже.
+      db.from('employees').select('id, name, salary, deduct_per_absence, is_active').order('name'),
       db.from('shift_absences').select('employee_id, date, source').gte('date', monthStart).lte('date', monthEnd),
       db.from('monthly_card_amounts').select('employee_id, card_amount').eq('month', targetYm),
       db.from('attendance_records').select('staff_id, check_in_at, check_out_at, date').gte('date', monthStart).lte('date', monthEnd),
@@ -67,7 +72,17 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       // 2026-08-15: аванс, взятый в июле датой на август, должен остаться в зарплате июля.
       db.from('salary_advances').select('*').eq('period', monthStart),
       db.from('salary_payments').select('*').eq('period', monthStart),
+      // Открытый ЗП-долг за этот месяц («Отметить как долг») — уже обещан к выплате через
+      // Manager→Долги, в «осталось» его не показываем повторно, иначе можно было заплатить
+      // и из инкассации, и погасить долг из кассы (аудит 2026-09-27).
+      db.from('shift_expenses').select('employee_id, amount').eq('is_paid', false).eq('note', `${SALPERIOD_PREFIX}${monthStart}`),
+      // Оклад/вычет, действовавшие в этом месяце (паритет с Analytics/iOS ManagerSalary): без
+      // этого правка оклада сегодня пересчитывала прошлые месяцы задним числом (аудит 2026-09-27).
+      db.from('salary_history').select('employee_id, salary, deduct_per_absence, effective_from').lte('effective_from', monthStart),
     ])
+    const emps = resolveEmployeesForMonth(rawEmps || [], salHist || [], monthStart)
+    const openDebtByEmp: Record<string, number> = {}
+    ;(debtRows || []).forEach((d: any) => { if (d.employee_id) openDebtByEmp[d.employee_id] = (openDebtByEmp[d.employee_id] || 0) + Number(d.amount || 0) })
     const staffName: Record<string, string> = {}; (dir || []).forEach((s: any) => { staffName[s.id] = s.name })
     const hoursByName: Record<string, number> = {}
     ;(att || []).forEach((r: any) => { const n = staffName[r.staff_id]; if (n) hoursByName[n] = (hoursByName[n] || 0) + hoursOf(r) })
@@ -90,7 +105,8 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       if ((p.method || 'cash') === 'cash') paidCashByEmp[p.employee_id] = (paidCashByEmp[p.employee_id] || 0) + Number(p.amount || 0)
       if (!lastPaidByEmp[p.employee_id] || p.paid_at > lastPaidByEmp[p.employee_id]) lastPaidByEmp[p.employee_id] = p.paid_at
     })
-    return (emps || []).map((e: any) => {
+    const hasActivity = (id: string) => !!(absByEmp[id] || advByEmp[id] || paidByEmp[id] || cardByEmp[id] || openDebtByEmp[id])
+    return emps.filter((e: any) => e.is_active !== false || hasActivity(e.id)).map((e: any) => {
       const salary = Number(e.salary || 0)
       const dates = (absByEmp[e.id] || []).sort()
       const deduct = dates.length * Number(e.deduct_per_absence || 0)
@@ -100,8 +116,9 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
       const paidCash = paidCashByEmp[e.id] || 0
       const total = Math.max(0, salary - deduct)
       const cash = Math.max(0, total - advance - card)
-      const remaining = Math.max(0, cash - paidCash)
-      return { id: e.id, name: e.name, salary, dates, absences: dates.length, deduct, card, advance, advanceRows: (advRowsByEmp[e.id] || []).sort((a, b) => a.date < b.date ? 1 : -1), paid, paidCash, remaining, total, cash, lastPaidAt: lastPaidByEmp[e.id] || null, hours: hoursByName[e.name] || 0 }
+      const openDebt = openDebtByEmp[e.id] || 0
+      const remaining = Math.max(0, cash - paidCash - openDebt)
+      return { id: e.id, openDebt, name: e.name, salary, dates, absences: dates.length, deduct, card, advance, advanceRows: (advRowsByEmp[e.id] || []).sort((a, b) => a.date < b.date ? 1 : -1), paid, paidCash, remaining, total, cash, lastPaidAt: lastPaidByEmp[e.id] || null, hours: hoursByName[e.name] || 0 }
     })
   }
 
@@ -215,7 +232,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     if (!isCurrentMonth) return
     const now = new Date()
     const d = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    computeMonth(fmtDate(d).slice(0, 7)).then(prevRows => setPrevCashTotal(prevRows.reduce((s, r: any) => s + r.cash, 0)))
+    computeMonth(fmtDate(d).slice(0, 7)).then(prevRows => { setPrevCashTotal(prevRows.reduce((s, r: any) => s + r.cash, 0)); setPrevPaidCash(prevRows.reduce((s, r: any) => s + r.paidCash, 0)) })
   }, [isCurrentMonth])
 
   // Смена/инкассация на дату оплаты может не существовать — создаём её тем же паттерном,
@@ -234,7 +251,6 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     return sh?.id ? { id: sh.id, inkassation: 0 } : null
   }
 
-  const SALPERIOD_PREFIX = 'SALPERIOD:'
   const periodLabel = (period: string) => new Date(period).toLocaleDateString(tr('dash.locale'), { month: 'long', year: 'numeric' })
 
   // Долг-леджер (юзер-фидбок 2026-08-20): остаток по ЗП за месяц материализуется как обычная
@@ -245,19 +261,33 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   // Идемпотентно: удаляем старую открытую запись за этот (сотрудник, период) и вставляем
   // свежую с текущим remaining — не накапливаем/не дрейфуем при частичных доплатах между
   // запусками (юзер-фидбок: «долг не делим по частям — платим/держим целиком»).
-  const syncSalaryLedger = async (empId: string, period: string, dateStr: string, remaining: number) => {
+  // «Отметить как долг» — ЗП-долг сотрудника за месяц одной строкой shift_expenses
+  // (is_paid=false, note=SALPERIOD:<period>), гасится галочкой в Manager→Смена (settle_debts
+  // пишет salary_payments). Аудит 2026-09-27: раньше здесь был delete+insert «заменить долг
+  // этой суммой» — второй долг за тот же месяц стирал первый, а двойной тап (без замка)
+  // оставлял две одинаковые строки (Алима 2×€100, SO, 26.09). Теперь сумма ДОБАВЛЯЕТСЯ к
+  // открытому долгу за этот период (remaining уже учитывает открытый долг, так что сверху
+  // можно добавить только реально невыплаченное).
+  const addSalaryDebt = async (empId: string, period: string, dateStr: string, amount: number): Promise<string | null> => {
     const noteTag = `${SALPERIOD_PREFIX}${period}`
-    const { data: existing } = await db.from('shift_expenses').select('id').eq('restaurant_id', restaurantId).eq('employee_id', empId).eq('note', noteTag).eq('is_paid', false)
-    const staleIds = (existing || []).map((r: any) => r.id)
-    if (staleIds.length > 0) await db.from('shift_expenses').delete().in('id', staleIds)
-    if (remaining <= 0) return
+    const { data: existing, error: exErr } = await db.from('shift_expenses').select('id, amount').eq('restaurant_id', restaurantId).eq('employee_id', empId).eq('note', noteTag).eq('is_paid', false).order('created_at').limit(1)
+    if (exErr) return exErr.message
+    const ex = Array.isArray(existing) ? existing[0] : existing
+    if (ex?.id) {
+      const cur = Number(ex.amount || 0)
+      // CAS по amount — параллельная запись с другого устройства не теряется молча.
+      const { data: upd, error } = await db.from('shift_expenses').update({ amount: cur + amount }).eq('id', ex.id).eq('amount', cur).select()
+      if (error) return error.message
+      return Array.isArray(upd) && upd.length > 0 ? null : 'race'
+    }
     const sh = await ensureShift(dateStr)
-    if (!sh) return
-    await db.from('shift_expenses').insert({
+    if (!sh) return 'shift'
+    const { error } = await db.from('shift_expenses').insert({
       shift_id: sh.id, restaurant_id: restaurantId, employee_id: empId,
       category_name: `${tr('pe.salaryWord')} — ${periodLabel(period)}`,
-      amount: remaining, is_paid: false, note: noteTag,
+      amount, is_paid: false, note: noteTag,
     })
+    return error ? error.message : null
   }
 
   // «На карту» / авансы (2026-08-14, аудит A3/A4 — веб раньше вообще не имел этой
@@ -308,6 +338,12 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     const row = rows.find(r => r.id === empId)
     if (!row) { showToast(tr('pe.saveFailed', { err: 'row' })); return }
     if (amount > row.remaining) { showToast(tr('an.advanceExceedsRemaining', { avail: eur(row.remaining) })); return }
+    // Аванс уходит из инкассации — та же проверка баланса, что у выплаты ЗП (аудит 2026-09-27:
+    // раньше аванс мог увести баланс инкассации в минус без предупреждения).
+    const { data: balRows, error: balErr } = await db.from('inkassation_balance').select('balance').eq('restaurant_id', restaurantId).limit(1)
+    if (balErr) { showToast(tr('pe.saveFailed', { err: balErr.message })); return }
+    const available = Number(balRows?.[0]?.balance || 0)
+    if (amount > available) { showToast(tr('pe.insufficientInkassationPool', { avail: eur(Math.max(0, available)) })); return }
     const { data: advRow, error: insErr } = await db.from('salary_advances').insert({ restaurant_id: restaurantId, employee_id: empId, amount, date: dateStr, period: `${ym}-01`, note: `${empName} аванс` }).select().single()
     if (insErr) { showToast(tr('pe.saveFailed', { err: insErr.message })); return }
     // A4 (аудит 2026-08-15): тег с id аванса вместо голого «Имя аванс» — иначе deleteAdvance
@@ -523,15 +559,20 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   // юзер: «долг не делим по частям»); settlement (галочка в Manager→Смена) сам допишет
   // salary_payments, remaining в ЗП после этого сойдётся сам.
   const markAsDebt = async () => {
-    if (!payFor) return
+    if (!payFor || moneyBusy.current) return
     const amount = Number(payFor.amount) || 0
     if (amount <= 0) return
+    const row = rows.find(r => r.id === payFor.id)
+    if (!row || amount > row.remaining) { setPayError(tr('pe.debtExceedsRemaining', { avail: eur(row?.remaining || 0) })); setPayInsufficient(false); return }
+    moneyBusy.current = true // замок от двойного тапа (аудит 2026-09-27)
     setMarkingDebt(true)
-    await syncSalaryLedger(payFor.id, `${ym}-01`, payFor.date || fmtDate(new Date()), amount)
-    setMarkingDebt(false)
-    setPayFor(null); setPayError(null); setPayInsufficient(false)
-    showToast(tr('pe.markedAsDebt'))
-    await load(); await loadDebt()
+    try {
+      const err = await addSalaryDebt(payFor.id, `${ym}-01`, payFor.date || fmtDate(new Date()), amount)
+      if (err) { setPayError(tr('pe.saveFailed', { err })); return }
+      setPayFor(null); setPayError(null); setPayInsufficient(false)
+      showToast(tr('pe.markedAsDebt'))
+      await load(); await loadDebt()
+    } finally { setMarkingDebt(false); moneyBusy.current = false }
   }
 
   const payStatus = (r: any) => {
@@ -641,7 +682,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   const advanceTotal = rows.reduce((s, r) => s + Math.min(r.advance, r.total), 0)
   const cardTotal = rows.reduce((s, r) => s + Math.min(r.card, Math.max(0, r.total - Math.min(r.advance, r.total))), 0)
   const cashTotal = rows.reduce((s, r) => s + r.cash, 0)
-  const accrued = computeAccruedToday({ isCurrentMonth, totalCash: cashTotal, daysInMonth, payoutDay, prevTotalCash: prevCashTotal, prevDaysInMonth })
+  const accrued = computeAccruedToday({ isCurrentMonth, totalCash: cashTotal, daysInMonth, payoutDay, prevTotalCash: prevCashTotal, prevDaysInMonth, paidCash: rows.reduce((s, r) => s + r.paidCash, 0), prevPaidCash })
   return (
     <div>
       <MonthNav />

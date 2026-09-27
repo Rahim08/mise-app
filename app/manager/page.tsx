@@ -12,6 +12,7 @@ import { AppLoading } from '@/components/AppLoading'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate, fv, displayDate, dd, businessDate } from '@/lib/format'
+import { splitShiftExpenses, round2, SALPERIOD_PREFIX } from '@/lib/shiftForm'
 import { ManagerSalaryTab } from './tabs-salary'
 import { InkassationTopups } from './topups'
 import { ManagerReportsTab } from './tabs-reports'
@@ -103,6 +104,9 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   // без этого пересохранение того же дня теряло сумму погашения из кассы (A1, аудит 2026-08-13,
   // тот же баг что и в iOS ManagerView.swift, порт фикса).
   const [settledTodayTotal, setSettledTodayTotal] = useState(0)
+  // Оплаченные строки смены вне формы (уволенный сотрудник, выключенная категория) — форма их не
+  // показывает и не удаляет, но они остаются расходом дня (см. lib/shiftForm.ts, аудит 2026-09-27).
+  const [unmanagedPaidTotal, setUnmanagedPaidTotal] = useState(0)
   const [showSummary, setShowSummary] = useState(false)
   const [checklistWarn, setChecklistWarn] = useState(false)
   // C8 (юзер-фидбок 2026-08-15): мягкий гейт — панель долгов позволяет отметить сразу ВСЕ
@@ -212,22 +216,13 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
         db.from('shift_expenses').select('*').eq('shift_id', sh.id),
         db.from('inkassations').select('*').eq('shift_id', sh.id).limit(1),
       ])
-      const amounts: Record<string, string> = {}; const notes: Record<string, string> = {}
-      const extras: Record<string, string> = {}
-      const catUn: Record<string, boolean> = {}; const empUn: Record<string, boolean> = {}
-      // paid_shift_id != null — строка управляется экраном долгов, не формой закрытия смены:
-      // не должна всплывать как редактируемое поле (см. persistShift ниже). Отдельно (вне этого
-      // фильтра) считаем settledTodayTotal — сумму долгов, погашенных ИМЕННО этой сменой, чтобы
-      // пересохранение дня её не теряло (A1, аудит 2026-08-13).
-      const shId = sh.id
-      setSettledTodayTotal((exps || []).filter((e: any) => e.paid_shift_id === shId).reduce((s: number, e: any) => s + Number(e.amount || 0), 0))
-      ;(exps || []).filter((e: any) => !e.paid_shift_id).forEach((e: any) => {
-        const unpaid = e.is_paid === false
-        if (e.employee_id) { extras[e.employee_id] = String(e.amount); if (unpaid) empUn[e.employee_id] = true }
-        else if (e.category_id) { amounts[e.category_id] = String(e.amount); if (e.note) notes[e.category_id] = e.note; if (unpaid) catUn[e.category_id] = true }
-      })
-      setCatAmounts(amounts); setCatNotes(notes); setEmpExtras(extras)
-      setCatUnpaid(catUn); setEmpUnpaid(empUn)
+      // paid_shift_id != null — строка управляется экраном долгов, не формой закрытия смены.
+      // settledTodayTotal — долги, погашенные ИМЕННО этой сменой (A1, аудит 2026-08-13).
+      // ЗП-долги, строки уволенных/выключенных категорий — вне формы (аудит 2026-09-27).
+      const split = splitShiftExpenses(exps || [], sh.id, new Set(cats.map(c => c.id)), new Set(emps.map(e => e.id)))
+      setSettledTodayTotal(split.settledTodayTotal); setUnmanagedPaidTotal(split.unmanagedPaidTotal)
+      setCatAmounts(split.catAmounts); setCatNotes(split.catNotes); setEmpExtras(split.empExtras)
+      setCatUnpaid(split.catUnpaid); setEmpUnpaid(split.empUnpaid)
       const ink = Array.isArray(inkList) ? inkList[0] : inkList
       const nextExpense = ink && ink.expense > 0 ? String(ink.expense) : ''
       const nextReason = ink?.reason || ''
@@ -237,7 +232,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       setShift(null); setLocked(false); setIncome(''); setIncomeCard(''); setInkSum(''); setInkExpense(''); setInkReason('')
       setLoadedInkExpense(''); setLoadedInkReason('')
       setCatAmounts({}); setCatNotes({}); setEmpExtras({})
-      setCatUnpaid({}); setEmpUnpaid({}); setSettledTodayTotal(0)
+      setCatUnpaid({}); setEmpUnpaid({}); setSettledTodayTotal(0); setUnmanagedPaidTotal(0)
     }
     setLoading(false)
   }
@@ -259,8 +254,10 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     try {
       const { data: { user } } = await supabase.auth.getUser()
 
-      const yesterday = new Date(currentDate); yesterday.setDate(yesterday.getDate() - 1)
-      const { data: prevList } = await db.from('shifts').select('closing_balance').eq('restaurant_id', restaurantId).eq('date', fmtDate(yesterday)).order('opened_at', { ascending: false }).limit(1)
+      // Последняя смена ДО этой даты, не строго «вчера» (аудит 2026-09-27, паритет с loadDay и
+      // iOS prevClosing): пропущенный день давал вход 0, и сохранение сразу после открытия
+      // записывало кассу без остатка.
+      const { data: prevList } = await db.from('shifts').select('closing_balance').eq('restaurant_id', restaurantId).lt('date', fmtDate(currentDate)).order('date', { ascending: false }).order('opened_at', { ascending: false }).limit(1)
       const openingBalance = (Array.isArray(prevList) ? prevList[0] : prevList)?.closing_balance || 0
       const { data: sh, error } = await db.from('shifts').insert({
         restaurant_id: restaurantId, date: fmtDate(currentDate),
@@ -314,9 +311,9 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     // Погашение отмеченных сейчас долгов + уже погашенных этой сменой ранее (A1) — реальные
     // наличные, покинувшие кассу именно сегодня.
     const debtTotal = debtSettleTotal() + settledTodayTotal
-    const totalExp = catTotal + empExtraTotal + debtTotal + ink
+    const totalExp = round2(catTotal + empExtraTotal + debtTotal + unmanagedPaidTotal + ink)
     const opening = shift?.opening_balance || 0
-    const balance = opening + inc - totalExp
+    const balance = round2(opening + inc - totalExp)
     const inkNet = ink - (parseFloat(inkExpense) || 0) // итог инкассации после расхода
     return { inc, card, ink, catTotal, empExtraTotal, debtTotal, totalExp, balance, opening, inkNet }
   }
@@ -340,7 +337,6 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   // 2026-08-20: «взаимодействие — выплата — только через открытие смены», но remaining в ЗП
   // должен сойтись сам). Пишем ДО shift_expenses (salary_payments — источник истины «оплачено»,
   // паритет с C2/tabs-salary.tsx savePayment) — если запись не пройдёт, откатываем весь settle.
-  const SALPERIOD_PREFIX = 'SALPERIOD:'
   // Один RPC вместо 2-3 независимых запросов (MISE-002, аудит 2026-08-28): раньше сбой сети
   // между шагами оставлял систему в несогласованном состоянии (например, salary_payments
   // записан — «оплачено» в ЗП, — а shift_expenses не обновлён — долг всё ещё «открыт» в
@@ -385,9 +381,11 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     await persistDebtSettlements(sh.id, fmtDate(dateForInk))
 
     // paid_shift_id != null — строка управляется экраном «Долги» (Analytics), не трогаем.
-    const { data: oldExpensesAll, error: oldExpErr } = await db.from('shift_expenses').select('id, paid_shift_id').eq('shift_id', sh.id)
+    // Удаляем только строки, которыми владеет форма (lib/shiftForm.ts) — по свежему чтению,
+    // не по снэпшоту loadDay: ЗП-долги и строки уволенных/выключенных остаются нетронутыми.
+    const { data: oldExpensesAll, error: oldExpErr } = await db.from('shift_expenses').select('id, category_id, employee_id, amount, note, is_paid, paid_shift_id').eq('shift_id', sh.id)
     if (oldExpErr) throw new Error(oldExpErr.message)
-    const oldExpenses = (oldExpensesAll || []).filter((e: any) => !e.paid_shift_id)
+    const oldExpenses = splitShiftExpenses(oldExpensesAll || [], sh.id, new Set(categories.map(c => c.id)), new Set(employees.map(e => e.id))).ownedIds.map(id => ({ id }))
     const inserts: any[] = []
     categories.forEach(c => {
       const amt = parseFloat(catAmounts[c.id] || '0')
@@ -401,7 +399,12 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
       const { error: insErr } = await db.from('shift_expenses').insert(inserts)
       if (insErr) throw new Error(insErr.message)
     }
-    if ((oldExpenses || []).length > 0) await db.from('shift_expenses').delete().in('id', (oldExpenses || []).map((e: any) => e.id))
+    if (oldExpenses.length > 0) {
+      // Ошибку удаления не глотаем: иначе старые строки остаются рядом с новыми, и расход дня
+      // в Аналитике удваивается до следующего сохранения (аудит 2026-09-27).
+      const { error: delErr } = await db.from('shift_expenses').delete().in('id', oldExpenses.map(e => e.id))
+      if (delErr) throw new Error(delErr.message)
+    }
 
     // Inkassation — UPDATE по id вместо delete+insert (A2, аудит 2026-08-09): раньше окно
     // между delete и insert теряло инкассацию при обрыве сети, а сам delete+insert затирал
@@ -487,7 +490,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   }
 
   const { inc, card, ink, catTotal, empExtraTotal, debtTotal, totalExp, balance, opening } = calc()
-  const netExpense = catTotal + empExtraTotal + debtTotal
+  const netExpense = round2(totalExp - ink) // вкл. «прочие расходы дня» вне формы (lib/shiftForm.ts)
   const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
   const dowRaw = currentDate.toLocaleDateString(locale, { weekday: 'long' })
   const dowName = dowRaw.charAt(0).toUpperCase() + dowRaw.slice(1)
@@ -889,13 +892,16 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
               <SRow label={tr('mg.cash')} value={`€${fv(inc)}`} color={t.green} t={t} />
               {card > 0 && <SRow label={tr('mg.sumCard')} value={`€${fv(card)}`} color={t.purple} t={t} />}
               {card > 0 && <SRow label={tr('mg.sumTotalIncome')} value={`€${fv(inc + card)}`} color={t.green} bold t={t} />}
+              {/* «В долг» — без минуса: в кассу дня не входит (аудит 2026-09-27: строки сводки
+                  должны сходиться с «Итого расход»). */}
               {employees.filter(e => parseFloat(empExtras[e.id] || '0') > 0).map(e => (
-                <SRow key={e.id} label={`${e.name} (${tr('mg.extra')})`} value={`€${fv(parseFloat(empExtras[e.id]))}`} color={t.orange} t={t} />
+                <SRow key={e.id} label={`${e.name} (${tr('mg.extra')})${empUnpaid[e.id] ? ` · ${tr('mg.onDebtShort')}` : ''}`} value={`${empUnpaid[e.id] ? '' : '−'}€${fv(parseFloat(empExtras[e.id]))}`} color={t.orange} t={t} />
               ))}
               {categories.filter(c => parseFloat(catAmounts[c.id] || '0') > 0).map(c => (
-                <SRow key={c.id} label={c.name + (catNotes[c.id] ? ` (${catNotes[c.id]})` : '')} value={`−€${fv(parseFloat(catAmounts[c.id]))}`} color={t.red} t={t} />
+                <SRow key={c.id} label={c.name + (catNotes[c.id] ? ` (${catNotes[c.id]})` : '') + (catUnpaid[c.id] ? ` · ${tr('mg.onDebtShort')}` : '')} value={`${catUnpaid[c.id] ? '' : '−'}€${fv(parseFloat(catAmounts[c.id]))}`} color={catUnpaid[c.id] ? t.orange : t.red} t={t} />
               ))}
-              {debtSettleTotal() > 0 && <SRow label={tr('an.debts')} value={`−€${fv(debtSettleTotal())}`} color={t.orange} t={t} />}
+              {unmanagedPaidTotal > 0 && <SRow label={tr('mg.otherDayExp')} value={`−€${fv(unmanagedPaidTotal)}`} color={t.red} t={t} />}
+              {debtSettleTotal() + settledTodayTotal > 0 && <SRow label={tr('an.debts')} value={`−€${fv(debtSettleTotal() + settledTodayTotal)}`} color={t.orange} t={t} />}
               {parseFloat(inkSum) > 0 && <SRow label={tr('mg.secCollection')} value={`−€${fv(parseFloat(inkSum))}`} color={t.orange} t={t} />}
               {parseFloat(inkExpense) > 0 && <SRow label={`${tr('mg.inkExpenseShort')}${inkReason ? ` (${inkReason})` : ''}`} value={`−€${fv(parseFloat(inkExpense))}`} color={t.red} t={t} />}
               <div style={{ borderTop: `1.5px solid ${t.sep}`, marginTop: 10, paddingTop: 10 }}>

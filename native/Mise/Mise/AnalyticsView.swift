@@ -8,14 +8,16 @@ import Charts
 // с payout_day этого месяца стартует новый цикл (копит на ЗП текущего месяца, выплата — в
 // следующем на payout_day); до payout_day идёт дособор на прошлый месяц. Паритет с
 // lib/analytics.ts computeAccruedToday (веб).
-func computeAccruedToday(isCurrentMonth: Bool, totalCash: Double, daysInMonth: Int, payoutDay: Int?, prevTotalCash: Double, prevDaysInMonth: Int, today: Date = Date()) -> Double {
+// paidCash/prevPaidCash — уже выплачено наличными за месяц цикла (аудит 2026-09-27): раньше
+// «начислено» не уменьшалось после выплат, и «отстаём на …» было завышено.
+func computeAccruedToday(isCurrentMonth: Bool, totalCash: Double, daysInMonth: Int, payoutDay: Int?, prevTotalCash: Double, prevDaysInMonth: Int, today: Date = Date(), paidCash: Double = 0, prevPaidCash: Double = 0) -> Double {
     guard isCurrentMonth else { return totalCash }
     let cycleStart = payoutDay ?? 1
     let day = Calendar.current.component(.day, from: today)
     if day >= cycleStart {
-        return max(0, totalCash / Double(daysInMonth) * Double(day - cycleStart + 1))
+        return max(0, totalCash / Double(daysInMonth) * Double(day - cycleStart + 1) - paidCash)
     }
-    return max(0, prevTotalCash / Double(prevDaysInMonth) * Double(prevDaysInMonth - cycleStart + day + 1))
+    return max(0, prevTotalCash / Double(prevDaysInMonth) * Double(prevDaysInMonth - cycleStart + day + 1) - prevPaidCash)
 }
 
 private func cur(_ v: Double) -> String { Money.s(v) }
@@ -75,6 +77,7 @@ final class AnalyticsModel {
     var inkDetails: [String: Inkassation] = [:]
     var advances: [SalaryAdvance] = []
     var payments: [SalaryPayment] = []
+    var prevPayments: [SalaryPayment] = []
     // Прошлый месяц — для «Начислено» до payout_day (см. cycleTotalCash в карточке кассы):
     // до дня выплаты карточка ещё показывает не выплаченную ЗП за прошлый месяц.
     var prevCardAmounts: [CardAmount] = []
@@ -112,7 +115,7 @@ final class AnalyticsModel {
         let inkLines = shiftsWithInk.map { s -> String in
             let ink = inkDetails[s.id]
             let rsn = ink?.reason.map { " (\($0))" } ?? ""
-            return "\(s.date): gross \(Money.s(s.inkassation ?? 0)), expense \(Money.s(ink?.expense ?? 0))\(rsn), net \(Money.s(ink?.total ?? (s.inkassation ?? 0)))"
+            return "\(s.date): gross \(Money.s(s.inkassation ?? 0)), expense \(Money.s(ink?.expense ?? 0))\(rsn), net \(Money.s(ink?.net(fallbackAmount: s.inkassation ?? 0) ?? (s.inkassation ?? 0)))"
         }.joined(separator: "; ")
 
         // hookah by type
@@ -219,7 +222,9 @@ final class AnalyticsModel {
         // (напр. pull-to-refresh без связи) прошлые данные сохраняются, а не обнуляются.
         async let sh = try? DB.from("shifts").select().gte("date", key(monthStart)).lte("date", key(monthEnd)).order("date").list(Shift.self)
         async let prev = try? DB.from("shifts").select().gte("date", key(prevStart)).lte("date", key(prevEnd)).order("date").list(Shift.self)
-        async let emps = try? DB.from("employees").select().eq("is_active", true).order("name").list(Employee.self)
+        // Без фильтра is_active — уволенный остаётся в месяцах, где у него есть выплаты/авансы/
+        // прогулы/карта (аудит 2026-09-27, паритет с Manager→Зарплата); фильтр — ниже, после payments.
+        async let emps = try? DB.from("employees").select().order("name").list(Employee.self)
         async let cards = try? DB.from("monthly_card_amounts").select("id, employee_id, card_amount").eq("month", ym).list(CardAmount.self)
         async let abs = try? DB.from("shift_absences").select().gte("date", key(monthStart)).lte("date", key(monthEnd)).list(Absence.self)
         async let hk = try? DB.from("hookah_sales").select().gte("date", key(monthStart)).lte("date", key(monthEnd)).order("date").list(HookahSale.self)
@@ -231,12 +236,14 @@ final class AnalyticsModel {
         async let prevAdv = try? DB.from("salary_advances").select().eq("period", prevYm + "-01").list(SalaryAdvance.self)
         // Оклад/вычет по месяцам (salary-history-2026-09.sql) — иначе правка оклада сегодня
         // меняет расчёт за просматриваемый прошлый месяц задним числом.
+        async let prevPays = try? DB.from("salary_payments").select().eq("period", prevYm + "-01").list(SalaryPayment.self)
         async let salHist = try? DB.from("salary_history").select("employee_id, salary, deduct_per_absence, effective_from").list(SalaryHistoryRow.self)
 
         shiftsRaw = (await sh) ?? shiftsRaw
         prevShiftsRaw = (await prev) ?? prevShiftsRaw
         if let h = await salHist { salaryHistory = h }
-        if let rawEmps = await emps { employees = resolveEmployees(rawEmps, history: salaryHistory, monthStart: key(monthStart)) }
+        let rawEmps = await emps
+        prevPayments = (await prevPays) ?? prevPayments
         cardAmounts = (await cards) ?? cardAmounts
         if let a = await abs { absences = a.filter { $0.source != "auto" } }
         hookahRows = (await hk) ?? hookahRows
@@ -279,6 +286,13 @@ final class AnalyticsModel {
         if let pe = await prevExpRes { prevExpenses = pe }
         if let adv = await advRes { advances = adv }
         if let pays = await paysRes { payments = pays }
+        if let rawEmps {
+            var withActivity = Set<String>()
+            for id in absences.compactMap(\.employee_id) + cardAmounts.compactMap(\.employee_id)
+                + advances.compactMap(\.employee_id) + payments.compactMap(\.employee_id) { withActivity.insert(id) }
+            let monthEmps = rawEmps.filter { $0.is_active != false || withActivity.contains($0.id) }
+            employees = resolveEmployees(monthEmps, history: salaryHistory, monthStart: key(monthStart))
+        }
         if let cats = await catsRes {
             pinnedCats = Set(cats.filter { $0.is_pinned == true }.compactMap { $0.name })
         }
@@ -493,7 +507,8 @@ final class AnalyticsModel {
     // Сравнение режем по последнему ЗАКРЫТОМУ дню текущего месяца с обеих сторон.
     private var monthDaysPassed: Int {
         guard isCurrentMonth else { return daysInMonth }
-        let closed = shiftsRaw.compactMap { $0.closing_balance != nil ? Int($0.date.suffix(2)) : nil }
+        // «Закрыт» = в смене есть цифры: closing_balance заполняется уже при открытии смены (аудит 2026-09-27).
+        let closed = shiftsRaw.compactMap { ($0.income ?? 0) > 0 || ($0.total_expense ?? 0) > 0 ? Int($0.date.suffix(2)) : nil }
         return closed.max() ?? 0
     }
     var pTotalToDate: Double {
@@ -551,7 +566,7 @@ final class AnalyticsModel {
 
     var totalInkassNet: Double {
         shiftsWithInk.reduce(0) { acc, s in
-            if let ink = inkDetails[s.id] { return acc + (ink.total ?? (s.inkassation ?? 0)) }
+            if let ink = inkDetails[s.id] { return acc + ink.net(fallbackAmount: s.inkassation ?? 0) }
             return acc + (s.inkassation ?? 0)
         }
     }
@@ -587,7 +602,9 @@ final class AnalyticsModel {
             let advance = advList.reduce(0) { $0 + ($1.amount ?? 0) }
             let total = max(0, (e.salary ?? 0) - deduct)
             let cash = max(0, total - advance - card)
-            let paid = payments.filter { $0.employee_id == e.id }.reduce(0) { $0 + ($1.amount ?? 0) }
+            // Только наличные — паритет с Manager→Зарплата (A2): карта уже вычтена через
+            // monthly_card_amounts, иначе «осталось» расходилось между экранами (аудит 2026-09-27).
+            let paid = payments.filter { $0.employee_id == e.id && ($0.method ?? "cash") == "cash" }.reduce(0) { $0 + ($1.amount ?? 0) }
             let remaining = max(0, cash - paid)
             return SalaryRow(id: e.id, name: e.name, salary: e.salary ?? 0, abs: absN, deduct: deduct, card: card, cash: cash, total: total, advance: advance, advanceList: advList, paid: paid, remaining: remaining)
         }
@@ -636,7 +653,9 @@ final class AnalyticsModel {
         // месяца (стрелками) даёт бессмысленную цифру (% от чужого месяца по чужому дню).
         // Прошлый закрытый месяц уже полностью начислен — 100%. Формула — см.
         // computeAccruedToday (C3, аудит 2026-08-15).
-        computeAccruedToday(isCurrentMonth: isCurrentMonth, totalCash: salCash, daysInMonth: daysInMonth, payoutDay: payoutDay, prevTotalCash: prevSalCash, prevDaysInMonth: prevDaysInMonth).rounded()
+        computeAccruedToday(isCurrentMonth: isCurrentMonth, totalCash: salCash, daysInMonth: daysInMonth, payoutDay: payoutDay, prevTotalCash: prevSalCash, prevDaysInMonth: prevDaysInMonth,
+                            paidCash: salaryRows.reduce(0) { $0 + $1.paid },
+                            prevPaidCash: prevPayments.filter { ($0.method ?? "cash") == "cash" }.reduce(0) { $0 + ($1.amount ?? 0) }).rounded()
     }
     // Аванс/сумма-на-карту (запись) — переехали в Manager→Зарплата (ManagerSalary.swift,
     // реструктура 2026-08-14). advances/cardAmounts здесь остаются read-only для отображения.
@@ -662,8 +681,9 @@ final class AnalyticsModel {
     //      shift_id = paid_shift_id = смена погашения (совпадают) → считается в расходах ИМЕННО
     //      этого дня. ManagerView её не видит и не трогает (loadDay/persistExpenses фильтруют
     //      paid_shift_id != nil) — живёт только в отчётах Analytics.
-    //   3. inkassations.expense дня погашения увеличивается на сумму — реальные наличные
-    //      физически ушли из инкассационного резерва в этот день (как и авансы).
+    //   3. Касса дня погашения уменьшается на сумму (ManagerView.calc debtTotal → total_expense).
+    //      inkassations RPC settle_debts НЕ трогает (аудит 2026-09-27: прежний текст утверждал
+    //      обратное). ЗП-долг дополнительно пишет salary_payments.
     struct DebtRow: Identifiable, Sendable {
         let id: String; let shiftId: String; let date: String
         let categoryId: String?; let categoryName: String; let employeeId: String?
@@ -1976,7 +1996,7 @@ private struct KassaTab: View {
                                 .fixedSize(horizontal: false, vertical: true)
                                 .presentationCompactAdaptation(.popover)
                             }
-                            Text(cur(ink?.total ?? (s.inkassation ?? 0)))
+                            Text(cur(ink?.net(fallbackAmount: s.inkassation ?? 0) ?? (s.inkassation ?? 0)))
                                 .frame(width: 84, alignment: .trailing).fontWeight(.semibold)
                                 .lineLimit(1).minimumScaleFactor(0.7)
                         }

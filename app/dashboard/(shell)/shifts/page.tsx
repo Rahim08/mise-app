@@ -9,6 +9,7 @@ import { db } from '@/lib/db'
 import { notify as pushNotify } from '@/lib/notifyClient'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate, fv, displayDate, dd } from '@/lib/format'
+import { splitShiftExpenses, round2, SALPERIOD_PREFIX } from '@/lib/shiftForm'
 import { Card, Btn, Badge, EmptyState, Spinner, SectionTitle, Container, Table, type TableColumn, inputStyle } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
 
@@ -79,10 +80,11 @@ export default function ShiftsPage() {
   // мобильном app/manager/page.tsx). См. те же комментарии там для полного контекста.
   const [catUnpaid, setCatUnpaid] = useState<Record<string, boolean>>({})
   const [empUnpaid, setEmpUnpaid] = useState<Record<string, boolean>>({})
-  const [openDebts, setOpenDebts] = useState<{ id: string; shiftId: string; date: string; categoryId: string | null; categoryName: string; employeeId: string | null; amount: number }[]>([])
+  const [openDebts, setOpenDebts] = useState<{ id: string; shiftId: string; date: string; categoryId: string | null; categoryName: string; employeeId: string | null; amount: number; note: string | null }[]>([])
   const [selectedDebtIds, setSelectedDebtIds] = useState<Set<string>>(new Set())
   const [showDebts, setShowDebts] = useState(false)
   const [settledTodayTotal, setSettledTodayTotal] = useState(0)
+  const [unmanagedPaidTotal, setUnmanagedPaidTotal] = useState(0) // см. lib/shiftForm.ts
   const [locked, setLocked] = useState(false)
   const [saving, setSaving] = useState(false)
   const [loadingDay, setLoadingDay] = useState(true)
@@ -94,14 +96,14 @@ export default function ShiftsPage() {
   const [debtNegativeWarn, setDebtNegativeWarn] = useState(false)
 
   const loadOpenDebts = async () => {
-    const { data: unpaid } = await db.from('shift_expenses').select('id, shift_id, category_id, category_name, employee_id, amount').eq('restaurant_id', restaurantId).eq('is_paid', false)
+    const { data: unpaid } = await db.from('shift_expenses').select('id, shift_id, category_id, category_name, employee_id, amount, note').eq('restaurant_id', restaurantId).eq('is_paid', false)
     if (!unpaid || unpaid.length === 0) { setOpenDebts([]); return }
     const shiftIds = Array.from(new Set(unpaid.map((e: any) => e.shift_id).filter(Boolean)))
     const { data: shiftDates } = await db.from('shifts').select('id, date').in('id', shiftIds)
     const dateById: Record<string, string> = {}
     ;(shiftDates || []).forEach((s: any) => { dateById[s.id] = s.date })
     const rows = unpaid
-      .map((e: any) => ({ id: e.id, shiftId: e.shift_id, date: dateById[e.shift_id], categoryId: e.category_id, categoryName: e.category_name || '—', employeeId: e.employee_id, amount: Number(e.amount || 0) }))
+      .map((e: any) => ({ id: e.id, shiftId: e.shift_id, date: dateById[e.shift_id], categoryId: e.category_id, categoryName: e.category_name || '—', employeeId: e.employee_id, amount: Number(e.amount || 0), note: e.note || null }))
       .filter((d: any) => d.date)
       .sort((a: any, b: any) => a.date < b.date ? -1 : 1)
     setOpenDebts(rows)
@@ -113,7 +115,7 @@ export default function ShiftsPage() {
     setAutoAbsences(new Set((abs || []).filter((a: any) => a.source === 'auto').map((a: any) => a.employee_id)))
   }
 
-  const loadDay = async (date: Date) => {
+  const loadDay = async (date: Date, emps: Employee[] = employees, cats: Category[] = categories) => {
     setLoadingDay(true); setErr('')
     const dateStr = fmtDate(date)
     const { data: shList } = await db.from('shifts').select('*').eq('restaurant_id', restaurantId).eq('date', dateStr).order('opened_at', { ascending: true }).limit(1)
@@ -128,19 +130,11 @@ export default function ShiftsPage() {
       setIncomeCard(sh.income_card > 0 ? String(sh.income_card) : '')
       setInkSum(sh.inkassation > 0 ? String(sh.inkassation) : '')
       const { data: exps } = await db.from('shift_expenses').select('*').eq('shift_id', sh.id)
-      const amounts: Record<string, string> = {}; const notes: Record<string, string> = {}; const extras: Record<string, string> = {}
-      const catUn: Record<string, boolean> = {}; const empUn: Record<string, boolean> = {}
-      // paid_shift_id != null — строка управляется экраном долгов, не форма смены. Отдельно
-      // считаем settledTodayTotal — сумму долгов, погашенных ИМЕННО этой сменой (A1, аудит
-      // 2026-08-13), иначе пересохранение дня теряет сумму погашения из кассы.
-      setSettledTodayTotal((exps || []).filter((e: any) => e.paid_shift_id === sh.id).reduce((s: number, e: any) => s + Number(e.amount || 0), 0))
-      ;(exps || []).filter((e: any) => !e.paid_shift_id).forEach((e: any) => {
-        const unpaid = e.is_paid === false
-        if (e.employee_id) { extras[e.employee_id] = String(e.amount); if (unpaid) empUn[e.employee_id] = true }
-        else if (e.category_id) { amounts[e.category_id] = String(e.amount); if (e.note) notes[e.category_id] = e.note; if (unpaid) catUn[e.category_id] = true }
-      })
-      setCatAmounts(amounts); setCatNotes(notes); setEmpExtras(extras)
-      setCatUnpaid(catUn); setEmpUnpaid(empUn)
+      // Разбор строк смены — lib/shiftForm.ts (аудит 2026-09-27, общий с app/manager/page.tsx).
+      const split = splitShiftExpenses(exps || [], sh.id, new Set(cats.map(c => c.id)), new Set(emps.map(e => e.id)))
+      setSettledTodayTotal(split.settledTodayTotal); setUnmanagedPaidTotal(split.unmanagedPaidTotal)
+      setCatAmounts(split.catAmounts); setCatNotes(split.catNotes); setEmpExtras(split.empExtras)
+      setCatUnpaid(split.catUnpaid); setEmpUnpaid(split.empUnpaid)
       await loadAbsencesByDate(dateStr)
       const { data: inkList } = await db.from('inkassations').select('*').eq('shift_id', sh.id).limit(1)
       const ink = Array.isArray(inkList) ? inkList[0] : inkList
@@ -152,7 +146,7 @@ export default function ShiftsPage() {
       setShift(null); setLocked(false); setIncome(''); setIncomeCard(''); setInkSum(''); setInkExpense(''); setInkReason('')
       setLoadedInkExpense(''); setLoadedInkReason('')
       setCatAmounts({}); setCatNotes({}); setAbsences([]); setAutoAbsences(new Set()); setEmpExtras({})
-      setCatUnpaid({}); setEmpUnpaid({}); setSettledTodayTotal(0)
+      setCatUnpaid({}); setEmpUnpaid({}); setSettledTodayTotal(0); setUnmanagedPaidTotal(0)
     }
     setLoadingDay(false)
   }
@@ -165,13 +159,14 @@ export default function ShiftsPage() {
         db.from('expense_categories').select('id,name').eq('restaurant_id', restaurantId).eq('is_active', true).order('name'),
       ])
       setEmployees(empsRes.data || []); setCategories(catsRes.data || [])
-      await loadDay(currentDate)
+      await loadDay(currentDate, empsRes.data || [], catsRes.data || [])
       await loadOpenDebts()
     })()
   }, [restaurantId])
 
   const changeDate = async (dir: number) => {
-    if (shift && !locked) { try { await persistShift() } catch (e: any) { setErr(tr('mg.autosaveErr') + ': ' + (e?.message || '')) } }
+    // При сбое автосейва не уходим с дня — иначе несохранённый ввод терялся (паритет с Manager).
+    if (shift && !locked) { try { await persistShift() } catch (e: any) { setErr(tr('mg.autosaveErr') + ': ' + (e?.message || '')); return } }
     const d = new Date(currentDate); d.setDate(d.getDate() + dir)
     setCurrentDate(d)
     await loadDay(d)
@@ -181,8 +176,8 @@ export default function ShiftsPage() {
     setSaving(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      const yesterday = new Date(currentDate); yesterday.setDate(yesterday.getDate() - 1)
-      const { data: prevList } = await db.from('shifts').select('closing_balance').eq('restaurant_id', restaurantId).eq('date', fmtDate(yesterday)).order('opened_at', { ascending: false }).limit(1)
+      // Последняя смена ДО этой даты, не строго «вчера» (аудит 2026-09-27, паритет с loadDay).
+      const { data: prevList } = await db.from('shifts').select('closing_balance').eq('restaurant_id', restaurantId).lt('date', fmtDate(currentDate)).order('date', { ascending: false }).order('opened_at', { ascending: false }).limit(1)
       const openingBalance = (Array.isArray(prevList) ? prevList[0] : prevList)?.closing_balance || 0
       const { data: sh, error } = await db.from('shifts').insert({
         restaurant_id: restaurantId, date: fmtDate(currentDate),
@@ -225,9 +220,9 @@ export default function ShiftsPage() {
     const catTotal = categories.reduce((s, c) => catUnpaid[c.id] ? s : s + (parseFloat(catAmounts[c.id] || '0') || 0), 0)
     const empExtraTotal = employees.reduce((s, e) => empUnpaid[e.id] ? s : s + (parseFloat(empExtras[e.id] || '0') || 0), 0)
     const debtTotal = debtSettleTotal() + settledTodayTotal
-    const totalExp = catTotal + empExtraTotal + debtTotal + ink
+    const totalExp = round2(catTotal + empExtraTotal + debtTotal + unmanagedPaidTotal + ink)
     const opening = shift?.opening_balance || 0
-    const balance = opening + inc - totalExp
+    const balance = round2(opening + inc - totalExp)
     const inkNet = ink - (parseFloat(inkExpense) || 0)
     return { inc, card, ink, catTotal, empExtraTotal, debtTotal, totalExp, balance, opening, inkNet }
   }
@@ -238,21 +233,28 @@ export default function ShiftsPage() {
   // Тот же порядок, что в app/manager/page.tsx (коммит b34d583) и ManagerView.swift.
   // Если упадёт финальный delete — останутся видимые дубли, следующее успешное сохранение
   // их подчистит (старые id уже собраны).
+  // Тот же атомарный RPC settle_debts, что в app/manager/page.tsx (аудит 2026-09-27): раньше
+  // здесь были два независимых запроса (сбой между ними = рассинхрон), и ЗП-долг гасился без
+  // записи в salary_payments — сотрудник оставался «не оплачен», можно было заплатить дважды.
   const persistDebtSettlements = async (shiftId: string, dateStr: string) => {
     const ids = Array.from(selectedDebtIds)
     if (ids.length === 0) return
     const selected = openDebts.filter(d => ids.includes(d.id))
     if (selected.length === 0) return
-    const newRows = selected.map(d => ({
-      shift_id: shiftId, restaurant_id: restaurantId, amount: d.amount,
-      category_id: d.categoryId || undefined, category_name: d.categoryName,
-      employee_id: d.employeeId || undefined, is_paid: true, paid_shift_id: shiftId,
-      note: `${tr('an.debtSettleNote')} (${d.date})`,
-    }))
-    const { error: insErr } = await db.from('shift_expenses').insert(newRows)
-    if (insErr) throw new Error(insErr.message)
-    const { error: updErr } = await db.from('shift_expenses').update({ is_paid: true, paid_at: dateStr, paid_shift_id: shiftId }).in('id', ids)
-    if (updErr) throw new Error(updErr.message)
+    const debts = selected.map(d => {
+      const isSalary = !!(d.employeeId && d.note?.startsWith(SALPERIOD_PREFIX))
+      return {
+        id: d.id, amount: d.amount,
+        category_id: d.categoryId || null, category_name: d.categoryName || null,
+        employee_id: d.employeeId || null,
+        is_salary: isSalary,
+        salary_period: isSalary ? (d.note as string).slice(SALPERIOD_PREFIX.length) : null,
+        salary_note: tr('an.debtSettleNote'),
+        expense_note: `${tr('an.debtSettleNote')} (${d.date})`,
+      }
+    })
+    const { error } = await db.rpc('settle_debts', { p_shift_id: shiftId, p_date_str: dateStr, p_debts: debts })
+    if (error) throw new Error(error.message)
   }
 
   const persistShift = async (sh = shift, dateForInk = currentDate) => {
@@ -267,9 +269,10 @@ export default function ShiftsPage() {
     await persistDebtSettlements(sh.id, fmtDate(dateForInk))
 
     // paid_shift_id != null — строка управляется экраном «Долги» (Analytics), не трогаем.
-    const { data: oldExpensesAll, error: oldExpErr } = await db.from('shift_expenses').select('id, paid_shift_id').eq('shift_id', sh.id)
+    // Удаляем только строки формы (lib/shiftForm.ts), по свежему чтению.
+    const { data: oldExpensesAll, error: oldExpErr } = await db.from('shift_expenses').select('id, category_id, employee_id, amount, note, is_paid, paid_shift_id').eq('shift_id', sh.id)
     if (oldExpErr) throw new Error(oldExpErr.message)
-    const oldExpenses = (oldExpensesAll || []).filter((e: any) => !e.paid_shift_id)
+    const oldExpenses = splitShiftExpenses(oldExpensesAll || [], sh.id, new Set(categories.map(c => c.id)), new Set(employees.map(e => e.id))).ownedIds.map(id => ({ id }))
     const inserts: any[] = []
     categories.forEach(c => {
       const amt = parseFloat(catAmounts[c.id] || '0')
@@ -283,7 +286,10 @@ export default function ShiftsPage() {
       const { error: insErr } = await db.from('shift_expenses').insert(inserts)
       if (insErr) throw new Error(insErr.message)
     }
-    if ((oldExpenses || []).length > 0) await db.from('shift_expenses').delete().in('id', (oldExpenses || []).map((e: any) => e.id))
+    if (oldExpenses.length > 0) {
+      const { error: delErr } = await db.from('shift_expenses').delete().in('id', oldExpenses.map(e => e.id))
+      if (delErr) throw new Error(delErr.message)
+    }
 
     // UPDATE по id вместо delete+insert (A2, аудит 2026-08-09) — delta-merge поверх актуального
     // значения в БД, чтобы не затирать то, что параллельно записал addAdvance/settleDebt.
@@ -312,8 +318,12 @@ export default function ShiftsPage() {
 
     if (selectedDebtIds.size > 0) {
       const settledIds = selectedDebtIds
+      // Бамп ДО очистки выбора — иначе повторное «Редактировать → Сохранить» в той же сессии
+      // писало кассу без уже погашенной суммы (аудит 2026-09-27, паритет с Manager A1).
+      const settledAmt = debtSettleTotal()
       setOpenDebts(ds => ds.filter(d => !settledIds.has(d.id)))
       setSelectedDebtIds(new Set())
+      setSettledTodayTotal(prev => prev + settledAmt)
     }
 
     setShift({ ...sh, income: inc, inkassation: ink, total_expense: totalExp, closing_balance: balance })
@@ -359,8 +369,8 @@ export default function ShiftsPage() {
     await loadHistory()
   }
 
-  const { ink, catTotal, empExtraTotal, debtTotal, balance } = calc()
-  const netExpense = catTotal + empExtraTotal + debtTotal
+  const { ink, totalExp, balance } = calc()
+  const netExpense = round2(totalExp - ink) // вкл. «прочие расходы дня» вне формы (lib/shiftForm.ts)
   const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
   const dowRaw = currentDate.toLocaleDateString(locale, { weekday: 'long' })
   const dowName = dowRaw.charAt(0).toUpperCase() + dowRaw.slice(1)

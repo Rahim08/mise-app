@@ -9,6 +9,7 @@ nonisolated struct Employee: Codable, Identifiable, Sendable {
     let deduct_per_absence: Double?
     var salary: Double?
     var card_amount: Double?
+    var is_active: Bool? = nil   // грузится только там, где нужны уволенные (ManagerSalary, Analytics)
 }
 
 // Снэпшот оклада/вычета-за-прогул по месяцам (docs/migrations/salary-history-2026-09.sql).
@@ -95,6 +96,12 @@ nonisolated struct Inkassation: Codable, Sendable {
     let total: Double?
     let salary: Double?
     let salary_note: String?
+}
+
+extension Inkassation {
+    /// Итог дня инкассации: amount − expense − salary. Колонку total не читаем — она устаревала
+    /// (старые сборки писали её без ЗП: 20.09 SO показывало €1 250 вместо −€2 820, аудит 2026-09-27).
+    func net(fallbackAmount: Double) -> Double { (amount ?? fallbackAmount) - (expense ?? 0) - (salary ?? 0) }
 }
 
 // Поступление в баланс инкассации (inkassation_topups) — не касса, не выручка.

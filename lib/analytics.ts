@@ -68,6 +68,11 @@ export function computeAccruedToday(params: {
   prevTotalCash: number
   prevDaysInMonth: number
   today?: Date
+  // Уже выплачено наличными за месяц цикла (salary_payments method='cash'). Аудит 2026-09-27:
+  // раньше «начислено» не уменьшалось после выплат — до payout_day карточка показывала весь
+  // прошлый месяц, даже если его уже выплатили, и «отстаём на …» было завышено.
+  paidCash?: number
+  prevPaidCash?: number
 }): number {
   const { isCurrentMonth, totalCash, daysInMonth, payoutDay, prevTotalCash, prevDaysInMonth } = params
   if (!isCurrentMonth) return totalCash
@@ -75,7 +80,7 @@ export function computeAccruedToday(params: {
   const cycleStart = payoutDay || 1
   const day = now.getDate()
   if (day >= cycleStart) {
-    return Math.max(0, totalCash / daysInMonth * (day - cycleStart + 1))
+    return Math.max(0, totalCash / daysInMonth * (day - cycleStart + 1) - (params.paidCash || 0))
   }
-  return Math.max(0, prevTotalCash / prevDaysInMonth * (prevDaysInMonth - cycleStart + day + 1))
+  return Math.max(0, prevTotalCash / prevDaysInMonth * (prevDaysInMonth - cycleStart + day + 1) - (params.prevPaidCash || 0))
 }
