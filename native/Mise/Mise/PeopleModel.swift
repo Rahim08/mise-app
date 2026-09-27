@@ -290,6 +290,9 @@ final class PeopleModel {
         // ManagerModel.computeSalary (ManagerSalary.swift, юзер-фидбок 2026-08-15).
         async let advR = try? DB.from("salary_advances").select().eq("period", ym + "-01").list(SalaryAdvance.self)
         async let paysR = try? DB.from("salary_payments").select().eq("period", ym + "-01").list(SalaryPayment.self)
+        // Открытый ЗП-долг за месяц — уже обещан через Manager→Долги (паритет с ManagerSalary, аудит 2026-09-27).
+        nonisolated struct DebtAmt: Codable, Sendable { let employee_id: String?; let amount: Double? }
+        async let debtsR = try? DB.from("shift_expenses").select("employee_id, amount").eq("is_paid", false).eq("note", "SALPERIOD:\(ym)-01").list(DebtAmt.self)
         // Оклад/вычет, действовавшие в этом месяце (salary-history-2026-09.sql) — иначе
         // правка оклада сегодня меняет расчёт за прошлые месяцы задним числом.
         async let salHistR = try? DB.from("salary_history").select("employee_id, salary, deduct_per_absence, effective_from").lte("effective_from", key(monthStart)).list(SalaryHistoryRow.self)
@@ -297,6 +300,8 @@ final class PeopleModel {
         let absences = (await absR) ?? [], cardAmounts = (await cardsR) ?? []
         let advances = (await advR) ?? [], payments = (await paysR) ?? []
         let employees = resolveEmployees(rawEmployees, history: (await salHistR) ?? [], monthStart: key(monthStart))
+        var openDebtByEmp: [String: Double] = [:]
+        for d in (await debtsR) ?? [] { if let id = d.employee_id { openDebtByEmp[id, default: 0] += d.amount ?? 0 } }
 
         return employees.map { e -> SalRow in
             let absForEmp = absences.filter { $0.employee_id == e.id && $0.source != "auto" }
@@ -314,7 +319,9 @@ final class PeopleModel {
             let lastPaidAt = paysForEmp.compactMap { $0.paid_at }.max()
             let total = max(0, (e.salary ?? 0) - deduct)
             let cash = max(0, total - advance - card)
-            let remaining = max(0, cash - paid)
+            // «Осталось» — только наличные выплаты и открытый ЗП-долг (паритет с ManagerSalary A2).
+            let paidCash = paysForEmp.filter { ($0.method ?? "cash") == "cash" }.reduce(0) { $0 + ($1.amount ?? 0) }
+            let remaining = max(0, cash - paidCash - (openDebtByEmp[e.id] ?? 0))
             return SalRow(id: e.id, name: e.name, salary: e.salary ?? 0, absences: absN, absenceList: absenceList, deduct: deduct, card: card, advance: advance, advanceList: advForEmp, total: total, cash: cash, paid: paid, remaining: remaining, lastPaidAt: lastPaidAt)
         }
     }

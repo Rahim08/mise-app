@@ -186,7 +186,8 @@ export function OrdersInbox({ currency, accent, t, toast }: { currency: string; 
                   </div>
                 ))}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTop: `0.5px solid ${t.sep2}` }}>
-                  <span style={{ fontSize: 15, fontWeight: 800, color: t.text }}>{Number(o.total || 0).toFixed(2)} {currency}</span>
+                  {/* Чаевые хранятся отдельно от total (api/menu/order) — раньше персонал их не видел (аудит 2026-09-27). */}
+                  <span style={{ fontSize: 15, fontWeight: 800, color: t.text }}>{Number(o.total || 0).toFixed(2)} {currency}{Number(o.tip || 0) > 0 && <span style={{ fontSize: 12, fontWeight: 600, color: t.green }}> + {tr('menu.tip')} {Number(o.tip).toFixed(2)}</span>}</span>
                   <div style={{ display: 'flex', gap: 8 }}>
                     {o.status === 'new' && <button onClick={() => setStatus(o, 'cancelled')} style={btnB2(t)}>{tr('pe.cancel')}</button>}
                     {st.next && <button onClick={() => setStatus(o, st.next!)} style={{ ...btnB2(t), background: accent, color: '#fff' }}>{tr(st.nextLabel ?? '')}</button>}

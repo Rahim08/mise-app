@@ -1,5 +1,5 @@
 'use client'
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -327,7 +327,15 @@ export function AttendanceTab({ me, isManager, accent, t, toast, onOpenDisciplin
   // Хард-гейт по графику (Д4, 2026-07-31): без опубликованной смены на сегодня «Я здесь»
   // не проходит вообще — кнопка и сама не показывается (см. staff-view ниже), это защитная
   // сетка на случай гонки/устаревшего рендера.
+  // Синхронный замок от двойного тапа: todayRec обновляется только после load(), и второй
+  // тап успевал отправить ещё один upsert и второй пуш «пришёл» менеджерам (аудит 2026-09-27).
+  const checkingIn = useRef(false)
   const checkIn = async () => {
+    if (checkingIn.current) return
+    checkingIn.current = true
+    try { await checkInInner() } finally { checkingIn.current = false }
+  }
+  const checkInInner = async () => {
     if (!pos || dist == null || todayRec) return
     if (!mySched?.published) return
     if (dist > (settings?.geo_radius_m || 150)) { toast(tr('pe.outsideZone')); return }

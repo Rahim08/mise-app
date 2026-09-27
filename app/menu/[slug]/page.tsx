@@ -310,9 +310,16 @@ export default function MenuPage({ params }: { params: Promise<{ slug: string }>
     ch.on('broadcast', { event: 'cart' }, ({ payload }) => {
       if (payload?.sender === clientId.current) return
       const remote: Record<string, CartEntry> = {}
-      for (const c of (payload?.cart || [])) {
-        if (!c || typeof c.id !== 'string') continue
-        remote[keyOf(c.id, c.opts)] = { id: c.id, qty: c.qty, opts: c.opts, at: c.at }
+      // Канал стола публичный (гость аноним) — любой, кто знает адрес меню и номер стола,
+      // может в него писать. Принимаем только позиции этого меню и разумное целое кол-во,
+      // чтобы чужой клиент не мог подсунуть мусор/qty:999 в общую корзину (аудит 2026-09-27).
+      const cartIn: any[] = Array.isArray(payload?.cart) ? payload.cart.slice(0, 200) : []
+      for (const c of cartIn) {
+        if (!c || typeof c.id !== 'string' || !itemsRef.current.some(x => x.id === c.id)) continue
+        const qty = Math.floor(Number(c.qty))
+        if (!Number.isFinite(qty) || qty < 0 || qty > 50) continue
+        const opts = Array.isArray(c.opts) ? c.opts.filter((o: unknown) => typeof o === 'string').slice(0, 20) : undefined
+        remote[keyOf(c.id, opts)] = { id: c.id, qty, opts, at: Number(c.at) || 0 }
       }
       const merged = pruneCart(mergeCart(cartMapRef.current, remote))
       if (merged !== cartMapRef.current) applyMap(merged, true)

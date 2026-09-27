@@ -44,7 +44,7 @@ export function SalaryTab({ me, accent, t }: { me: any; accent: string; t: any }
   const computeMonth = async (targetYm: string) => {
     const monthStart = `${targetYm}-01`
     const monthEnd = fmtDate(new Date(Number(targetYm.slice(0, 4)), Number(targetYm.slice(5, 7)), 0))
-    const [{ data: rawEmps }, { data: abs }, { data: cards }, { data: att }, { data: dir }, { data: advs }, { data: pays }, { data: salHist }] = await Promise.all([
+    const [{ data: rawEmps }, { data: abs }, { data: cards }, { data: att }, { data: dir }, { data: advs }, { data: pays }, { data: salHist }, { data: debtRows }] = await Promise.all([
       db.from('employees').select('id, name, salary, deduct_per_absence').eq('is_active', true).order('name'),
       db.from('shift_absences').select('employee_id, date, source').gte('date', monthStart).lte('date', monthEnd),
       db.from('monthly_card_amounts').select('employee_id, card_amount').eq('month', targetYm),
@@ -57,7 +57,11 @@ export function SalaryTab({ me, accent, t }: { me: any; accent: string; t: any }
       // Оклад/вычет-за-прогул, действовавшие в targetYm (salary-history-2026-09.sql) —
       // без этого правка оклада сегодня меняла бы расчёт за прошлые месяцы задним числом.
       db.from('salary_history').select('employee_id, salary, deduct_per_absence, effective_from').lte('effective_from', monthStart),
+      // Открытый ЗП-долг за месяц — уже обещан через Manager→Долги (паритет с Manager→Зарплата).
+      db.from('shift_expenses').select('employee_id, amount').eq('is_paid', false).eq('note', `SALPERIOD:${monthStart}`),
     ])
+    const openDebtByEmp: Record<string, number> = {}
+    ;(debtRows || []).forEach((d: any) => { if (d.employee_id) openDebtByEmp[d.employee_id] = (openDebtByEmp[d.employee_id] || 0) + Number(d.amount || 0) })
     const emps = resolveEmployeesForMonth(rawEmps || [], salHist || [], monthStart)
     const staffName: Record<string, string> = {}; (dir || []).forEach((s: any) => { staffName[s.id] = s.name })
     const hoursByName: Record<string, number> = {}
@@ -67,9 +71,13 @@ export function SalaryTab({ me, accent, t }: { me: any; accent: string; t: any }
     ;(abs || []).forEach((a: any) => { if (a.source !== 'auto') (absByEmp[a.employee_id] = absByEmp[a.employee_id] || []).push(a.date) })
     const advByEmp: Record<string, number> = {}
     ;(advs || []).forEach((a: any) => { advByEmp[a.employee_id] = (advByEmp[a.employee_id] || 0) + Number(a.amount || 0) })
-    const paidByEmp: Record<string, number> = {}; const lastPaidByEmp: Record<string, string> = {}
+    // «Осталось» уменьшают только наличные выплаты — карта уже вычтена из cash через
+    // monthly_card_amounts (паритет с Manager→Зарплата A2, аудит 2026-09-27). paid (всего) —
+    // для отображения.
+    const paidByEmp: Record<string, number> = {}; const paidCashByEmp: Record<string, number> = {}; const lastPaidByEmp: Record<string, string> = {}
     ;(pays || []).forEach((p: any) => {
       paidByEmp[p.employee_id] = (paidByEmp[p.employee_id] || 0) + Number(p.amount || 0)
+      if ((p.method || 'cash') === 'cash') paidCashByEmp[p.employee_id] = (paidCashByEmp[p.employee_id] || 0) + Number(p.amount || 0)
       if (!lastPaidByEmp[p.employee_id] || p.paid_at > lastPaidByEmp[p.employee_id]) lastPaidByEmp[p.employee_id] = p.paid_at
     })
     return (emps || []).map((e: any) => {
@@ -81,7 +89,7 @@ export function SalaryTab({ me, accent, t }: { me: any; accent: string; t: any }
       const paid = paidByEmp[e.id] || 0
       const total = Math.max(0, salary - deduct)
       const cash = Math.max(0, total - advance - card)
-      const remaining = Math.max(0, cash - paid)
+      const remaining = Math.max(0, cash - (paidCashByEmp[e.id] || 0) - (openDebtByEmp[e.id] || 0))
       return { id: e.id, name: e.name, salary, dates, absences: dates.length, deduct, card, advance, paid, remaining, total, cash, lastPaidAt: lastPaidByEmp[e.id] || null, hours: hoursByName[e.name] || 0 }
     })
   }

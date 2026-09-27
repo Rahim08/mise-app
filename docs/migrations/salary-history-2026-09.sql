@@ -21,8 +21,10 @@
 
 CREATE TABLE IF NOT EXISTS salary_history (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  restaurant_id uuid NOT NULL REFERENCES restaurants(id),
-  employee_id uuid NOT NULL REFERENCES employees(id),
+  -- ON DELETE CASCADE (аудит 2026-09-27): без него delete_restaurant_account падал бы на FK,
+  -- как только у заведения появится хоть одна запись истории.
+  restaurant_id uuid NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  employee_id uuid NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   salary numeric NOT NULL DEFAULT 0,
   deduct_per_absence numeric NOT NULL DEFAULT 0,
   effective_from date NOT NULL,     -- первое число месяца, с которого действует это значение

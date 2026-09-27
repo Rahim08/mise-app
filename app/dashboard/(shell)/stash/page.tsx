@@ -1,7 +1,7 @@
 'use client'
 // Модуль Stash внутри дашборд-shell: owner уже авторизован (Supabase),
 // PIN не нужен — рендерим тот же StashApp в embedded-режиме (rid).
-import StashApp from '@/app/tobacco/page'
+import StashApp from '@/app/tobacco/StashApp'
 import { useDash } from '@/components/dash/context'
 import { Spinner } from '@/components/ui'
 

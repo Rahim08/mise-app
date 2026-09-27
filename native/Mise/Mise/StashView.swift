@@ -660,7 +660,17 @@ final class StashModel {
             try await DB.from("tobacco_inventories").insert(["restaurant_id": rid, "type": "warehouse", "items": items]).run()
             // Раньше расхождение только фиксировалось записью, но остаток на складе не менялся —
             // инвентаризация переставала иметь смысл: посчитал факт, сохранил, а склад как был.
+            // Маркер-движение в ленту «Движения» — паритет с вебом (StashApp.tsx saveInv, аудит
+            // 2026-09-27): раньше коррекция с iOS была видна только в tobacco_inventories, и
+            // история движений на двух платформах расходилась. Пишем ДО правки остатка.
+            let batchId = UUID().uuidString.lowercased()
             for r in disc {
+                try await DB.from("tobacco_movements").insert([
+                    "restaurant_id": rid, "brand": r.brand, "flavor": r.flavor,
+                    "quantity_g": abs(r.actual - r.expected), "type": "inventory",
+                    "batch_id": batchId, "flavor_id": r.id,
+                    "reason": "Инвентаризация: было \(Int(r.expected.rounded())) г, стало \(Int(r.actual.rounded())) г",
+                ] as [String: Any]).run()
                 try await DB.from("tobacco_stock").update(["quantity_g": max(0, r.actual)]).eq("id", r.id).run()
             }
         } catch {

@@ -285,7 +285,10 @@ export default function MenuEditor() {
   // ── Menu CRUD ──
   const saveSettings = async () => {
     setSaving(true); setSlugError('')
-    const payload: any = { ...settings, restaurant_id: restaurantId, updated_at: new Date().toISOString() }
+    // Пустой адрес — null, не '': menus.slug UNIQUE, и первое меню, сохранённое без адреса,
+    // занимало '' — у всех следующих заведений сохранение без адреса падало с «адрес занят»
+    // (аудит 2026-09-27). NULL в UNIQUE не конфликтует.
+    const payload: any = { ...settings, slug: settings.slug?.trim() || null, restaurant_id: restaurantId, updated_at: new Date().toISOString() }
     if (settings.id) {
       const { error } = await db.from('menus').update(payload).eq('id', settings.id)
       if (error) { setSlugError(error.code === '23505' ? tr('me.slugTaken') : error.message); setSaving(false); return }

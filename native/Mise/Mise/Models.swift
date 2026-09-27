@@ -249,6 +249,7 @@ nonisolated struct MenuOrder: Codable, Identifiable, Sendable {
     let table_number: String?
     var status: String?
     let total: Double?
+    var tip: Double? = nil   // чаевые гостя, отдельно от total (аудит 2026-09-27)
     let created_at: String?
     let items: [OrderItem]?
 }

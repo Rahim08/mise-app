@@ -277,6 +277,10 @@ struct OrderCard: View {
                     Divider().overlay(Color.primary.opacity(0.08))
                     HStack {
                         Text(eur(o.total ?? 0)).font(.system(size: 15, weight: .heavy)).foregroundStyle(.primary)
+                        // Чаевые гостя — отдельно от total (аудит 2026-09-27, раньше не показывались).
+                        if let tip = o.tip, tip > 0 {
+                            Text("+ \(t("menu.tip")) \(eur(tip))").font(.system(size: 12, weight: .semibold)).foregroundStyle(.green)
+                        }
                         Spacer()
                         buttons
                     }
