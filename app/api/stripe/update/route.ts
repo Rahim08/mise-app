@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
     const { data: rest } = await supabase
       .from('restaurants')
-      .select('subscription_id, stripe_customer_id, subscription_plan, billing_interval, addon_modules, extra_seats, addon_ai')
+      .select('subscription_id, stripe_customer_id, subscription_plan, billing_interval, addon_modules, extra_seats, addon_ai, discount_pct')
       .eq('id', restaurantId)
       .single()
 
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
       extra_seats: extraSeats,
       addon_ai: addonAI,
     }
-    const monthly = monthlyRevenue({ ...nextFields, subscription_status: 'active' })
+    const monthly = monthlyRevenue({ ...nextFields, discount_pct: rest.discount_pct, subscription_status: 'active' })
 
     // metadata — источник правды для вебхука (entitlementFields): именно из неё
     // customer.subscription.updated переливает состав модулей в restaurants.
