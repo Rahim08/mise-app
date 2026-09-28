@@ -7,9 +7,10 @@ import { track } from '@/lib/analytics'
 import { useI18n } from '@/lib/i18n'
 import { entitlements } from '@/lib/plans'
 import { fmtDate } from '@/lib/format'
-import { Card, Btn, Field, Spinner, SectionTitle, inputStyle, Container, Table, type TableColumn } from '@/components/ui'
+import { Card, Btn, Field, Spinner, inputStyle, Container, Table, type TableColumn } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
 import { APPS, ROLE_OPTS, roleLabel } from '@/components/dash/shared'
+import './team-web.css'
 
 export default function TeamPage() {
   const { t: tr } = useI18n()
@@ -22,6 +23,8 @@ export default function TeamPage() {
   const [staff, setStaff] = useState<any[]>([])
   const [employees, setEmployees] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const [loadedOnce, setLoadedOnce] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: '', role: 'waiter', salary: '', deduct: '', card: '', pin: '', apps: [] as string[] })
   const [saving, setSaving] = useState(false)
@@ -39,12 +42,15 @@ export default function TeamPage() {
 
   const load = async () => {
     setLoading(true)
-    const [{ data: staffData }, { data: empData }] = await Promise.all([
+    const [{ data: staffData, error: staffError }, { data: empData, error: empError }] = await Promise.all([
       db.from('staff').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name'),
       db.from('employees').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name'),
     ])
+    if (staffError || empError) { setLoadError(true); setLoading(false); return }
+    setLoadError(false)
     setStaff(staffData || [])
     setEmployees(empData || [])
+    setLoadedOnce(true)
     setLoading(false)
   }
 
@@ -99,7 +105,21 @@ export default function TeamPage() {
   // One save handles both HR (employees) and access (staff).
   const save = async () => {
     if (!form.name.trim()) { alert(tr('dash.enterName')); return }
+    // Проверяем PIN и его хеширование до записи в employees, чтобы ошибка не создавала
+    // сотрудника без запрошенного доступа.
+    const previousEmp = editingEmpId ? employees.find(emp => emp.id === editingEmpId) : undefined
+    const existingAccess = previousEmp ? staffFor(previousEmp) : undefined
+    if (form.apps.length && (!existingAccess || form.pin) && !/^\d{4}$/.test(form.pin)) { alert(tr('dash.setPinForAccess')); return }
     setSaving(true)
+    let pinHash: string | undefined
+    if (form.apps.length && form.pin) {
+      try {
+        const response = await fetch('/api/auth/pin/hash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: form.pin }) })
+        if (!response.ok) throw new Error('PIN hash failed')
+        pinHash = (await response.json()).hash
+        if (!pinHash) throw new Error('PIN hash missing')
+      } catch { alert(tr('dash.saveFailed')); setSaving(false); return }
+    }
     const name = form.name.trim()
     const empPayload = { restaurant_id: restaurantId, name, salary: +form.salary || 0, deduct_per_absence: +form.deduct || 0, card_amount: +form.card || 0, is_active: true }
     let empId = editingEmpId
@@ -121,11 +141,8 @@ export default function TeamPage() {
       empId = newEmp.id
     }
 
-    const existing = empId ? staffFor({ id: empId, name }) : undefined
+    const existing = editingEmpId ? existingAccess : undefined
     if (form.apps.length) {
-      if (!existing && (form.pin.length !== 4 || !/^\d+$/.test(form.pin))) { alert(tr('dash.setPinForAccess')); setSaving(false); return }
-      let pinHash: string | undefined
-      if (form.pin) { const r = await fetch('/api/auth/pin/hash', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: form.pin }) }); pinHash = (await r.json()).hash }
       const sp: any = { restaurant_id: restaurantId, name, apps: form.apps, role: form.role, is_active: true, employee_id: empId }
       if (pinHash) sp.pin_hash = pinHash
       const { error } = existing ? await db.from('staff').update(sp).eq('id', existing.id) : await db.from('staff').insert(sp)
@@ -215,9 +232,9 @@ export default function TeamPage() {
 
   const appColor = (id: string) => APPS.find(a => a.id === id)?.color || 'var(--accent)'
   const appName = (id: string) => APPS.find(a => a.id === id)?.name || id
-  const totalSalary = employees.reduce((s, e) => s + (e.salary || 0), 0)
+  const totalSalary = employees.reduce((s, e) => s + Number(e.salary || 0), 0)
   const withAccess = staff.length
-  const atLimit = withAccess >= maxStaff
+  const atLimit = loadedOnce && !loadError && withAccess >= maxStaff
 
   const empColumns: TableColumn<any>[] = [
     {
@@ -260,7 +277,8 @@ export default function TeamPage() {
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'flex-end' }} onClick={e => e.stopPropagation()}>
             {s?.device_id && <button onClick={() => resetDevice(s.id)} style={{ background: 'none', border: 'none', color: 'var(--warn)', fontSize: '.75rem', fontWeight: 600, cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>{tr('dash.resetDevice')}</button>}
             <Btn small variant="ghost" onClick={() => editingEmpId === emp.id ? setEditingEmpId(null) : startEdit(emp)}>{tr('dash.edit')}</Btn>
-            <Btn small variant="danger" onClick={() => removePerson(emp)}>
+            <Btn small variant="danger" onClick={() => removePerson(emp)} style={{ minWidth: 36 }}>
+              <span className="team-web-visually-hidden">{tr('dash.teamDeactivate')}</span>
               <svg width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" /></svg>
             </Btn>
           </div>
@@ -270,17 +288,19 @@ export default function TeamPage() {
   ]
 
   return (
-    <Container size="wide">
-      <SectionTitle title={tr('dash.navTeam')} sub={tr('dash.teamSub')} />
+    <Container size="wide" style={{ maxWidth: 1440 }}>
+      <header className="team-web-header"><h1>{tr('dash.navTeam')}</h1><p>{tr('dash.teamSub')}</p></header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 16 }}>
-        {[{ l: tr('dash.inTeam'), v: String(employees.length), c: 'var(--tx)' }, { l: tr('dash.withAccess'), v: `${withAccess}/${maxStaff}`, c: 'var(--accent)' }, { l: tr('dash.payrollMo'), v: `${restaurant?.currency || '€'}${totalSalary.toLocaleString()}`, c: 'var(--violet)' }].map(it => (
-          <Card key={it.l} style={{ padding: '14px 16px', textAlign: 'center' }}>
+      <div className="team-web-metrics">
+        {[{ l: tr('dash.inTeam'), v: loadedOnce ? String(employees.length) : '—', c: 'var(--tx)' }, { l: tr('dash.withAccess'), v: loadedOnce ? `${withAccess}/${maxStaff}` : '—', c: 'var(--accent)' }, { l: tr('dash.payrollMo'), v: loadedOnce ? `${restaurant?.currency || '€'}${totalSalary.toLocaleString()}` : '—', c: 'var(--violet)' }].map(it => (
+          <Card key={it.l} style={{ padding: '16px 20px' }}>
             <div style={{ fontSize: '.68rem', color: 'var(--tx2)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4, letterSpacing: '.04em' }}>{it.l}</div>
-            <div style={{ fontSize: '1.3rem', fontWeight: 700, color: it.c, fontVariantNumeric: 'tabular-nums' }}>{it.v}</div>
+            <div style={{ fontSize: '1.55rem', fontWeight: 700, color: it.c, fontVariantNumeric: 'tabular-nums' }}>{it.v}</div>
           </Card>
         ))}
       </div>
+
+      {loadError && <div className="team-web-error" role="alert">{tr('dash.teamLoadFailed')} <button type="button" onClick={load}>{tr('dash.teamRetry')}</button></div>}
 
       {atLimit && (
         <div style={{ background: 'var(--warn-soft)', border: '1px solid rgba(255,149,0,.25)', borderRadius: 12, padding: '10px 14px', marginBottom: 14, fontSize: '.83rem', color: 'var(--warn)', fontWeight: 500 }}>
@@ -288,6 +308,32 @@ export default function TeamPage() {
         </div>
       )}
 
+      <section className="team-web-members">
+        <div className="team-web-section-head"><div><h2>{tr('dash.teamMembersTitle')}</h2><p>{tr('dash.teamMembersHint')}</p></div>
+          <Btn onClick={() => { setEditingEmpId(null); setForm(blank); setShowForm(f => !f) }}>{showForm ? tr('dash.cancel') : tr('dash.addBtn')}</Btn>
+        </div>
+
+      {/* ─ ФОРМА НОВОГО СОТРУДНИКА — тоже над списком ─ */}
+      {showForm && (
+        <Card style={{ marginBottom: 14, border: '1px solid var(--accent)' }}>
+          <div style={{ fontWeight: 700, fontSize: '.95rem', marginBottom: 14 }}>{tr('dash.newEmployee')}</div>
+          {renderFormBody(true)}
+        </Card>
+      )}
+
+      {/* ─ СПИСОК — правка сотрудника раскрывается прямо под его строкой ─ */}
+      {loading ? (
+        <Spinner />
+      ) : loadError && !loadedOnce ? null : employees.length === 0 ? (
+        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>{tr('dash.addFirstEmployee')}</div></Card>
+      ) : (
+        <Table columns={empColumns} rows={employees} searchable searchPlaceholder={tr('dash.name')} searchText={e => e.name}
+          expandedId={editingEmpId} renderExpanded={() => <div style={{ padding: 16 }}>{renderFormBody(false)}</div>} />
+      )}
+      </section>
+      <section className="team-web-access-section">
+        <div className="team-web-section-head"><div><h2>{tr('dash.teamAccessTools')}</h2><p>{tr('dash.teamAccessHint')}</p></div></div>
+        <div className="team-web-access-grid">
       {/* ─ QR БЛОК ─ */}
       <Card style={{ marginBottom: 14, background: 'linear-gradient(135deg, #007aff08 0%, #5856d608 100%)', border: '1px solid rgba(0,122,255,.15)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -338,7 +384,7 @@ export default function TeamPage() {
               {ownerPin ? tr('dash.pinSet') : tr('dash.pinNotSet')}
             </div>
           </div>
-          <button onClick={() => { setOwnerPinEdit(!ownerPinEdit); setOwnerPinVal('') }} className="ui-press" style={{ background: 'none', border: '1px solid rgba(175,82,222,.3)', borderRadius: 980, padding: '7px 14px', fontSize: '.78rem', fontWeight: 600, color: 'var(--violet)', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
+          <button onClick={() => { setOwnerPinEdit(!ownerPinEdit); setOwnerPinVal('') }} aria-expanded={ownerPinEdit} className="ui-press" style={{ background: 'none', border: '1px solid rgba(175,82,222,.3)', borderRadius: 980, padding: '7px 14px', fontSize: '.78rem', fontWeight: 600, color: 'var(--violet)', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
             {ownerPinEdit ? tr('dash.cancel') : ownerPin ? tr('dash.changePin') : tr('dash.setPin')}
           </button>
         </div>
@@ -346,8 +392,9 @@ export default function TeamPage() {
         {ownerPinEdit && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(175,82,222,.1)', display: 'flex', gap: 10, alignItems: 'flex-end' }}>
             <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: 'var(--tx2)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>{tr('dash.newPin4')}</label>
+              <label htmlFor="team-owner-pin" style={{ display: 'block', fontSize: '.72rem', fontWeight: 600, color: 'var(--tx2)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em' }}>{tr('dash.newPin4')}</label>
               <input
+                id="team-owner-pin"
                 type="password" inputMode="numeric" maxLength={4}
                 value={ownerPinVal} onChange={e => setOwnerPinVal(e.target.value.replace(/\D/g,'').slice(0,4))}
                 placeholder="••••" className="ui-input"
@@ -361,30 +408,8 @@ export default function TeamPage() {
         )}
       </Card>
 
-      {/* ─ КНОПКА ДОБАВИТЬ — над списком, не в начале страницы ─ */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
-        <Btn onClick={() => { setEditingEmpId(null); setForm(blank); setShowForm(f => !f) }}>
-          {showForm ? tr('dash.cancel') : tr('dash.addBtn')}
-        </Btn>
-      </div>
-
-      {/* ─ ФОРМА НОВОГО СОТРУДНИКА — тоже над списком ─ */}
-      {showForm && (
-        <Card style={{ marginBottom: 14, border: '1px solid var(--accent)' }}>
-          <div style={{ fontWeight: 700, fontSize: '.95rem', marginBottom: 14 }}>{tr('dash.newEmployee')}</div>
-          {renderFormBody(true)}
-        </Card>
-      )}
-
-      {/* ─ СПИСОК — правка сотрудника раскрывается прямо под его строкой ─ */}
-      {loading ? (
-        <Spinner />
-      ) : employees.length === 0 ? (
-        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>{tr('dash.addFirstEmployee')}</div></Card>
-      ) : (
-        <Table columns={empColumns} rows={employees} searchable searchPlaceholder={tr('dash.name')} searchText={e => e.name}
-          expandedId={editingEmpId} renderExpanded={() => <div style={{ padding: 16 }}>{renderFormBody(false)}</div>} />
-      )}
+        </div>
+      </section>
     </Container>
   )
 }
