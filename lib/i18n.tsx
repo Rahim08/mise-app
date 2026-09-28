@@ -1418,6 +1418,15 @@ const STRINGS: Record<string, Row> = {
   'nw.deleteConfirm': { en: 'Delete this post?', ru: 'Удалить эту новость?', it: 'Eliminare questo post?', fr: 'Supprimer cette publication ?', az: 'Bu xəbər silinsin?', tr: 'Bu haber silinsin mi?', uk: 'Видалити цю новину?', kk: 'Бұл жаңалық жойылсын ба?' },
   'role.owner':    { en: 'Owner', ru: 'Владелец', it: 'Titolare', fr: 'Propriétaire', az: 'Sahib', tr: 'Sahip', uk: 'Власник', kk: 'Иесі' },
   'nw.loadFailed': { en: 'Couldn’t load news — showing last known list', ru: 'Не удалось обновить ленту — показан прежний список', it: 'Aggiornamento non riuscito — mostro l’ultimo elenco', fr: 'Échec de l’actualisation — dernière liste affichée', az: 'Yenilənmədi — son siyahı göstərilir', tr: 'Güncellenemedi — son liste gösteriliyor', uk: 'Не вдалося оновити — показано попередній список', kk: 'Жаңартылмады — соңғы тізім көрсетілді' },
+  'nw.webFeed': { en: 'Team feed', ru: 'Лента команды', it: 'Bacheca del team' },
+  'nw.webCompose': { en: 'New announcement', ru: 'Новое объявление', it: 'Nuovo annuncio' },
+  'nw.webComposeHint': { en: 'The post will appear in the team feed.', ru: 'Публикация появится в ленте команды.', it: 'Il post apparirà nella bacheca del team.' },
+  'nw.webSearch': { en: 'Search posts', ru: 'Поиск по новостям', it: 'Cerca annunci' },
+  'nw.webFilter': { en: 'Filter by priority', ru: 'Фильтр по приоритету', it: 'Filtra per priorità' },
+  'nw.webAll': { en: 'All', ru: 'Все', it: 'Tutti' },
+  'nw.webNoMatch': { en: 'No posts match your filters', ru: 'По этому запросу новостей нет', it: 'Nessun annuncio corrisponde ai filtri' },
+  'nw.webLoadError': { en: 'Couldn’t load news.', ru: 'Не удалось загрузить новости.', it: 'Impossibile caricare gli annunci.' },
+  'nw.webRetry': { en: 'Retry', ru: 'Повторить', it: 'Riprova' },
 
   // ── common ──
   'common.or':      { en: 'or', ru: 'или', it: 'oppure', fr: 'ou', az: 'və ya', tr: 'veya', uk: 'або', kk: 'немесе' },
