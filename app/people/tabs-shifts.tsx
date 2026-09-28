@@ -583,9 +583,9 @@ function ShiftAuditHub({ me, isManager, restaurantId, accent, t, toast }: { me: 
 // полный редактируемый график всех сотрудников переехал в Manager→Настройки→Расписание
 // (ScheduleTab теперь рендерится там, app/manager/page.tsx). Дисциплина — там же, отдельной
 // вкладкой Manager (не сегментом здесь).
-export function ShiftsHub({ me, isManager, restaurantId, accent, t, toast }: { me: any; isManager: boolean; restaurantId: string; accent: string; t: any; toast: (m: string) => void }) {
+export function ShiftsHub({ me, isManager, restaurantId, accent, t, toast, initialView = 'shifts' }: { me: any; isManager: boolean; restaurantId: string; accent: string; t: any; toast: (m: string) => void; initialView?: 'shifts' | 'attendance' | 'audit' | 'swaps' }) {
   const { t: tr } = useI18n()
-  const [view, setView] = useState<'shifts' | 'attendance' | 'audit' | 'swaps'>('shifts')
+  const [view, setView] = useState<'shifts' | 'attendance' | 'audit' | 'swaps'>(initialView)
   const views: [string, string][] = [
     ['shifts', tr('pe.myShifts')],
     ['attendance', tr('pe.attendance')],
@@ -606,4 +606,3 @@ export function ShiftsHub({ me, isManager, restaurantId, accent, t, toast }: { m
     </div>
   )
 }
-

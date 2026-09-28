@@ -1,5 +1,5 @@
 'use client'
-// Обзор — один вопрос экрана: «как дела сегодня?» — касса, кальяны, заказы + максимум 2 аномалии.
+// Обзор владельца: выручка и смена, операции сегодня, затем действия и проверки.
 // Также редиректит старые ссылки /dashboard?tab=... на новые роуты (categories → settings),
 // пронося success=1 (Stripe success_url остаётся /dashboard?tab=billing&success=1).
 import { useEffect, useState } from 'react'
@@ -8,8 +8,9 @@ import { db } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate as fmtDay } from '@/lib/format'
 import { entitlements, isActiveStatus, type ModuleId } from '@/lib/plans'
-import { Card, Container, SectionTitle, StatTile, type Tone } from '@/components/ui'
+import { Card, Container, Sparkline } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
+import './overview.css'
 
 const TAB_ROUTES = ['team', 'notifications', 'settings', 'billing', 'account']
 
@@ -38,35 +39,46 @@ export default function OverviewPage() {
   const [loading, setLoading] = useState(true)
   const [shift, setShift] = useState<any>(null)
   const [hookah, setHookah] = useState({ qty: 0, revenue: 0 })
-  const [orders, setOrders] = useState({ total: 0, fresh: 0 })
+  const [orders, setOrders] = useState({ total: 0, fresh: 0, oldestNew: '' })
+  const [ordersEnabled, setOrdersEnabled] = useState(false)
+  const [bookings, setBookings] = useState({ total: 0, waiting: 0 })
+  const [lowStock, setLowStock] = useState<{ name: string; quantity: number } | null>(null)
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
+  const [dataError, setDataError] = useState(false)
+  const [showAllIssues, setShowAllIssues] = useState(false)
   const [setup, setSetup] = useState({ hasStaff: false, hasShift: false })
-  const [trends, setTrends] = useState<{ cash: number[]; card: number[]; hookah: number[] }>({ cash: [], card: [], hookah: [] })
+  const [revenueTrend, setRevenueTrend] = useState<number[]>([])
   // Аудиты за 30 дней (ревью В3): владелец видит % выполнения и топ нарушений
-  // прямо в Обзоре, не залезая в People → Зал → Чек-листы.
+  // прямо в Обзоре, не заходя в People → Смены → Проверки.
   const [audits, setAudits] = useState<{ rate: number; top: [string, number][] } | null>(null)
 
   useEffect(() => {
     if (!restaurant?.id) return
     let gone = false
     ;(async () => {
+      try {
       const today = fmtDay(new Date())
       const dayStartISO = new Date(new Date().setHours(0, 0, 0, 0)).toISOString()
       // 14-дневное окно для sparkline-трендов в StatTile (glance-виджет, не полноценная аналитика — та живёт в Analytics).
       const days14 = Array.from({ length: 14 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - (13 - i)); return fmtDay(d) })
       const rangeStart = days14[0]
       const auditsSince = fmtDay(new Date(Date.now() - 30 * 86400000))
-      const [shiftRes, hookahRes, ordersRes, staffRes, anyShiftRes, histShiftsRes, histHookahRes, clRes, cmRes] = await Promise.all([
+      const [shiftRes, hookahRes, ordersRes, menusRes, menuSettingsRes, bookingsRes, stockRes, staffRes, anyShiftRes, histShiftsRes, clRes, cmRes] = await Promise.all([
         db.from('shifts').select('*').eq('restaurant_id', restaurant.id).eq('date', today).order('opened_at', { ascending: false }).limit(1),
         appOk('stash') ? db.from('hookah_sales').select('quantity, price, is_free, date').eq('date', today) : Promise.resolve({ data: [] }),
-        appOk('menu') ? db.from('menu_orders').select('id, status, created_at').gte('created_at', dayStartISO) : Promise.resolve({ data: [] }),
+        appOk('menu') ? db.from('menu_orders').select('id, status, created_at, items').gte('created_at', dayStartISO) : Promise.resolve({ data: [] }),
+        appOk('menu') ? db.from('menus').select('allow_orders, is_published') : Promise.resolve({ data: [] }),
+        appOk('menu') ? db.from('menu_settings').select('allow_orders').limit(1) : Promise.resolve({ data: [] }),
+        appOk('bookings') ? db.from('bookings').select('id, status').eq('booking_date', today) : Promise.resolve({ data: [] }),
+        appOk('stash') ? db.from('tobacco_stock').select('flavor_name, brand, flavor, quantity_g, min_quantity_g') : Promise.resolve({ data: [] }),
         db.from('employees').select('id').eq('restaurant_id', restaurant.id).eq('is_active', true).limit(1),
         db.from('shifts').select('id').eq('restaurant_id', restaurant.id).limit(1),
         db.from('shifts').select('date, income, income_card').eq('restaurant_id', restaurant.id).gte('date', rangeStart).lte('date', today),
-        appOk('stash') ? db.from('hookah_sales').select('date, quantity, price, is_free').gte('date', rangeStart).lte('date', today) : Promise.resolve({ data: [] }),
         appOk('people') ? db.from('shift_checklists').select('id, items') : Promise.resolve({ data: [] }),
         appOk('people') ? db.from('shift_checklist_completions').select('checklist_id, items_state, status, date').gte('date', auditsSince) : Promise.resolve({ data: [] }),
       ])
       if (gone) return
+      setDataError([shiftRes, hookahRes, ordersRes, menusRes, menuSettingsRes, bookingsRes, stockRes, staffRes, anyShiftRes, histShiftsRes, clRes, cmRes].some(r => 'error' in r && !!r.error))
       setSetup({ hasStaff: (staffRes.data || []).length > 0, hasShift: (anyShiftRes.data || []).length > 0 })
       setShift((shiftRes.data || [])[0] || null)
       const hs = hookahRes.data || []
@@ -74,24 +86,21 @@ export default function OverviewPage() {
         qty: hs.reduce((s: number, r: any) => s + (r.quantity || 0), 0),
         revenue: hs.reduce((s: number, r: any) => s + (r.is_free ? 0 : (r.price || 0) * (r.quantity || 0)), 0),
       })
-      const os = ordersRes.data || []
-      setOrders({ total: os.length, fresh: os.filter((o: any) => o.status === 'new').length })
+      const os = (ordersRes.data || []).filter((o: any) => !Array.isArray(o.items) || !o.items[0]?.call)
+      const fresh = os.filter((o: any) => o.status === 'new')
+      setOrdersEnabled(appOk('menu') && ((menusRes.data || []).some((m: any) => m.is_published && m.allow_orders) || !!menuSettingsRes.data?.[0]?.allow_orders || fresh.length > 0))
+      setOrders({ total: os.length, fresh: fresh.length, oldestNew: fresh.reduce((oldest: string, o: any) => !oldest || o.created_at < oldest ? o.created_at : oldest, '') })
+      const bs = (bookingsRes.data || []).filter((b: any) => b.status !== 'cancelled' && b.status !== 'no_show')
+      setBookings({ total: bs.length, waiting: bs.filter((b: any) => b.status !== 'arrived').length })
+      const low = (stockRes.data || []).filter((s: any) => Number(s.quantity_g || 0) <= Number(s.min_quantity_g ?? 100)).sort((a: any, b: any) => Number(a.quantity_g || 0) - Number(b.quantity_g || 0))[0]
+      setLowStock(low ? { name: low.flavor_name || [low.brand, low.flavor].filter(Boolean).join(' ') || tr('dash.tobacco'), quantity: Number(low.quantity_g || 0) } : null)
 
       const cashByDate: Record<string, number> = {}; const cardByDate: Record<string, number> = {}
       ;(histShiftsRes.data || []).forEach((s: any) => {
         cashByDate[s.date] = (cashByDate[s.date] || 0) + (s.income || 0)
         cardByDate[s.date] = (cardByDate[s.date] || 0) + (s.income_card || 0)
       })
-      const hookahByDate: Record<string, number> = {}
-      ;(histHookahRes.data || []).forEach((r: any) => {
-        if (r.is_free) return
-        hookahByDate[r.date] = (hookahByDate[r.date] || 0) + (r.price || 0) * (r.quantity || 0)
-      })
-      setTrends({
-        cash: days14.map(d => cashByDate[d] || 0),
-        card: days14.map(d => cardByDate[d] || 0),
-        hookah: days14.map(d => hookahByDate[d] || 0),
-      })
+      setRevenueTrend(days14.map(d => (cashByDate[d] || 0) + (cardByDate[d] || 0)))
 
       // Аудиты (В3): та же логика, что AuditStatsView в People — считаем только
       // завершённые прогоны (done + начатые за прошлые дни), N/A вне знаменателя,
@@ -120,26 +129,27 @@ export default function OverviewPage() {
         rate: Math.round((auPass / auTotal) * 100),
         top: Array.from(auViolations.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3),
       } : null)
+      setUpdatedAt(new Date())
       setLoading(false)
+      } catch {
+        if (!gone) { setDataError(true); setLoading(false) }
+      }
     })()
     return () => { gone = true }
   }, [restaurant?.id])
 
   if (redirecting) return null
 
-  // Аномалии: показываем максимум две, по убыванию важности
-  const issues: { key: string; title: string; sub: string; color: string; href?: string }[] = []
-  if (status === 'past_due') issues.push({ key: 'pd', title: tr('dash.paymentFailed'), sub: tr('dash.updateCardElseLock'), color: 'var(--danger)', href: '/dashboard/billing' })
-  if (!loading && (!shift || shift.status !== 'open')) issues.push({ key: 'sh', title: tr('dash.shiftNotOpen'), sub: tr('dash.managerNotOpenedShift'), color: 'var(--warn)' })
-  if (orders.fresh > 0) issues.push({ key: 'or', title: tr('dash.newOrdersN', { n: orders.fresh }), sub: tr('dash.waitingAcceptance'), color: 'var(--accent)', href: '/dashboard/notifications' })
-  if (status === 'canceling' && restaurant?.subscription_ends_at) issues.push({ key: 'cn', title: tr('dash.subCancelled'), sub: tr('dash.accessUntilD', { date: new Date(restaurant.subscription_ends_at).toLocaleDateString(locale) }), color: 'var(--warn)', href: '/dashboard/billing' })
-
-  const stats: { key: string; l: string; v: string; tone: Tone; trend?: number[] }[] = [
-    { key: 'cash', l: tr('dash.cash'), v: `${cur}${(shift?.income || 0).toLocaleString()}`, tone: 'accent', trend: trends.cash },
-    { key: 'card', l: tr('dash.card'), v: `${cur}${(shift?.income_card || 0).toLocaleString()}`, tone: 'ok', trend: trends.card },
-    ...(appOk('stash') ? [{ key: 'hookah', l: tr('dash.hookahs'), v: `${hookah.qty} · ${cur}${hookah.revenue.toLocaleString()}`, tone: 'warn' as Tone, trend: trends.hookah }] : []),
-    ...(appOk('menu') ? [{ key: 'orders', l: tr('dash.menuOrders'), v: String(orders.total), tone: 'pink' as Tone }] : []),
-  ]
+  const money = (value: number) => `${cur}${value.toLocaleString(locale, { maximumFractionDigits: 2 })}`
+  const shiftIsOpen = shift?.status === 'open'
+  const revenue = Number(shift?.income || 0) + Number(shift?.income_card || 0)
+  const orderHref = appOk('people') ? '/dashboard/people?tab=orders' : '/dashboard/notifications'
+  const issues: { key: string; title: string; sub: string; href: string; color: string; action: string }[] = []
+  if (status === 'past_due') issues.push({ key: 'payment', title: tr('dash.paymentFailed'), sub: tr('dash.updateCardElseLock'), href: '/dashboard/billing', color: 'var(--danger)', action: tr('dash.navBilling') })
+  if (!loading && !dataError && !shift) issues.push({ key: 'shift', title: tr('dash.shiftNotOpen'), sub: tr('dash.managerNotOpenedShift'), href: '/dashboard/shifts', color: 'var(--warn)', action: tr('dash.openShift') })
+  if (ordersEnabled && orders.fresh > 0) issues.push({ key: 'orders', title: tr('dash.qrOrdersNew', { n: orders.fresh }), sub: orders.oldestNew ? tr('dash.oldestOrderAt', { time: new Date(orders.oldestNew).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }) }) : tr('dash.waitingAcceptance'), href: orderHref, color: 'var(--accent)', action: tr('dash.viewOrders') })
+  if (lowStock) issues.push({ key: 'stock', title: tr('dash.tobaccoLow'), sub: `${lowStock.name} · ${Math.round(lowStock.quantity)} ${tr('dash.grams')}`, href: '/dashboard/stash', color: 'var(--warn)', action: tr('dash.viewStock') })
+  if (status === 'canceling' && restaurant?.subscription_ends_at) issues.push({ key: 'subscription', title: tr('dash.subCancelled'), sub: tr('dash.accessUntilD', { date: new Date(restaurant.subscription_ends_at).toLocaleDateString(locale) }), href: '/dashboard/billing', color: 'var(--warn)', action: tr('dash.navBilling') })
 
   // Шаги настройки: data-driven, ведём до полной активации. Скрываем, когда всё готово.
   const allSteps = [
@@ -154,7 +164,13 @@ export default function OverviewPage() {
 
   return (
     <Container size="normal">
-      <SectionTitle title={tr('dash.navOverview')} sub={new Date().toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })} />
+      <div className="overview">
+      <header className="overview-head">
+        <div>
+          <h1>{tr('dash.todayAtRestaurant')}</h1>
+          <p>{new Date().toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })} · {tr('dash.currentShiftAmounts')}</p>
+        </div>
+      </header>
 
       {/* Onboarding: показывается пока нет активной подписки */}
       {setupSteps && (
@@ -185,72 +201,67 @@ export default function OverviewPage() {
         </Card>
       )}
 
-      {loading ? (
-        // Скелетоны той же геометрии, что и контент — данные «проявляются», а не грузятся
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 10 }}>
-          {[0, 1, 2, 3].map(i => <div key={i} style={{ height: 76, borderRadius: 16, background: 'var(--fill)', animation: 'dashPulse 1.2s ease-in-out infinite' }} />)}
+      {dataError && !loading && <Card style={{ marginBottom: 20, borderLeft: '3px solid var(--warn)', color: 'var(--tx2)', fontSize: '.85rem' }}>{tr('dash.overviewDataError')}</Card>}
+
+      <section className="overview-section" aria-labelledby="overview-now">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <h2 id="overview-now" className="overview-section-title">{tr('dash.situationNow')}</h2>
+          {updatedAt && <span className="overview-chip" style={{ marginBottom: 12 }}>{tr('dash.updatedAt', { time: updatedAt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }) })}</span>}
         </div>
-      ) : (
-        <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10, marginBottom: 16 }}>
-            {stats.map(it => (
-              <StatTile key={it.key} label={it.l} value={it.v} tone={it.tone} trend={it.trend}
-                trendFormat={v => `${cur}${Math.round(v).toLocaleString()}`} />
-            ))}
+        {loading ? <div className="overview-current"><div className="overview-loading"/><div className="overview-loading"/></div> : (
+          <div className="overview-current">
+            <Card style={{ minHeight: 215 }}>
+              <div className="overview-label">{tr('dash.revenueToday')}</div>
+              <div className="overview-revenue-value">{money(revenue)}</div>
+              <div className="overview-sub">{tr('dash.cash')} {money(Number(shift?.income || 0))} · {tr('dash.card')} {money(Number(shift?.income_card || 0))}</div>
+              <div className="overview-divider" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 22 }}>
+                <span className="overview-sub" style={{ fontSize: '.75rem', whiteSpace: 'nowrap' }}>{tr('dash.last14Days')}</span>
+                <div style={{ flex: 1, minWidth: 60 }}>{revenueTrend.length > 1 && <Sparkline values={revenueTrend} tone="accent" height={42} formatValue={money} />}</div>
+              </div>
+            </Card>
+            <Card style={{ minHeight: 215 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <div className="overview-label">{tr('dash.navShifts')}</div>
+                <span className="overview-chip" style={!shiftIsOpen ? { background: 'var(--warn-soft)', color: 'var(--warn)' } : undefined}>{shiftIsOpen ? tr('dash.shiftOpen') : shift ? tr('dash.shiftFinished') : tr('dash.shiftClosed')}</span>
+              </div>
+              <div className="overview-shift-value">{money(Number(shift?.closing_balance || 0))}</div>
+              <div className="overview-sub">{tr('dash.tillBalance')}</div>
+              <div className="overview-divider" />
+              <button className="overview-link ui-press" onClick={() => router.push('/dashboard/shifts')}>{tr('dash.openShift')} <span aria-hidden>›</span></button>
+            </Card>
           </div>
+        )}
+      </section>
 
-          {shift?.status === 'open' && (
-            <Card style={{ marginBottom: 10, padding: '12px 16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '.85rem', color: 'var(--tx2)' }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--ok)', flexShrink: 0 }} />
-                {tr('dash.shiftOpenLine', { v: `${cur}${(shift.closing_balance || 0).toLocaleString()}` })}
-              </div>
-            </Card>
-          )}
+      {!loading && (ordersEnabled || appOk('bookings') || appOk('stash')) && <section className="overview-section" aria-labelledby="overview-operations">
+        <h2 id="overview-operations" className="overview-section-title">{tr('dash.operations')}</h2>
+        <div className="overview-operations">
+          {ordersEnabled && <Card style={{ minHeight: 152 }}><div className="overview-label">{tr('dash.menuOrders')}</div><div className="overview-operation-value">{orders.fresh ? tr('dash.newCount', { n: orders.fresh }) : orders.total}</div><div className="overview-sub">{tr('dash.totalToday', { n: orders.total })}</div><button className="overview-link ui-press" onClick={() => router.push(orderHref)}>{tr('dash.viewOrders')} <span aria-hidden>›</span></button></Card>}
+          {appOk('bookings') && <Card style={{ minHeight: 152 }}><div className="overview-label">{tr('dash.navBookings')}</div><div className="overview-operation-value">{tr('dash.bookingsToday', { n: bookings.total })}</div><div className="overview-sub">{tr('dash.awaitingArrival', { n: bookings.waiting })}</div><button className="overview-link ui-press" onClick={() => router.push('/dashboard/bookings')}>{tr('dash.viewBookings')} <span aria-hidden>›</span></button></Card>}
+          {appOk('stash') && <Card style={{ minHeight: 152 }}><div className="overview-label">{tr('dash.hookahs')}</div><div className="overview-operation-value">{hookah.qty}</div><div className="overview-sub">{tr('dash.revenue')} {money(hookah.revenue)}</div><button className="overview-link ui-press" onClick={() => router.push('/dashboard/stash')}>{tr('dash.viewStash')} <span aria-hidden>›</span></button></Card>}
+        </div>
+      </section>}
 
-          {issues.slice(0, 2).map(it => (
-            <Card key={it.key} onClick={it.href ? () => router.push(it.href!) : undefined}
-              style={{ marginBottom: 10, padding: '12px 16px', borderLeft: `3px solid ${it.color}` }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>{it.title}</div>
-                  <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 1 }}>{it.sub}</div>
-                </div>
-                {it.href && <svg width="8" height="14" fill="none" stroke="var(--tx3)" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 10 18"><path d="M2 1l7 8-7 8" /></svg>}
-              </div>
-            </Card>
-          ))}
-
-          {issues.length === 0 && (
-            <Card style={{ padding: '12px 16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '.85rem', color: 'var(--tx2)' }}>
-                <svg width="14" height="12" fill="none" stroke="var(--ok)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 12 10"><path d="M1 5l3.5 3.5L11 1" /></svg>
-                {tr('dash.allGood')}
-              </div>
-            </Card>
-          )}
-
-          {/* Аудиты за 30 дней (ревью В3): glance-карточка, клик ведёт в People */}
-          {audits && (
-            <Card onClick={() => router.push('/dashboard/people')} style={{ marginTop: 10, padding: '14px 16px', cursor: 'pointer' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>{tr('dash.audits')} · {tr('pe.last30Days')}</div>
-                <div style={{ fontSize: '1rem', fontWeight: 800, color: audits.rate >= 80 ? 'var(--ok)' : audits.rate >= 50 ? 'var(--warn)' : 'var(--danger)' }}>{audits.rate}%</div>
-              </div>
-              {audits.top.length > 0 && (
-                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {audits.top.map(([label, n]) => (
-                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: '.78rem', color: 'var(--tx2)' }}>
-                      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-                      <span style={{ fontWeight: 700, color: 'var(--danger)', flexShrink: 0 }}>{n}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-          )}
-        </>
-      )}
+      {!loading && <section className="overview-section" aria-labelledby="overview-attention">
+        <h2 id="overview-attention" className="overview-section-title">{tr('dash.needsAttention')}</h2>
+        <div className={`overview-attention${audits ? '' : ' overview-attention--single'}`}>
+          <Card style={{ minHeight: 145, borderLeft: issues.length ? `3px solid ${issues[0].color}` : undefined }}>
+            {issues.length ? issues.slice(0, showAllIssues ? issues.length : 3).map(issue => <div className="overview-issue" key={issue.key}>
+              <div style={{ minWidth: 0 }}><div className="overview-issue-title">{issue.title}</div><div className="overview-issue-sub">{issue.sub}</div></div>
+              <button className="overview-link ui-press" style={{ flexShrink: 0 }} onClick={() => router.push(issue.href)}>{issue.action} <span aria-hidden>›</span></button>
+            </div>) : <div className="overview-sub">{dataError ? tr('dash.overviewDataError') : tr('dash.allGood')}</div>}
+            {issues.length > 3 && !showAllIssues && <button className="overview-link ui-press" onClick={() => setShowAllIssues(true)}>{tr('dash.moreIssues', { n: issues.length - 3 })}</button>}
+          </Card>
+          {audits && <Card style={{ minHeight: 145 }}>
+            <div className="overview-audit-head"><div className="overview-issue-title">{tr('dash.audits')} · {tr('pe.last30Days')}</div><div className="overview-audit-value" style={{ color: audits.rate >= 80 ? 'var(--ok)' : audits.rate >= 50 ? 'var(--warn)' : 'var(--danger)' }}>{audits.rate}%</div></div>
+            <div className="overview-sub" style={{ marginTop: 12 }}>{tr('dash.violationsCount', { n: audits.top.reduce((sum, [, count]) => sum + count, 0) })}</div>
+            <div className="overview-divider" />
+            <button className="overview-link ui-press" onClick={() => router.push('/dashboard/people?tab=audits')}>{tr('dash.viewAudits')} <span aria-hidden>›</span></button>
+          </Card>}
+        </div>
+      </section>}
+      </div>
     </Container>
   )
 }
