@@ -41,7 +41,7 @@ const REPORT_TYPE: Record<string, { label: string; color: (t: any) => string }> 
 }
 const REPORT_STATUS: Record<string, string> = { new: 'pe.rsNew', reviewed: 'pe.rsReviewed', resolved: 'pe.rsResolved' }
 
-export function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boolean; myId: string; accent: string; t: any; toast: (m: string) => void }) {
+export function TasksTab({ isManager, myId, accent, t, toast, hideReports = false }: { isManager: boolean; myId: string; accent: string; t: any; toast: (m: string) => void; hideReports?: boolean }) {
   const { t: tr } = useI18n()
   const [view, setView] = useState<'tasks' | 'reports'>('tasks')
   const [tasks, setTasks] = useState<any[]>([])
@@ -135,11 +135,11 @@ export function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boo
 
   return (
     <div>
-      <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
+      {!hideReports && <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
         {([['tasks', tr('pe.tasks')], ['reports', tr('pe.reports')]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setView(id)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: view === id ? 700 : 500, cursor: 'pointer', background: view === id ? t.surface : 'transparent', color: view === id ? accent : t.text3, boxShadow: view === id ? t.sh2 : 'none' }}>{label}</button>
         ))}
-      </div>
+      </div>}
 
       <button onClick={() => setShowForm(true)} style={{ width: '100%', padding: '14px', borderRadius: 14, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', marginBottom: 16, boxShadow: `0 4px 16px ${accent}44` }}>
         {view === 'tasks' ? tr('pe.newTask') : tr('pe.reportProblem')}
@@ -269,4 +269,3 @@ export function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boo
     </div>
   )
 }
-
