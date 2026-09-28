@@ -5,8 +5,19 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
 import { useI18n, SUPPORTED_LOCALES } from '@/lib/i18n'
-import { Card, Btn, Field, Spinner, SectionTitle, Toggle, inputStyle, Container } from '@/components/ui'
+import { Card, Btn, Field, Spinner, Toggle, inputStyle, Container } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
+import './settings-web.css'
+
+const SETTINGS_SECTIONS = [
+  { id: 'venue', label: 'dash.settingsVenue', description: 'dash.settingsVenueSub' },
+  { id: 'finance', label: 'dash.settingsFinance', description: 'dash.settingsFinanceSub' },
+  { id: 'hookah', label: 'dash.settingsHookah', description: 'dash.settingsHookahSub' },
+  { id: 'attendance', label: 'dash.settingsAttendance', description: 'dash.settingsAttendanceSub' },
+  { id: 'reviews', label: 'dash.settingsReviews', description: 'dash.settingsReviewsSub' },
+  { id: 'appearance', label: 'dash.settingsAppearance', description: 'dash.settingsAppearanceSub' },
+] as const
+type SettingsSection = typeof SETTINGS_SECTIONS[number]['id']
 
 const XIcon = ({ size = 11 }: { size?: number }) => (
   <svg width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" /></svg>
@@ -22,23 +33,32 @@ type SettingsRow = any
 type SettingsCtl = {
   row: SettingsRow | null
   loaded: boolean
+  loadError: boolean
+  retry: () => void
   save: (payload: Record<string, any>) => Promise<{ error: any }>
 }
 
 function useSettingsRow(): SettingsCtl {
   const [row, setRow] = useState<SettingsRow | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+  const [refresh, setRefresh] = useState(0)
   const rowRef = useRef<SettingsRow | null>(null)
   const creating = useRef<Promise<{ data: any; error: any }> | null>(null)
 
   const apply = (r: SettingsRow | null) => { rowRef.current = r; setRow(r) }
 
   useEffect(() => {
-    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
+    let cancelled = false
+    db.from('restaurant_settings').select('*').limit(1).then(({ data, error }: any) => {
+      if (cancelled) return
+      if (error) { setLoadError(true); setLoaded(false); return }
       apply((Array.isArray(data) ? data[0] : data) || null)
+      setLoadError(false)
       setLoaded(true)
     })
-  }, [])
+    return () => { cancelled = true }
+  }, [refresh])
 
   // Гарантируем ровно одну строку. Промис создания общий: две карточки, сохранённые
   // одновременно, дождутся одной вставки вместо двух конкурирующих.
@@ -46,7 +66,8 @@ function useSettingsRow(): SettingsCtl {
     if (rowRef.current?.id) return { data: rowRef.current, error: null }
     if (!creating.current) creating.current = (async () => {
       // Перечитываем перед вставкой: строку мог создать другой таб или iOS-клиент.
-      const { data } = await db.from('restaurant_settings').select('*').limit(1)
+      const { data, error } = await db.from('restaurant_settings').select('*').limit(1)
+      if (error) return { data: null, error }
       const existing = Array.isArray(data) ? data[0] : data
       if (existing?.id) return { data: existing, error: null }
       const res = await db.from('restaurant_settings').insert({}).select().single()
@@ -63,11 +84,13 @@ function useSettingsRow(): SettingsCtl {
     if (ensured.error || !ensured.data?.id) return { error: ensured.error || { message: 'restaurant_settings' } }
     const res = await db.from('restaurant_settings').update(payload).eq('id', ensured.data.id)
     if (res.error) return { error: res.error }
-    apply({ ...ensured.data, ...payload })
+    apply({ ...(rowRef.current || ensured.data), ...payload })
+    setLoadError(false)
+    setLoaded(true)
     return { error: null }
   }
 
-  return { row, loaded, save }
+  return { row, loaded, loadError, retry: () => setRefresh(value => value + 1), save }
 }
 
 // ── CATEGORIES ────────────────────────────────────────────────────────────────
@@ -76,10 +99,13 @@ function CategoriesCard({ restaurantId }: { restaurantId: string }) {
   const [cats, setCats] = useState<any[]>([])
   const [newName, setNewName] = useState('')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
 
   const load = async () => {
     setLoading(true)
-    const { data } = await db.from('expense_categories').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name')
+    const { data, error } = await db.from('expense_categories').select('*').eq('restaurant_id', restaurantId).eq('is_active', true).order('name')
+    if (error) { setLoadError(true); setLoading(false); return }
+    setLoadError(false)
     // Закреплённые — первыми (как в Аналитике), внутри групп по алфавиту.
     const rows = (data || []).sort((a: any, b: any) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) || String(a.name).localeCompare(String(b.name)))
     setCats(rows); setLoading(false)
@@ -92,13 +118,16 @@ function CategoriesCard({ restaurantId }: { restaurantId: string }) {
     if (!name) return
     // Реактивируем ранее удалённую категорию с тем же названием вместо дубля с новым id
     // (сохраняет is_pinned, старые расходы уже используют это имя текстом).
-    const { data: existing } = await db.from('expense_categories').select('*').eq('restaurant_id', restaurantId).ilike('name', name).limit(1)
+    const { data: existing, error: lookupError } = await db.from('expense_categories').select('*').eq('restaurant_id', restaurantId).ilike('name', name).limit(1)
+    if (lookupError) { alert(tr('dash.notSaved') + lookupError.message); return }
     const match = existing?.[0]
+    let error
     if (match) {
-      if (!match.is_active) await db.from('expense_categories').update({ is_active: true }).eq('id', match.id)
+      if (!match.is_active) ({ error } = await db.from('expense_categories').update({ is_active: true }).eq('id', match.id))
     } else {
-      await db.from('expense_categories').insert({ restaurant_id: restaurantId, name })
+      ;({ error } = await db.from('expense_categories').insert({ restaurant_id: restaurantId, name }))
     }
+    if (error) { alert(tr('dash.notSaved') + error.message); return }
     setNewName(''); load()
   }
 
@@ -126,8 +155,9 @@ function CategoriesCard({ restaurantId }: { restaurantId: string }) {
           style={{ ...inputStyle, flex: 1, width: 'auto' }} />
         <Btn onClick={add}>{tr('dash.add')}</Btn>
       </div>
+      {loadError && <div className="settings-web-error" role="alert">{tr('dash.categoriesLoadFailed')} <button type="button" onClick={load}>{tr('dash.settingsRetry')}</button></div>}
       {loading ? <Spinner />
-        : cats.length === 0
+        : !loadError && cats.length === 0
           ? <div style={{ color: 'var(--tx2)', fontSize: '.85rem' }}>{tr('dash.noCats')}</div>
           : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {cats.map(cat => (
@@ -211,7 +241,8 @@ function HookahSettingsCard({ s }: { s: SettingsCtl }) {
   }
   const remove = async (id: string) => {
     if (!confirm(tr('dash.removeHookahType'))) return
-    await db.from('hookah_types').update({ is_active: false }).eq('id', id)
+    const { error } = await db.from('hookah_types').update({ is_active: false }).eq('id', id)
+    if (error) { alert(tr('dash.notSaved') + error.message); return }
     await load()
   }
 
@@ -492,6 +523,17 @@ export default function SettingsPage() {
   const [logoPreview, setLogoPreview] = useState(restaurant?.logo_url || '')
   const [logoUploading, setLogoUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const [section, setSection] = useState<SettingsSection>('venue')
+
+  useEffect(() => {
+    const id = window.location.hash.slice(1)
+    if (SETTINGS_SECTIONS.some(item => item.id === id)) setSection(id as SettingsSection)
+  }, [])
+
+  const selectSection = (id: SettingsSection) => {
+    setSection(id)
+    window.history.replaceState(window.history.state, '', `#${id}`)
+  }
 
   useEffect(() => {
     if (restaurant) { setName(restaurant.name); setCurrency(restaurant.currency || '€'); setLogoPreview(restaurant.logo_url || '') }
@@ -506,20 +548,28 @@ export default function SettingsPage() {
 
   // Ошибки загрузки логотипа раньше глотались: превью оставалось новым, в БД — старый URL,
   // владелец видел «логотип загружен» до первой перезагрузки страницы.
-  const uploadLogo = async () => {
-    if (!logoFile || !restaurant) return
+  const uploadLogo = async (): Promise<boolean> => {
+    if (!logoFile || !restaurant) return true
     setLogoUploading(true)
     const ext = logoFile.name.split('.').pop()
     const path = `logos/${restaurant.id}.${ext}`
     const revert = () => { setLogoPreview(restaurant.logo_url || ''); setLogoFile(null) }
-    const { error } = await supabase.storage.from('restaurant-assets').upload(path, logoFile, { upsert: true })
-    if (error) { alert(tr('dash.notSaved') + error.message); revert(); setLogoUploading(false); return }
-    const { data: { publicUrl } } = supabase.storage.from('restaurant-assets').getPublicUrl(path)
-    const { error: dbErr } = await db.from('restaurants').update({ logo_url: publicUrl }).eq('id', restaurant.id)
-    if (dbErr) { alert(tr('dash.notSaved') + dbErr.message); revert(); setLogoUploading(false); return }
-    setLogoFile(null)
-    reload()
-    setLogoUploading(false)
+    try {
+      const { error } = await supabase.storage.from('restaurant-assets').upload(path, logoFile, { upsert: true })
+      if (error) throw error
+      const { data: { publicUrl } } = supabase.storage.from('restaurant-assets').getPublicUrl(path)
+      const { error: dbErr } = await db.from('restaurants').update({ logo_url: publicUrl }).eq('id', restaurant.id)
+      if (dbErr) throw dbErr
+      setLogoFile(null)
+      reload()
+      return true
+    } catch (error) {
+      alert(tr('dash.notSaved') + (error instanceof Error ? error.message : ''))
+      revert()
+      return false
+    } finally {
+      setLogoUploading(false)
+    }
   }
 
   const save = async () => {
@@ -527,21 +577,31 @@ export default function SettingsPage() {
     setSaving(true)
     const { error } = await db.from('restaurants').update({ name, currency }).eq('id', restaurant.id)
     if (error) { alert(tr('dash.notSaved') + error.message); setSaving(false); return }
-    if (logoFile) await uploadLogo()
+    if (logoFile && !(await uploadLogo())) { setSaving(false); reload(); return }
     setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000); reload()
   }
 
   return (
-    <Container size="normal">
-      <SectionTitle title={tr('dash.navSettings')} sub={tr('dash.settingsSub')} />
+    <Container size="wide" style={{ maxWidth: 1320 }}>
+      <header className="settings-web-header"><h1>{tr('dash.navSettings')}</h1><p>{tr('dash.settingsOverviewSub')}</p></header>
+      {settings.loadError && <div className="settings-web-error" role="alert">{tr('dash.settingsLoadFailed')} <button type="button" onClick={settings.retry}>{tr('dash.settingsRetry')}</button></div>}
+      <div className="settings-web-layout">
+        <nav className="settings-web-nav" aria-label={tr('dash.settingsSections')}>
+          {SETTINGS_SECTIONS.map(item => <button key={item.id} type="button" aria-current={section === item.id ? 'page' : undefined} className={section === item.id ? 'is-active' : undefined} onClick={() => selectSection(item.id)}>{tr(item.label)}</button>)}
+        </nav>
+        <main className="settings-web-content">
+          <div className="settings-web-section-head"><h2>{tr(SETTINGS_SECTIONS.find(item => item.id === section)!.label)}</h2><p>{tr(SETTINGS_SECTIONS.find(item => item.id === section)!.description)}</p></div>
+          {!settings.loaded && !settings.loadError && section !== 'venue' && section !== 'appearance' && <Spinner />}
+
+      {section === 'venue' && <div className="settings-web-card-grid settings-web-venue-grid">
 
       {/* Логотип */}
       <Card style={{ marginBottom: 14 }}>
         <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 14, color: 'var(--tx)' }}>{tr('dash.venueLogo')}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div style={{ width: 72, height: 72, borderRadius: 16, background: 'var(--fill)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'var(--hairline-strong)', flexShrink: 0 }}>
+        <div className="settings-web-logo-content" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div className="settings-web-logo-preview" style={{ width: 72, height: 72, borderRadius: 16, background: 'var(--fill)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'var(--hairline-strong)', flexShrink: 0 }}>
             {logoPreview ? (
-              <img src={logoPreview} alt="logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <img src={logoPreview} alt={tr('dash.venueLogo')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             ) : (
               <svg width="30" height="30" fill="none" stroke="var(--tx3)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M3 9l1.2-5h15.6L21 9" /><path d="M4 9v11a1 1 0 001 1h14a1 1 0 001-1V9" /><path d="M3 9h18" /><path d="M9 21v-6h6v6" /></svg>
             )}
@@ -578,19 +638,21 @@ export default function SettingsPage() {
         />
         <Btn onClick={save} disabled={saving}>{saving ? tr('dash.saving') : saved ? tr('dash.savedCheck') : tr('dash.save')}</Btn>
       </Card>
+      </div>}
 
-      {restaurant && <CategoriesCard restaurantId={restaurant.id} />}
+      {section === 'finance' && restaurant && <CategoriesCard restaurantId={restaurant.id} />}
 
-      <HookahSettingsCard s={settings} />
+      {section === 'hookah' && settings.loaded && <HookahSettingsCard s={settings} />}
 
-      <AnalyticsSettingsCard s={settings} />
+      {section === 'finance' && settings.loaded && <AnalyticsSettingsCard s={settings} />}
 
-      <SalaryPayoutSettingsCard s={settings} />
+      {section === 'finance' && settings.loaded && <SalaryPayoutSettingsCard s={settings} />}
 
-      <GeoSettingsCard s={settings} />
+      {section === 'attendance' && settings.loaded && <GeoSettingsCard s={settings} />}
 
-      <GoogleReviewsSettingsCard s={settings} />
+      {section === 'reviews' && settings.loaded && <GoogleReviewsSettingsCard s={settings} />}
 
+      {section === 'appearance' && <div className="settings-web-card-grid">
       <Card>
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontWeight: 600, fontSize: '.9rem', color: 'var(--tx)' }}>{tr('dash.theme')}</div>
@@ -600,7 +662,7 @@ export default function SettingsPage() {
           {([['system', tr('dash.system')], ['light', tr('dash.light')], ['dark', tr('dash.dark')]] as const).map(([m, label]) => {
             const on = theme.mode === m
             return (
-              <button key={m} type="button" onClick={() => theme.setMode(m)} className="ui-press" style={{
+              <button key={m} type="button" onClick={() => theme.setMode(m)} aria-pressed={on} className="ui-press" style={{
                 flex: 1, padding: '8px 4px', borderRadius: 9, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
                 fontSize: '.82rem', fontWeight: on ? 700 : 500,
                 background: on ? 'var(--surface)' : 'transparent',
@@ -621,7 +683,7 @@ export default function SettingsPage() {
           {SUPPORTED_LOCALES.map(l => {
             const on = locale === l.code
             return (
-              <button key={l.code} type="button" onClick={() => setLocale(l.code)} className="ui-press" style={{
+              <button key={l.code} type="button" onClick={() => setLocale(l.code)} aria-pressed={on} className="ui-press" style={{
                 padding: '8px 14px', borderRadius: 980, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
                 fontSize: '.82rem', fontWeight: on ? 700 : 500,
                 background: on ? 'var(--accent)' : 'var(--fill)',
@@ -631,6 +693,9 @@ export default function SettingsPage() {
           })}
         </div>
       </Card>
+      </div>}
+        </main>
+      </div>
     </Container>
   )
 }

@@ -1,0 +1,31 @@
+.settings-web-header { margin: 5px 0 24px; }
+.settings-web-header h1 { margin: 0; color: var(--tx); font-size: 29px; line-height: 1.18; letter-spacing: -.03em; }
+.settings-web-header p { margin: 6px 0 0; color: var(--tx2); font-size: 13px; }
+.settings-web-layout { display: grid; grid-template-columns: 218px minmax(0, 1fr); align-items: start; gap: 24px; }
+.settings-web-nav { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 24px; padding: 9px; background: var(--surface); border: var(--hairline); border-radius: 14px; }
+.settings-web-nav button { width: 100%; min-height: 41px; padding: 10px 12px; text-align: left; border: 0; border-radius: 9px; background: transparent; color: var(--tx2); font: inherit; font-size: 13px; font-weight: 550; cursor: pointer; }
+.settings-web-nav button:hover { background: var(--fill); color: var(--tx); }
+.settings-web-nav button.is-active { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.settings-web-content { min-width: 0; }
+.settings-web-section-head { margin: 1px 0 17px; }
+.settings-web-section-head h2 { margin: 0; color: var(--tx); font-size: 19px; letter-spacing: -.02em; }
+.settings-web-section-head p { margin: 5px 0 0; color: var(--tx3); font-size: 12px; line-height: 1.45; }
+.settings-web-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.settings-web-card-grid > div { margin: 0 !important; height: 100%; }
+.settings-web-venue-grid > div { min-height: 285px; }
+.settings-web-logo-content { flex-direction: column; justify-content: center; text-align: center; padding: 10px 0; }
+.settings-web-logo-preview { width: 122px !important; height: 122px !important; border-radius: 20px !important; }
+.settings-web-error { margin: 0 0 18px; padding: 12px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--danger-soft); color: var(--danger); font-size: 12px; }
+.settings-web-error button { margin-left: 8px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
+
+@media (max-width: 1100px) {
+  .settings-web-layout { display: block; }
+  .settings-web-nav { position: static; flex-direction: row; overflow-x: auto; margin-bottom: 22px; padding: 5px; scrollbar-width: none; }
+  .settings-web-nav button { width: auto; white-space: nowrap; text-align: center; padding: 9px 13px; flex: none; }
+}
+
+@media (max-width: 760px) {
+  .settings-web-header h1 { font-size: 24px; }
+  .settings-web-card-grid { grid-template-columns: 1fr; }
+  .settings-web-venue-grid > div { min-height: 0; }
+}
