@@ -1,0 +1,19 @@
+.billing-web-header { margin-bottom: 22px; }
+.billing-web-current { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); align-items: stretch; gap: 14px; margin-bottom: 24px; }
+.billing-web-current > div { margin: 0 !important; }
+.billing-web-section { margin-bottom: 20px; }
+.billing-web-section-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+.billing-web-section-head h2 { margin: 0; color: var(--tx); font-size: 18px; letter-spacing: -.02em; }
+.billing-web-plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.billing-web-plans > div { min-width: 0; height: 100%; }
+.billing-web-config { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, .85fr); align-items: start; gap: 14px; }
+.billing-web-summary { position: sticky; top: 24px; }
+.billing-web-summary > div:first-child { margin: 0 0 10px !important; }
+@media (max-width: 1000px) {
+  .billing-web-config { grid-template-columns: 1fr; }
+  .billing-web-summary { position: static; }
+}
+@media (max-width: 750px) {
+  .billing-web-plans { grid-template-columns: 1fr; }
+  .billing-web-section-head > div { width: 100%; }
+}
