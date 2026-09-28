@@ -7,9 +7,10 @@ import { useEffect, useState } from 'react'
 import { db } from '@/lib/db'
 import { notify as pushNotify } from '@/lib/notifyClient'
 import { useI18n } from '@/lib/i18n'
-import { Card, Btn, Badge, Field, SectionTitle, Spinner, Container, type Tone } from '@/components/ui'
+import { Card, Btn, Badge, Field, Spinner, Container, inputStyle, type Tone } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
 import { timeAgo } from '@/components/dash/shared'
+import './news-web.css'
 
 type Post = {
   id: string; kind: string; title?: string | null; body: string; priority?: string | null
@@ -35,6 +36,9 @@ export default function NewsPage() {
 
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<'all' | 'urgent' | 'important'>('all')
   const [priorityOk, setPriorityOk] = useState(true)
   const [kind, setKind] = useState('info')
   const [priority, setPriority] = useState('normal')
@@ -49,7 +53,8 @@ export default function NewsPage() {
       .order('created_at', { ascending: false }).limit(100)
     setLoading(false)
     // Ошибка сети/RLS не должна стирать уже показанную ленту (была бы ложная "Новостей нет").
-    if (error) { console.error('[news] load failed', error); return }
+    if (error) { console.error('[news] load failed', error); setLoadError(true); return }
+    setLoadError(false)
     const rows = (data || []) as Post[]
     rows.sort((a, b) => (PRIORITY[b.priority || 'normal']?.rank ?? 0) - (PRIORITY[a.priority || 'normal']?.rank ?? 0) || b.created_at.localeCompare(a.created_at))
     setPosts(rows)
@@ -89,26 +94,36 @@ export default function NewsPage() {
 
   const kindOptions = Object.entries(KIND).map(([value, k]) => ({ value, label: tr(k.label) }))
   const priorityOptions = Object.entries(PRIORITY).map(([value, p]) => ({ value, label: tr(p.label) }))
+  const visiblePosts = posts.filter(post => {
+    if (filter !== 'all' && post.priority !== filter) return false
+    const text = `${post.title || ''} ${post.body} ${post.created_by_name || ''}`.toLocaleLowerCase(locale)
+    return text.includes(search.trim().toLocaleLowerCase(locale))
+  })
 
   return (
-    <Container size="normal">
-      <SectionTitle title={tr('dash.navNews')} sub={tr('nw.sub')} />
-
-      <Card style={{ marginBottom: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: priorityOk ? '1fr 1fr' : '1fr', gap: 4, marginBottom: 4 }}>
-          <Field label={tr('nw.kind')} value={kind} onChange={setKind} select options={kindOptions} />
-          {priorityOk && <Field label={tr('nw.priority')} value={priority} onChange={setPriority} select options={priorityOptions} />}
-        </div>
-        <Field label={tr('nw.title')} value={title} onChange={setTitle} placeholder={tr('nw.titlePh')} />
-        <Field label={tr('nw.body')} value={body} onChange={setBody} placeholder={tr('nw.bodyPh')} />
-        <Btn onClick={publish} disabled={publishing || !body.trim()}>{publishing ? tr('dash.saving') : tr('nw.publish')}</Btn>
-      </Card>
-
-      {loading ? <Spinner /> : posts.length === 0 ? (
-        <Card><div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>{tr('nw.empty')}</div></Card>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {posts.map(p => {
+    <Container size="wide" style={{ maxWidth: 1320 }}>
+      <header className="news-web-header"><h1>{tr('dash.navNews')}</h1><p>{tr('nw.sub')}</p></header>
+      <div className="news-web-grid">
+        <section className="news-web-feed" aria-label={tr('nw.webFeed')}>
+          <div className="news-web-toolbar">
+            <div className="news-web-toolbar-title"><h2>{tr('nw.webFeed')}</h2><span>{posts.length}</span></div>
+            <div className="news-web-controls">
+              <label className="news-web-search">
+                <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
+                <input value={search} onChange={event => setSearch(event.target.value)} placeholder={tr('nw.webSearch')} aria-label={tr('nw.webSearch')} />
+              </label>
+              <div className="news-web-filters" role="group" aria-label={tr('nw.webFilter')}>
+                {(['all', 'urgent', 'important'] as const).map(value => <button key={value} type="button" aria-pressed={filter === value} className={filter === value ? 'is-active' : undefined} onClick={() => setFilter(value)}>{value === 'all' ? tr('nw.webAll') : tr(PRIORITY[value].label)}</button>)}
+              </div>
+            </div>
+          </div>
+          {loadError && <div className="news-web-error" role="alert">{tr(posts.length ? 'nw.loadFailed' : 'nw.webLoadError')} <button type="button" onClick={load}>{tr('nw.webRetry')}</button></div>}
+          {loading ? <div className="news-web-loading"><Spinner /></div> : !loadError && posts.length === 0 ? (
+            <Card><div className="news-web-empty">{tr('nw.empty')}</div></Card>
+          ) : visiblePosts.length === 0 ? (
+            !loadError && <Card><div className="news-web-empty">{tr('nw.webNoMatch')}</div></Card>
+          ) : <div className="news-web-posts">
+          {visiblePosts.map(p => {
             const k = KIND[p.kind] || KIND.info
             const pr = p.priority ? PRIORITY[p.priority] : null
             return (
@@ -118,7 +133,7 @@ export default function NewsPage() {
                     <Badge tone={k.tone}>{tr(k.label)}</Badge>
                     {pr && pr.rank > 0 && <Badge tone={pr.tone}>{tr(pr.label)}</Badge>}
                   </div>
-                  <button onClick={() => setDeleteConfirm(p.id)} className="ui-press" style={{ background: 'none', border: 'none', color: 'var(--tx3)', cursor: 'pointer', padding: 4 }}>
+                  <button onClick={() => setDeleteConfirm(p.id)} aria-label={tr('nw.deleteConfirm')} className="ui-press" style={{ background: 'none', border: 'none', color: 'var(--tx3)', cursor: 'pointer', padding: 4 }}>
                     <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" /></svg>
                   </button>
                 </div>
@@ -137,8 +152,24 @@ export default function NewsPage() {
               </Card>
             )
           })}
-        </div>
-      )}
+          </div>}
+        </section>
+
+        <aside className="news-web-compose">
+          <Card>
+            <h2>{tr('nw.webCompose')}</h2>
+            <p>{tr('nw.webComposeHint')}</p>
+            <div className="news-web-compose-selects" style={{ gridTemplateColumns: priorityOk ? '1fr 1fr' : '1fr' }}>
+              <Field label={tr('nw.kind')} value={kind} onChange={setKind} select options={kindOptions} />
+              {priorityOk && <Field label={tr('nw.priority')} value={priority} onChange={setPriority} select options={priorityOptions} />}
+            </div>
+            <Field label={tr('nw.title')} value={title} onChange={setTitle} placeholder={tr('nw.titlePh')} />
+            <label className="news-web-body-label" htmlFor="news-web-body">{tr('nw.body')}</label>
+            <textarea id="news-web-body" className="ui-input news-web-body" value={body} onChange={event => setBody(event.target.value)} placeholder={tr('nw.bodyPh')} style={inputStyle} rows={7} />
+            <Btn onClick={publish} disabled={publishing || !body.trim()} full>{publishing ? tr('dash.saving') : tr('nw.publish')}</Btn>
+          </Card>
+        </aside>
+      </div>
     </Container>
   )
 }
