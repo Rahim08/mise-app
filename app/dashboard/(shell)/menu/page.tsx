@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { QRCodeCanvas, QRCodeSVG } from 'qrcode.react'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
-import { SortableContext, useSortable, arrayMove, horizontalListSortingStrategy, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { SortableContext, useSortable, arrayMove, rectSortingStrategy, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
@@ -15,6 +15,7 @@ import {
   MENU_LOCALES, LOCALE_LABEL, MENU_TAGS, MENU_FONTS, THEME_PRESETS,
   WEEKDAY_KEYS, fontStack, googleFontsHref, type I18nContent, type Schedule,
 } from '@/lib/menu'
+import './menu-web.css'
 
 // ── TYPES ─────────────────────────────────────────────────────────────────────
 
@@ -614,6 +615,7 @@ export default function MenuEditor() {
 
   const selectedCatItems = items.filter(i => i.category_id === selectedCat).sort((a, b) => a.position - b.position)
   const sortedCats = [...categories].sort((a, b) => a.position - b.position)
+  const visibleCategoryIds = new Set(categories.filter(category => category.is_visible).map(category => category.id))
   const radius = settings.radius ?? 18
   const menuUrl = settings.slug ? `${appOrigin}/menu/${settings.slug}` : ''
   const qrValue = menuUrl ? (qrTable ? `${menuUrl}?table=${encodeURIComponent(qrTable)}` : menuUrl) : ''
@@ -645,7 +647,7 @@ export default function MenuEditor() {
   ] as const
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }}>
+    <div className="menu-editor-web" style={{ display: 'flex', flexDirection: 'column', fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }}>
       <style>{`
         @keyframes spin{to{transform:rotate(360deg)}}
         @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
@@ -657,37 +659,38 @@ export default function MenuEditor() {
       `}</style>
 
       {/* HEADER: строка статуса в потоке (shell даёт сайдбар/шапку) */}
-      <div style={{ order: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, maxWidth: 1100, width: '100%', alignSelf: 'center', boxSizing: 'border-box' }}>
+      <div className="menu-editor-header" style={{ order: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, maxWidth: 1100, width: '100%', alignSelf: 'center', boxSizing: 'border-box' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <IconMenu color={t.purple} size={28} />
-          <span style={{ fontWeight: 700, fontSize: 17, color: t.text, letterSpacing: -0.3 }}>Mise Menu</span>
+          <div><h1 className="menu-editor-title">{tr('me.menus')}</h1><p className="menu-editor-subtitle">{tr('me.webSubtitle')}</p></div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 20, background: settings.is_published ? `${t.green}22` : t.fill, color: settings.is_published ? t.green : t.text3 }}>
             {settings.is_published ? tr('me.published') : tr('me.draft')}
           </div>
-          {settings.slug && (
-            <a href={`/menu/${settings.slug}`} target="_blank" rel="noopener noreferrer" style={{ width: 34, height: 34, borderRadius: '50%', background: `${t.purple}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}>
+          {settings.is_published && settings.slug && (
+            <a href={`/menu/${settings.slug}`} target="_blank" rel="noopener noreferrer" className="menu-editor-open-link" style={{ width: 34, height: 34, borderRadius: '50%', background: `${t.purple}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}>
               <svg width="16" height="16" fill="none" stroke={t.purple} strokeWidth="2" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+              <span>{tr('me.openMenu')}</span>
             </a>
           )}
         </div>
       </div>
 
       {/* CONTENT */}
-      <div style={{ order: 2 }}>
+      <div className="menu-editor-content" style={{ order: 2 }}>
         <div style={{ padding: '0 0 28px', maxWidth: 1100, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
 
           {/* MENU SWITCHER */}
           {tab !== 'analytics' && (
-            <div style={{ display: 'flex', gap: 8, marginBottom: 14, overflowX: 'auto', alignItems: 'center', paddingBottom: 2, scrollbarWidth: 'none' }}>
+            <div className="menu-editor-switcher" style={{ display: 'flex', gap: 8, marginBottom: 14, overflowX: 'auto', alignItems: 'center', paddingBottom: 2, scrollbarWidth: 'none' }}>
               {menus.map(m => (
                 <button key={m.id} onClick={() => switchMenu(m.id!)} style={{ flexShrink: 0, padding: '8px 14px', borderRadius: 12, border: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: activeMenuId === m.id ? 700 : 500, cursor: 'pointer', background: activeMenuId === m.id ? t.purple : t.fill, color: activeMenuId === m.id ? '#fff' : t.text2, display: 'flex', alignItems: 'center', gap: 6 }}>
                   {m.name}{m.is_default && <span style={{ fontSize: 9, opacity: 0.8 }}>★</span>}
                 </button>
               ))}
               {(activeMenuId || menus.length === 0) && (
-                <button onClick={() => setShowMenuActions(true)} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 12, border: 'none', background: t.fill, color: t.text2, cursor: 'pointer', display: settings.id ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center' }}>
+                <button onClick={() => setShowMenuActions(true)} aria-label={tr('me.webMenuActions')} style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 12, border: 'none', background: t.fill, color: t.text2, cursor: 'pointer', display: settings.id ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center' }}>
                   <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg>
                 </button>
               )}
@@ -698,32 +701,42 @@ export default function MenuEditor() {
             </div>
           )}
 
+          {tab === 'categories' && <div className="menu-editor-summary" aria-label={tr('me.webSummary')}>
+            <div><span>{tr('me.webCategories')}</span><strong>{categories.length}</strong></div>
+            <div><span>{tr('me.webItems')}</span><strong>{items.length}</strong></div>
+            <div><span>{tr('me.webAvailable')}</span><strong>{items.filter(item => visibleCategoryIds.has(item.category_id) && item.is_visible && item.is_available).length}</strong></div>
+            <div><span>{tr('me.webUnavailable')}</span><strong>{items.filter(item => !item.is_available).length}</strong></div>
+          </div>}
+
           {/* ══ CATEGORIES & ITEMS ══ */}
           {tab === 'categories' && (
-            <div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 16, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
+            <div className="menu-editor-workspace">
+              <div className="menu-editor-categories" style={{ display: 'flex', gap: 8, marginBottom: 16, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
+                <div className="menu-editor-categories-label">{tr('me.webCategories')}</div>
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onCatDragEnd}>
-                  <SortableContext items={sortedCats.map(c => c.id)} strategy={horizontalListSortingStrategy}>
+                  <SortableContext items={sortedCats.map(c => c.id)} strategy={rectSortingStrategy}>
                     {sortedCats.map(cat => (
                       <Sortable key={cat.id} id={cat.id} style={{ flexShrink: 0 }}>
                         {(listeners) => (
-                          <button {...listeners} onClick={() => setSelectedCat(cat.id)} style={{ touchAction: 'none', padding: '8px 16px', borderRadius: 20, border: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: selectedCat === cat.id ? 700 : 500, cursor: 'grab', background: selectedCat === cat.id ? t.purple : t.fill, color: selectedCat === cat.id ? '#fff' : t.text2, opacity: cat.is_visible ? 1 : 0.5 }}>
-                            {cat.name}
+                          <button {...listeners} onClick={() => setSelectedCat(cat.id)} className="menu-editor-category" aria-pressed={selectedCat === cat.id} style={{ touchAction: 'none', padding: '8px 16px', borderRadius: 20, border: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: selectedCat === cat.id ? 700 : 500, cursor: 'grab', background: selectedCat === cat.id ? t.purple : t.fill, color: selectedCat === cat.id ? '#fff' : t.text2, opacity: cat.is_visible ? 1 : 0.5 }}>
+                            <span>{cat.name}</span><small>{items.filter(item => item.category_id === cat.id).length}</small>
                           </button>
                         )}
                       </Sortable>
                     ))}
                   </SortableContext>
                 </DndContext>
-                <button onClick={() => setShowAddCat(true)} disabled={!activeMenuId} style={{ flexShrink: 0, padding: '8px 16px', borderRadius: 20, border: `1.5px dashed ${t.sep}`, fontFamily: 'inherit', fontSize: 14, fontWeight: 500, cursor: activeMenuId ? 'pointer' : 'not-allowed', background: 'transparent', color: t.text3, display: 'flex', alignItems: 'center', gap: 6, opacity: activeMenuId ? 1 : 0.5 }}>
+                <button onClick={() => setShowAddCat(true)} disabled={!activeMenuId} className="menu-editor-add-category" style={{ flexShrink: 0, padding: '8px 16px', borderRadius: 20, border: `1.5px dashed ${t.sep}`, fontFamily: 'inherit', fontSize: 14, fontWeight: 500, cursor: activeMenuId ? 'pointer' : 'not-allowed', background: 'transparent', color: t.text3, display: 'flex', alignItems: 'center', gap: 6, opacity: activeMenuId ? 1 : 0.5 }}>
                   <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 12 12"><path d="M6 1v10M1 6h10" /></svg>
                   {tr('me.category')}
                 </button>
-                <button onClick={() => { setImportError(''); setImportResult(null); setShowImport(true) }} disabled={!activeMenuId} style={{ flexShrink: 0, padding: '8px 16px', borderRadius: 20, border: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: activeMenuId ? 'pointer' : 'not-allowed', background: `${t.purple}18`, color: t.purple, display: 'flex', alignItems: 'center', gap: 6, opacity: activeMenuId ? 1 : 0.5 }}>
+                <button onClick={() => { setImportError(''); setImportResult(null); setShowImport(true) }} disabled={!activeMenuId} className="menu-editor-import" style={{ flexShrink: 0, padding: '8px 16px', borderRadius: 20, border: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: activeMenuId ? 'pointer' : 'not-allowed', background: `${t.purple}18`, color: t.purple, display: 'flex', alignItems: 'center', gap: 6, opacity: activeMenuId ? 1 : 0.5 }}>
                   <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><path d="M12 16V4M12 4l-4 4M12 4l4 4" /><path d="M4 16v3a2 2 0 002 2h12a2 2 0 002-2v-3" /></svg>
                   {tr('me.importFile')}
                 </button>
               </div>
+
+              <div className="menu-editor-products">
 
               {selectedCat && (() => {
                 const cat = categories.find(c => c.id === selectedCat); if (!cat) return null
@@ -735,7 +748,7 @@ export default function MenuEditor() {
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button onClick={() => toggleCatVisibility(cat.id)} style={{ padding: '6px 12px', borderRadius: 10, background: cat.is_visible ? `${t.green}18` : t.fill, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: cat.is_visible ? t.green : t.text3, fontFamily: 'inherit' }}>{cat.is_visible ? tr('me.visible') : tr('me.hidden')}</button>
-                      <button onClick={() => deleteCategory(cat.id)} style={{ width: 32, height: 32, borderRadius: 10, background: `${t.red}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <button onClick={() => deleteCategory(cat.id)} aria-label={tr('me.webDeleteCategory')} style={{ width: 32, height: 32, borderRadius: 10, background: `${t.red}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <svg width="14" height="14" fill="none" stroke={t.red} strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
                       </button>
                     </div>
@@ -754,13 +767,13 @@ export default function MenuEditor() {
                       <div style={{ fontSize: 13, marginBottom: 20 }}>{tr('me.catEmptySub')}</div>
                     </div>
                   ) : (
-                    <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
+                    <div className="menu-editor-item-list" style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
                       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onItemDragEnd}>
                         <SortableContext items={selectedCatItems.map(i => i.id)} strategy={verticalListSortingStrategy}>
                           {selectedCatItems.map((item, i) => (
                             <Sortable key={item.id} id={item.id} style={{ background: t.surface, borderBottom: i < selectedCatItems.length - 1 ? `0.5px solid ${t.sep2}` : 'none' }}>
                               {(listeners) => (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', opacity: item.is_visible ? 1 : 0.5 }}>
+                                <div className="menu-editor-item-row" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', opacity: item.is_visible ? 1 : 0.5 }}>
                                   <span {...listeners} style={{ touchAction: 'none', cursor: 'grab', color: t.text3, display: 'flex', alignItems: 'center', flexShrink: 0 }}><svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg></span>
                                   {item.image_url ? <img src={item.image_url} alt={item.name} style={{ width: 48, height: 48, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }} /> : <div style={{ width: 48, height: 48, borderRadius: 10, background: t.fill, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="20" height="20" fill="none" stroke={t.text4} strokeWidth="1.5" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg></div>}
                                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -772,9 +785,9 @@ export default function MenuEditor() {
                                     </div>
                                   </div>
                                   <div style={{ display: 'flex', gap: 6 }}>
-                                    <button onClick={() => toggleItemVisibility(item)} style={{ width: 32, height: 32, borderRadius: 10, background: item.is_visible ? `${t.green}18` : t.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="14" height="14" fill="none" stroke={item.is_visible ? t.green : t.text3} strokeWidth="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg></button>
-                                    <button onClick={() => openEditItem(item)} style={{ width: 32, height: 32, borderRadius: 10, background: `${t.blue}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="14" height="14" fill="none" stroke={t.blue} strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg></button>
-                                    <button onClick={() => deleteItem(item.id)} style={{ width: 32, height: 32, borderRadius: 10, background: `${t.red}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="14" height="14" fill="none" stroke={t.red} strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /></svg></button>
+                                    <button onClick={() => toggleItemVisibility(item)} aria-label={item.is_visible ? tr('me.webHideItem') : tr('me.webShowItem')} style={{ width: 32, height: 32, borderRadius: 10, background: item.is_visible ? `${t.green}18` : t.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="14" height="14" fill="none" stroke={item.is_visible ? t.green : t.text3} strokeWidth="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg></button>
+                                    <button onClick={() => openEditItem(item)} aria-label={tr('me.webEditItem')} style={{ width: 32, height: 32, borderRadius: 10, background: `${t.blue}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="14" height="14" fill="none" stroke={t.blue} strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg></button>
+                                    <button onClick={() => deleteItem(item.id)} aria-label={tr('me.webDeleteItem')} style={{ width: 32, height: 32, borderRadius: 10, background: `${t.red}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg width="14" height="14" fill="none" stroke={t.red} strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /></svg></button>
                                   </div>
                                 </div>
                               )}
@@ -784,7 +797,7 @@ export default function MenuEditor() {
                       </DndContext>
                     </div>
                   )}
-                  <button onClick={openAddItem} style={{ width: '100%', padding: '16px', borderRadius: 16, background: t.purple, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${t.purple}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  <button onClick={openAddItem} className="menu-editor-add-item" style={{ width: '100%', padding: '16px', borderRadius: 16, background: t.purple, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${t.purple}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                     <svg width="18" height="18" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 18 18"><path d="M9 1v16M1 9h16" /></svg>
                     {tr('me.addItem')}
                   </button>
@@ -800,6 +813,7 @@ export default function MenuEditor() {
                     : <button onClick={() => setTab('settings')} style={{ padding: '14px 32px', borderRadius: 14, background: t.purple, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>{tr('me.tabSettings')}</button>}
                 </div>
               )}
+              </div>
             </div>
           )}
 
@@ -1067,9 +1081,9 @@ export default function MenuEditor() {
       </div>
 
       {/* NAV: сегмент-строка над контентом (внутри shell) */}
-      <div style={{ order: 1, display: 'flex', gap: 2, background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, maxWidth: 1100, width: '100%', alignSelf: 'center', boxSizing: 'border-box' }}>
+      <div className="menu-editor-tabs" style={{ order: 1, display: 'flex', gap: 2, background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, maxWidth: 1100, width: '100%', alignSelf: 'center', boxSizing: 'border-box' }}>
         {TABS.map(tb => (
-          <button key={tb.id} onClick={() => setTab(tb.id as any)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: tab === tb.id ? 700 : 500, cursor: 'pointer', background: tab === tb.id ? t.surface : 'transparent', color: tab === tb.id ? t.purple : t.text3, boxShadow: tab === tb.id ? t.sh2 : 'none', transition: 'all .18s' }}>
+          <button key={tb.id} onClick={() => setTab(tb.id as any)} aria-current={tab === tb.id ? 'page' : undefined} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: tab === tb.id ? 700 : 500, cursor: 'pointer', background: tab === tb.id ? t.surface : 'transparent', color: tab === tb.id ? t.purple : t.text3, boxShadow: tab === tb.id ? t.sh2 : 'none', transition: 'all .18s' }}>
             {tb.label}
           </button>
         ))}
