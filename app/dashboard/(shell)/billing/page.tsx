@@ -23,7 +23,7 @@ const MODULE_NAMES: Record<ModuleId, string> = {
 export default function BillingPage() {
   const { t: tr, locale } = useI18n()
   const native = useIsNative()
-  const { restaurant, reload } = useDash()
+  const { restaurant, user, reload } = useDash()
 
   const status = restaurant?.subscription_status
   const endsAt = restaurant?.subscription_ends_at ? new Date(restaurant.subscription_ends_at) : null
@@ -39,12 +39,16 @@ export default function BillingPage() {
   const [ai, setAi] = useState(false)
   useEffect(() => {
     if (!restaurant) return
-    setPlan((PLAN_DEFS[restaurant.subscription_plan as PlanId] ? restaurant.subscription_plan : 'business') as PlanId)
+    const fromUrl = new URLSearchParams(window.location.search).get('plan')
+    const fromAccount = user?.user_metadata?.preferred_plan
+    const fromStorage = localStorage.getItem('mise_preferred_plan')
+    const preferred = [fromUrl, fromAccount, fromStorage].find((value): value is PlanId => value === 'starter' || value === 'business' || value === 'pro')
+    setPlan(!restaurant.subscription_id && preferred ? preferred : (PLAN_DEFS[restaurant.subscription_plan as PlanId] ? restaurant.subscription_plan : 'business') as PlanId)
     setInterval_(restaurant.billing_interval === 'year' ? 'year' : 'month')
     setMods(((restaurant.addon_modules || []) as ModuleId[]).filter(m => ALL_MODULES.includes(m)))
     setSeats(restaurant.extra_seats || 0)
     setAi(!!restaurant.addon_ai)
-  }, [restaurant?.id])
+  }, [restaurant?.id, user?.id])
 
   const planData = PLAN_DEFS[plan]
   // Аддон-модули валидны только сверх тарифа
@@ -235,11 +239,13 @@ export default function BillingPage() {
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--tx)', fontVariantNumeric: 'tabular-nums' }}>
                   €{(() => {
-                    const m = currentPlan.price
-                      + ((restaurant.addon_modules?.length || 0) * ADDON_PRICES.module)
-                      + ((restaurant.extra_seats || 0) * ADDON_PRICES.seat)
-                      + (restaurant.addon_ai ? ADDON_PRICES.ai : 0)
-                    return restaurant.billing_interval === 'year' ? Math.round(m * 12 * (1 - YEARLY_DISCOUNT)) : m
+                    const modules = restaurant.addon_modules?.length || 0
+                    const extraSeats = restaurant.extra_seats || 0
+                    const base = restaurant.billing_interval === 'year'
+                      ? yearly(currentPlan.price) + modules * yearly(ADDON_PRICES.module) + extraSeats * yearly(ADDON_PRICES.seat) + (restaurant.addon_ai ? yearly(ADDON_PRICES.ai) : 0)
+                      : currentPlan.price + modules * ADDON_PRICES.module + extraSeats * ADDON_PRICES.seat + (restaurant.addon_ai ? ADDON_PRICES.ai : 0)
+                    const discount = Math.max(0, Math.min(100, Number(restaurant.discount_pct) || 0))
+                    return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(Math.round(base * (1 - discount / 100) * 100) / 100)
                   })()}
                 </div>
                 <div style={{ color: 'var(--tx2)', fontSize: '.78rem' }}>{restaurant.billing_interval === 'year' ? tr('dash.perYear') : tr('dash.perMonth')}</div>
