@@ -9,11 +9,12 @@ import { db } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
 import {
-  Card, Btn, Badge, Field, SectionTitle, Segmented, SplitView, EmptyState, Spinner, Container,
+  Card, Btn, Badge, Field, Segmented, EmptyState, Spinner, Container,
   Table, StatTile, type TableColumn, type Tone,
 } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
 import { notify as pushNotify } from '@/lib/notifyClient'
+import './bookings.css'
 
 type Booking = {
   id: string; booking_date: string; booking_time?: string | null
@@ -67,9 +68,13 @@ export default function BookingsPage() {
   // ── БРОНИ ──
   const [visibleMonth, setVisibleMonth] = useState(() => new Date())
   const [selectedDate, setSelectedDate] = useState(() => new Date())
+  const monthRequest = useRef(0)
+  const dayRequest = useRef(0)
+  const bookingDetailRef = useRef<HTMLElement | null>(null)
   const [monthDays, setMonthDays] = useState<Set<string>>(new Set())
   const [dayBookings, setDayBookings] = useState<Booking[]>([])
   const [loadingDay, setLoadingDay] = useState(true)
+  const [bookingFilter, setBookingFilter] = useState<'all' | 'new' | 'arrived' | 'cancelled'>('all')
   const [selectedId, setSelectedId] = useState<string | 'new' | null>(null)
   const [form, setForm] = useState(blank)
   const [saving, setSaving] = useState(false)
@@ -78,20 +83,28 @@ export default function BookingsPage() {
   const dateKey = (d: Date) => fmtDate(d)
 
   const loadMonth = async (month: Date) => {
+    const request = ++monthRequest.current
     const first = new Date(month.getFullYear(), month.getMonth(), 1)
     const last = new Date(month.getFullYear(), month.getMonth() + 1, 0)
     const { data } = await db.from('bookings').select('booking_date').eq('restaurant_id', restaurantId)
       .gte('booking_date', dateKey(first)).lte('booking_date', dateKey(last))
-    setMonthDays(new Set((data || []).map((r: any) => r.booking_date)))
+    if (request === monthRequest.current) setMonthDays(new Set((data || []).map((r: any) => r.booking_date)))
   }
 
   const loadDay = async (date: Date) => {
+    const request = ++dayRequest.current
     setLoadingDay(true)
+    setDayBookings([])
     const { data } = await db.from('bookings').select('*').eq('restaurant_id', restaurantId)
       .eq('booking_date', dateKey(date)).order('booking_time', { ascending: true })
+    if (request !== dayRequest.current) return
     setDayBookings(data || [])
     setLoadingDay(false)
   }
+
+  useEffect(() => {
+    if (selectedId && window.innerWidth <= 1300) bookingDetailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [selectedId])
 
   useEffect(() => { if (restaurantId) { loadMonth(visibleMonth); loadDay(selectedDate) } }, [restaurantId])
 
@@ -100,7 +113,14 @@ export default function BookingsPage() {
     setVisibleMonth(m); loadMonth(m)
   }
   const selectDay = (d: Date) => {
-    setSelectedDate(d); setSelectedId(null); loadDay(d)
+    setSelectedDate(d); setSelectedId(null); setBookingFilter('all'); loadDay(d)
+  }
+
+  const goToday = () => {
+    const today = new Date()
+    setVisibleMonth(today)
+    loadMonth(today)
+    selectDay(today)
   }
 
   const startNew = () => { setForm(blank); setSelectedId('new'); setDeleteConfirm(false) }
@@ -297,26 +317,56 @@ export default function BookingsPage() {
     { value: 'cancelled', label: tr('bk.stCancelled') },
   ]
   const formStatusBucket = bkBucket(form.status)
+  const bookingCounts = {
+    all: dayBookings.length,
+    new: dayBookings.filter(b => bkBucket(b.status) === 'new').length,
+    arrived: dayBookings.filter(b => bkBucket(b.status) === 'arrived').length,
+    cancelled: dayBookings.filter(b => bkBucket(b.status) === 'cancelled').length,
+  }
+  const visibleDayBookings = bookingFilter === 'all' ? dayBookings : dayBookings.filter(b => bkBucket(b.status) === bookingFilter)
 
   return (
     <Container size="wide">
-      <SectionTitle title={tr('dash.navBookings')} sub={tr('bk.sub')}
-        right={<Segmented small value={tab} onChange={v => setTab(v as any)}
-          options={[{ value: 'bookings', label: tr('bk.tabBookings') }, { value: 'guests', label: tr('bk.tabGuests') }, { value: 'reviews', label: tr('bk.tabReviews') }]} />} />
+      <div className="bookings-header">
+        <div>
+          <h1>{tr('dash.navBookings')}</h1>
+          <p>{tr('bk.sub')}</p>
+        </div>
+        <Segmented small value={tab} onChange={v => setTab(v as 'bookings' | 'guests' | 'reviews')}
+          options={[{ value: 'bookings', label: tr('bk.tabBookings') }, { value: 'guests', label: tr('bk.tabGuests') }, { value: 'reviews', label: tr('bk.tabReviews') }]} />
+      </div>
 
       {tab === 'bookings' ? (
-        <SplitView
-          masterWidth={340}
-          master={
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <>
+          <div className="bookings-day-head">
+            <div>
+              <div className="bookings-day-title">{selectedDate.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+              <div className="bookings-day-sub">{tr('bk.tabBookings')} · {bookingCounts.all}</div>
+            </div>
+            <Btn onClick={startNew}>{tr('bk.newBooking')}</Btn>
+          </div>
+          <div className="bookings-summary">
+            {([
+              { id: 'all', label: tr('bk.tabBookings'), count: bookingCounts.all },
+              { id: 'new', label: tr('bk.stWaiting'), count: bookingCounts.new },
+              { id: 'arrived', label: tr('bk.stArrived'), count: bookingCounts.arrived },
+            ] as const).map(item => (
+              <Card key={item.id} style={{ minWidth: 0 }}>
+                <div className="bookings-summary-label">{item.label}</div>
+                <div className="bookings-summary-value">{loadingDay ? '—' : item.count}</div>
+              </Card>
+            ))}
+          </div>
+          <div className={`bookings-workspace${selectedId ? ' bookings-workspace--detail' : ''}`}>
+            <aside className="bookings-calendar">
               {/* Календарь */}
               <Card pad={14}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <button onClick={() => changeMonth(-1)} className="ui-press" style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--fill)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx2)' }}>
+                  <button onClick={() => changeMonth(-1)} aria-label={tr('bk.prevMonth')} className="ui-press" style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--fill)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx2)' }}>
                     <svg width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 8 14"><path d="M7 1L1 7l6 6" /></svg>
                   </button>
                   <div style={{ fontSize: '.85rem', fontWeight: 700, color: 'var(--tx)', textTransform: 'capitalize' }}>{monthLabel}</div>
-                  <button onClick={() => changeMonth(1)} className="ui-press" style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--fill)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx2)' }}>
+                  <button onClick={() => changeMonth(1)} aria-label={tr('bk.nextMonth')} className="ui-press" style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--fill)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx2)' }}>
                     <svg width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6" /></svg>
                   </button>
                 </div>
@@ -331,7 +381,7 @@ export default function BookingsPage() {
                     const isSelected = key === dateKey(selectedDate)
                     const isToday = key === dateKey(new Date())
                     return (
-                      <button key={i} onClick={() => selectDay(d)} className="ui-press" style={{
+                      <button key={i} onClick={() => selectDay(d)} aria-label={d.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' })} aria-pressed={isSelected} className="ui-press" style={{
                         aspectRatio: '1', borderRadius: 8, border: isToday && !isSelected ? '1px solid var(--accent)' : 'none',
                         background: isSelected ? 'var(--accent)' : 'transparent', color: isSelected ? '#fff' : 'var(--tx)',
                         fontSize: '.78rem', fontWeight: isSelected ? 700 : 500, cursor: 'pointer', fontFamily: 'inherit',
@@ -344,28 +394,41 @@ export default function BookingsPage() {
                   })}
                 </div>
               </Card>
+              <Btn variant="gray" onClick={goToday} full>{tr('dash.shiftsToday')}</Btn>
+            </aside>
 
-              {/* Список дня */}
-              <Btn onClick={startNew} full>{tr('bk.newBooking')}</Btn>
-              {loadingDay ? <Spinner compact /> : dayBookings.length === 0 ? (
-                <Card><div style={{ textAlign: 'center', padding: '16px 0', color: 'var(--tx2)', fontSize: '.85rem' }}>{tr('bk.noneDay')}</div></Card>
+            <section className="bookings-list" aria-label={tr('bk.tabBookings')}>
+              <div className="bookings-list-head">
+                <h2>{tr('bk.tabBookings')}</h2>
+                <span>{bookingCounts.all}</span>
+              </div>
+              <div className="bookings-filters" role="group" aria-label={tr('bk.status')}>
+                {([
+                  { id: 'all', label: tr('bk.all'), count: bookingCounts.all },
+                  { id: 'new', label: tr('bk.stWaiting'), count: bookingCounts.new },
+                  { id: 'arrived', label: tr('bk.stArrived'), count: bookingCounts.arrived },
+                  { id: 'cancelled', label: tr('bk.stCancelled'), count: bookingCounts.cancelled },
+                ] as const).map(item => (
+                  <button key={item.id} type="button" aria-pressed={bookingFilter === item.id}
+                    onClick={() => setBookingFilter(item.id)} className="bookings-filter">
+                    {item.label} <span>{item.count}</span>
+                  </button>
+                ))}
+              </div>
+              {loadingDay ? <Spinner compact /> : visibleDayBookings.length === 0 ? (
+                <div className="bookings-list-empty">{dayBookings.length === 0 ? tr('bk.noneDay') : tr('bk.noneFilter')}</div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {dayBookings.map(b => {
+                <div className="bookings-rows">
+                  {visibleDayBookings.map(b => {
                     const st = statusOf(b.status)
                     const on = selectedId === b.id
                     return (
-                      <button key={b.id} onClick={() => startEdit(b)} className="ui-press" style={{
-                        display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 12,
-                        border: on ? '1.5px solid var(--accent)' : 'var(--hairline)', background: on ? 'var(--accent-soft)' : 'var(--surface)',
-                        cursor: 'pointer', textAlign: 'left', width: '100%', fontFamily: 'inherit',
-                      }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '.85rem', fontWeight: 600, color: 'var(--tx)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {b.booking_time ? `${b.booking_time} · ` : ''}{b.guest_name || tr('bk.namePh')}
-                          </div>
-                          <div style={{ fontSize: '.74rem', color: 'var(--tx3)', marginTop: 1 }}>
-                            {[b.guests_count ? `${b.guests_count}` : null, b.table_label ? `${tr('bk.table')} ${b.table_label}` : null].filter(Boolean).join(' · ')}
+                      <button key={b.id} onClick={() => startEdit(b)} className={`ui-press bookings-row${on ? ' bookings-row--selected' : ''}`}>
+                        <span className="bookings-row-time">{b.booking_time || '—'}</span>
+                        <div className="bookings-row-body">
+                          <div className="bookings-row-name">{b.guest_name || tr('bk.namePh')}</div>
+                          <div className="bookings-row-meta">
+                            {[b.guests_count ? `${tr('bk.guestsCount')}: ${b.guests_count}` : null, b.table_label ? `${tr('bk.table')} ${b.table_label}` : null].filter(Boolean).join(' · ')}
                           </div>
                         </div>
                         <Badge tone={st.tone}>{tr(st.label)}</Badge>
@@ -374,14 +437,14 @@ export default function BookingsPage() {
                   })}
                 </div>
               )}
-            </div>
-          }
-          detail={selectedId ? (
+            </section>
+
+            {selectedId && <aside className="bookings-detail" ref={bookingDetailRef}>
             <Card>
               <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)', marginBottom: 14 }}>
                 {selectedId === 'new' ? tr('bk.newBooking') : tr('bk.status')}
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+              <div className="bookings-form-grid">
                 <Field label={tr('bk.name')} value={form.guest_name} onChange={v => setForm({ ...form, guest_name: v })} placeholder={tr('bk.namePh')} />
                 <Field label={tr('bk.phone')} value={form.phone} onChange={v => setForm({ ...form, phone: v })} type="tel" />
                 <Field label={tr('bk.time')} value={form.booking_time} onChange={v => setForm({ ...form, booking_time: v })} type="time" />
@@ -415,13 +478,9 @@ export default function BookingsPage() {
                 </div>
               )}
             </Card>
-          ) : (
-            <EmptyState
-              icon={<svg width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4" /></svg>}
-              title={tr('bk.selectPrompt')} sub={tr('bk.selectPromptSub')}
-            />
-          )}
-        />
+            </aside>}
+          </div>
+        </>
       ) : tab === 'guests' ? (
         <div>
           {allBookings === null ? <Spinner /> : (

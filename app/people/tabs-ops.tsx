@@ -538,9 +538,9 @@ export function PurchaseTab({ me, isManager, accent, t, toast }: { me: any; isMa
   )
 }
 
-export function OpsTab({ me, isManager, restaurantId, accent, t, toast }: { me: any; isManager: boolean; restaurantId: string; accent: string; t: any; toast: (m: string) => void }) {
+export function OpsTab({ me, isManager, restaurantId, accent, t, toast, initialView = 'stop' }: { me: any; isManager: boolean; restaurantId: string; accent: string; t: any; toast: (m: string) => void; initialView?: 'stop' | 'orders' | 'tech' }) {
   const { t: tr } = useI18n()
-  const [view, setView] = useState<'stop' | 'orders' | 'tech'>('stop')
+  const [view, setView] = useState<'stop' | 'orders' | 'tech'>(initialView)
   const [currency, setCurrency] = useState('€')
   const [ordersEnabled, setOrdersEnabled] = useState(false)
 
@@ -549,9 +549,12 @@ export function OpsTab({ me, isManager, restaurantId, accent, t, toast }: { me: 
       const r = Array.isArray(data) ? data[0] : data
       if (r?.currency) setCurrency(r.currency)
     })
-    db.from('menu_settings').select('allow_orders').limit(1).then(({ data }: any) => {
-      const r = Array.isArray(data) ? data[0] : data
-      setOrdersEnabled(!!r?.allow_orders)
+    Promise.all([
+      db.from('menus').select('allow_orders, is_published'),
+      db.from('menu_settings').select('allow_orders').limit(1),
+      db.from('menu_orders').select('id').eq('status', 'new').limit(1),
+    ]).then(([menus, legacy, pending]) => {
+      setOrdersEnabled((menus.data || []).some((m: any) => m.is_published && m.allow_orders) || !!legacy.data?.[0]?.allow_orders || (pending.data || []).length > 0)
     })
   }, [])
 
@@ -578,4 +581,3 @@ export function OpsTab({ me, isManager, restaurantId, accent, t, toast }: { me: 
     </div>
   )
 }
-

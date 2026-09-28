@@ -27,9 +27,15 @@ const NAV_MODULES: { id: string; label: string; href: string; module?: ModuleId 
 const NAV_SERVICE: { id: string; label: string; href: string }[] = [
   { id: 'team',          label: 'dash.navTeam',          href: '/dashboard/team' },
   { id: 'notifications', label: 'dash.navNotifications', href: '/dashboard/notifications' },
-  { id: 'settings',      label: 'dash.navSettings',      href: '/dashboard/settings' },
+  { id: 'settings',      label: 'dash.navParameters',    href: '/dashboard/settings' },
   { id: 'billing',       label: 'dash.navBilling',       href: '/dashboard/billing' },
 ]
+const NAV_GROUPS = [
+  { id: 'today', label: 'dash.groupToday', items: [NAV_MODULES[0], NAV_MODULES[1], NAV_MODULES[6], NAV_SERVICE[1]] },
+  { id: 'analysis', label: 'dash.groupAnalysis', items: [NAV_MODULES[2]] },
+  { id: 'management', label: 'dash.groupManagement', items: [NAV_MODULES[3], NAV_MODULES[4], NAV_MODULES[5], NAV_MODULES[7], NAV_SERVICE[0]] },
+  { id: 'settings', label: 'dash.navSettings', items: [NAV_SERVICE[2], NAV_SERVICE[3]] },
+] as const
 
 function Shell({ children }: { children: React.ReactNode }) {
   const { t: tr } = useI18n()
@@ -41,11 +47,25 @@ function Shell({ children }: { children: React.ReactNode }) {
   // с SSR-HTML и роняет гидрацию (сервер false, клиент true).
   const [showSplash, setShowSplash] = useState(false)
   const [sideCollapsed, setSideCollapsed] = useState(false)
+  const [openGroups, setOpenGroups] = useState<string[]>(['today'])
+  const [closedActivePath, setClosedActivePath] = useState<string | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
   useEffect(() => {
     if (!sessionStorage.getItem('mise_splash_shown')) setShowSplash(true)
     if (localStorage.getItem('mise_dash_side_collapsed') === '1') setSideCollapsed(true)
+    try {
+      const saved = JSON.parse(localStorage.getItem('mise_dash_open_groups') || 'null')
+      if (Array.isArray(saved)) setOpenGroups(saved.filter((id): id is string => typeof id === 'string'))
+    } catch {}
   }, [])
+  const activeGroup = NAV_GROUPS.find(group => group.items.some(item => item.href === pathname))?.id
+  const isGroupOpen = (id: string) => openGroups.includes(id) || (activeGroup === id && closedActivePath !== pathname)
+  const toggleGroup = (id: string) => {
+    const next = isGroupOpen(id) ? openGroups.filter(group => group !== id) : [...openGroups, id]
+    if (activeGroup === id) setClosedActivePath(isGroupOpen(id) ? pathname : null)
+    setOpenGroups(next)
+    localStorage.setItem('mise_dash_open_groups', JSON.stringify(next))
+  }
   const toggleSide = () => setSideCollapsed(c => {
     const next = !c
     localStorage.setItem('mise_dash_side_collapsed', next ? '1' : '0')
@@ -140,13 +160,6 @@ function Shell({ children }: { children: React.ReactNode }) {
     )
   }
 
-  const SectionLabel = ({ children }: { children: React.ReactNode }) =>
-    sideCollapsed ? null : (
-      <div style={{ fontSize: '.62rem', fontWeight: 700, color: 'var(--tx3)', textTransform: 'uppercase', letterSpacing: '.08em', padding: '0 12px', marginBottom: 6 }}>
-        {children}
-      </div>
-    )
-
   const avatar = (size: number) => (
     <div style={{ width: size, height: size, borderRadius: size * 0.3, background: 'var(--fill)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: size * 0.42, fontWeight: 700, color: 'var(--tx2)' }}>
       {restaurant?.logo_url
@@ -212,16 +225,20 @@ function Shell({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
-          <SectionLabel>{tr('dash.secModules')}</SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {NAV_MODULES.map(item => <SideItem key={item.id} item={item} />)}
+          <div style={{ minHeight: 0, overflowY: 'auto', overflowX: 'hidden', flex: 1, display: 'flex', flexDirection: 'column', gap: sideCollapsed ? 10 : 8 }}>
+            {NAV_GROUPS.map(group => {
+              const open = isGroupOpen(group.id)
+              return <div key={group.id}>
+                {!sideCollapsed && <button type="button" onClick={() => toggleGroup(group.id)} aria-expanded={open} aria-controls={`dash-group-${group.id}`} className="ui-press" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minHeight: 36, padding: '7px 12px', border: 'none', borderRadius: 9, background: 'transparent', color: 'var(--tx3)', fontFamily: 'inherit', fontSize: '.66rem', fontWeight: 750, letterSpacing: '.07em', textTransform: 'uppercase', cursor: 'pointer' }}>
+                  {tr(group.label)}
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform .18s ease' }}><path d="m2.5 4.5 3.5 3 3.5-3" /></svg>
+                </button>}
+                <div id={`dash-group-${group.id}`} hidden={!sideCollapsed && !open} style={{ display: !sideCollapsed && !open ? 'none' : 'flex', flexDirection: 'column', gap: 2, paddingLeft: sideCollapsed ? 0 : 8 }}>
+                  {group.items.map(item => <SideItem key={item.id} item={item} badge={item.id === 'notifications' ? unseen : 0} />)}
+                </div>
+              </div>
+            })}
           </div>
-          <div style={{ height: 1, background: 'var(--sep-c)', margin: sideCollapsed ? '10px 8px' : '14px 12px' }} />
-          <SectionLabel>{tr('dash.secService')}</SectionLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {NAV_SERVICE.map(item => <SideItem key={item.id} item={item} badge={item.id === 'notifications' ? unseen : 0} />)}
-          </div>
-          <div style={{ flex: 1 }} />
 
           {/* Аккаунт */}
           {sideCollapsed ? (

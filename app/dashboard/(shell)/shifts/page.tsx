@@ -11,6 +11,7 @@ import { useI18n } from '@/lib/i18n'
 import { fmtDate, fv, displayDate, dd } from '@/lib/format'
 import { Card, Btn, Badge, EmptyState, Spinner, SectionTitle, Container, Table, type TableColumn, inputStyle } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
+import './shifts.css'
 
 type Shift = {
   id: string; date: string; status: string
@@ -359,8 +360,9 @@ export default function ShiftsPage() {
     await loadHistory()
   }
 
-  const { ink, catTotal, empExtraTotal, debtTotal, balance } = calc()
+  const { ink, catTotal, empExtraTotal, debtTotal, totalExp, balance } = calc()
   const netExpense = catTotal + empExtraTotal + debtTotal
+  const totalIncome = (parseFloat(income) || 0) + (parseFloat(incomeCard) || 0)
   const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
   const dowRaw = currentDate.toLocaleDateString(locale, { weekday: 'long' })
   const dowName = dowRaw.charAt(0).toUpperCase() + dowRaw.slice(1)
@@ -369,6 +371,7 @@ export default function ShiftsPage() {
     { key: 'date', label: tr('mg.sumDate'), sortable: true, render: s => displayDate(new Date(s.date + 'T00:00:00')) },
     { key: 'status', label: tr('mg.secRegister'), render: s => <Badge tone={s.status === 'open' ? 'ok' : 'neutral'}>{s.status === 'open' ? tr('mg.statusOpen') : tr('mg.statusClosed')}</Badge> },
     { key: 'income', label: tr('mg.cash'), align: 'right', sortable: true, sortValue: s => s.income || 0, render: s => `€${fv(s.income || 0)}` },
+    { key: 'income_card', label: tr('mg.sumCard'), align: 'right', sortable: true, sortValue: s => s.income_card || 0, render: s => `€${fv(s.income_card || 0)}` },
     { key: 'total_expense', label: tr('mg.expense'), align: 'right', sortable: true, sortValue: s => s.total_expense || 0, render: s => `€${fv(s.total_expense || 0)}` },
     {
       key: 'closing_balance', label: tr('mg.cellBalance'), align: 'right', sortable: true, sortValue: s => s.closing_balance || 0,
@@ -384,7 +387,7 @@ export default function ShiftsPage() {
       <SectionTitle title={tr('dash.navShifts')} sub={tr('dash.shiftsSub')} />
 
       {/* ── ДАТА + СТАТУС ── */}
-      <Card style={{ marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+      <Card style={{ marginBottom: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button onClick={() => changeDate(-1)} className="ui-press" style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--fill)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx)' }}>
             <svg width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" viewBox="0 0 8 14"><path d="M7 1L1 7l6 6" /></svg>
@@ -402,6 +405,26 @@ export default function ShiftsPage() {
 
       {err && <div style={{ background: 'var(--danger-soft)', color: 'var(--danger)', borderRadius: 12, padding: '10px 14px', marginBottom: 14, fontSize: '.85rem' }}>{err}</div>}
 
+      {!loadingDay && shift && (
+        <div className="shifts-summary" aria-label={tr('dash.navShifts')}>
+          <Card style={{ minWidth: 0 }}>
+            <div className="shifts-summary-label">{tr('mg.totalIncome')}</div>
+            <div className="shifts-summary-value">€{fv(totalIncome)}</div>
+            <div className="shifts-summary-note">{tr('mg.cash')} €{fv(parseFloat(income) || 0)} · {tr('mg.sumCard')} €{fv(parseFloat(incomeCard) || 0)}</div>
+          </Card>
+          <Card style={{ minWidth: 0 }}>
+            <div className="shifts-summary-label">{tr('mg.registerEnd')}</div>
+            <div className="shifts-summary-value" style={{ color: balance < 0 ? 'var(--danger)' : 'var(--tx)' }}>€{fv(balance)}</div>
+            <div className="shifts-summary-note">{tr('mg.cellIn')} €{fv(shift.opening_balance || 0)} · {tr('mg.cardHint')}</div>
+          </Card>
+          <Card style={{ minWidth: 0 }}>
+            <div className="shifts-summary-label">{tr('mg.sumTotalExpense')}</div>
+            <div className="shifts-summary-value">€{fv(totalExp)}</div>
+            <div className="shifts-summary-note">{tr('mg.expense')} €{fv(netExpense)} · {tr('mg.cellInk')} €{fv(ink)}</div>
+          </Card>
+        </div>
+      )}
+
       {loadingDay ? <Spinner /> : !shift ? (
         <Card style={{ marginBottom: 18 }}>
           <EmptyState
@@ -412,9 +435,9 @@ export default function ShiftsPage() {
         </Card>
       ) : (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.4fr) minmax(300px,1fr)', gap: 14, marginBottom: 14, opacity: locked ? .7 : 1 }}>
+          <div className="shifts-editor" style={{ opacity: locked ? .7 : 1 }}>
             {/* ЛЕВАЯ КОЛОНКА: сотрудники + расходы */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="shifts-editor-column">
               <Card>
                 <div style={{ fontWeight: 700, fontSize: '.85rem', color: 'var(--tx)', marginBottom: 4 }}>{tr('mg.secStaff')}</div>
                 {employees.map(emp => {
@@ -502,7 +525,7 @@ export default function ShiftsPage() {
             </div>
 
             {/* ПРАВАЯ КОЛОНКА: инкассация + касса */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="shifts-editor-column">
               <Card>
                 <div style={{ fontWeight: 700, fontSize: '.85rem', color: 'var(--tx)', marginBottom: 4 }}>{tr('mg.secCollection')}</div>
                 <div style={row}>
@@ -598,7 +621,7 @@ export default function ShiftsPage() {
       )}
 
       {/* ── ИСТОРИЯ ── */}
-      <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)', margin: '18px 0 10px' }}>{tr('dash.shiftsHistory')}</div>
+      <h2 className="shifts-history-title">{tr('dash.shiftsHistory')}</h2>
       {loadingHistory ? <Spinner compact /> : history.filter(s => s.id !== shift?.id).length === 0 ? (
         <Card><div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>{tr('dash.shiftsNoHistory')}</div></Card>
       ) : (

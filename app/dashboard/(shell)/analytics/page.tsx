@@ -1,7 +1,7 @@
 'use client'
 // Модуль Analytics внутри дашборд-shell: owner уже авторизован (Supabase),
 // PIN не нужен — рендерим тот же AnalyticsApp в embedded-режиме (rid).
-import AnalyticsApp from '@/app/analytics/page'
+import AnalyticsApp from '@/app/analytics/AnalyticsApp'
 import { useDash } from '@/components/dash/context'
 import { Spinner } from '@/components/ui'
 
