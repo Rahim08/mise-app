@@ -11,6 +11,7 @@ import { useI18n, tCurrent } from '@/lib/i18n'
 import { fmtDate, fv, dd, displayReason, businessDate } from '@/lib/format'
 import { computeAccruedToday } from '@/lib/analytics'
 import { resolveEmployeesForMonth, resolveSalaryFor } from '@/lib/salaryHistory'
+import './analytics-web.css'
 const COLORS = ['#34c759', '#ff3b30', '#007aff', '#ff9500', '#af52de', '#00c7be', '#ff6b35', '#5856d6']
 
 // Банк (Open Banking) — короткий список стран для поиска института в GoCardless
@@ -424,7 +425,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const embedded = !!rid
   // Desktop-режим внутри shell: контент шире мобильных 640px. Staff-приложение
   // (standalone /analytics на телефоне) не трогаем — там maxWidth всегда 640.
-  const contentMaxWidth = embedded ? 1100 : 640
+  const contentMaxWidth = embedded ? 1160 : 640
   const t = useTheme(embedded ? 'mise_dash_dark' : 'mise_ana_dark')
   const { t: tr, locale } = useI18n()
   const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1)
@@ -939,10 +940,10 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
             <StatCard label={tr('an.income')} rawValue={dayShift.income} value={`${currency}${fv(dayShift.income)}`} color={t.green} t={t} />
             <StatCard label={tr('an.expense')} rawValue={dayShift.total_expense} value={`${currency}${fv(dayShift.total_expense)}`} color={t.red} t={t} />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 16 }}>
+          <div className={embedded ? 'analytics-web-day-mini' : undefined} style={{ display: 'grid', gridTemplateColumns: embedded ? 'repeat(2,minmax(0,1fr))' : 'repeat(4,1fr)', gap: 8, marginBottom: 16 }}>
             <StatCard label={tr('an.cOpen')} value={`${currency}${fv(dayShift.opening_balance)}`} rawValue={dayShift.opening_balance} color={t.blue} sm t={t} />
-            <StatCard label={tr('an.income')} value={`${currency}${fv(dayShift.income)}`} rawValue={dayShift.income} color={t.green} sm t={t} />
-            <StatCard label={tr('an.expense')} value={`${currency}${fv(dayShift.total_expense)}`} rawValue={dayShift.total_expense} color={t.red} sm t={t} />
+            {!embedded && <StatCard label={tr('an.income')} value={`${currency}${fv(dayShift.income)}`} rawValue={dayShift.income} color={t.green} sm t={t} />}
+            {!embedded && <StatCard label={tr('an.expense')} value={`${currency}${fv(dayShift.total_expense)}`} rawValue={dayShift.total_expense} color={t.red} sm t={t} />}
             <StatCard label={tr('an.cKassa')} value={`${currency}${fv(dayShift.closing_balance)}`} rawValue={dayShift.closing_balance} color={t.blue} sm t={t} />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginBottom: 4 }}>
@@ -1063,16 +1064,18 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     return (
       <div>
         {/* Top stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-          <StatCard label={tr('an.income')} rawValue={totalIncome} value={`${currency}${fv(totalIncome)}`} color={t.green} pct={ip} sparkValues={incomeArr} t={t} />
+        <div className={embedded ? 'analytics-web-major-stats' : undefined} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+          <StatCard label={tr('an.income')} rawValue={totalIncome} value={`${currency}${fv(totalIncome)}`} color={t.green} sub={embedded ? (includeCard ? tr('an.cashCard') : tr('an.cashShort')) : undefined} pct={ip} sparkValues={incomeArr} t={t} />
           <StatCard label={tr('an.expenses')} rawValue={totalExpense} value={`${currency}${fv(totalExpense)}`} color={t.red} pct={ep} t={t} />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
+        <div className={embedded ? 'analytics-web-mini-stats' : undefined} style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
           <StatCard label={tr('an.shiftsCount')} value={String(shifts.length)} sm t={t} />
           <StatCard label={tr('an.cInkassShort')} rawValue={totalInkass} value={`${currency}${fv(totalInkass)}`} color={t.orange} sm t={t} />
           <StatCard label={tr('an.cKassa')} rawValue={trueCurrentBalance} value={`${currency}${fv(trueCurrentBalance)}`} color={t.blue} sm t={t} />
         </div>
 
+        <div className={embedded ? `analytics-web-month-columns${top5.length ? '' : ' analytics-web-month-columns--single'}` : undefined}>
+        <div>
         {/* Нал vs безнал: соотношение продаж за месяц (инкассация — всегда только нал) */}
         {(() => {
           const cash = shiftsRaw.reduce((s: number, sh: any) => s + (sh.income || 0), 0)
@@ -1118,6 +1121,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
             </div>
           </div>
         </>}
+        </div>
+        <div>
 
         {/* Donut */}
         {top5.length > 0 && <>
@@ -1131,6 +1136,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
             {top5.map(([n, v], i) => <HBar key={n} name={n} val={v} max={maxV} color={COLORS[i % COLORS.length]} currency={currency} t={t} />)}
           </div>
         </>}
+        </div>
+        </div>
 
         {cats.length > 0 && <>
           <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.allCategories')}</div>
@@ -1160,17 +1167,23 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
             <StatCard label={tr('an.lastIncome')} rawValue={lastShift?.income || 0} value={`${currency}${fv(lastShift?.income || 0)}`} color={t.green} sub={lastShift ? dd(lastShift.date) : undefined} t={t} />
           </div>
           {filled.length > 1 && <>
+            <div className={embedded ? 'analytics-web-kassa-charts' : undefined}>
+            <div>
             <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.kassaBalance')}</div>
             <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
               <div style={{ padding: '14px 14px 8px', color: t.text }}>
                 <LineChartSVG labels={filled.map((s: any) => dd(s.date))} values={balArr} color={t.blue} currency={currency} />
               </div>
             </div>
+            </div>
+            <div>
             <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.incomeExpense')}</div>
             <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
               <div style={{ padding: '14px 14px 8px', color: t.text }}>
                 <BarChartSVG labels={filled.map((s: any) => dd(s.date))} income={filled.map((s: any) => s.income || 0)} expense={filled.map((s: any) => s.total_expense || 0)} currency={currency} />
               </div>
+            </div>
+            </div>
             </div>
           </>}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 4px 8px' }}>
@@ -1539,7 +1552,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   ] as const
 
   return (
-    <div style={embedded
+    <div className={embedded ? 'analytics-web' : undefined} style={embedded
       ? { display: 'flex', flexDirection: 'column', fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }
       : { height: '100vh', overflow: 'hidden', background: t.bg, fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }}>
       <style>{`
@@ -1547,15 +1560,19 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
         @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
         @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.2);opacity:.6}}
         @keyframes orbit{from{transform:rotate(0deg) translateX(7px) rotate(0deg)}to{transform:rotate(360deg) translateX(7px) rotate(-360deg)}}
-        * { box-sizing: border-box }
-        ::-webkit-scrollbar { display: none }
+        ${embedded ? '.analytics-web *' : '*'} { box-sizing: border-box }
+        ${embedded ? '' : '::-webkit-scrollbar { display: none }'}
       `}</style>
 
       {/* HEADER: standalone — фикс-шапка с брендом и темой; embedded — строка контролов в потоке */}
-      <div style={embedded
-        ? { order: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 12, maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center', boxSizing: 'border-box' as const }
+      <div className={embedded ? 'analytics-web-header' : undefined} style={embedded
+        ? { order: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 20, maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center', boxSizing: 'border-box' as const }
         : { position: 'fixed', top: 0, left: 0, right: 0, zIndex: 300, height: 56, background: t.hbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderBottom: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
         {!embedded && <AppSwitchBrand name="Analytics" accent={t.green} color={t.text} muted={t.text3} size={18} />}
+        {embedded && <div>
+          <h1>{tr('an.webTitle')}</h1>
+          <p>{tr('an.webSub')}</p>
+        </div>}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {!embedded && <button onClick={t.toggle} style={{ width: 36, height: 36, borderRadius: '50%', background: t.fill, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text }}>
             {t.dark
@@ -1563,11 +1580,11 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
               : <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
             }
           </button>}
-          <button onClick={() => setShowMonthPicker(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.green}18`, borderRadius: 20, padding: '7px 14px', cursor: 'pointer', fontSize: 14, fontWeight: 600, color: t.green, border: 'none', fontFamily: 'inherit' }}>
+          <button onClick={() => setShowMonthPicker(true)} aria-label={tr('an.monthPick')} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.green}18`, borderRadius: 20, padding: '7px 14px', cursor: 'pointer', fontSize: 14, fontWeight: 600, color: t.green, border: 'none', fontFamily: 'inherit', minHeight: 40 }}>
             {mShort(currentDate)} {currentDate.getFullYear()}
             <svg width="10" height="6" fill="none" stroke={t.green} strokeWidth="2.5" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" /></svg>
           </button>
-          <button onClick={() => isPro ? setShowAI(true) : alert(tr('an.aiProOnly'))} style={{ width: 36, height: 36, borderRadius: '50%', background: `${t.green}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' as const, opacity: isPro ? 1 : 0.55 }}>
+          <button onClick={() => isPro ? setShowAI(true) : alert(tr('an.aiProOnly'))} aria-label="Mise AI" style={{ width: 40, height: 40, borderRadius: '50%', background: `${t.green}18`, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' as const, opacity: isPro ? 1 : 0.55 }}>
             <div style={{ position: 'relative' as const, width: 20, height: 20 }}>
               <div style={{ position: 'absolute' as const, inset: 0, borderRadius: '50%', border: `1.5px solid ${t.green}66`, animation: 'pulse 2s ease-in-out infinite' }} />
               <div style={{ position: 'absolute' as const, inset: 3, borderRadius: '50%', background: t.green, animation: 'pulse 2s ease-in-out infinite .3s' }} />
@@ -1585,7 +1602,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
 
           {tab === 'period' && (
             <>
-              <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
+              <div className={embedded ? 'analytics-web-mode' : undefined} style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
                 {(['day', 'week', 'month'] as const).map(m => (
                   <button key={m} onClick={() => setPeriodMode(m)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: periodMode === m ? 700 : 500, cursor: 'pointer', background: periodMode === m ? t.surface : 'transparent', color: periodMode === m ? t.green : t.text3, boxShadow: periodMode === m ? t.sh2 : 'none', transition: 'all .18s' }}>
                     {m === 'day' ? tr('an.day') : m === 'week' ? tr('an.week') : tr('an.month')}
@@ -1612,7 +1629,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
 
           {tab === 'kassa' && (
             <>
-              <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
+              <div className={embedded ? 'analytics-web-mode' : undefined} style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
                 {(['kassa', 'inkass'] as const).map(m => (
                   <button key={m} onClick={() => setKassaMode(m)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: kassaMode === m ? 700 : 500, cursor: 'pointer', background: kassaMode === m ? t.surface : 'transparent', color: kassaMode === m ? t.green : t.text3, boxShadow: kassaMode === m ? t.sh2 : 'none', transition: 'all .18s' }}>
                     {m === 'kassa' ? tr('an.cKassa') : tr('an.cInkassShort')}
@@ -1812,16 +1829,16 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       </div>
 
       {/* NAV: standalone — фикс-бар снизу; embedded — сегмент-строка над контентом (order 1) */}
-      <div style={embedded
-        ? { order: 1, display: 'flex', gap: 2, background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center', boxSizing: 'border-box' as const }
+      <div className={embedded ? 'analytics-web-tabs' : undefined} role={embedded ? 'group' : undefined} aria-label={embedded ? tr('an.webSections') : undefined} style={embedded
+        ? { order: 1, display: 'flex', gap: 4, marginBottom: 24, maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center', boxSizing: 'border-box' as const }
         : { position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 300, height: 82, background: t.nbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderTop: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'flex-start', paddingTop: 10, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
         {TABS.map(tb => (
           embedded ? (
-            <button key={tb.id} onClick={() => setTab(tb.id as any)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: tab === tb.id ? 700 : 500, cursor: 'pointer', background: tab === tb.id ? t.surface : 'transparent', color: tab === tb.id ? t.green : t.text3, boxShadow: tab === tb.id ? t.sh2 : 'none', transition: 'all .18s' }}>
+            <button key={tb.id} aria-pressed={tab === tb.id} onClick={() => setTab(tb.id)} className="analytics-web-tab" style={{ color: tab === tb.id ? t.green : t.text3, borderColor: tab === tb.id ? t.green : 'transparent' }}>
               {tb.label}
             </button>
           ) : (
-            <button key={tb.id} onClick={() => setTab(tb.id as any)} style={{ flex: 1, display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: 3, cursor: 'pointer', color: tab === tb.id ? t.green : t.text3, border: 'none', background: 'none', fontFamily: 'inherit', padding: 0, fontSize: 10, fontWeight: tab === tb.id ? 700 : 500, transition: 'color .18s' }}>
+            <button key={tb.id} onClick={() => setTab(tb.id)} style={{ flex: 1, display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: 3, cursor: 'pointer', color: tab === tb.id ? t.green : t.text3, border: 'none', background: 'none', fontFamily: 'inherit', padding: 0, fontSize: 10, fontWeight: tab === tb.id ? 700 : 500, transition: 'color .18s' }}>
               <span style={{ transform: tab === tb.id ? 'scale(1.08)' : 'scale(1)', transition: 'transform .18s ease', display: 'flex' }}>{tb.icon(tab === tb.id)}</span>
               {tb.label}
             </button>

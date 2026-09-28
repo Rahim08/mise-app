@@ -2,15 +2,18 @@
 // Уведомления: одна лента — заказы, вызовы официанта, события подписки, остатки табака.
 // Перенесено из NotificationsTab старого dashboard/page.tsx.
 import { useEffect, useState, type ReactElement } from 'react'
+import { useRouter } from 'next/navigation'
 import { db } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
 import { renderNotify, renderCategory, renderSegments } from '@/lib/notifyStrings'
-import { Card, Container, SectionTitle } from '@/components/ui'
+import { Card, Container } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
 import { timeAgo } from '@/components/dash/shared'
+import './notifications.css'
 
 export default function NotificationsPage() {
   const { t: tr, locale } = useI18n()
+  const router = useRouter()
   const { restaurant } = useDash()
   const [rows, setRows] = useState<any[]>([])
   const [lowStock, setLowStock] = useState<any[]>([])
@@ -59,45 +62,58 @@ export default function NotificationsPage() {
     new: { label: 'pe.osNew', color: 'var(--warn)' }, in_progress: { label: 'pe.osInProgress', color: 'var(--accent)' },
     done: { label: 'pe.osDone', color: 'var(--ok)' }, cancelled: { label: 'pe.osCancelled', color: 'var(--tx3)' },
   }
+  const pendingOrders = rows.filter(o => o.status === 'new').length
+  const attentionCount = pendingOrders + lowStock.length + (status === 'past_due' ? 1 : 0)
+  const hasActivity = rows.length > 0 || journal.length > 0
 
   return (
     <Container size="normal">
-      <SectionTitle title={tr('dash.navNotifications')} sub={tr('dash.notifsSub')} />
+      <div className="notifications-head">
+        <h1>{tr('dash.navNotifications')}</h1>
+        <p>{tr('dash.notifsSub')}</p>
+      </div>
 
-      {status === 'past_due' && (
-        <Card style={{ marginBottom: 10, padding: '12px 16px', borderLeft: '3px solid var(--danger)' }}>
-          <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>{tr('dash.subPaymentFailed')}</div>
-          <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 1 }}>{tr('dash.stripeRetry')}</div>
-        </Card>
-      )}
+      {!loading && <section className="notifications-section" aria-label={tr('dash.notifAttention')}>
+        <div className="notifications-section-head">
+          <h2>{tr('dash.notifAttention')}</h2>
+          {attentionCount > 0 && <span className="notifications-count">{attentionCount}</span>}
+        </div>
+        {attentionCount === 0 ? (
+          <Card><div className="notifications-calm">{tr('dash.allGood')}</div></Card>
+        ) : (
+          <div className="notifications-attention">
+            {pendingOrders > 0 && <Card onClick={() => router.push('/dashboard/people?tab=orders')} style={{ minWidth: 0, borderLeft: '3px solid var(--warn)' }}>
+              <div className="notifications-attention-label">{tr('dash.notifPendingOrders')}</div>
+              <div className="notifications-attention-value">{pendingOrders}</div>
+              <div className="notifications-action">{tr('dash.notifOpenOrders')} <span aria-hidden="true">→</span></div>
+            </Card>}
+            {lowStock.length > 0 && <Card onClick={() => router.push('/dashboard/stash')} style={{ minWidth: 0, borderLeft: '3px solid var(--warn)' }}>
+              <div className="notifications-attention-label">{Number(lowStock[0].quantity_g || 0) <= 0 ? tr('dash.tobaccoOut') : tr('dash.tobaccoLow')}</div>
+              <div className="notifications-attention-value">{lowStock.length}</div>
+              <div className="notifications-attention-sub">{stockName(lowStock[0])} · {Math.round(Number(lowStock[0].quantity_g || 0))} {tr('dash.grams')}</div>
+              <div className="notifications-action">{tr('dash.notifOpenStock')} <span aria-hidden="true">→</span></div>
+            </Card>}
+            {status === 'past_due' && <Card onClick={() => router.push('/dashboard/billing')} style={{ minWidth: 0, borderLeft: '3px solid var(--danger)' }}>
+              <div className="notifications-attention-label">{tr('dash.subPaymentFailed')}</div>
+              <div className="notifications-attention-sub">{tr('dash.stripeRetry')}</div>
+              <div className="notifications-action">{tr('dash.notifOpenBilling')} <span aria-hidden="true">→</span></div>
+            </Card>}
+          </div>
+        )}
+      </section>}
 
-      {/* Проактивно: заканчивающийся табак (Stash) */}
-      {lowStock.slice(0, 5).map((s, i) => {
-        const out = Number(s.quantity_g || 0) <= 0
-        const c = out ? 'var(--danger)' : 'var(--warn)'
-        const soft = out ? 'var(--danger-soft)' : 'var(--warn-soft)'
-        return (
-          <Card key={`low-${i}`} style={{ marginBottom: 10, padding: '12px 16px', borderLeft: `3px solid ${c}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 34, height: 34, borderRadius: 10, background: soft, color: c, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: '.88rem', color: 'var(--tx)' }}>{out ? tr('dash.tobaccoOut') : tr('dash.tobaccoLow')}</div>
-                <div style={{ fontSize: '.78rem', color: 'var(--tx2)', marginTop: 1 }}>{stockName(s)} · {Math.round(Number(s.quantity_g || 0))} г</div>
-              </div>
-            </div>
-          </Card>
-        )
-      })}
+      <section className="notifications-section" aria-label={tr('dash.notifRecent')}>
+        <div className="notifications-section-head"><h2>{tr('dash.notifRecent')}</h2></div>
 
       {loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {[0, 1, 2].map(i => <div key={i} style={{ height: 64, borderRadius: 16, background: 'var(--fill)', animation: 'dashPulse 1.2s ease-in-out infinite' }} />)}
         </div>
-      ) : rows.length === 0 && lowStock.length === 0 && journal.length === 0 ? (
-        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>{tr('dash.quietNoNotifs')}</div></Card>
+      ) : !hasActivity ? (
+        <Card><div style={{ textAlign: 'center', padding: '28px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>{tr('dash.notifNoRecent')}</div></Card>
       ) : rows.length === 0 ? null : (
+        <>
+        <h3 className="notifications-list-title">{tr('dash.notifOrdersAndCalls')}</h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {rows.map(o => {
             const callKind: string | null = Array.isArray(o.items) ? (o.items[0]?.call ?? null) : null
@@ -111,7 +127,7 @@ export default function NotificationsPage() {
             }
             const CALL_LABEL: Record<string, string> = { waiter: tr('dash.waiterCall'), coal: tr('dash.coalCall'), water: tr('dash.waterCall') }
             return (
-              <Card key={o.id} style={{ padding: '12px 16px' }}>
+              <Card key={o.id} onClick={() => router.push('/dashboard/people?tab=orders')} style={{ padding: '12px 16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ width: 34, height: 34, borderRadius: 10, background: isCall ? 'var(--warn-soft)' : 'rgba(255,45,85,.12)', color: isCall ? 'var(--warn)' : 'var(--pink)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     {isCall
@@ -130,12 +146,13 @@ export default function NotificationsPage() {
             )
           })}
         </div>
+        </>
       )}
 
       {/* Журнал уведомлений владельца (notifications, to_owner) — явка, аудиты, кассы, закуп. */}
       {journal.length > 0 && (
         <>
-          <div style={{ fontSize: '.72rem', fontWeight: 700, color: 'var(--tx3)', textTransform: 'uppercase', letterSpacing: '.5px', margin: '18px 4px 8px' }}>{tr('dash.notifJournal')}</div>
+          <h3 className="notifications-list-title">{tr('dash.notifJournal')}</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {journal.map(n => (
               <Card key={n.id} style={{ padding: '12px 16px' }}>
@@ -154,6 +171,7 @@ export default function NotificationsPage() {
           </div>
         </>
       )}
+      </section>
     </Container>
   )
 }
