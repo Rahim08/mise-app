@@ -532,7 +532,7 @@ export default function BookingsPage() {
             <EmptyState
               icon={<svg width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0119 9.5C19 14.8 12 21 12 21z" /><circle cx="12" cy="9.5" r="2.4" /></svg>}
               title={tr('bk.rvNotConfigured')} sub={tr('bk.rvNotConfiguredSub')}
-              action={<Btn onClick={() => window.location.assign('/dashboard/settings')}>{tr('bk.rvGoSettings')}</Btn>}
+              action={<Btn onClick={() => window.location.assign('/dashboard/settings#reviews')}>{tr('bk.rvGoSettings')}</Btn>}
             />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
