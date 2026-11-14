@@ -32,9 +32,8 @@ struct ShiftsHubTab: View {
 /// «Проверки»: один ряд пилюль по типу контента — Смена | Восьмёрка (менеджер).
 /// Статистика — под кнопку-шторку, не постоянный третий ряд табов (Д5, флаттенинг по
 /// фидбеку юзера: 3 уровня вложенности читались как повторяющиеся подпункты).
-/// Д6: пилюля «Аудиты» скрыта из навигации по просьбе юзера (термин не понравился, разовые
-/// проверки пока не нужны) — AuditsTab/loadAudits остаются нетронутыми, просто не вызываются
-/// отсюда. Чтобы вернуть — восстановить showAudits/тег "audits"/case ниже.
+/// Д6: пилюля «Аудиты» скрыта по просьбе юзера; мёртвый AuditsTab удалён 2026-11-14 (пакет C),
+/// вернуть можно из git (коммит aa71612).
 struct ShiftAuditHub: View {
     @Bindable var m: PeopleModel
     @State private var showStats = false
@@ -65,7 +64,7 @@ struct ShiftAuditHub: View {
         }
         .sheet(isPresented: $showStats) {
             NavigationStack {
-                ScrollView { StatisticsSection(m: m, initialKind: m.checklistsSubTab == "walk" ? "walk" : m.checklistsSubTab == "audits" ? "audit" : "shift").padding(16) }
+                ScrollView { StatisticsSection(m: m, initialKind: m.checklistsSubTab == "walk" ? "walk" : "shift").padding(16) }
                     .navigationTitle(t("pe.statistics")).navigationBarTitleDisplayMode(.inline)
             }
         }
@@ -262,6 +261,7 @@ struct AttendanceTab: View {
 struct SwapsTab: View {
     @Bindable var m: PeopleModel
     @State private var showCreate = false
+    @State private var cancelling: SwapRequest?
     var body: some View {
         Group {
             if !m.swapsLoaded {
@@ -289,6 +289,13 @@ struct SwapsTab: View {
             }
         }
         .task(id: m.shiftsView) { if m.shiftsView == "swaps" && !m.swapsLoaded { await m.loadSwaps() } }
+        // Отмена запроса — с подтверждением (пакет C): кнопка рядом с карточкой, легко задеть.
+        .confirmationDialog(t("pe.confirmCancelSwap"), isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } }), titleVisibility: .visible) {
+            Button(t("pe.cancelReq"), role: .destructive) {
+                if let r = cancelling { Task { await m.swapCancel(r) } }
+                cancelling = nil
+            }
+        }
         .sheet(isPresented: $showCreate) { SwapCreateSheet(m: m) }
     }
 
@@ -319,7 +326,7 @@ struct SwapsTab: View {
                     actBtn(t("pe.declineBtn"), false) { Task { await m.swapPeerDecline(r) } }
                 }
             } else if r.status == "pending_peer" && iAmRequester {
-                actBtn(t("pe.cancelReq"), false) { Task { await m.swapCancel(r) } }
+                actBtn(t("pe.cancelReq"), false) { cancelling = r }
             } else if r.status == "peer_accepted" && m.isManager {
                 HStack(spacing: 8) {
                     actBtn(t("pe.approve"), true) { Task { await m.swapApprove(r) } }

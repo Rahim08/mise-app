@@ -27,16 +27,19 @@ export function MyShiftsTab({ myId, accent, t }: { myId: string; accent: string;
   const { t: tr } = useI18n()
   const [shifts, setShifts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
 
   useEffect(() => {
     const today = peopleToday(null)
     db.from('staff_schedules').select('*').eq('staff_id', myId).eq('published', true).gte('date', today).order('date')
-      .then(({ data }: any) => { setShifts(data || []); setLoading(false) })
+      .then(({ data, error }: any) => { setFailed(!!error); setShifts(data || []); setLoading(false) })
   }, [myId])
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
+  // Сбой загрузки ≠ «смен нет» (пакет C).
+  if (failed) return <div style={{ textAlign: 'center', padding: '28px 20px', color: t.text3, fontSize: 13 }}>{tr('pe.loadFailed')}</div>
   if (shifts.length === 0) return (
-    <div style={{ textAlign: 'center', padding: '60px 20px', color: t.text3 }}>
+    <div style={{ textAlign: 'center', padding: '28px 20px', color: t.text3 }}>
       <div style={{ width: 72, height: 72, borderRadius: 20, background: `${accent}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
         <svg width="34" height="34" fill="none" stroke={accent} strokeWidth="1.6" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
       </div>
@@ -97,12 +100,13 @@ export function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManag
     setLoading(true)
     const today = peopleToday(null)
     const from = fmtDate(addDays(new Date(), -14)); const to = fmtDate(addDays(new Date(), 60))
-    const [{ data: rq }, { data: st }, { data: sc }] = await Promise.all([
+    const [{ data: rq, error: e1 }, { data: st }, { data: sc, error: e2 }] = await Promise.all([
       // Лимит на растущую таблицу (ревью Д1).
       db.from('shift_swap_requests').select('*').order('created_at', { ascending: false }).limit(200),
       db.from('staff_directory').select('*').eq('is_active', true).order('name'),
       db.from('staff_schedules').select('*').gte('date', from).lte('date', to),
     ])
+    if (e1 || e2) { toast(tr('pe.loadFailed')); setLoading(false); return }
     setRequests(rq || []); setStaff(st || []); setSchedules(sc || []); setLoading(false)
   }
   useEffect(() => { load() }, [])
@@ -207,7 +211,7 @@ export function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManag
           </div>
         )}
         {r.status === 'pending_peer' && iAmRequester && (
-          <button onClick={() => setStatus(r, { status: 'cancelled' })} style={{ ...btnB(t), marginTop: 10, width: '100%' }}>{tr('pe.cancelRequest')}</button>
+          <button onClick={() => { if (window.confirm(tr('pe.confirmCancelSwap'))) setStatus(r, { status: 'cancelled' }) }} style={{ ...btnB(t), marginTop: 10, width: '100%' }}>{tr('pe.cancelRequest')}</button>
         )}
         {r.status === 'peer_accepted' && isManager && (
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
@@ -553,10 +557,8 @@ export type ChecklistFailDay = { date: string; role: string | null; items: strin
 // коллизия имён): один ряд пилюль по типу контента (Смена/Восьмёрка/Аудиты) вместо
 // пикера-в-пикере, статистика — под кнопку-шторку, а не постоянный третий ряд табов.
 // useOpsGate вызывается один раз здесь и прокидывается вниз (было — по разу на подраздел).
-// Д6: пилюля «Аудиты» скрыта из навигации по просьбе юзера (термин не понравился, разовые
-// проверки пока не нужны) — AdHocAuditsView/fetchHasRelevantAudits остаются в audits.tsx
-// нетронутыми, просто не вызываются отсюда. Чтобы вернуть — добавить audits обратно в PILLS,
-// импортировать AdHocAuditsView/fetchHasRelevantAudits и восстановить ветку рендера/гейт.
+// Д6: пилюля «Аудиты» скрыта из навигации по просьбе юзера. Мёртвые AdHocAuditsView и
+// fetchHasRelevantAudits удалены 2026-11-14 (пакет C) — вернуть можно из git (коммит aa71612).
 function ShiftAuditHub({ me, isManager, restaurantId, accent, t, toast, onGoCheckIn }: { me: any; isManager: boolean; restaurantId: string; accent: string; t: any; toast: (m: string) => void; onGoCheckIn?: () => void }) {
   const { t: tr } = useI18n()
   const myId = me.id || ''
@@ -606,10 +608,11 @@ function ShiftAuditHub({ me, isManager, restaurantId, accent, t, toast, onGoChec
 // вкладкой Manager (не сегментом здесь).
 export function ShiftsHub({ me, isManager, restaurantId, accent, t, toast, initialView = 'shifts', hidePersonalShifts = false }: { me: any; isManager: boolean; restaurantId: string; accent: string; t: any; toast: (m: string) => void; initialView?: 'shifts' | 'attendance' | 'audit' | 'swaps'; hidePersonalShifts?: boolean }) {
   const { t: tr } = useI18n()
-  const [view, setView] = useState<'shifts' | 'attendance' | 'audit' | 'swaps'>(initialView)
+  // Явка — наверху «Смен», как на iOS (аудит People 2026-11-14, пакет C): раньше «Я пришёл»
+  // пряталось во втором сегменте. «Мои смены» — под явкой в том же экране.
+  const [view, setView] = useState<'shifts' | 'audit' | 'swaps'>(initialView === 'attendance' ? 'shifts' : initialView)
   const views: [string, string][] = [
-    ...(!hidePersonalShifts ? [['shifts', tr('pe.myShifts')] as [string, string]] : []),
-    ['attendance', tr('pe.attendance')],
+    ['shifts', hidePersonalShifts ? tr('pe.attendance') : tr('pe.shiftsTab')],
     ['audit', tr('pe.auditTab')],
     ['swaps', tr('pe.swaps')],
   ]
@@ -620,9 +623,18 @@ export function ShiftsHub({ me, isManager, restaurantId, accent, t, toast, initi
           <button key={id} onClick={() => setView(id as any)} style={{ flex: 1, padding: '8px 2px', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 12.5, fontWeight: view === id ? 700 : 500, cursor: 'pointer', background: view === id ? t.surface : 'transparent', color: view === id ? accent : t.text3, boxShadow: view === id ? t.sh2 : 'none' }}>{label}</button>
         ))}
       </div>
-      {view === 'shifts' && <MyShiftsTab myId={me.id || ''} accent={accent} t={t} />}
-      {view === 'attendance' && <AttendanceTab me={me} isManager={isManager} accent={accent} t={t} toast={toast} />}
-      {view === 'audit' && <ShiftAuditHub me={me} isManager={isManager} restaurantId={restaurantId} accent={accent} t={t} toast={toast} onGoCheckIn={() => setView('attendance')} />}
+      {view === 'shifts' && (
+        <>
+          <AttendanceTab me={me} isManager={isManager} accent={accent} t={t} toast={toast} />
+          {!hidePersonalShifts && (
+            <div style={{ marginTop: 22 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase', color: t.text3, marginBottom: 8 }}>{tr('pe.myShifts')}</div>
+              <MyShiftsTab myId={me.id || ''} accent={accent} t={t} />
+            </div>
+          )}
+        </>
+      )}
+      {view === 'audit' && <ShiftAuditHub me={me} isManager={isManager} restaurantId={restaurantId} accent={accent} t={t} toast={toast} onGoCheckIn={() => setView('shifts')} />}
       {view === 'swaps' && <SwapsTab me={me} isManager={isManager} accent={accent} t={t} toast={toast} />}
     </div>
   )

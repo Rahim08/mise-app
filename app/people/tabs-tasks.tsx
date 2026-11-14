@@ -57,13 +57,15 @@ export function TasksTab({ isManager, myId, accent, t, toast, hideReports = fals
     setLoading(true)
     // Открытые задачи — все, без общего лимита (раньше старая незакрытая задача выпадала из
     // списка, как только набиралось 200 более свежих); выполненные — свежие 200.
-    const [{ data: open }, { data: done }, { data: rp }, { data: dir }] = await Promise.all([
+    const [{ data: open, error: e1 }, { data: done, error: e2 }, { data: rp, error: e3 }, { data: dir }] = await Promise.all([
       db.from('staff_tasks').select('*').neq('status', 'done').order('created_at', { ascending: false }).limit(1000),
       db.from('staff_tasks').select('*').eq('status', 'done').order('created_at', { ascending: false }).limit(200),
       // Лимиты на растущие таблицы (ревью Д1): свежие 200 достаточно для рабочего списка.
       db.from('staff_reports').select('*').order('created_at', { ascending: false }).limit(200),
       db.from('staff_directory').select('*').eq('is_active', true).order('name'),
     ])
+    // Ошибка — тост и старый список, а не пустой экран «задач нет» (пакет C).
+    if (e1 || e2 || e3) { toast(tr('pe.loadFailed')); setLoading(false); return }
     setTasks([...(open || []), ...(done || [])]); setReports(rp || []); setStaff(dir || []); setLoading(false)
   }
   useEffect(() => { load() }, [])

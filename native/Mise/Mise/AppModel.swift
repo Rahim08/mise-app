@@ -358,9 +358,8 @@ final class AppModel {
         case "task":
             pendingPeopleRoute = PeopleRoute(tab: "tasks", tasksSeg: "tasks"); openApp("people")
         case "audit", "audit_close_reminder":
-            // Д5: флаттенинг — внутренний сегмент снова checklistsSubTab (единая пилюля
-            // Смена|Восьмёрка|Аудиты вместо отдельного auditSeg на удалённом уровне Рутина/Аудиты).
-            pendingPeopleRoute = PeopleRoute(tab: "shifts", shiftsView: "audit", checklistsSubTab: "audits"); openApp("people")
+            // Пилюли «Аудиты» нет (Д6) — пуш ведёт на чек-листы смены, а не в несуществующий тег.
+            pendingPeopleRoute = PeopleRoute(tab: "shifts", shiftsView: "audit", checklistsSubTab: "shift"); openApp("people")
         default: break
         }
     }

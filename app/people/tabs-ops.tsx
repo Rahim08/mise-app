@@ -1,5 +1,5 @@
 'use client'
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
@@ -30,10 +30,12 @@ export function StopListTab({ canEdit, currency, accent, t, toast }: { canEdit: 
 
   const load = async () => {
     setLoading(true)
-    const [{ data: c }, { data: i }] = await Promise.all([
+    const [{ data: c, error: e1 }, { data: i, error: e2 }] = await Promise.all([
       db.from('menu_categories').select('*').eq('is_visible', true).order('position'),
       db.from('menu_items').select('*').eq('is_visible', true).order('position'),
     ])
+    // Ошибка загрузки — тост, а не пустой стоп-лист, похожий на «ничего нет» (пакет C).
+    if (e1 || e2) { toast(tr('pe.loadFailed')); setLoading(false); return }
     setCats(c || []); setItems(i || []); setLoading(false)
   }
   useEffect(() => { load() }, [])
@@ -112,10 +114,14 @@ export function OrdersInbox({ currency, accent, t, toast }: { currency: string; 
   const [orders, setOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [seg, setSeg] = useState<'active' | 'done'>('active')
+  const ordersWarned = useRef(false)
 
   const load = async () => {
     const from = fmtDate(addDays(new Date(), -2))
-    const { data } = await db.from('menu_orders').select('*').gte('created_at', from).order('created_at', { ascending: false }).limit(100)
+    const { data, error } = await db.from('menu_orders').select('*').gte('created_at', from).order('created_at', { ascending: false }).limit(100)
+    // Опрос каждые N секунд: тост один раз до первого успеха, не на каждом тике.
+    if (error) { if (!ordersWarned.current) { ordersWarned.current = true; toast(tr('pe.loadFailed')) } setLoading(false); return }
+    ordersWarned.current = false
     setOrders(data || []); setLoading(false)
   }
   useEffect(() => {
@@ -215,7 +221,8 @@ export function TechCardsView({ isManager, accent, t, toast }: { isManager: bool
   const [saving, setSaving] = useState(false)
 
   const load = async () => {
-    const { data } = await db.from('tech_cards').select('*').eq('is_active', true).order('name')
+    const { data, error } = await db.from('tech_cards').select('*').eq('is_active', true).order('name')
+    if (error) { toast(tr('pe.loadFailed')); setLoading(false); return }
     setCards(data || []); setLoading(false)
   }
   useEffect(() => { load() }, [])
@@ -335,6 +342,7 @@ export function PurchaseTab({ me, isManager, accent, t, toast }: { me: any; isMa
   const [items, setItems] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [seg, setSeg] = useState<'todo' | 'done'>('todo')
+  const purchaseWarned = useRef(false)
   const [showForm, setShowForm] = useState(false)
   const [cat, setCat] = useState<string>('kitchen')
   const [rows, setRows] = useState<{ name: string; qty: string; unit: string }[]>([{ name: '', qty: '', unit: '' }])
@@ -346,7 +354,8 @@ export function PurchaseTab({ me, isManager, accent, t, toast }: { me: any; isMa
       db.from('purchase_items').select('*').eq('status', 'todo').order('created_at', { ascending: false }).limit(1000),
       db.from('purchase_items').select('*').neq('status', 'todo').order('created_at', { ascending: false }).limit(300),
     ])
-    if (!e1 && !e2) setItems([...(todo || []), ...(done || [])])
+    if (!e1 && !e2) { setItems([...(todo || []), ...(done || [])]); purchaseWarned.current = false }
+    else if (!purchaseWarned.current) { purchaseWarned.current = true; toast(tr('pe.loadFailed')) }
     setLoading(false)
   }
   useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv) }, [])
@@ -410,6 +419,8 @@ export function PurchaseTab({ me, isManager, accent, t, toast }: { me: any; isMa
   const clearDone = async () => {
     const ids = items.filter(x => x.status !== 'todo').map(x => x.id)
     if (!ids.length) return
+    // Удаление без возврата — с подтверждением (пакет C).
+    if (!window.confirm(tr('pe.confirmClearBought', { n: ids.length }))) return
     setItems(xs => xs.filter(x => x.status === 'todo'))
     const { error } = await db.from('purchase_items').delete().in('id', ids)
     if (error) { toast(tr('dash.notSaved') + error.message); load(); return }

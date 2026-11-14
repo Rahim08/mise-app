@@ -67,7 +67,7 @@ final class PeopleModel {
     var checklists: [ShiftChecklist] = []
     var completions: [ChecklistCompletion] = []
     var checklistsLoaded = false
-    var checklistsSubTab = "shift" // shift | walk | audits — пилюля контента в ShiftAuditHub (Д5).
+    var checklistsSubTab = "shift" // shift | walk — пилюля контента в ShiftAuditHub (Д5).
     var clType = "open"
     var openShiftId: String?           // id открытой смены Manager на сегодня (чек-лист привязан к ней)
     var clHistory: [ChecklistCompletion] = []
@@ -125,7 +125,7 @@ final class PeopleModel {
         async let doneR = try? DB.from("staff_tasks").select().eq("status", "done").order("created_at", ascending: false).limit(200).list(StaffTask.self)
         async let dR = try? DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)
         let openO = await openR, doneO = await doneR, dO = await dR
-        if let o = openO, let d = doneO { tasks = o + d } else if !tasks.isEmpty { flash(t("refreshFailed")) }
+        if let o = openO, let d = doneO { tasks = o + d } else { flash(t("refreshFailed")) }
         if let d = dO { dir = d }
         tasksLoaded = true
     }
@@ -407,7 +407,7 @@ final class PeopleModel {
         if isManager {
             if let a = try? await DB.from("attendance_records").select().gte("date", key(monthStart)).order("date", ascending: false).limit(500).list(AttendanceRecord.self) {
                 attendance = a
-            } else if !attendance.isEmpty { flash(t("refreshFailed")) }
+            } else { flash(t("refreshFailed")) }
             if dir.isEmpty, let d = try? await DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self) { dir = d }
             struct SchedStub: Codable { let staff_id: String }
             if let todayScheds = try? await DB.from("staff_schedules").select("staff_id").eq("date", todayKey).list(SchedStub.self) {
@@ -416,7 +416,7 @@ final class PeopleModel {
         } else {
             if let a = try? await DB.from("attendance_records").select().eq("staff_id", myId).order("date", ascending: false).limit(62).list(AttendanceRecord.self) {
                 attendance = a
-            } else if !attendance.isEmpty { flash(t("refreshFailed")) }
+            } else { flash(t("refreshFailed")) }
             let day = todayKey
             // Сбой сети не должен стирать график (Б7): раньше try? превращал ошибку в «смены нет».
             if let rows = try? await DB.from("staff_schedules").select()
@@ -462,7 +462,10 @@ final class PeopleModel {
         var sentCoord: CLLocationCoordinate2D?
         if g.active, let lat = g.latitude, let lng = g.longitude {
             guard let coord = await LocationOneShot().current() else { flash(t("pe.noGeo")); return }
-            if distanceMeters(coord, lat, lng) > (g.geo_radius_m ?? 150) { flash(t("pe.outOfZone")); return }
+            // Расстояние до точки в сообщении (пакет C): «вне зоны» без цифры не помогал понять,
+            // сломан GPS или человек правда не на месте.
+            let dist = distanceMeters(coord, lat, lng), radius = g.geo_radius_m ?? 150
+            if dist > radius { flash(t("pe.outOfZoneDist", ["m": "\(Int(dist.rounded()))", "r": "\(Int(radius))"])); return }
             sentCoord = coord
         }
 
@@ -575,7 +578,7 @@ final class PeopleModel {
         // Лимит на растущую таблицу (ревью Д1).
         if let s = try? await DB.from("shift_swap_requests").select().order("created_at", ascending: false).limit(200).list(SwapRequest.self) {
             swaps = s
-        } else if !swaps.isEmpty { flash(t("refreshFailed")) }
+        } else { flash(t("refreshFailed")) }
         if dir.isEmpty, let d = try? await DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self) { dir = d }
         if let ss = try? await DB.from("staff_schedules").select().gte("date", from).lte("date", to).list(Schedule.self) { swapScheds = ss }
         swapsLoaded = true
@@ -674,7 +677,7 @@ final class PeopleModel {
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { auditsLoaded = true; return }
         #endif
         if let cls = try? await DB.from("shift_checklists").select().eq("kind", "audit").list(ShiftChecklist.self) { audits = cls }
-        else if !audits.isEmpty { flash(t("refreshFailed")) }
+        else { flash(t("refreshFailed")) }
         let from = key(Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date())
         let auditIds = Set(audits.map(\.id))
         auditRuns = ((try? await DB.from("shift_checklist_completions").select()
@@ -984,7 +987,7 @@ final class PeopleModel {
         #endif
         if let rows = try? await DB.from("shift_checklists").select().eq("kind", "walk").list(WalkTemplate.self) {
             walkTemplates = rows
-        } else if !walkTemplates.isEmpty { flash(t("refreshFailed")) }
+        } else { flash(t("refreshFailed")) }
         let from = key(Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date())
         let ids = Set(walkTemplates.map(\.id))
         walkRuns = ((try? await DB.from("shift_checklist_completions").select()
@@ -1028,7 +1031,7 @@ final class PeopleModel {
         #endif
         if let tc = try? await DB.from("tech_cards").select().eq("is_active", true).order("name").list(TechCard.self) {
             techCards = tc
-        } else if !techCards.isEmpty { flash(t("refreshFailed")) }
+        } else { flash(t("refreshFailed")) }
         techLoaded = true
     }
     // -> Bool: см. saveChecklistTemplate — dismiss на вызывающей стороне гейтится на true.
@@ -1086,7 +1089,7 @@ final class PeopleModel {
         #endif
         if let mi = try? await DB.from("menu_items").select().eq("is_visible", true).order("position").list(MenuItem.self) {
             menu = mi
-        } else if !menu.isEmpty { flash(t("refreshFailed")) }
+        } else { flash(t("refreshFailed")) }
         menuLoaded = true
     }
     func toggleItem(_ item: MenuItem) async {
@@ -1125,7 +1128,7 @@ final class PeopleModel {
         // «К закупке» — все открытые; общий лимит 300 выбрасывал старые некупленные позиции.
         async let todoR = try? DB.from("purchase_items").select().eq("status", "todo").order("created_at", ascending: false).limit(1000).list(PurchaseItem.self)
         async let doneR = try? DB.from("purchase_items").select().neq("status", "todo").order("created_at", ascending: false).limit(300).list(PurchaseItem.self)
-        if let a = await todoR, let b = await doneR { purchase = a + b } else if !purchase.isEmpty { flash(t("refreshFailed")) }
+        if let a = await todoR, let b = await doneR { purchase = a + b } else { flash(t("refreshFailed")) }
         purchaseLoaded = true
     }
     var purchaseTodo: [PurchaseItem] { purchase.filter { $0.status == "todo" } }

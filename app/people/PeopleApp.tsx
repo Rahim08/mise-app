@@ -70,22 +70,22 @@ export function PeopleApp({ restaurantId, embedded = false, initialSection }: { 
   // Первый таб зависит от роли; «Зал» (стоп-лист/заказы/чек-листы/техкарты) — у всех.
   // Уведомления переехали в колокольчик хедера.
   const TABS = [
-    { id: 'shifts', label: isManager ? tr('pe.schedule') : tr('pe.shiftsTab'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },
+    { id: 'shifts', label: tr('pe.shiftsTab'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="3" y="4" width="18" height="18" rx="3" /><path d="M16 2v4M8 2v4M3 10h18" /></svg> },
     { id: 'tasks', label: tr('pe.tasks'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /><path d="M9 13l2 2 4-4" /></svg> },
     { id: 'ops', label: tr('pe.hall'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><path d="M3 9l1.2-5h15.6L21 9" /><path d="M4 9v11a1 1 0 001 1h14a1 1 0 001-1V9" /><path d="M3 9h18" /><path d="M9 21v-6h6v6" /></svg> },
     { id: 'purchase', label: tr('pe.pTab'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><circle cx="9" cy="21" r="1.5" /><circle cx="18" cy="21" r="1.5" /><path d="M2 3h2.2l2.2 12.4a1.5 1.5 0 001.5 1.2h9.1a1.5 1.5 0 001.5-1.2L21 7H5.3" /></svg> },
     { id: 'salary', label: tr('pe.salaryTab'), icon: (a: boolean) => <svg fill="none" stroke="currentColor" strokeWidth={a ? 2.2 : 1.8} viewBox="0 0 24 24" width="25" height="25"><rect x="2" y="6" width="20" height="13" rx="2.5" /><path d="M2 10h20" /><circle cx="17.5" cy="14.5" r="1.4" fill="currentColor" stroke="none" /></svg> },
   ]
-  const WEB_TABS = [
+  // Владелец: 5 разделов вместо 8 (аудит People 2026-11-14, пакет C). Близкие экраны
+  // сгруппированы, внутри группы — второй ряд пилюль. tab по-прежнему хранит конечный экран.
+  const WEB_TABS: { id: string; label: string; leaves?: [string, string][] }[] = [
     { id: 'overview', label: tr('pe.webOverview') },
-    { id: 'schedule', label: tr('pe.schedule') },
-    { id: 'tasks', label: tr('pe.tasks') },
-    { id: 'shifts', label: tr('pe.webShiftRecords') },
-    { id: 'ops', label: tr('pe.hall') },
-    { id: 'purchase', label: tr('pe.pTab') },
-    { id: 'reports', label: tr('pe.reports') },
+    { id: 'schedule', label: tr('pe.shiftsTab'), leaves: [['schedule', tr('pe.schedule')], ['shifts', tr('pe.webShiftRecords')]] },
+    { id: 'tasks', label: tr('pe.tasks'), leaves: [['tasks', tr('pe.tasks')], ['reports', tr('pe.reports')]] },
+    { id: 'ops', label: tr('pe.hall'), leaves: [['ops', tr('pe.hall')], ['purchase', tr('pe.pTab')]] },
     { id: 'salary', label: tr('pe.salaryTab') },
   ]
+  const activeGroup = WEB_TABS.find(g => g.id === tab || g.leaves?.some(([id]) => id === tab))
 
   return (
     <div className={embedded ? 'people-web' : undefined} style={embedded
@@ -129,6 +129,15 @@ export function PeopleApp({ restaurantId, embedded = false, initialSection }: { 
         ? { order: 2 }
         : { position: 'fixed', top: 56, left: 0, right: 0, bottom: 82, overflowY: 'auto', background: t.bg }}>
         <div className={embedded && tab !== 'overview' ? 'people-web-focused' : undefined} style={{ padding: embedded ? '0 0 28px' : '16px 16px 28px', maxWidth: contentMaxWidth, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
+          {embedded && activeGroup?.leaves && (
+            <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2, maxWidth: 420 }}>
+              {activeGroup.leaves.map(([id, label]) => (
+                <button key={id} type="button" onClick={() => { if (id === 'shifts') setShiftsView('attendance'); setTab(id) }} style={{ flex: 1, padding: '8px 2px', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 12.5, fontWeight: tab === id ? 700 : 500, cursor: 'pointer', background: tab === id ? t.surface : 'transparent', color: tab === id ? accent : t.text3, boxShadow: tab === id ? t.sh2 : 'none' }}>
+                  {label}{id === 'ops' && newOrders > 0 && <span className="people-web-badge">{newOrders > 9 ? '9+' : newOrders}</span>}
+                </button>
+              ))}
+            </div>
+          )}
           {embedded && tab === 'overview' && <PeopleWebHome onSchedule={() => setTab('schedule')} onTasks={() => setTab('tasks')} onAudits={() => { setShiftsView('audit'); setTab('shifts') }} onReports={() => setTab('reports')} onTeam={() => router.push('/dashboard/team')} />}
           {embedded && tab === 'schedule' && <ScheduleTab restaurantId={restaurantId} accent={accent} t={t} toast={showToast} />}
           {tab === 'shifts' && <ShiftsHub key={embedded ? shiftsView : 'staff'} me={me} isManager={isManager} restaurantId={restaurantId} accent={accent} t={t} toast={showToast} initialView={embedded ? shiftsView : initialSection === 'audits' ? 'audit' : undefined} hidePersonalShifts={embedded} />}
@@ -164,9 +173,9 @@ export function PeopleApp({ restaurantId, embedded = false, initialSection }: { 
       <div className={embedded ? 'people-web-tabs' : undefined} role={embedded ? 'group' : undefined} aria-label={embedded ? tr('pe.webSections') : undefined} style={embedded
         ? { order: 1, display: 'flex', gap: 4, marginBottom: 24, maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center', boxSizing: 'border-box' as const }
         : { position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 300, height: 82, background: t.nbg, backdropFilter: 'saturate(200%) blur(24px)', WebkitBackdropFilter: 'saturate(200%) blur(24px)', borderTop: `0.5px solid ${t.sep2}`, display: 'flex', alignItems: 'flex-start', paddingTop: 10, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-        {embedded ? WEB_TABS.map(tb => <button key={tb.id} type="button" className="people-web-tab" aria-pressed={tab === tb.id} onClick={() => { if (tb.id === 'shifts') setShiftsView('attendance'); setTab(tb.id) }} style={{ color: tab === tb.id ? accent : t.text3, borderColor: tab === tb.id ? accent : 'transparent' }}>
+        {embedded ? WEB_TABS.map(tb => { const on = activeGroup?.id === tb.id; return <button key={tb.id} type="button" className="people-web-tab" aria-pressed={on} onClick={() => { if (!on) setTab(tb.id) }} style={{ color: on ? accent : t.text3, borderColor: on ? accent : 'transparent' }}>
           {tb.label}{tb.id === 'ops' && newOrders > 0 && <span className="people-web-badge">{newOrders > 9 ? '9+' : newOrders}</span>}
-        </button>) : TABS.map(tb => (
+        </button> }) : TABS.map(tb => (
             <button key={tb.id} onClick={() => setTab(tb.id)} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer', color: tab === tb.id ? accent : t.text3, border: 'none', background: 'none', fontFamily: 'inherit', padding: 0, fontSize: 10, fontWeight: tab === tb.id ? 700 : 500 }}>
               <span style={{ position: 'relative', transform: tab === tb.id ? 'scale(1.08)' : 'scale(1)', transition: 'transform .18s', display: 'flex' }}>
                 {tb.icon(tab === tb.id)}
