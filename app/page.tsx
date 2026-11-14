@@ -1,47 +1,35 @@
-'use client'
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
-import { db } from '@/lib/db'
-import { isNativeApp } from '@/lib/native'
-import { NativeOnboarding } from '@/components/NativeOnboarding'
+import type { Metadata } from 'next'
+import Script from 'next/script'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { HomeBehavior } from './home-behavior'
+
+// The public landing remains the source of its markup and translations. Render
+// the same content here so the root URL has useful server-generated HTML.
+const landing = readFileSync(join(process.cwd(), 'public/landing.html'), 'utf8')
+const part = (start: string, end: string) => {
+  const from = landing.indexOf(start)
+  const to = landing.indexOf(end, from + start.length)
+  if (from < 0 || to < 0) throw new Error(`Missing landing section: ${start}`)
+  return landing.slice(from + start.length, to)
+}
+const styles = part('<style>', '</style>')
+const markup = part('<body>', '<script>')
+const interactions = part('<script>', '</script>')
+
+export const metadata: Metadata = {
+  title: 'Mise — платформа управления рестораном',
+  description: 'Кассовые смены, аналитика, склад, команда и QR-меню в одной платформе для ресторана. 14 дней бесплатно.',
+  alternates: { canonical: '/' },
+}
 
 export default function Home() {
-  const router = useRouter()
-  const [src, setSrc] = useState('/landing.html')
-  // 'detect' пока не знаем платформу; 'native' → онбординг приложения; 'web' → лендинг.
-  const [mode, setMode] = useState<'detect' | 'native' | 'web'>('detect')
-
-  useEffect(() => {
-    if (isNativeApp()) { setMode('native'); return }
-    setMode('web')
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (data.session?.user) {
-        // НЕ редиректим владельца на дашборд — показываем лендинг. В навбаре вместо
-        // «Войти» подставим имя ресторана (тап → дашборд). Имя передаём в iframe параметром.
-        try {
-          const { data: rest } = await db.from('restaurants').select('name').limit(1)
-          const name = Array.isArray(rest) ? rest[0]?.name : (rest as any)?.name
-          if (name) setSrc('/landing.html?account=' + encodeURIComponent(name))
-        } catch {}
-        return
-      }
-      // Возвращающийся сотрудник с живым токеном → сразу на свой хаб приложений (/join),
-      // а не на маркетинговый лендинг. /join сам откроет единственное приложение или покажет сетку.
-      try {
-        const rid = localStorage.getItem('mise_restaurant_id')
-        const hasStaff = rid && localStorage.getItem('mise_staff_' + rid)
-        const m = document.cookie.match(/(?:^|; )mise_token_until=(\d+)/)
-        const tokenValid = m ? parseInt(m[1], 10) > Math.floor(Date.now() / 1000) : false
-        if (rid && hasStaff && tokenValid) router.replace('/join?restaurant=' + rid)
-      } catch {}
-    })
-  }, [])
-
-  if (mode === 'detect') return <div style={{ position: 'fixed', inset: 0, background: '#000' }} />
-  if (mode === 'native') return <NativeOnboarding />
-
   return (
-    <iframe src={src} style={{ width: '100%', height: '100vh', border: 'none', display: 'block' }} />
+    <>
+      <style dangerouslySetInnerHTML={{ __html: styles }} />
+      <div className="landing-root" dangerouslySetInnerHTML={{ __html: markup }} />
+      <Script id="mise-landing-interactions" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html: interactions }} />
+      <HomeBehavior />
+    </>
   )
 }

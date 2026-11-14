@@ -1,0 +1,42 @@
+.menu-editor-title { margin: 0; font-size: 18px; font-weight: 720; letter-spacing: -.025em; }
+.menu-editor-subtitle { display: none; margin: 4px 0 0; color: var(--tx3); font-size: 13px; }
+.menu-editor-open-link span, .menu-editor-categories-label, .menu-editor-category small { display: none; }
+.menu-editor-summary { display: none; }
+
+@media (min-width: 900px) {
+  .menu-editor-web .menu-editor-header,
+  .menu-editor-web .menu-editor-tabs { max-width: 1220px !important; }
+  .menu-editor-web .menu-editor-content > div { max-width: 1220px !important; }
+  .menu-editor-web .menu-editor-header { margin: 6px auto 22px !important; align-items: flex-start !important; }
+  .menu-editor-web .menu-editor-header > div:first-child { align-items: flex-start !important; gap: 14px !important; }
+  .menu-editor-web .menu-editor-header > div:first-child > svg { margin-top: 4px; }
+  .menu-editor-title { font-size: 29px; line-height: 1.15; }
+  .menu-editor-subtitle { display: block; }
+  .menu-editor-web .menu-editor-header > div:last-child { align-items: center !important; }
+  .menu-editor-open-link { width: auto !important; height: 36px !important; gap: 8px; border-radius: 10px !important; padding: 0 12px; font-size: 13px; font-weight: 650; }
+  .menu-editor-open-link span { display: inline; color: var(--tx); }
+  .menu-editor-web .menu-editor-tabs { width: fit-content !important; align-self: flex-start !important; margin-left: max(0px, calc((100% - 1220px)/2)); margin-bottom: 20px !important; background: transparent !important; border-bottom: var(--hairline); border-radius: 0 !important; padding: 0 !important; gap: 22px !important; }
+  .menu-editor-web .menu-editor-tabs button { flex: none !important; background: transparent !important; box-shadow: none !important; border-radius: 0 !important; padding: 9px 4px 13px !important; border-bottom: 2px solid transparent !important; min-width: 82px; }
+  .menu-editor-web .menu-editor-tabs button[aria-current="page"] { border-bottom-color: var(--tx) !important; }
+  .menu-editor-switcher { margin-bottom: 20px !important; border: var(--hairline); background: var(--surface); border-radius: 14px; padding: 12px !important; }
+  .menu-editor-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .menu-editor-summary > div { min-height: 92px; padding: 16px 19px; background: var(--surface); border: var(--hairline); border-radius: 14px; display: flex; flex-direction: column; justify-content: space-between; }
+  .menu-editor-summary span { color: var(--tx3); font-size: 12px; font-weight: 550; }
+  .menu-editor-summary strong { color: var(--tx); font-size: 27px; line-height: 1; letter-spacing: -.03em; }
+  .menu-editor-workspace { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 20px; align-items: start; }
+  .menu-editor-categories { position: sticky; top: 24px; flex-direction: column; gap: 5px !important; overflow: visible !important; padding: 14px !important; background: var(--surface); border: var(--hairline); border-radius: 14px; }
+  .menu-editor-categories-label { display: block; padding: 3px 8px 9px; color: var(--tx3); font-size: 11px; font-weight: 750; text-transform: uppercase; letter-spacing: .075em; }
+  .menu-editor-categories > div:not(.menu-editor-categories-label) { width: 100%; }
+  .menu-editor-categories .menu-editor-category { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; border-radius: 9px !important; text-align: left; }
+  .menu-editor-category span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .menu-editor-category small { display: inline; font-size: 11px; opacity: .75; }
+  .menu-editor-add-category, .menu-editor-import { width: 100%; border-radius: 9px !important; justify-content: center; }
+  .menu-editor-products { min-width: 0; }
+  .menu-editor-item-list { border: var(--hairline); box-shadow: none !important; }
+  .menu-editor-item-row { min-height: 72px; padding: 12px 18px !important; }
+  .menu-editor-add-item { width: auto !important; min-width: 180px; padding: 11px 18px !important; border-radius: 10px !important; font-size: 13px !important; box-shadow: none !important; }
+}
+
+@media (min-width: 900px) and (max-width: 1150px) {
+  .menu-editor-workspace { grid-template-columns: 200px minmax(0, 1fr); gap: 14px; }
+}

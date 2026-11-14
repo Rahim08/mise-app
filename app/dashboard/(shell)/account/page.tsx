@@ -9,6 +9,7 @@ import { openCookieSettings } from '@/components/CookieConsent'
 import { Card, Btn, SectionTitle, Badge, Container } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
 import { PLANS } from '@/components/dash/shared'
+import './account-web.css'
 
 export default function AccountPage() {
   const { t: tr } = useI18n()
@@ -22,20 +23,28 @@ export default function AccountPage() {
     setDeleting(true)
     try {
       const res = await fetch('/api/account/delete', { method: 'POST' })
-      const data = await res.json()
-      if (data.error) { alert(data.error); return }
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.error) { alert(data.error || tr('dash.error')); return }
       await supabase.auth.signOut()
       router.replace('/auth/login')
+    } catch (error) {
+      alert(tr('dash.error') + (error instanceof Error ? error.message : ''))
     } finally {
       setDeleting(false)
     }
   }
 
-  return (
-    <Container size="normal">
-      <SectionTitle title={tr('dash.account')} sub={tr('dash.accountSub')} />
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut()
+    if (error) { alert(tr('dash.error') + error.message); return }
+    router.replace('/auth/login')
+  }
 
-      <Card style={{ marginBottom: 14 }}>
+  return (
+    <Container size="normal" style={{ maxWidth: 1040 }}>
+      <div className="account-web-header"><SectionTitle title={tr('dash.account')} sub={tr('dash.accountSub')} /></div>
+
+      <Card style={{ marginBottom: 18 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--fill)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '1.4rem', fontWeight: 700, color: 'var(--tx2)' }}>
             {restaurant?.logo_url
@@ -50,21 +59,23 @@ export default function AccountPage() {
         </div>
       </Card>
 
-      <Card style={{ marginBottom: 14 }}>
-        <button onClick={async () => { await supabase.auth.signOut(); router.replace('/auth/login') }}
-          style={{ background: 'none', border: 'none', color: 'var(--danger)', fontSize: '.88rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
-          {tr('dash.signOut')}
-        </button>
-      </Card>
+      <div className="account-web-grid">
+        <Card>
+          <h2 className="account-web-card-title">{tr('dash.accountAccess')}</h2>
+          <p className="account-web-card-description">{tr('dash.accountAccessSub')}</p>
+          <Btn variant="gray" onClick={signOut}>{tr('dash.signOut')}</Btn>
+        </Card>
 
-      <Card style={{ marginBottom: 14, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
-        <button onClick={openCookieSettings}
-          style={{ background: 'none', border: 'none', color: 'var(--tx2)', fontSize: '.84rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
-          {tr('dash.cookieSettings')}
-        </button>
-        <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--tx2)', fontSize: '.84rem', fontWeight: 600, textDecoration: 'none' }}>{tr('dash.privacy')}</a>
-        <a href="/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--tx2)', fontSize: '.84rem', fontWeight: 600, textDecoration: 'none' }}>{tr('dash.terms')}</a>
-      </Card>
+        <Card>
+          <h2 className="account-web-card-title">{tr('dash.accountPrivacy')}</h2>
+          <p className="account-web-card-description">{tr('dash.accountPrivacySub')}</p>
+          <div className="account-web-links">
+            <button type="button" onClick={openCookieSettings}>{tr('dash.cookieSettings')}</button>
+            <a href="/privacy.html" target="_blank" rel="noopener noreferrer">{tr('dash.privacy')}</a>
+            <a href="/terms.html" target="_blank" rel="noopener noreferrer">{tr('dash.terms')}</a>
+          </div>
+        </Card>
+      </div>
 
       <Card style={{ border: '1px solid rgba(255,59,48,.15)' }}>
         <div style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 4, color: 'var(--tx)' }}>{tr('dash.dangerZone')}</div>

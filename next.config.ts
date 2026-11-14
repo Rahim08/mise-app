@@ -3,8 +3,7 @@ import type { NextConfig } from "next";
 // Security headers applied to every response.
 //
 // Notes for this app specifically:
-//  • The landing page is embedded same-origin via <iframe> in app/page.tsx, so
-//    X-Frame-Options stays SAMEORIGIN (not DENY).
+//  • The public landing is also available as /landing.html for direct links.
 //  • The QR scanner needs the camera and the staff layer needs geolocation, so
 //    Permissions-Policy allows camera/geolocation for self only.
 //  • No strict CSP yet — a real CSP needs auditing against Supabase, Stripe,
@@ -14,7 +13,7 @@ const securityHeaders = [
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
   // Block MIME-type sniffing.
   { key: "X-Content-Type-Options", value: "nosniff" },
-  // Allow framing only from same origin (landing iframe), block external clickjacking.
+  // Allow framing only from same origin, block external clickjacking.
   // CSP frame-ancestors is the modern replacement; kept for older browsers.
   { key: "X-Frame-Options", value: "SAMEORIGIN" },
   // Don't leak full URLs to third parties.
@@ -45,7 +44,7 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
-      // Статические дубли-страницы в public/: /landing.html рендерится внутри iframe на «/»
+      // Статические дубли-страницы в public/: /landing.html также рендерится на «/»
       // (canonical уже указывает туда) и сам по себе индексировался как дубликат; остальные —
       // заброшенные версии секций сайта (mise-landing-v2 — старый лендинг с ценой €9 от июня,
       // manager/analytics/tobacco.html — старые одностраничники) без canonical и без ссылок

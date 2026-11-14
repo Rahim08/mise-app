@@ -19,6 +19,7 @@ export type Restaurant = {
   extra_seats?: number | null
   addon_ai?: boolean | null
   billing_interval?: string | null
+  discount_pct?: number | null
   trial_ends_at?: string | null
 }
 

@@ -10,6 +10,7 @@ import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { Spinner } from '@/components/ui'
 import { fmtDate as fmtDay } from '@/lib/format'
 import { useI18n, tCurrent } from '@/lib/i18n'
+import './stash-web.css'
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -413,12 +414,12 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
   // без AuthGate/PIN, без фикс-хрома, тема дашборда.
   const embedded = !!rid
   // Desktop-режим внутри shell: шире мобильных 860px. Staff-приложение не трогаем.
-  const contentMaxWidth = embedded ? 1100 : 860
+  const contentMaxWidth = embedded ? 1160 : 860
   const t = useTheme(embedded ? 'mise_dash_dark' : undefined)
   const { t: tr, locale } = useI18n()
 
   const [restaurantId, setRestaurantId] = useState(rid)
-  const [tab, setTab] = useState<'shift' | 'stock' | 'movements' | 'inventory'>('shift')
+  const [tab, setTab] = useState<'shift' | 'stock' | 'movements' | 'inventory'>(embedded ? 'stock' : 'shift')
   const [movMode, setMovMode] = useState<'in' | 'out' | 'writeoff'>('in')
   const [movReason, setMovReason] = useState('')
   const [invType, setInvType] = useState<'warehouse' | 'venue'>('warehouse')
@@ -430,6 +431,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
   const [search, setSearch] = useState('')
   const [showEmpty, setShowEmpty] = useState(false)
   const [showLowOnly, setShowLowOnly] = useState(false)
+  const [webStockFilter, setWebStockFilter] = useState<'all' | 'attention' | 'low' | 'empty'>('all')
   // Кальянщик (роль hookah/waiter) не видит выручку — деньги только владельцу/менеджеру.
   // Владелец входит по Supabase-сессии (без staff-объекта) → по умолчанию видит.
   const [canSeeMoney, setCanSeeMoney] = useState(true)
@@ -502,12 +504,18 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
   const outBrands = [...new Set(stock.filter(s => s.quantity_g > 0).map(s => s.brand))].sort()
   const inStockItems = stock.filter(s => s.quantity_g > 0)
   const emptyItems = stock.filter(s => s.quantity_g <= 0)
-  // Заканчивается = остаток ≤ минимума позиции (fallback 200 г, если минимум не задан)
-  const isLow = (s: any) => s.quantity_g > 0 && s.quantity_g <= (s.min_quantity_g || 200)
+  // Заканчивается = остаток ≤ минимума позиции (fallback 100 г, как в уведомлениях).
+  const isLow = (s: any) => s.quantity_g > 0 && s.quantity_g <= (s.min_quantity_g ?? 100)
   const lowItems = inStockItems.filter(isLow)
+  const attentionItems = [...emptyItems, ...lowItems].sort((a, b) => a.quantity_g - b.quantity_g)
   const filteredStock = inStockItems
     .filter(s => `${s.brand} ${s.flavor}`.toLowerCase().includes(search.toLowerCase()))
     .filter(s => !showLowOnly || isLow(s))
+  const webStockRows = (webStockFilter === 'empty' ? emptyItems : webStockFilter === 'low' ? lowItems : webStockFilter === 'attention' ? attentionItems : inStockItems)
+    .filter(s => `${s.brand} ${s.flavor}`.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => a.brand.localeCompare(b.brand, locale) || a.flavor.localeCompare(b.flavor, locale))
+  const totalStockGrams = inStockItems.reduce((sum, item) => sum + item.quantity_g, 0)
+  const latestMovements = movements.filter(m => m.type === 'in' || m.type === 'out' || m.type === 'writeoff').slice(0, 3)
   const brandTotal = (brand: string) => stock.filter(s => s.brand === brand && s.quantity_g > 0).reduce((sum, s) => sum + s.quantity_g, 0)
 
   const updateMovRow = (id: string, field: keyof MovRow, val: string) => {
@@ -807,20 +815,20 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
   ]
 
   return (
-    <div style={embedded
+    <div className={embedded ? 'stash-web' : undefined} style={embedded
       ? { display: 'flex', flexDirection: 'column', fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased', color: t.text }
       : { height: '100vh', overflow: 'hidden', background: t.bg, fontFamily: "-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif", WebkitFontSmoothing: 'antialiased' }}>
       <style>{`
         @keyframes spin { to { transform: rotate(360deg) } }
         @keyframes fadeUp { from { opacity:0; transform:translateY(10px) } to { opacity:1; transform:translateY(0) } }
         @keyframes toastIn { from { opacity:0; transform:translateX(-50%) translateY(10px) } to { opacity:1; transform:translateX(-50%) translateY(0) } }
-        * { box-sizing: border-box }
+        ${embedded ? '.stash-web *' : '*'} { box-sizing: border-box }
         input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none }
       `}</style>
 
       {/* ── HEADER: standalone — фикс-шапка; embedded — строка контролов в потоке ── */}
-      <div style={embedded ? {
-        order: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 12,
+      <div className={embedded ? 'stash-web-header' : undefined} style={embedded ? {
+        order: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 20,
         maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center', boxSizing: 'border-box' as const,
       } : {
         position: 'fixed', top: 0, left: 0, right: 0, zIndex: 300,
@@ -833,8 +841,10 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
         {!embedded && <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <AppSwitchBrand name="Stash" accent={t.orange} color={t.text} muted={t.text3} size={18} />
         </div>}
+        {embedded && <div className="stash-web-heading"><h1>{tr('st.webTitle')}</h1><p>{tr('st.webSub')}</p></div>}
         <button
           onClick={() => { setEditBatch(null); setMovRows([newRow()]); setMovReason(''); setWriteoffVenue(false); setVenueGrams(''); setShowAddMov(true) }}
+          className={embedded ? 'stash-web-add' : undefined}
           style={{
             display: 'flex', alignItems: 'center', gap: 6,
             background: `${t.orange}1a`, borderRadius: 20,
@@ -845,7 +855,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <path d="M7 1v12M1 7h12" />
           </svg>
-          {tr('st.addBtn')}
+          {embedded ? tr('st.webNewOperation') : tr('st.addBtn')}
         </button>
       </div>
 
@@ -853,7 +863,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
       <div style={embedded
         ? { order: 2 }
         : { position: 'fixed', top: 56, left: 0, right: 0, bottom: 82, overflowY: 'auto', background: t.bg }}>
-        <div style={{ padding: embedded ? '0 0 28px' : '16px 16px 28px', maxWidth: contentMaxWidth, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
+        <div className={embedded && tab !== 'stock' ? 'stash-web-focused' : undefined} style={{ padding: embedded ? '0 0 28px' : '16px 16px 28px', maxWidth: contentMaxWidth, margin: '0 auto', animation: 'fadeUp .22s ease' }}>
 
           {/* ══ HOOKAH SHIFT ══ */}
           {tab === 'shift' && !loading && (
@@ -863,6 +873,66 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
           {/* ══ STOCK ══ */}
           {tab === 'stock' && (
             <div>
+              {embedded && <div className="stash-web-stock">
+                <div className="stash-web-metrics">
+                  {[
+                    { label: tr('st.webStockTotal'), value: fg(totalStockGrams), tone: 'default' },
+                    { label: tr('st.statPositions'), value: String(stock.length), tone: 'default' },
+                    { label: tr('st.webLowCount'), value: String(lowItems.length), tone: 'warning' },
+                    { label: tr('st.outOfStockSec'), value: String(emptyItems.length), tone: 'danger' },
+                  ].map(metric => <div key={metric.label} className="stash-web-metric">
+                    <div className="stash-web-metric-label">{metric.label}</div>
+                    <div className={`stash-web-metric-value stash-web-metric-value--${metric.tone}`}>{metric.value}</div>
+                  </div>)}
+                </div>
+
+                <div className="stash-web-columns">
+                  <section className="stash-web-panel stash-web-stock-panel">
+                    <h2>{tr('st.webStockList')}</h2>
+                    <label className="stash-web-search">
+                      <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
+                      <input value={search} onChange={e => setSearch(e.target.value)} placeholder={tr('st.searchPh')} aria-label={tr('st.searchPh')} />
+                    </label>
+                    <div className="stash-web-filters" role="group" aria-label={tr('st.webStockFilter')}>
+                      {([
+                        ['all', tr('st.webAll')],
+                        ['attention', tr('st.webAttention')],
+                        ['low', tr('st.webLowCount')],
+                        ['empty', tr('st.outOfStockSec')],
+                      ] as const).map(([id, label]) => <button key={id} type="button" className={webStockFilter === id ? 'is-active' : undefined} aria-pressed={webStockFilter === id} onClick={() => setWebStockFilter(id)}>{label}</button>)}
+                    </div>
+                    {webStockRows.length ? <div className="stash-web-table-scroll"><table className="stash-web-table">
+                      <thead><tr><th>{tr('st.brandPh')}</th><th>{tr('st.flavorPh')}</th><th>{tr('st.available')}</th><th>{tr('st.webStatus')}</th></tr></thead>
+                      <tbody>{webStockRows.map(item => {
+                        const empty = item.quantity_g <= 0
+                        const low = isLow(item)
+                        return <tr key={item.id}>
+                          <td>{item.brand}</td><td>{item.flavor}</td><td className="stash-web-quantity">{fg(item.quantity_g)}</td>
+                          <td><span className={`stash-web-status ${empty ? 'is-empty' : low ? 'is-low' : 'is-ok'}`}>{empty ? tr('st.webEmpty') : low ? tr('st.webLow') : tr('st.webAvailable')}</span></td>
+                        </tr>
+                      })}</tbody>
+                    </table></div> : <div className="stash-web-empty">{search ? tr('st.notFound') : webStockFilter === 'attention' ? tr('st.webNoAttention') : webStockFilter === 'low' ? tr('st.webNoLow') : webStockFilter === 'empty' ? tr('st.webNoEmpty') : tr('st.stockEmpty')}</div>}
+                  </section>
+
+                  <aside className="stash-web-rail">
+                    <section className="stash-web-panel">
+                      <div className="stash-web-panel-head"><h2>{tr('st.webAttention')}</h2>{attentionItems.length > 3 && <button type="button" onClick={() => { setSearch(''); setWebStockFilter('attention') }}>{tr('st.webViewAll')} ›</button>}</div>
+                      {attentionItems.length ? attentionItems.slice(0, 3).map(item => <div className="stash-web-rail-row" key={item.id}>
+                        <div><strong>{item.brand}</strong><span>{item.flavor}</span></div><div className="stash-web-rail-amount">{fg(item.quantity_g)}<span className={item.quantity_g <= 0 ? 'stash-web-empty-label' : 'stash-web-low-label'}>{item.quantity_g <= 0 ? tr('st.webEmpty') : tr('st.webLow')}</span></div>
+                      </div>) : <div className="stash-web-rail-empty">{tr('st.webNoAttention')}</div>}
+                    </section>
+                    <section className="stash-web-panel">
+                      <div className="stash-web-panel-head"><h2>{tr('st.webRecent')}</h2><button type="button" onClick={() => setTab('movements')}>{tr('st.webViewAll')} ›</button></div>
+                      {latestMovements.length ? latestMovements.map(movement => <div className="stash-web-rail-row" key={movement.id}>
+                        <div><strong>{movement.type === 'in' ? tr('st.movIn') : movement.type === 'out' ? tr('st.movOut') : tr('st.movWriteoff')}</strong><span>{movement.brand && movement.flavor ? `${movement.brand} · ${movement.flavor}` : tr('st.venueWriteoffLabel')}</span><small>{timeStr(movement.created_at, locale)}</small></div>
+                        <div className="stash-web-rail-amount">{movement.type === 'in' ? '+' : '−'}{fg(movement.quantity_g)}</div>
+                      </div>) : <div className="stash-web-rail-empty">{tr('st.suppliesEmpty')}</div>}
+                      <button type="button" className="stash-web-inventory-link" onClick={() => { setTab('inventory'); setInvType('warehouse'); openInv() }}>{tr('st.startInv')} ›</button>
+                    </section>
+                  </aside>
+                </div>
+              </div>}
+              {!embedded && <>
               {/* Search row */}
               <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
                 <div style={{ position: 'relative', flex: 1 }}>
@@ -977,6 +1047,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
                   </div>
                 </div>
               )}
+              </>}
             </div>
           )}
 
@@ -1147,8 +1218,8 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
       </div>
 
       {/* ── NAV: standalone — фикс-бар снизу; embedded — сегмент-строка над контентом ── */}
-      <div style={embedded ? {
-        order: 1, display: 'flex', gap: 2, background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16,
+      <div className={embedded ? 'stash-web-tabs' : undefined} role={embedded ? 'group' : undefined} aria-label={embedded ? tr('st.webSections') : undefined} style={embedded ? {
+        order: 1, display: 'flex', gap: 4, marginBottom: 24,
         maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center', boxSizing: 'border-box' as const,
       } : {
         position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 300,
@@ -1159,11 +1230,11 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
         display: 'flex', alignItems: 'flex-start', paddingTop: 10,
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       }}>
-        {NAV_TABS.map(navTab => {
+        {(embedded ? [NAV_TABS[1], NAV_TABS[0], NAV_TABS[2], NAV_TABS[3]] : NAV_TABS).map(navTab => {
           const active = tab === navTab.id
           if (embedded) return (
-            <button key={navTab.id} onClick={() => setTab(navTab.id as any)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: active ? 700 : 500, cursor: 'pointer', background: active ? t.surface : 'transparent', color: active ? t.orange : t.text3, boxShadow: active ? t.sh2 : 'none', transition: 'all .18s' }}>
-              {navTab.label}
+            <button key={navTab.id} aria-pressed={active} onClick={() => setTab(navTab.id as 'shift' | 'stock' | 'movements' | 'inventory')} className="stash-web-tab" style={{ color: active ? t.orange : t.text3, borderColor: active ? t.orange : 'transparent' }}>
+              {navTab.id === 'stock' ? tr('st.webStockTab') : navTab.id === 'shift' ? tr('st.webShiftTab') : navTab.id === 'inventory' ? tr('st.webInvTab') : navTab.label}
             </button>
           )
           return (
@@ -1189,11 +1260,11 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
       {/* ── ADD/EDIT MOVEMENT MODAL ── */}
       {showAddMov && (
         <div
-          style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+          style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: embedded ? 'center' : 'flex-end', justifyContent: 'center', padding: embedded ? 20 : 0 }}
           onClick={() => { setShowAddMov(false); setEditBatch(null) }}
         >
           <div
-            style={{ background: t.bg, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '92vh', overflowY: 'auto' }}
+            style={{ background: t.bg, borderRadius: embedded ? 20 : '24px 24px 0 0', width: '100%', maxWidth: embedded ? 620 : 480, maxHeight: embedded ? 'min(860px, 90vh)' : '92vh', overflowY: 'auto' }}
             onClick={e => e.stopPropagation()}
           >
             <div style={{ width: 40, height: 4, background: t.fill, borderRadius: 2, margin: '14px auto 0' }} />
@@ -1325,11 +1396,11 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
       {/* ── INVENTORY MODAL ── */}
       {showInv && (
         <div
-          style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+          style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: embedded ? 'center' : 'flex-end', justifyContent: 'center', padding: embedded ? 20 : 0 }}
           onClick={() => setShowInv(false)}
         >
           <div
-            style={{ background: t.bg, borderRadius: '24px 24px 0 0', width: '100%', maxWidth: 480, maxHeight: '92vh', overflowY: 'auto' }}
+            style={{ background: t.bg, borderRadius: embedded ? 20 : '24px 24px 0 0', width: '100%', maxWidth: embedded ? 620 : 480, maxHeight: embedded ? 'min(860px, 90vh)' : '92vh', overflowY: 'auto' }}
             onClick={e => e.stopPropagation()}
           >
             <div style={{ width: 40, height: 4, background: t.fill, borderRadius: 2, margin: '14px auto 0' }} />

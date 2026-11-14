@@ -12,6 +12,7 @@ import { PLANS as PLAN_DEFS, ADDON_PRICES, ALL_MODULES, YEARLY_DISCOUNT, yearly,
 import { Card, Btn, Badge, Toggle, Segmented, Stepper, SectionTitle, Spinner, Container } from '@/components/ui'
 import { useDash } from '@/components/dash/context'
 import { PLANS } from '@/components/dash/shared'
+import './billing-web.css'
 
 // Брендовые имена модулей — не переводятся.
 const MODULE_NAMES: Record<ModuleId, string> = {
@@ -22,7 +23,7 @@ const MODULE_NAMES: Record<ModuleId, string> = {
 export default function BillingPage() {
   const { t: tr, locale } = useI18n()
   const native = useIsNative()
-  const { restaurant, reload } = useDash()
+  const { restaurant, user, reload } = useDash()
 
   const status = restaurant?.subscription_status
   const endsAt = restaurant?.subscription_ends_at ? new Date(restaurant.subscription_ends_at) : null
@@ -38,12 +39,16 @@ export default function BillingPage() {
   const [ai, setAi] = useState(false)
   useEffect(() => {
     if (!restaurant) return
-    setPlan((PLAN_DEFS[restaurant.subscription_plan as PlanId] ? restaurant.subscription_plan : 'business') as PlanId)
+    const fromUrl = new URLSearchParams(window.location.search).get('plan')
+    const fromAccount = user?.user_metadata?.preferred_plan
+    const fromStorage = localStorage.getItem('mise_preferred_plan')
+    const preferred = [fromUrl, fromAccount, fromStorage].find((value): value is PlanId => value === 'starter' || value === 'business' || value === 'pro')
+    setPlan(!restaurant.subscription_id && preferred ? preferred : (PLAN_DEFS[restaurant.subscription_plan as PlanId] ? restaurant.subscription_plan : 'business') as PlanId)
     setInterval_(restaurant.billing_interval === 'year' ? 'year' : 'month')
     setMods(((restaurant.addon_modules || []) as ModuleId[]).filter(m => ALL_MODULES.includes(m)))
     setSeats(restaurant.extra_seats || 0)
     setAi(!!restaurant.addon_ai)
-  }, [restaurant?.id])
+  }, [restaurant?.id, user?.id])
 
   const planData = PLAN_DEFS[plan]
   // Аддон-модули валидны только сверх тарифа
@@ -65,7 +70,7 @@ export default function BillingPage() {
 
   // ── Действия ──
   const [busy, setBusy] = useState(false)
-  const [preview, setPreview] = useState<{ amountDue: number | null; monthly: number } | null>(null)
+  const [preview, setPreview] = useState<{ amountDue: number | null; monthly: number; signature: string } | null>(null)
   const [cancelConfirm, setCancelConfirm] = useState(false)
   const [portalLoading, setPortalLoading] = useState(false)
 
@@ -73,6 +78,8 @@ export default function BillingPage() {
     restaurantId: restaurant?.id, plan, interval,
     addonModules: effMods, extraSeats: seats, addonAI: effAi,
   }
+  const selectionSignature = JSON.stringify(payload)
+  const currentPreview = preview?.signature === selectionSignature ? preview : null
 
   const apply = async () => {
     if (!restaurant || busy) return
@@ -100,14 +107,14 @@ export default function BillingPage() {
       }
       if (!res.ok || data.error) { alert(`${tr('dash.error')}${data.message || data.error || res.status}`); return }
       if (!data.changed) { alert(tr('dash.noChanges')); return }
-      setPreview({ amountDue: data.amountDue, monthly: data.monthly })
+      setPreview({ amountDue: data.amountDue, monthly: data.monthly, signature: selectionSignature })
     } catch (e: any) {
       alert(tr('dash.error') + (e?.message || e))
     } finally { setBusy(false) }
   }
 
   const confirm = async () => {
-    if (!restaurant || busy) return
+    if (!restaurant || busy || !currentPreview) return
     setBusy(true)
     try {
       const res = await fetch('/api/stripe/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
@@ -179,8 +186,8 @@ export default function BillingPage() {
   if (!restaurant) return <Spinner />
 
   return (
-    <Container size="normal">
-      <SectionTitle title={tr('dash.navBilling')} sub={tr('dash.billingSub')} />
+    <Container size="wide" style={{ maxWidth: 1320 }}>
+      <div className="billing-web-header"><SectionTitle title={tr('dash.navBilling')} sub={tr('dash.billingSub')} /></div>
 
       {justPaid && !isActive && (
         <Card style={{ marginBottom: 16, border: '1px solid rgba(0,122,255,.25)' }}>
@@ -215,6 +222,7 @@ export default function BillingPage() {
       )}
 
       {/* Текущая подписка */}
+      <div className="billing-web-current">
       {currentPlan && (
         <Card style={{ marginBottom: 16, border: `1px solid ${currentPlan.color}25` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
@@ -231,11 +239,13 @@ export default function BillingPage() {
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--tx)', fontVariantNumeric: 'tabular-nums' }}>
                   €{(() => {
-                    const m = currentPlan.price
-                      + ((restaurant.addon_modules?.length || 0) * ADDON_PRICES.module)
-                      + ((restaurant.extra_seats || 0) * ADDON_PRICES.seat)
-                      + (restaurant.addon_ai ? ADDON_PRICES.ai : 0)
-                    return restaurant.billing_interval === 'year' ? Math.round(m * 12 * (1 - YEARLY_DISCOUNT)) : m
+                    const modules = restaurant.addon_modules?.length || 0
+                    const extraSeats = restaurant.extra_seats || 0
+                    const base = restaurant.billing_interval === 'year'
+                      ? yearly(currentPlan.price) + modules * yearly(ADDON_PRICES.module) + extraSeats * yearly(ADDON_PRICES.seat) + (restaurant.addon_ai ? yearly(ADDON_PRICES.ai) : 0)
+                      : currentPlan.price + modules * ADDON_PRICES.module + extraSeats * ADDON_PRICES.seat + (restaurant.addon_ai ? ADDON_PRICES.ai : 0)
+                    const discount = Math.max(0, Math.min(100, Number(restaurant.discount_pct) || 0))
+                    return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(Math.round(base * (1 - discount / 100) * 100) / 100)
                   })()}
                 </div>
                 <div style={{ color: 'var(--tx2)', fontSize: '.78rem' }}>{restaurant.billing_interval === 'year' ? tr('dash.perYear') : tr('dash.perMonth')}</div>
@@ -272,13 +282,15 @@ export default function BillingPage() {
           </div>
         </Card>
       )}
+      </div>
 
       {!native && <>
+        <section className="billing-web-section" aria-label={currentPlan && hasSub ? tr('dash.changePlan') : tr('dash.choosePlan')}>
         {/* Тумблер месяц/год */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
-          <div style={{ fontWeight: 600, fontSize: '.78rem', color: 'var(--tx2)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+        <div className="billing-web-section-head">
+          <h2>
             {currentPlan && hasSub ? tr('dash.changePlan') : tr('dash.choosePlan')}
-          </div>
+          </h2>
           <div style={{ minWidth: 220 }}>
             <Segmented small value={interval} onChange={v => setInterval_(v as 'month' | 'year')}
               options={[{ value: 'month', label: tr('dash.intMonth') }, { value: 'year', label: tr('dash.intYear') }]} />
@@ -286,7 +298,7 @@ export default function BillingPage() {
         </div>
 
         {/* Карточки тарифов */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12, marginBottom: 16 }}>
+        <div className="billing-web-plans">
           {PLANS.map(p => {
             const def = PLAN_DEFS[p.id as PlanId]
             const selected = plan === p.id
@@ -321,7 +333,9 @@ export default function BillingPage() {
             )
           })}
         </div>
+        </section>
 
+        <div className="billing-web-config">
         {/* Аддоны */}
         <Card style={{ marginBottom: 16 }}>
           <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)' }}>{tr('dash.addonsTitle')}</div>
@@ -369,19 +383,19 @@ export default function BillingPage() {
         </Card>
 
         {/* Итог + применить */}
-        <Card style={{ marginBottom: 16 }}>
-          {preview ? (
+        <div className="billing-web-summary"><Card style={{ marginBottom: 16 }}>
+          {currentPreview ? (
             <div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, marginBottom: 14 }}>
-                {preview.amountDue != null && (
+                {currentPreview.amountDue != null && (
                   <div>
                     <div style={{ fontSize: '.72rem', fontWeight: 600, color: 'var(--tx2)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 2 }}>{tr('dash.dueNow')}</div>
-                    <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--tx)', fontVariantNumeric: 'tabular-nums' }}>€{preview.amountDue.toFixed(2)}</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--tx)', fontVariantNumeric: 'tabular-nums' }}>€{currentPreview.amountDue.toFixed(2)}</div>
                   </div>
                 )}
                 <div>
                   <div style={{ fontSize: '.72rem', fontWeight: 600, color: 'var(--tx2)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 2 }}>{tr('dash.newMonthly')}</div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--accent)', fontVariantNumeric: 'tabular-nums' }}>€{preview.monthly}{tr('dash.perMo')}</div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--accent)', fontVariantNumeric: 'tabular-nums' }}>€{currentPreview.monthly}{tr('dash.perMo')}</div>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -404,6 +418,8 @@ export default function BillingPage() {
 
         <div style={{ textAlign: 'center', fontSize: '.75rem', color: 'var(--tx3)' }}>
           {tr('dash.stripeNote')}
+        </div>
+        </div>
         </div>
       </>}
     </Container>

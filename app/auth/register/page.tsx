@@ -1,9 +1,17 @@
 'use client'
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Wordmark } from '@/components/brand'
 import { useI18n, LanguageSwitcher } from '@/lib/i18n'
 import { track } from '@/lib/analytics'
+import { PLANS, type PlanId } from '@/lib/plans'
+
+const validPlan = (value: string | null): value is PlanId => value === 'starter' || value === 'business' || value === 'pro'
+const getPreferredPlan = (): PlanId | null => {
+  const fromUrl = new URLSearchParams(window.location.search).get('plan')
+  const saved = localStorage.getItem('mise_preferred_plan')
+  return validPlan(fromUrl) ? fromUrl : validPlan(saved) ? saved : null
+}
 
 function PasswordRule({ ok, text }: { ok: boolean; text: string }) {
   return (
@@ -28,6 +36,7 @@ export default function Register() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [showPass, setShowPass] = useState(false)
+  const preferredPlan = useSyncExternalStore(() => () => {}, getPreferredPlan, () => null)
 
   const rules = {
     length: password.length >= 8,
@@ -46,7 +55,7 @@ export default function Register() {
     setError('')
     const { error } = await supabase.auth.signUp({
       email, password,
-      options: { data: { full_name: name, restaurant_name: restaurant } }
+      options: { data: { full_name: name, restaurant_name: restaurant, ...(preferredPlan ? { preferred_plan: preferredPlan } : {}) } }
     })
     if (error) { setError(error.message) }
     else {
@@ -61,7 +70,7 @@ export default function Register() {
     setGoogleLoading(true)
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/auth/callback` }
+      options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(preferredPlan ? `/dashboard/billing?plan=${preferredPlan}` : '/dashboard')}` }
     })
   }
 
@@ -69,7 +78,7 @@ export default function Register() {
     setAppleLoading(true)
     await supabase.auth.signInWithOAuth({
       provider: 'apple',
-      options: { redirectTo: `${window.location.origin}/auth/callback` }
+      options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(preferredPlan ? `/dashboard/billing?plan=${preferredPlan}` : '/dashboard')}` }
     })
   }
 
@@ -104,6 +113,10 @@ export default function Register() {
           <div style={{ color: '#6d6d72', fontSize: '.88rem', marginTop: 4 }}>{t('auth.register.subtitle')}</div>
         </div>
 
+        {preferredPlan && <div style={{ marginBottom: 18, padding: '10px 13px', borderRadius: 10, background: 'rgba(0,122,255,.08)', color: '#1c1c1e', fontSize: '.82rem', lineHeight: 1.45 }}>
+          {t('auth.register.preferredPlan', { plan: PLANS[preferredPlan].name })}
+        </div>}
+
         {/* Google */}
         <button onClick={handleGoogle} disabled={googleLoading} style={S.socialBtn}>
           <svg width="18" height="18" viewBox="0 0 18 18">
@@ -120,7 +133,7 @@ export default function Register() {
             <path d="M14.05 9.02c-.02-2.04 1.67-3.02 1.74-3.07-1.05-1.54-2.67-1.76-3.24-1.78-1.38-.14-2.7.81-3.4.81-.7 0-1.78-.79-2.93-.77-1.51.02-2.9.88-3.68 2.23-1.57 2.72-.4 6.74 1.13 8.94.75 1.08 1.64 2.29 2.81 2.25 1.13-.05 1.56-.73 2.93-.73 1.37 0 1.76.73 2.95.71 1.21-.02 1.98-1.1 2.73-2.18.86-1.25 1.21-2.46 1.23-2.52-.03-.01-2.35-.9-2.37-3.59z" fill="white"/>
             <path d="M11.62 2.67C12.23 1.93 12.64.93 12.52 0c-.87.04-1.92.58-2.54 1.31-.56.64-1.05 1.67-.92 2.65.97.07 1.96-.49 2.56-1.29z" fill="white"/>
           </svg>
-          <span>{appleLoading ? t('auth.login.googleLoading') : 'Continue with Apple'}</span>
+          <span>{appleLoading ? t('auth.login.googleLoading') : t('auth.register.apple')}</span>
         </button>
 
         {/* Divider */}

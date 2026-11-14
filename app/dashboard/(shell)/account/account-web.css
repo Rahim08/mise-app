@@ -1,0 +1,9 @@
+.account-web-header { margin-bottom: 22px; }
+.account-web-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+.account-web-grid > div { min-width: 0; }
+.account-web-card-title { margin: 0 0 5px; color: var(--tx); font-size: 16px; letter-spacing: -.015em; }
+.account-web-card-description { min-height: 38px; margin: 0 0 17px; color: var(--tx2); font-size: 12px; line-height: 1.5; }
+.account-web-links { display: flex; flex-wrap: wrap; align-items: center; gap: 9px 18px; }
+.account-web-links button, .account-web-links a { min-height: 36px; display: inline-flex; align-items: center; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; }
+.account-web-links button:hover, .account-web-links a:hover { text-decoration: underline; }
+@media (max-width: 750px) { .account-web-grid { grid-template-columns: 1fr; } .account-web-card-description { min-height: 0; } }
