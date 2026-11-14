@@ -147,6 +147,8 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
 
   useEffect(() => {
     setMounted(true)
+    // Диплинк из онбординга People (/manager?section=checklists) — сразу в редактор чек-листов.
+    if (new URLSearchParams(window.location.search).get('section') === 'checklists') { setTab('settings'); setSettingsSection('checklists') }
     init()
   }, [])
 

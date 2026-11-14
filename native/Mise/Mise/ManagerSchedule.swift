@@ -76,7 +76,9 @@ final class ManagerScheduleModel {
         guard !dates.isEmpty else { flash(t("pe.pickDates")); return false }
         var inserts: [[String: Any]] = []
         for d in dates {
-            var v: [String: Any] = ["restaurant_id": rid, "staff_id": staffId, "date": d, "shift_start": start, "shift_end": end]
+// В iOS нет шага «опубликовать неделю» — без published: true смена навсегда оставалась
+            // черновиком (DB default false) и сотрудник её не видел (пакет D, 2026-11-14).
+            var v: [String: Any] = ["restaurant_id": rid, "staff_id": staffId, "date": d, "shift_start": start, "shift_end": end, "published": true]
             if !note.isEmpty { v["note"] = note }
             inserts.append(v)
         }
@@ -98,7 +100,7 @@ final class ManagerScheduleModel {
         var inserts: [[String: Any]] = []
         for s in prev {
             guard let d = dfKey.date(from: s.date), let nd = cal.date(byAdding: .day, value: 7, to: d) else { continue }
-            var v: [String: Any] = ["restaurant_id": rid, "staff_id": s.staff_id ?? "", "date": key(nd)]
+            var v: [String: Any] = ["restaurant_id": rid, "staff_id": s.staff_id ?? "", "date": key(nd), "published": true]
             if let st = s.shift_start { v["shift_start"] = st }
             if let en = s.shift_end { v["shift_end"] = en }
             if let n = s.note { v["note"] = n }

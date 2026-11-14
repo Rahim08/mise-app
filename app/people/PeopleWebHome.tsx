@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from 'react'
 import { db } from '@/lib/db'
-import { peopleToday } from '@/lib/peopleDay'
+import { peopleToday, geoMissingAddress } from '@/lib/peopleDay'
 import { useI18n } from '@/lib/i18n'
 import { roleLabel, timeRange } from '@/components/people/helpers'
 
 type Staff = { id: string; name: string; role: string }
 type Schedule = { staff_id: string; shift_start: string | null; shift_end: string | null; published: boolean }
 type Task = { id: string; title: string; assigned_to: string | null; due_date: string | null; status: string }
-type HomeData = { staff: Staff[]; schedules: Schedule[]; tasks: Task[]; newReports: number }
+type Setup = { publishedAhead: number; shiftChecklists: number; addressMissing: boolean }
+type HomeData = { staff: Staff[]; schedules: Schedule[]; tasks: Task[]; newReports: number; setup: Setup | null }
 
 export function PeopleWebHome({ onSchedule, onTasks, onAudits, onReports, onTeam }: {
   onSchedule: () => void; onTasks: () => void; onAudits: () => void; onReports: () => void; onTeam: () => void
@@ -28,17 +29,28 @@ export function PeopleWebHome({ onSchedule, onTasks, onAudits, onReports, onTeam
     const load = async () => {
       setLoading(true)
       setError(false)
-      const [staffResult, scheduleResult, tasksResult, reportsResult] = await Promise.all([
+      const [staffResult, scheduleResult, tasksResult, reportsResult, aheadResult, checklistsResult, settingsResult] = await Promise.all([
         db.from('staff_directory').select('id,name,role').eq('is_active', true).order('name'),
         db.from('staff_schedules').select('staff_id,shift_start,shift_end,published').eq('date', today),
         db.from('staff_tasks').select('id,title,assigned_to,due_date,status').neq('status', 'done').order('created_at', { ascending: false }).limit(1000),
         db.from('staff_reports').select('id').eq('status', 'new').limit(1000),
+        // Онбординг (аудит People 2026-11-14, пакет D): People пуст, пока нет опубликованного
+        // графика и чек-листа смены — показываем владельцу шаги, а не пустые экраны.
+        db.from('staff_schedules').select('id').eq('published', true).gte('date', today).limit(1),
+        db.from('shift_checklists').select('id').eq('kind', 'shift').limit(1),
+        db.from('restaurant_settings').select('attendance_enabled,latitude,longitude').limit(1),
       ])
       if (cancelled) return
       if (staffResult.error || scheduleResult.error || tasksResult.error || reportsResult.error) {
         setError(true)
       } else {
-        setData({ staff: staffResult.data || [], schedules: scheduleResult.data || [], tasks: tasksResult.data || [], newReports: (reportsResult.data || []).length })
+        // Сбой вспомогательных запросов не ломает обзор — просто не показываем онбординг.
+        const setup: Setup | null = aheadResult.error || checklistsResult.error || settingsResult.error ? null : {
+          publishedAhead: (aheadResult.data || []).length,
+          shiftChecklists: (checklistsResult.data || []).length,
+          addressMissing: geoMissingAddress((settingsResult.data as any[] | null)?.[0]),
+        }
+        setData({ staff: staffResult.data || [], schedules: scheduleResult.data || [], tasks: tasksResult.data || [], newReports: (reportsResult.data || []).length, setup })
       }
       setLoading(false)
     }
@@ -59,7 +71,27 @@ export function PeopleWebHome({ onSchedule, onTasks, onAudits, onReports, onTeam
   const topTasks = [...data.tasks].sort((a, b) => (a.due_date || '9999-12-31').localeCompare(b.due_date || '9999-12-31')).slice(0, 4)
   const dateLabel = new Date(`${today}T00:00:00`).toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })
 
+  const steps = data.setup ? [
+    { done: data.staff.length > 0, label: tr('pe.obTeam'), go: onTeam },
+    { done: data.setup.publishedAhead > 0, label: tr('pe.obSchedule'), go: onSchedule },
+    { done: data.setup.shiftChecklists > 0, label: tr('pe.obChecklist'), go: () => { window.location.href = '/manager?section=checklists' } },
+    ...(data.setup.addressMissing ? [{ done: false, label: tr('pe.obAddress'), go: () => { window.location.href = '/dashboard/settings' } }] : []),
+  ] : []
+  const showSetup = steps.some(s => !s.done)
+
   return <div className="people-web-home">
+    {showSetup && <section className="people-web-panel people-web-setup">
+      <h2>{tr('pe.obTitle')}</h2>
+      <p>{tr('pe.obHint')}</p>
+      <div className="people-web-action-list">
+        {steps.map((s, i) => <button type="button" key={i} onClick={s.go} disabled={s.done} className={s.done ? 'is-done' : undefined}>
+          <i aria-hidden="true">{s.done
+            ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+            : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /></svg>}</i>
+          {s.label}{!s.done && <span>›</span>}
+        </button>)}
+      </div>
+    </section>}
     <div className="people-web-metrics">
       {[
         { label: tr('pe.webStaffCount'), value: data.staff.length, tone: 'default' },

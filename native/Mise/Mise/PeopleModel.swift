@@ -51,6 +51,10 @@ final class PeopleModel {
     var attLoaded = false
     var checking = false
     var todayScheduledIds: Set<String> = []
+    /// Онбординг менеджера (пакет D): есть ли опубликованный график вперёд и чек-лист смены.
+    /// nil — не загружено/ошибка (карточку не показываем).
+    var setupPublishedAhead: Bool? = nil
+    var setupHasShiftChecklist: Bool? = nil
     /// Своя опубликованная смена на сегодня — гейт «Я здесь» (Д4, 2026-07-31). nil, пока не
     /// проверено ИЛИ смены нет; published-фильтр серверный (.eq), поле в модель не тащим.
     var mySchedToday: Schedule? = nil
@@ -378,8 +382,9 @@ final class PeopleModel {
     // Менеджер строит график: добавление / удаление смен + копирование прошлой недели.
     func createSchedule(staffId: String, date: String, start: String, end: String, note: String) async -> Bool {
         guard !staffId.isEmpty else { flash(t("pe.pickStaff")); return false }
+        // published: true — в iOS нет шага публикации, иначе смена навсегда черновик (пакет D).
         var v: [String: Any] = ["restaurant_id": rid, "staff_id": staffId, "date": date,
-                                "shift_start": start, "shift_end": end]
+                                "shift_start": start, "shift_end": end, "published": true]
         if !note.isEmpty { v["note"] = note }
         do {
             try await DB.from("staff_schedules").insert(v).run()
@@ -412,6 +417,13 @@ final class PeopleModel {
             struct SchedStub: Codable { let staff_id: String }
             if let todayScheds = try? await DB.from("staff_schedules").select("staff_id").eq("date", todayKey).list(SchedStub.self) {
                 todayScheduledIds = Set(todayScheds.map { $0.staff_id })
+            }
+            struct IdStub: Codable { let id: String }
+            if let a = try? await DB.from("staff_schedules").select("id").eq("published", true).gte("date", todayKey).limit(1).list(IdStub.self) {
+                setupPublishedAhead = !a.isEmpty
+            }
+            if let c = try? await DB.from("shift_checklists").select("id").eq("kind", "shift").limit(1).list(IdStub.self) {
+                setupHasShiftChecklist = !c.isEmpty
             }
         } else {
             if let a = try? await DB.from("attendance_records").select().eq("staff_id", myId).order("date", ascending: false).limit(62).list(AttendanceRecord.self) {

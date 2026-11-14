@@ -202,6 +202,35 @@ struct AttendanceTab: View {
         }
     }
 
+    /// «С чего начать» (пакет D): People пуст, пока нет графика и чек-листа смены.
+    /// Шаги — текстом с путём, без навигации: экраны живут в Manager, а адрес — в веб-настройках.
+    @ViewBuilder private var setupCard: some View {
+        if let sched = m.setupPublishedAhead, let cl = m.setupHasShiftChecklist {
+            let steps: [(Bool, String)] = [
+                (!m.dir.isEmpty, t("pe.obTeam")),
+                (sched, t("pe.obScheduleIOS")),
+                (cl, t("pe.obChecklistIOS")),
+            ] + (m.geo?.missingAddress == true ? [(false, t("pe.obAddressIOS"))] : [])
+            if steps.contains(where: { !$0.0 }) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(t("pe.obTitle")).font(.system(size: 15, weight: .semibold))
+                    Text(t("pe.obHint")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.55))
+                    ForEach(Array(steps.enumerated()), id: \.offset) { _, s in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: s.0 ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(s.0 ? BrandKit.analytics : PEOPLE_ACCENT)
+                            Text(s.1).font(.system(size: 13)).foregroundStyle(.primary.opacity(s.0 ? 0.45 : 0.85))
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                .padding(.bottom, 14)
+            }
+        }
+    }
+
     private var managerView: some View {
         // Пришедшие вне графика тоже в списке, с бейджем (Б3) — иначе их явку не видно.
         let cameToday = Set(m.attendance.filter { $0.date == m.todayKey }.compactMap { $0.staff_id })
@@ -209,6 +238,7 @@ struct AttendanceTab: View {
             ? m.dir
             : m.dir.filter { m.todayScheduledIds.contains($0.id) || cameToday.contains($0.id) }
         return VStack(alignment: .leading, spacing: 0) {
+            setupCard
             if m.geo?.missingAddress == true {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "mappin.slash").foregroundStyle(BrandKit.stash)

@@ -49,8 +49,26 @@ export function MyShiftsTab({ myId, accent, t }: { myId: string; accent: string;
   )
 
   const today = peopleToday(null); const tomorrow = fmtDate(addDays(new Date(), 1))
+  // Календарь на 2 недели (пакет D): раньше на вебе был только список, без «когда я свободен».
+  const byDate = new Map(shifts.map(s => [s.date, s]))
+  const monday = mondayOf(new Date(today + 'T00:00:00'))
+  const days = Array.from({ length: 14 }, (_, i) => fmtDate(addDays(monday, i)))
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ background: t.surface, borderRadius: 16, padding: '12px 10px', boxShadow: t.sh }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
+          {DOW_SHORT().map(d => <div key={d} style={{ textAlign: 'center', fontSize: 10.5, fontWeight: 600, color: t.text3, paddingBottom: 4 }}>{d}</div>)}
+          {days.map(d => {
+            const sh = byDate.get(d); const isToday = d === today; const past = d < today
+            return (
+              <div key={d} style={{ textAlign: 'center', padding: '6px 0', borderRadius: 10, background: sh ? `${accent}1a` : 'transparent', outline: isToday ? `1.5px solid ${accent}` : 'none', opacity: past ? 0.4 : 1 }}>
+                <div style={{ fontSize: 14, fontWeight: sh ? 700 : 500, color: sh ? accent : t.text2 }}>{new Date(d + 'T00:00:00').getDate()}</div>
+                <div style={{ fontSize: 9.5, color: sh ? accent : t.text3, minHeight: 12 }}>{sh ? (hhmm(sh.shift_start) || '•') : ''}</div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
       {shifts.map(s => {
         const when = s.date === today ? tr('pe.today') : s.date === tomorrow ? tr('pe.tomorrow') : null
         return (

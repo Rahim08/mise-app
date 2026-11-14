@@ -60,3 +60,12 @@ html.mise-dark .people-web { --people-accent: #5e5ce6; }
 @media (max-width: 1020px) { .people-web-columns { grid-template-columns: minmax(0, 1fr); } .people-web-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .people-web-header { align-items: flex-start !important; flex-direction: column; } .people-web-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .people-web-rail { grid-template-columns: minmax(0, 1fr); } .people-web-panel { padding: 16px; } }
 @media (max-width: 480px) { .people-web-metric { padding: 15px; } .people-web-metric-value { font-size: 1.55rem; } .people-web-table { min-width: 620px; } }
+
+/* Онбординг «С чего начать» (пакет D) */
+.people-web-setup { margin-bottom: 20px; }
+.people-web-setup h2 { margin: 0; }
+.people-web-setup p { margin: 6px 0 0; color: var(--tx2); font-size: .85rem; }
+.people-web-setup .people-web-action-list button { justify-content: flex-start; }
+.people-web-setup .people-web-action-list button i { display: flex; color: var(--accent); font-style: normal; }
+.people-web-setup .people-web-action-list button.is-done { color: var(--tx2); cursor: default; }
+.people-web-setup .people-web-action-list button.is-done i { color: var(--success, #34c759); }
