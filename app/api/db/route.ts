@@ -105,7 +105,7 @@ const RPC_POLICY: Record<string, { write: AppId[]; restaurantArg: string }> = {
 }
 
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'like', 'ilike'])
-function validBookingFilter(value: unknown): boolean {
+function validFilter(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const filter = value as Record<string, unknown>
   return typeof filter.op === 'string' && FILTER_OPS.has(filter.op)
@@ -214,7 +214,7 @@ async function checkStaffPlanLimit(admin: any, rid: string, op: string, values: 
   return null
 }
 
-const PEOPLE_GUARDED = new Set(['menu_items', 'menu_orders', 'staff_schedules', 'shift_checklists', 'tech_cards',
+const PEOPLE_GUARDED = new Set(['menu_items', 'menu_orders', 'staff_schedules', 'shift_checklists', 'shift_checklist_completions', 'tech_cards',
   'attendance_records', 'staff_tasks', 'staff_reports', 'shift_swap_requests', 'tech_card_sessions', 'purchase_items'])
 
 function authorized(caller: Caller, allowed: AppId[]): boolean {
@@ -318,6 +318,12 @@ export async function POST(req: NextRequest) {
 
   const policy = POLICY[table]
   if (!policy) return NextResponse.json({ error: 'Unknown table' }, { status: 400 })
+  // Невалидный фильтр отклоняем целиком (аудит People 2026-11-14, К1): applyFilters молча
+  // пропускал неизвестный op, а проверка «фильтр обязателен» смотрела только на длину —
+  // {op:'delete', filters:[{op:'x',...}]} удалял ВСЕ строки таблицы ресторана.
+  if (filters != null && (!Array.isArray(filters) || filters.some((f: unknown) => !validFilter(f)))) {
+    return NextResponse.json({ error: 'Invalid filters' }, { status: 400 })
+  }
 
   const isWrite = op === 'insert' || op === 'update' || op === 'delete' || op === 'upsert'
   if (table === 'shift_expenses' && (op === 'insert' || op === 'upsert') && customExpenseWriteError(values)) {
@@ -436,7 +442,7 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ data: returning === 'single' ? inserted : [inserted] })
         }
         if (!(filters || []).length) throw new BookingPolicyError('Filter required for booking mutation')
-        if ((filters || []).some((filter: unknown) => !validBookingFilter(filter))) throw new BookingPolicyError('Invalid booking filter')
+        if ((filters || []).some((filter: unknown) => !validFilter(filter))) throw new BookingPolicyError('Invalid booking filter')
         const official = await isOfficial(admin,caller)
         if (!official) {
           const author = bookingAuthor(caller)
@@ -486,7 +492,7 @@ export async function POST(req: NextRequest) {
           }
           values = Array.isArray(values) ? prepared : prepared[0]
         } else {
-          if (!(filters || []).length || (filters || []).some((filter: unknown)=>!validBookingFilter(filter))) throw new BookingPolicyError('Filter required for guest mutation')
+          if (!(filters || []).length || (filters || []).some((filter: unknown)=>!validFilter(filter))) throw new BookingPolicyError('Filter required for guest mutation')
           // A cap avoids silently checking only the first PostgREST response page.
           // Larger bulk profile changes belong in an explicit administrative workflow.
           const {data: notes,error} = await applyFilters(admin.from('guest_notes').select('guest_key').eq('restaurant_id',caller.rid)).limit(101)

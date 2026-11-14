@@ -88,6 +88,14 @@ enum API {
             checkAuth(http.statusCode)
             throw APIError.http(http.statusCode, serverMessage(data))
         }
+        // Эндпоинты /api/people/* пишут в таблицы мимо DB.swift, поэтому кэш SELECT-ов сам не
+        // сбрасывался: после утверждения обмена loadSwaps читал 5-минутную копию и возвращал
+        // статус «ожидает» (аудит 2026-11-14, В1). Сбрасываем синхронно, до следующего чтения.
+        if method != "GET" {
+            let touched: [String] = path.contains("/swap") ? ["shift_swap_requests", "staff_schedules"]
+                : path.contains("/checklist-item") ? ["shift_checklist_completions"] : []
+            for table in touched { await CacheStore.shared.invalidate(table: table) }
+        }
         do { return try JSONDecoder().decode(PeopleWrap<T>.self, from: data).data }
         catch { throw APIError.decode }
     }

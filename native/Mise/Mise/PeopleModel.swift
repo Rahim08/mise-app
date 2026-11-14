@@ -193,7 +193,9 @@ final class PeopleModel {
             flash(t("saveFailed", ["err": lastError.localizedDescription]))
             return false
         } else {
-            flash(targets.count > 1 ? t("pe.taskCreatedN", ["n": "\(targets.count)"]) : t("pe.taskCreated"))
+            // При частичном сбое (задача «на роль») — честное число созданных, а не всех целей.
+            let created = targets.count - failed
+            flash(targets.count > 1 ? t("pe.taskCreatedN", ["n": "\(created)"]) : t("pe.taskCreated"))
         }
         await loadTasks()
         return true
@@ -451,9 +453,11 @@ final class PeopleModel {
         guard mySchedToday != nil else { return }
         checking = true; defer { checking = false }
 
+        var sentCoord: CLLocationCoordinate2D?
         if let g = geo, g.attendance_enabled == true, let lat = g.latitude, let lng = g.longitude {
             guard let coord = await LocationOneShot().current() else { flash(t("pe.noGeo")); return }
             if distanceMeters(coord, lat, lng) > (g.geo_radius_m ?? 150) { flash(t("pe.outOfZone")); return }
+            sentCoord = coord
         }
 
         // Идемпотентность: убедиться, что записи за сегодня нет (двойная проверка)
@@ -476,10 +480,12 @@ final class PeopleModel {
                 late = mins; status = mins > grace ? "late" : "present"
             }
         }
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "restaurant_id": rid, "staff_id": myId, "date": todayKey,
             "check_in_at": ISO8601DateFormatter().string(from: Date()), "late_minutes": late as Any, "status": status, "source": "manual",
         ]
+        // Координаты — чтобы сервер сам проверил радиус и посчитал дистанцию (аудит 2026-11-14, К3).
+        if let c = sentCoord { payload["check_in_lat"] = c.latitude; payload["check_in_lng"] = c.longitude }
         do {
             try await DB.from("attendance_records").insert(payload).run()
             UserDefaults.standard.removeObject(forKey: pendingCheckInKey)
@@ -877,7 +883,12 @@ final class PeopleModel {
 
     /// Досылает отметки, накопленные без сети. Вызывается там же, где flushPendingCheckIn —
     /// при загрузке раздела/возврате в foreground.
+    @ObservationIgnored private var flushingChecklistQueue = false
     func flushPendingChecklistQueue() async {
+        // loadChecklists и loadAudits зовут досылку параллельно — без замка одни и те же
+        // отметки уходили дважды.
+        guard !flushingChecklistQueue else { return }
+        flushingChecklistQueue = true; defer { flushingChecklistQueue = false }
         let queue = loadPendingChecklistQueue()
         guard !queue.isEmpty else { return }
         var remaining: [PendingChecklistToggle] = []
@@ -897,8 +908,13 @@ final class PeopleModel {
                 // Сервер отверг (прогон удалён/нет доступа) — повтор бесполезен, выбрасываем.
             }
         }
-        if remaining.isEmpty { UserDefaults.standard.removeObject(forKey: pendingChecklistKey) }
-        else if let data = try? JSONEncoder().encode(remaining) { UserDefaults.standard.set(data, forKey: pendingChecklistKey) }
+        // Пока досылали (await на каждом пункте), могли добавиться новые офлайн-отметки —
+        // очередь только дописывается в конец, поэтому сохраняем всё, что добавилось после
+        // прочитанного в начале, а не затираем остатком (аудит 2026-11-14, К4).
+        let appended = Array(loadPendingChecklistQueue().dropFirst(queue.count))
+        let keep = remaining + appended
+        if keep.isEmpty { UserDefaults.standard.removeObject(forKey: pendingChecklistKey) }
+        else if let data = try? JSONEncoder().encode(keep) { UserDefaults.standard.set(data, forKey: pendingChecklistKey) }
         if remaining.count < queue.count { await loadChecklists(); await loadAudits() }
     }
 
@@ -917,10 +933,18 @@ final class PeopleModel {
         let domVal: Any = kind == "audit" ? ((recurrenceDayOfMonth as Any?) ?? NSNull()) : NSNull()
         do {
             if let id {
-                try await DB.from("shift_checklists").update([
+                var patch: [String: Any] = [
                     "items": itemDicts, "role": roleVal,
                     "recurrence": recurrenceVal, "recurrence_weekdays": weekdaysVal, "recurrence_day_of_month": domVal,
-                ] as [String: Any]).eq("id", id).run()
+                ]
+                // Форма аудита даёт менять название, охват и исполнителя — раньше update их не
+                // писал, правка молча терялась (аудит 2026-11-14, В2). Шаблоны смены их не имеют.
+                if kind == "audit" {
+                    patch["title"] = title ?? NSNull()
+                    patch["target_scope"] = targetScope
+                    patch["assigned_staff_id"] = assignedStaffId ?? NSNull()
+                }
+                try await DB.from("shift_checklists").update(patch).eq("id", id).run()
             } else {
                 try await DB.from("shift_checklists").insert([
                     // kind="audit": type — семантика открытия/закрытия смены к разовым аудитам не относится, NULL.

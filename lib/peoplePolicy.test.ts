@@ -130,3 +130,41 @@ describe('mergeChecklistItem', () => {
     expect(allDone).toBe(false)
   })
 })
+
+describe('peoplePolicy — прогоны чек-листов (К2)', () => {
+  it('сотрудник не пишет прогоны напрямую через шлюз', async () => {
+    for (const op of ['insert', 'update', 'delete', 'upsert']) {
+      await expect(run(waiter, 'shift_checklist_completions', op, { status: 'done' }, [{ op: 'eq', col: 'id', val: 'c1' }]))
+        .rejects.toBeInstanceOf(PeoplePolicyError)
+    }
+  })
+  it('менеджер запускает аудит', async () => {
+    const r = await run(manager, 'shift_checklist_completions', 'insert', { checklist_id: 'a1', status: 'pending' })
+    expect(r.values).toEqual({ checklist_id: 'a1', status: 'pending' })
+  })
+})
+
+describe('peoplePolicy — явка считается на сервере (К3)', () => {
+  const settings = [{ restaurant_id: RID, timezone: 'Europe/Rome', late_grace_min: 5, attendance_enabled: false }]
+  const day = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' })
+  it('статус и опоздание клиента игнорируются', async () => {
+    const r = await run(waiter, 'attendance_records', 'insert',
+      { staff_id: 'w2', date: day, status: 'present', late_minutes: 0, check_in_distance_m: 1 }, [],
+      { restaurant_settings: settings, staff_schedules: [{ id: 's1', restaurant_id: RID, staff_id: 'w1', date: day, shift_start: '00:00', published: true }] })
+    expect(r.values.staff_id).toBe('w1')
+    expect(r.values.schedule_id).toBe('s1')
+    expect(r.values.check_in_distance_m).toBeNull()
+    // Смена с 00:00, отметка «сейчас» — опоздание считает сервер, не 0 от клиента.
+    expect(r.values.late_minutes).toBeGreaterThanOrEqual(0)
+    expect(r.values.status).toBe(r.values.late_minutes > 5 ? 'late' : 'present')
+  })
+  it('повторная отметка за тот же день отклоняется', async () => {
+    await expect(run(waiter, 'attendance_records', 'upsert', { date: day }, [],
+      { restaurant_settings: settings, attendance_records: [{ id: 'a1', restaurant_id: RID, staff_id: 'w1', date: day }] }))
+      .rejects.toMatchObject({ status: 409 })
+  })
+  it('пачка строк отклоняется', async () => {
+    await expect(run(waiter, 'attendance_records', 'insert', [{ date: day }, { date: day }], [], { restaurant_settings: settings }))
+      .rejects.toBeInstanceOf(PeoplePolicyError)
+  })
+})

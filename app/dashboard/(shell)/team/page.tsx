@@ -87,19 +87,23 @@ export default function TeamPage() {
   // сотруднику сначала фиксируем СТАРОЕ значение сентинелем '2000-01-01' («действовало
   // всегда до сих пор» — момент начала старого оклада неизвестен), иначе прошлые месяцы
   // до первой правки остались бы без истории и падали бы на текущее (уже новое) значение.
-  const recordSalaryChange = async (employeeId: string, oldSalary: number, oldDeduct: number, newSalary: number, newDeduct: number) => {
-    const { data: hist } = await db.from('salary_history').select('id, effective_from').eq('employee_id', employeeId)
+  // Возвращает текст ошибки или null. Раньше ошибки select/insert/update игнорировались:
+  // оклад менялся, а история — нет, и прошлые месяцы снова пересчитывались по новому окладу
+  // (аудит 2026-11-14, В8).
+  const recordSalaryChange = async (employeeId: string, oldSalary: number, oldDeduct: number, newSalary: number, newDeduct: number): Promise<string | null> => {
+    const { data: hist, error: histErr } = await db.from('salary_history').select('id, effective_from').eq('employee_id', employeeId)
+    if (histErr) return histErr.message
     const rows = hist || []
     if (rows.length === 0) {
-      await db.from('salary_history').insert({ employee_id: employeeId, salary: oldSalary, deduct_per_absence: oldDeduct, effective_from: '2000-01-01' })
+      const { error } = await db.from('salary_history').insert({ employee_id: employeeId, salary: oldSalary, deduct_per_absence: oldDeduct, effective_from: '2000-01-01' })
+      if (error) return error.message
     }
     const thisMonthStart = fmtDate(new Date()).slice(0, 7) + '-01'
-    const currentRow = rows.find(r => r.effective_from === thisMonthStart)
-    if (currentRow) {
-      await db.from('salary_history').update({ salary: newSalary, deduct_per_absence: newDeduct }).eq('id', currentRow.id)
-    } else {
-      await db.from('salary_history').insert({ employee_id: employeeId, salary: newSalary, deduct_per_absence: newDeduct, effective_from: thisMonthStart })
-    }
+    const currentRow = rows.find((r: any) => r.effective_from === thisMonthStart)
+    const { error } = currentRow
+      ? await db.from('salary_history').update({ salary: newSalary, deduct_per_absence: newDeduct }).eq('id', currentRow.id)
+      : await db.from('salary_history').insert({ employee_id: employeeId, salary: newSalary, deduct_per_absence: newDeduct, effective_from: thisMonthStart })
+    return error ? error.message : null
   }
 
   // One save handles both HR (employees) and access (staff).
@@ -133,14 +137,16 @@ export default function TeamPage() {
     let empId = editingEmpId
     if (editingEmpId) {
       const before = employees.find(e => e.id === editingEmpId)
-      const { error } = await db.from('employees').update(empPayload).eq('id', editingEmpId)
-      if (error) { alert(tr('dash.notSaved') + error.message); setSaving(false); return }
       // История окладов (salary-history-2026-09.sql): без этого правка оклада сегодня
       // задним числом меняла начисление за все прошлые месяцы. Пишем только при реальном
-      // изменении salary/deduct_per_absence — не на каждое сохранение формы.
+      // изменении salary/deduct_per_absence — и ДО смены оклада: не записалась история —
+      // оклад не меняем.
       if (before && (Number(before.salary || 0) !== empPayload.salary || Number(before.deduct_per_absence || 0) !== empPayload.deduct_per_absence)) {
-        await recordSalaryChange(editingEmpId, Number(before.salary || 0), Number(before.deduct_per_absence || 0), empPayload.salary, empPayload.deduct_per_absence)
+        const histErr = await recordSalaryChange(editingEmpId, Number(before.salary || 0), Number(before.deduct_per_absence || 0), empPayload.salary, empPayload.deduct_per_absence)
+        if (histErr) { alert(tr('dash.notSaved') + histErr); setSaving(false); return }
       }
+      const { error } = await db.from('employees').update(empPayload).eq('id', editingEmpId)
+      if (error) { alert(tr('dash.notSaved') + error.message); setSaving(false); return }
     } else {
       const { data: newEmp, error } = await db.from('employees').insert(empPayload).select().single()
       // Раньше ошибка insert не проверялась: empId оставался null, а staff всё равно

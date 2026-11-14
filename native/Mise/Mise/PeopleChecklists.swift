@@ -743,6 +743,8 @@ struct ReportProblemSheet: View {
     @State private var showCamera = false
     @State private var saving = false
     @State private var existingTask: StaffTask?
+    /// Фото уже загружено при прошлой (неудачной) попытке — повтор не грузит его снова.
+    @State private var uploadedPhotoURL: String?
 
     var body: some View {
         NavigationStack {
@@ -783,14 +785,18 @@ struct ReportProblemSheet: View {
                         saving = true
                         Task {
                             defer { saving = false }
-                            var photoURL: String? = nil
-                            if let photo {
+                            var photoURL: String? = uploadedPhotoURL
+                            if let photo, photoURL == nil {
                                 photoURL = await uploadAuditPhoto(image: photo, restaurantId: m.rid, completionId: run?.id ?? list.id,
                                                                    itemId: (itemIndex < (list.itemDetails?.count ?? 0)) ? list.itemDetails![itemIndex].id : "\(itemIndex)")
+                                uploadedPhotoURL = photoURL
                             }
-                            _ = await m.createTask(title: itemLabel, desc: comment, assignee: assignee, priority: "high", due: m.todayKey,
-                                                    sourceCompletionId: run?.id, sourceItemLabel: itemLabel, photoURL: photoURL)
-                            dismiss()
+                            // Закрываем только при успехе: раньше шторка закрывалась и при сбое —
+                            // комментарий, исполнитель и фото пропадали (аудит 2026-11-14, В3).
+                            // createTask сам показывает ошибку.
+                            let ok = await m.createTask(title: itemLabel, desc: comment, assignee: assignee, priority: "high", due: m.todayKey,
+                                                         sourceCompletionId: run?.id, sourceItemLabel: itemLabel, photoURL: photoURL)
+                            if ok { dismiss() }
                         }
                     }.disabled(existingTask == nil && (assignee.isEmpty || saving))
                 }

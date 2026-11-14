@@ -7,6 +7,7 @@
 // Здесь — те же правила, что показывает интерфейс, но на сервере.
 
 import type { Caller } from '@/lib/apiAuth'
+import { buildCheckIn, localDateKey, AttendanceError } from '@/lib/attendanceCheckIn'
 
 type Admin = { from: (t: string) => any }
 type Filter = { op: string; col: string; val: any }
@@ -152,6 +153,10 @@ export async function applyPeoplePolicy(
   switch (table) {
     case 'staff_schedules':
     case 'shift_checklists':
+    // Прогоны чек-листов/аудитов: сотрудник отмечает пункты только через
+    // /api/people/checklist-item (CAS + снимок пункта); прямая запись через шлюз позволяла
+    // переписать или удалить любой прогон, включая менеджерскую верификацию (аудит 2026-11-14, К2).
+    case 'shift_checklist_completions':
       if (!official) throw new PeoplePolicyError('Forbidden')
       break
     case 'tech_cards': {
@@ -164,7 +169,25 @@ export async function applyPeoplePolicy(
       write()
       if (op === 'delete') throw new PeoplePolicyError('Forbidden')
       if (op === 'insert' || op === 'upsert') {
-        values = mapRows(values, v => ({ ...v, staff_id: sid }))
+        // К3 (аудит 2026-11-14): опоздание/статус/дистанцию считает сервер; одна запись,
+        // только за себя, и уже отмеченный приход нельзя перезаписать.
+        if (Array.isArray(values)) throw new PeoplePolicyError('One check-in at a time', 400)
+        const { data: settings } = await admin.from('restaurant_settings').select('*').eq('restaurant_id', caller.rid).maybeSingle()
+        const now = new Date()
+        const probeDate = typeof values?.date === 'string' ? values.date : localDateKey(now, settings?.timezone)
+        const { data: sched } = await admin.from('staff_schedules').select('id, shift_start, published')
+          .eq('restaurant_id', caller.rid).eq('staff_id', sid).eq('date', probeDate).maybeSingle()
+        let row: Record<string, any>
+        try {
+          row = buildCheckIn({ input: values, staffId: sid!, now, settings, schedule: sched?.published ? sched : null })
+        } catch (e) {
+          if (e instanceof AttendanceError) throw new PeoplePolicyError(e.message, e.status)
+          throw e
+        }
+        const { data: dup } = await admin.from('attendance_records').select('id')
+          .eq('restaurant_id', caller.rid).eq('staff_id', sid).eq('date', row.date).maybeSingle()
+        if (dup) throw new PeoplePolicyError('Already checked in', 409)
+        values = row
       } else {
         if (!onlyKeys(values, ['check_out_at', 'check_out_lat', 'check_out_lng'])) throw new PeoplePolicyError('Forbidden')
         filters = [...filters, { op: 'eq', col: 'staff_id', val: sid }]
