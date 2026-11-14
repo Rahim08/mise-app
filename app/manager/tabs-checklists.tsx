@@ -1,5 +1,5 @@
 'use client'
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { db } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
@@ -79,9 +79,15 @@ export function ManagerChecklistsTab({ restaurantId, accent, t }: { restaurantId
     setLists(ls => ls.filter(l => l.id !== id))
     await db.from('shift_checklists').delete().eq('id', id)
   }
+  // Замок: кнопка без disabled, двойной клик добавлял пресеты дважды (аудит 2026-10-26).
+  const presetsBusy = useRef(false)
   const addPresets = async () => {
-    await Promise.all(PRESET_TEMPLATES.map(p => db.from('shift_checklists').insert({ type: p.type, role: p.role, items: p.items, kind: 'shift' })))
-    showToast(tr('pe.presetsAdded')); await load()
+    if (presetsBusy.current) return
+    presetsBusy.current = true
+    try {
+      await Promise.all(PRESET_TEMPLATES.map(p => db.from('shift_checklists').insert({ type: p.type, role: p.role, items: p.items, kind: 'shift' })))
+      showToast(tr('pe.presetsAdded')); await load()
+    } finally { presetsBusy.current = false }
   }
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>

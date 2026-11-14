@@ -1,0 +1,48 @@
+{
+  "assembled_on": "2026-10-21",
+  "sources": [
+    {
+      "id": "project-context",
+      "kind": "repository",
+      "note": "",
+      "original_path": "/Users/rahim/mise-app/CLAUDE.md",
+      "sha256": "72171fb294e9dd3004fff56b90d36a207aef6e0bfe142b543e82959c8bca353c",
+      "bytes": 4567
+    },
+    {
+      "id": "brand-code",
+      "kind": "repository",
+      "note": "Снимок текущих компонентов; источник для разработки — оригинал.",
+      "original_path": "/Users/rahim/mise-app/components/brand.tsx",
+      "sha256": "07e71463a9c1676c0fd2b79ce3f001f2535516701e223716e7f316a7c545c390",
+      "bytes": 6515,
+      "local_copy": "brand/reference/brand.snapshot.tsx"
+    },
+    {
+      "id": "brand-preview",
+      "kind": "brand_reference",
+      "note": "Существующее превью, не самостоятельный утверждённый brandbook.",
+      "original_path": "/Users/rahim/mise-app/docs/mise-brand-v2.html",
+      "sha256": "1aaf87801e73cefc739b1604e6a568f401f92746b75dbc11634ac4373fd47fb2",
+      "bytes": 11466,
+      "local_copy": "brand/reference/mise-brand-v2.html"
+    },
+    {
+      "id": "contact-page",
+      "kind": "repository",
+      "note": "",
+      "original_path": "/Users/rahim/mise-app/public/contact.html",
+      "sha256": "bd2b39c2e3bc30e7e3de1762c746665dc7af964cca5189a48e0660fd5d04ef57",
+      "bytes": 17076
+    },
+    {
+      "id": "app-icon",
+      "kind": "logo",
+      "note": "",
+      "original_path": "/Users/rahim/mise-app/native/Mise/Mise/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
+      "sha256": "99c5252000ca3f0bb48758c73315387530e9c2717c9cf815b8bdd918ce46e3c1",
+      "bytes": 78060,
+      "local_copy": "brand/logos/app-icon.png"
+    }
+  ]
+}

@@ -26,6 +26,10 @@
 -- строка, кто бы её ни вставил).
 -- =============================================================================
 
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_salperiod_debt
+-- Только ОТКРЫТЫЕ строки (is_paid = false, аудит 2026-09-30): settle_debts гасит долг
+-- флагом is_paid, note 'SALPERIOD:<период>' остаётся — без этого условия второй долг за
+-- тот же месяц после погашения первого падал бы на 23505.
+DROP INDEX IF EXISTS uniq_salperiod_debt;
+CREATE UNIQUE INDEX uniq_salperiod_debt
   ON shift_expenses (restaurant_id, employee_id, note)
-  WHERE note LIKE 'SALPERIOD:%';
+  WHERE note LIKE 'SALPERIOD:%' AND is_paid = false;

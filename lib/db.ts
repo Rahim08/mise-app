@@ -12,6 +12,11 @@
 type FilterOp = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'is' | 'like' | 'ilike'
 type Result<T = any> = { data: T; error: { message: string; code?: string } | null }
 
+// Browser-only, in-flight sharing: no stored results or server-wide user cache.
+const pendingReads = new Map<string, Promise<Result<unknown>>>()
+
+export function clearPendingDbReads() { pendingReads.clear() }
+
 class Query<T = any> implements PromiseLike<Result<T>> {
   private table: string
   private op: 'select' | 'insert' | 'update' | 'delete' | 'upsert' = 'select'
@@ -72,6 +77,24 @@ class Query<T = any> implements PromiseLike<Result<T>> {
     if (this.orderBy.length) payload.order = this.orderBy
     if (this.limitN) payload.limit = this.limitN
 
+    // An overlapping SELECT may share its response, but a read started after any
+    // mutation must observe that mutation rather than join an earlier request.
+    if (this.op !== 'select') clearPendingDbReads()
+    const key = this.op === 'select' && typeof window !== 'undefined'
+      ? document.cookie + ':' + JSON.stringify(payload) : null
+    if (key) {
+      const pending = pendingReads.get(key)
+      if (pending) return pending as Promise<Result<T>>
+      const request = this.send(payload)
+      pendingReads.set(key, request)
+      try { return await request }
+      finally { if (pendingReads.get(key) === request) pendingReads.delete(key) }
+    }
+    try { return await this.send(payload) }
+    finally { if (this.op !== 'select') clearPendingDbReads() }
+  }
+
+  private async send(payload: object): Promise<Result<T>> {
     // Сетевая устойчивость: короткие просадки wi-fi переживаем повтором.
     // ВАЖНО: ретраим только идемпотентные операции (select/update/delete). insert/upsert НЕ ретраим —
     // запрос мог дойти и выполниться, а ответ потеряться → повтор создал бы дубль (двойная запись денег).
@@ -112,6 +135,7 @@ export const db = {
   // Calls an allowlisted atomic SQL function via /api/db (see RPC_POLICY there). Not
   // idempotent — never retried, same rule as insert/upsert in Query.exec above.
   async rpc<T = any>(fn: string, args?: Record<string, unknown>): Promise<Result<T>> {
+    clearPendingDbReads()
     try {
       const res = await fetch('/api/db', {
         method: 'POST',
@@ -124,6 +148,6 @@ export const db = {
       return { data: json.data as T, error: null }
     } catch (err: unknown) {
       return { data: null as any, error: { message: err instanceof Error ? err.message : 'Network error' } }
-    }
+    } finally { clearPendingDbReads() }
   },
 }

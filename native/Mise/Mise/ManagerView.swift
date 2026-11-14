@@ -23,6 +23,9 @@ final class ManagerModel {
     var empExtras: [String: String] = [:]
     var catAmounts: [String: String] = [:]
     var catNotes: [String: String] = [:]
+    var customExpenses: [CustomExpenseDraft] = []
+    var customExpenseError: String?
+    private var loadedCustomExpenses: [String: CustomExpenseDraft] = [:]
     // «В долг» (Б, 2026-08-09): расход вписан, но наличных в кассе не хватило — не уменьшает
     // c.catTotal/empExtraTotal сегодня (кассы физически не покидал), но всё равно попадает в
     // shift_expenses с реальной датой (is_paid=false) — Analytics уже суммирует по датам,
@@ -41,10 +44,12 @@ final class ManagerModel {
         // ManagerSalary.swift syncLedger) от обычного expense-долга при погашении (MISE-001,
         // аудит 2026-08-28) — сама карточка долга его не показывает.
         let note: String?
+        var isCustom = false
     }
     var openDebts: [DebtRow] = []
     var selectedDebtIds: Set<String> = []
-    var debtSettleTotal: Double { openDebts.filter { selectedDebtIds.contains($0.id) }.reduce(0) { $0 + $1.amount } }
+    var selectableDebts: [DebtRow] { openDebts.filter { !($0.isCustom && $0.shiftId == shift?.id) } }
+    var debtSettleTotal: Double { selectableDebts.filter { selectedDebtIds.contains($0.id) }.reduce(0) { $0 + $1.amount } }
     // Сумма долгов, УЖЕ погашенных сегодняшней сменой (persistDebtSettlements вставляет строку
     // с paid_shift_id == shift_id самой этой смены) — loadDay исключает такие строки из
     // catAmounts/empExtras (см. ниже), поэтому без этого поля пересохранение того же дня
@@ -111,7 +116,7 @@ final class ManagerModel {
 
     struct Calc {
         var inc = 0.0, card = 0.0, ink = 0.0
-        var catTotal = 0.0, empExtraTotal = 0.0, debtTotal = 0.0, totalExp = 0.0
+        var catTotal = 0.0, customTotal = 0.0, empExtraTotal = 0.0, debtTotal = 0.0, totalExp = 0.0
         var opening = 0.0, balance = 0.0, inkNet = 0.0
     }
 
@@ -120,12 +125,13 @@ final class ManagerModel {
         c.inc = num(income); c.card = num(incomeCard); c.ink = num(inkSum)
         // «В долг» — не покидал кассу сегодня, не входит в дневной расход/баланс.
         c.catTotal = categories.reduce(0) { catUnpaid[$1.id] == true ? $0 : $0 + num(catAmounts[$1.id] ?? "") }
+        c.customTotal = customExpenseTotal(customExpenses)
         c.empExtraTotal = employees.reduce(0) { empUnpaid[$1.id] == true ? $0 : $0 + num(empExtras[$1.id] ?? "") }
         // Погашение отмеченных долгов — реальные наличные уходят из кассы ИМЕННО сегодня.
         // + уже погашенные сегодня в предыдущем save этого же дня (settledTodayTotal) — иначе
         // пересохранение дня теряет сумму погашения (A1, аудит 2026-08-13).
         c.debtTotal = debtSettleTotal + settledTodayTotal
-        c.totalExp = round2(c.catTotal + c.empExtraTotal + c.debtTotal + unmanagedPaidTotal + c.ink)
+        c.totalExp = round2(c.catTotal + c.customTotal + c.empExtraTotal + c.debtTotal + unmanagedPaidTotal + c.ink)
         c.opening = shift?.opening_balance ?? 0
         c.balance = round2(c.opening + c.inc - c.totalExp)
         c.inkNet = c.ink - num(inkExpense)
@@ -163,10 +169,10 @@ final class ManagerModel {
     func loadOpenDebts() async {
         nonisolated struct DebtExp: Codable, Sendable {
             let id: String; let shift_id: String?; let category_id: String?; let category_name: String?
-            let employee_id: String?; let amount: Double?; let note: String?
+            let employee_id: String?; let amount: Double?; let note: String?; let is_custom: Bool?
         }
         guard let unpaid = try? await DB.from("shift_expenses")
-            .select("id, shift_id, category_id, category_name, employee_id, amount, note")
+            .select("id, shift_id, category_id, category_name, employee_id, amount, note, is_custom")
             .eq("is_paid", false).list(DebtExp.self), !unpaid.isEmpty else { openDebts = []; return }
         let shiftIds = Array(Set(unpaid.compactMap { $0.shift_id }))
         nonisolated struct ShiftDateRow: Codable, Sendable { let id: String; let date: String }
@@ -175,7 +181,7 @@ final class ManagerModel {
         openDebts = unpaid.compactMap { e -> DebtRow? in
             guard let sid = e.shift_id, let date = dateById[sid] else { return nil }
             return DebtRow(id: e.id, shiftId: sid, date: date, categoryId: e.category_id,
-                categoryName: e.category_name ?? "—", employeeId: e.employee_id, amount: e.amount ?? 0, note: e.note)
+                categoryName: e.category_name ?? "—", employeeId: e.employee_id, amount: e.amount ?? 0, note: e.note, isCustom: e.is_custom == true)
         }.sorted { $0.date < $1.date }
     }
 
@@ -197,6 +203,7 @@ final class ManagerModel {
         loadError = false
         defer { if gen == loadGen { loading = false } }
         let dateStr = key(date)
+        customExpenseError = nil
         // prevClosing не зависит от shifts — грузим параллельно, не друг за другом.
         async let openingTask = prevClosing(before: date)
         // do/catch вместо try?: отмену (быстрые тапы по датам) игнорируем без ошибки,
@@ -217,20 +224,19 @@ final class ManagerModel {
         }
         guard gen == loadGen else { return }   // пользователь уже сменил дату — игнор
         // nil = не смогли узнать остаток (сеть) → оставить хранимое значение, не показывать 0
-        let opening = try? await openingTask
 
         // На случай дублей на одну дату (до миграции shifts-date-fix.sql) берём смену
         // с наибольшими данными, чтобы не показывать пустую/«открыть смену».
         let best = shifts.max { activity($0) < activity($1) } ?? shifts.first
-        guard var sh = best else {
+        guard let sh = best else {
             shift = nil; locked = false
             income = ""; incomeCard = ""; inkSum = ""; inkExpense = ""; inkReason = ""
             loadedInkExpense = ""; loadedInkReason = ""
             catAmounts = [:]; catNotes = [:]; empExtras = [:]; absences = []; autoAbsences = []
+            customExpenses = []; loadedCustomExpenses = [:]
             catUnpaid = [:]; empUnpaid = [:]; settledTodayTotal = 0; unmanagedPaidTotal = 0
             return
         }
-        if let opening { sh.opening_balance = opening }
         shift = sh
         locked = (sh.income ?? 0) > 0 || (sh.total_expense ?? 0) > 0 || (sh.inkassation ?? 0) > 0
         income = (sh.income ?? 0) > 0 ? trimNum(sh.income!) : ""
@@ -240,10 +246,13 @@ final class ManagerModel {
         // Три независимых запроса — грузим параллельно, не друг за другом.
         // sh — var (мутируется чуть выше), поэтому фиксируем id в let до захвата в async let.
         let shId = sh.id
-        async let expsTask = (try? await DB.from("shift_expenses").select().eq("shift_id", shId).list(ShiftExpense.self)) ?? []
+        async let expsTask = (try? await DB.from("shift_expenses").select().eq("shift_id", shId).order("created_at").order("id").list(ShiftExpense.self)) ?? []
         async let inksTask = (try? await DB.from("inkassations").select().eq("shift_id", shId).limit(1).list(Inkassation.self)) ?? []
-        async let absencesTask: Void = loadAbsences(dateStr)
+        async let absencesTask: Void = loadAbsences(dateStr, generation: gen)
 
+        let opening = try? await openingTask
+        guard gen == loadGen, !Task.isCancelled else { return }
+        if let opening { shift?.opening_balance = opening }
         let exps = await expsTask
         await catalogLoad?.value
         guard gen == loadGen else { return }
@@ -251,7 +260,9 @@ final class ManagerModel {
         // этой сменой; ЗП-долги, строки уволенных/выключенных — вне формы, не удаляются.
         let split = splitShiftExpenses(exps, shiftId: shId,
                                        activeCategoryIds: Set(categories.map(\.id)),
-                                       activeEmployeeIds: Set(employees.map(\.id)))
+                                       activeEmployeeIds: Set(employees.map(\.id)), includeCustom: true)
+        customExpenses = split.customExpenses
+        loadedCustomExpenses = Dictionary(uniqueKeysWithValues: split.customExpenses.map { ($0.id, $0) })
         settledTodayTotal = split.settledTodayTotal
         unmanagedPaidTotal = split.unmanagedPaidTotal
         catAmounts = split.catAmounts.mapValues { trimNum(round2($0)) }
@@ -261,6 +272,7 @@ final class ManagerModel {
 
         let inks = await inksTask
         await absencesTask
+        guard gen == loadGen, !Task.isCancelled else { return }
         if let ink = inks.first {
             inkExpense = (ink.expense ?? 0) > 0 ? trimNum(ink.expense!) : ""
             inkReason = ink.reason ?? ""
@@ -274,9 +286,10 @@ final class ManagerModel {
         if locked { clearDraft(dateStr) } else { restoreDraftIfAny(dateStr) }
     }
 
-    private func loadAbsences(_ dateStr: String) async {
+    private func loadAbsences(_ dateStr: String, generation: Int? = nil) async {
         nonisolated struct Abs: Codable { let employee_id: String?; let source: String? }
         let abs = (try? await DB.from("shift_absences").select().eq("date", dateStr).list(Abs.self)) ?? []
+        guard generation.map({ $0 == loadGen }) ?? true, !Task.isCancelled else { return }
         absences = Set(abs.compactMap { $0.employee_id })
         autoAbsences = Set(abs.filter { $0.source == "auto" }.compactMap { $0.employee_id })
     }
@@ -295,6 +308,7 @@ final class ManagerModel {
         var income = "", incomeCard = "", inkSum = "", inkExpense = "", inkReason = ""
         var catAmounts: [String: String] = [:], catNotes: [String: String] = [:], empExtras: [String: String] = [:]
         var catUnpaid: [String: Bool] = [:], empUnpaid: [String: Bool] = [:]
+        var customExpenses: [CustomExpenseDraft]? = nil
     }
     private func draftKey(_ dateStr: String) -> String { "mgDraft_\(rid)_\(dateStr)" }
 
@@ -303,7 +317,7 @@ final class ManagerModel {
         guard shift != nil, !locked else { return }
         let d = Draft(income: income, incomeCard: incomeCard, inkSum: inkSum, inkExpense: inkExpense,
                       inkReason: inkReason, catAmounts: catAmounts, catNotes: catNotes, empExtras: empExtras,
-                      catUnpaid: catUnpaid, empUnpaid: empUnpaid)
+                      catUnpaid: catUnpaid, empUnpaid: empUnpaid, customExpenses: customExpenses)
         guard let data = try? JSONEncoder().encode(d) else { return }
         UserDefaults.standard.set(data, forKey: draftKey(key(currentDate)))
     }
@@ -319,11 +333,13 @@ final class ManagerModel {
         inkExpense = d.inkExpense; inkReason = d.inkReason
         catAmounts = d.catAmounts; catNotes = d.catNotes; empExtras = d.empExtras
         catUnpaid = d.catUnpaid; empUnpaid = d.empUnpaid
+        customExpenses = d.customExpenses ?? customExpenses
     }
 
     // MARK: действия
 
     func changeDate(_ dir: Int) async {
+        guard !saving else { return }
         if shift != nil && !locked {
             do { try await persist() } catch {
                 flash(t("saveFailed", ["err": error.localizedDescription])); return
@@ -334,6 +350,7 @@ final class ManagerModel {
     }
 
     func setDate(_ d: Date) async {
+        guard !saving else { return }
         if shift != nil && !locked {
             do { try await persist() } catch {
                 flash(t("saveFailed", ["err": error.localizedDescription])); return
@@ -378,7 +395,7 @@ final class ManagerModel {
     }
 
     func toggleAbsence(_ empId: String) async {
-        guard let sh = shift else { return }
+        guard !saving, let sh = shift else { return }
         let dateStr = key(currentDate)
         if absences.contains(empId) {
             do {
@@ -395,17 +412,120 @@ final class ManagerModel {
         autoAbsences.remove(empId)
     }
 
+    private func validatedCustomExpenses() throws -> [PreparedCustomExpense] {
+        do {
+            guard !openDebts.contains(where: { $0.isCustom && $0.shiftId == shift?.id && selectedDebtIds.contains($0.id) }) else {
+                throw CustomExpenseValidationError.invalid
+            }
+            let prepared = try prepareCustomExpenses(customExpenses)
+            for id in selectedDebtIds {
+                guard let original = loadedCustomExpenses[id] else { continue }
+                guard let current = customExpenses.first(where: { $0.id == id }),
+                      normalizeExpenseName(current.name) == normalizeExpenseName(original.name),
+                      parseExpenseCents(current.amount) == parseExpenseCents(original.amount),
+                      current.unpaid == original.unpaid, current.note == original.note else {
+                    throw CustomExpenseValidationError.invalid
+                }
+            }
+            customExpenseError = nil
+            return prepared
+        } catch {
+            let message = t("mg.customExpenseInvalid")
+            customExpenseError = message
+            throw NSError(domain: "CustomExpense", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+    }
+
+    /// Saved names only. The gateway supplies the authenticated restaurant scope.
+    func expenseNameSuggestions(prefix: String) async throws -> [String] {
+        let prefix = normalizeExpenseName(prefix)
+        guard !prefix.isEmpty, prefix.utf16.count <= 120 else { return [] }
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" {
+            return ["Perfume", "Parking"].filter { $0.lowercased().hasPrefix(prefix.lowercased()) }
+        }
+        #endif
+        nonisolated struct NameRow: Decodable { let name: String }
+        nonisolated struct Response: Decodable { let data: [NameRow]? }
+        let data = try await API.dbRequest(["op": "rpc", "fn": "shift_expense_name_suggestions", "args": ["p_prefix": prefix]])
+        let response = try JSONDecoder().decode(Response.self, from: data)
+        var seen = Set<String>()
+        return (response.data ?? []).compactMap { row in
+            let name = normalizeExpenseName(row.name)
+            guard name.utf16.count <= 120, name.lowercased().hasPrefix(prefix.lowercased()),
+                  seen.insert(name.lowercased()).inserted else { return nil }
+            return name
+        }.prefix(20).map { $0 }
+    }
+
+    private func persistCustomExpenses(shiftId: String, custom: [PreparedCustomExpense]) async throws -> [ShiftExpense] {
+        let fresh = try await DB.from("shift_expenses").fresh()
+            .select("id, employee_id, category_id, category_name, amount, note, is_paid, paid_shift_id, is_custom")
+            .eq("shift_id", shiftId).order("created_at").order("id").list(ShiftExpense.self)
+        let customRows = fresh.filter { $0.is_custom == true }
+        let byId = Dictionary(uniqueKeysWithValues: customRows.map { ($0.id.lowercased(), $0) })
+        let desiredIds = Set(custom.map { $0.id.lowercased() })
+        let knownIds = Set(loadedCustomExpenses.keys)
+        func matches(_ current: ShiftExpense, _ name: String, _ amount: Double, _ unpaid: Bool, _ note: String) -> Bool {
+            current.paid_shift_id == nil && current.category_id == nil && current.employee_id == nil
+                && normalizeExpenseName(current.category_name ?? "") == normalizeExpenseName(name)
+                && round2(current.amount ?? 0) == round2(amount)
+                && (current.is_paid == false) == unpaid && (current.note ?? "") == note
+        }
+        let desiredById = Dictionary(uniqueKeysWithValues: custom.map { ($0.id.lowercased(), $0) })
+        var valid = true
+        for (id, snapshot) in loadedCustomExpenses {
+            guard let current = byId[id] else {
+                // A preceding attempt may have deleted the row before a later write failed.
+                if !desiredIds.contains(id) { continue }
+                valid = false; break
+            }
+            let originalMatches = matches(current, snapshot.name, Double(parseExpenseCents(snapshot.amount) ?? 0) / 100,
+                                          snapshot.unpaid, snapshot.note)
+            let desiredMatches = desiredById[id].map { matches(current, $0.name, $0.amount, $0.unpaid, $0.note) } ?? false
+            guard originalMatches || desiredMatches else { valid = false; break }
+        }
+        for current in customRows where !knownIds.contains(current.id.lowercased())
+            && current.paid_shift_id == nil && current.category_id == nil && current.employee_id == nil
+            && !normalizeExpenseName(current.category_name ?? "").isEmpty
+            && !(current.note?.hasPrefix(Self.salperiodPrefix) ?? false) {
+            // New local IDs may be present after a lost response. Unseen remote rows
+            // require a reload so their amounts cannot be omitted from shift totals.
+            guard desiredIds.contains(current.id.lowercased()), current.paid_shift_id == nil,
+                  current.category_id == nil, current.employee_id == nil else { valid = false; break }
+        }
+        guard valid else {
+            throw NSError(domain: "CustomExpense", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: t("mg.customExpenseChanged")])
+        }
+        if !custom.isEmpty {
+            try await DB.from("shift_expenses").upsert(custom.map { $0.values(restaurantId: rid, shiftId: shiftId) },
+                                                       onConflict: "restaurant_id,id").run()
+        }
+        let removed = knownIds.subtracting(desiredIds)
+        if !removed.isEmpty { try await DB.from("shift_expenses").delete().in("id", Array(removed)).run() }
+        // Advance the ledger snapshot now: later template/shift failures remain retryable.
+        loadedCustomExpenses = Dictionary(uniqueKeysWithValues: custom.map {
+            ($0.id.lowercased(), CustomExpenseDraft(id: $0.id, name: $0.name, amount: String($0.amount), unpaid: $0.unpaid, note: $0.note))
+        })
+        return fresh
+    }
+
     // Расходы: СНАЧАЛА вставить новые, удалить старые по id — ПОТОМ.
     // Старая схема delete→insert при обрыве сети между шагами молча стирала
     // все расходы смены. Если теперь упадёт delete — будут видимые дубли,
     // которые следующее успешное сохранение само подчистит (старые id уже собраны).
-    private func persistExpenses(shiftId: String) async throws {
+    private func persistExpenses(shiftId: String, unchangedSnapshot: [ShiftExpense]? = nil) async throws {
         // paid_shift_id != nil — строка управляется экраном «Долги» (Analytics), не формой
         // закрытия смены: удалять/пересоздавать её здесь нельзя (см. loadDay).
         // Удаляем только строки, которыми владеет форма (ShiftForm.swift) — по свежему чтению:
         // ЗП-долги и строки уволенных/выключенных категорий остаются нетронутыми (аудит 2026-09-27).
-        let fresh = try await DB.from("shift_expenses").select("id, employee_id, category_id, amount, note, is_paid, paid_shift_id")
-            .eq("shift_id", shiftId).list(ShiftExpense.self)
+        let fresh: [ShiftExpense]
+        if let unchangedSnapshot { fresh = unchangedSnapshot }
+        else {
+            fresh = try await DB.from("shift_expenses").fresh().select("id, employee_id, category_id, category_name, amount, note, is_paid, paid_shift_id, is_custom")
+                .eq("shift_id", shiftId).order("created_at").order("id").list(ShiftExpense.self)
+        }
         let oldIds = splitShiftExpenses(fresh, shiftId: shiftId,
                                         activeCategoryIds: Set(categories.map(\.id)),
                                         activeEmployeeIds: Set(employees.map(\.id))).ownedIds
@@ -418,10 +538,8 @@ final class ManagerModel {
                                    "is_paid": catUnpaid[cat.id] != true])
             }
         }
-        if !catInserts.isEmpty { try await DB.from("shift_expenses").insert(catInserts).run() }
-        // Экстры по сотрудникам — отдельной вставкой. Раньше try? (best-effort): при ошибке
-        // вставки старые экстры/долги сотрудников всё равно удалялись ниже — молча терялись
-        // (аудит 2026-09-27). Колонка employee_id давно есть во всех базах.
+        // Same ledger and schema: one insert for categories and employee extras.
+        // A failed batch must still leave every prior owned row in place.
         var empInserts: [[String: Any]] = []
         for emp in employees {
             let extra = num(empExtras[emp.id] ?? "")
@@ -431,7 +549,8 @@ final class ManagerModel {
                                    "is_paid": empUnpaid[emp.id] != true])
             }
         }
-        if !empInserts.isEmpty { try await DB.from("shift_expenses").insert(empInserts).run() }
+        let inserts = catInserts + empInserts
+        if !inserts.isEmpty { try await DB.from("shift_expenses").insert(inserts).run() }
         if !oldIds.isEmpty {
             try await DB.from("shift_expenses").delete().in("id", oldIds).run()
         }
@@ -471,7 +590,19 @@ final class ManagerModel {
         if let id = current?.id {
             try await DB.from("inkassations").update(values).eq("id", id).run()
         } else {
-            try await DB.from("inkassations").insert(values.merging(["shift_id": shiftId]) { a, _ in a }).run()
+            do {
+                try await DB.from("inkassations").insert(values.merging(["shift_id": shiftId]) { a, _ in a }).run()
+            } catch {
+                // unique(shift_id): строку успели создать параллельно (выплата ЗП/аванс, другое
+                // устройство) — переносим дельту менеджера поверх неё, второй строки не будет.
+                guard let raced = try? await DB.from("inkassations").select("id, expense, salary, reason")
+                    .eq("shift_id", shiftId).limit(1).list(InkRow.self).first else { throw error }
+                let exp2 = (raced.expense ?? 0) + (num(inkExpense) - num(loadedInkExpense))
+                var v2 = values
+                v2["expense"] = exp2
+                v2["total"] = c.ink - exp2 - (raced.salary ?? 0)
+                try await DB.from("inkassations").update(v2).eq("id", raced.id).run()
+            }
         }
     }
 
@@ -516,10 +647,31 @@ final class ManagerModel {
         )
     }
 
+    // Параллельный вызов для той же смены (двойной тап, «Сохранить» + автосейв при смене даты)
+    // присоединяется к уже идущему сохранению, а не запускает второе: два прогона читали один
+    // и тот же набор старых расходов, оба вставляли новый — набор задваивался (аудит 2026-10-26).
+    private var persistInFlight: (id: String, task: Task<Double?, Error>)?
+    var customPersistenceBusy: Bool { persistInFlight != nil }
+
     @discardableResult
     private func persist() async throws -> Double? {
         guard let sh = shift else { return nil }
+        if let cur = persistInFlight, cur.id == sh.id { return try await cur.task.value }
+        let task = Task { try await self.persistOnce(sh) }
+        persistInFlight = (sh.id, task)
+        defer { if persistInFlight?.task == task { persistInFlight = nil } }
+        return try await task.value
+    }
+
+    private func persistOnce(_ sh: Shift) async throws -> Double? {
+        // Validate every custom row before debt settlement or any other financial write.
+        let preparedCustom = try validatedCustomExpenses()
+        let selectedCustomIds = Set(preparedCustom.map(\.id)).intersection(selectedDebtIds)
         let c = calc
+        // Custom writes can be rejected by settlement guards. Finish them before
+        // updating the shift balance or starting the existing template save flow.
+        let unchangedLedger = preparedCustom.isEmpty && loadedCustomExpenses.isEmpty && selectedDebtIds.isEmpty
+        let preflight = try await persistCustomExpenses(shiftId: sh.id, custom: preparedCustom.filter { !selectedCustomIds.contains($0.id) })
 
         // Погашение долгов — ПЕРВЫМ и ОТДЕЛЬНО от остального (C3, аудит 2026-08-13/15): если
         // сам погашаемый долг был создан СЕГОДНЯ (shift_id == текущей смене), запуск параллельно
@@ -538,7 +690,9 @@ final class ManagerModel {
             "income": c.inc, "income_card": c.card, "inkassation": c.ink,
             "total_expense": c.totalExp, "closing_balance": c.balance,
         ]).eq("id", sh.id).run()
-        async let expensesResult: () = persistExpenses(shiftId: sh.id)
+        // With no custom/debt mutations there has been no ledger write since preflight.
+        // Mutation paths retain their fresh read AFTER settlement/custom writes.
+        async let expensesResult: () = persistExpenses(shiftId: sh.id, unchangedSnapshot: unchangedLedger ? preflight : nil)
         async let inkResult: () = persistInkassation(shiftId: sh.id, c)
         // best-effort: подтвердить прогулы дня (привязать к смене, снять авто-черновик)
         async let absResult: Void = { _ = try? await DB.from("shift_absences").update(["shift_id": sh.id, "source": "manager"])
@@ -549,6 +703,7 @@ final class ManagerModel {
         try await inkResult
         await absResult
         autoAbsences = []
+        customExpenses.removeAll { selectedCustomIds.contains($0.id) }
         if !selectedDebtIds.isEmpty {
             // A1 (аудит 2026-08-15): бампаем settledTodayTotal ДО очистки selectedDebtIds —
             // иначе calc на следующий рендер теряет только что погашенную сумму, баланс кассы
@@ -575,14 +730,23 @@ final class ManagerModel {
     }
 
     func save(force: Bool = false) async {
-        guard shift != nil else { return }
-        if !force, await closeChecklistIncomplete() { showChecklistWarn = true; return }
+        // saving ставим ДО первого await (аудит дублей 2026-10-26): раньше — после
+        // closeChecklistIncomplete(), и второй тап во время этого запроса проходил, persist
+        // выполнялся дважды — расходы смены и инкассация задваивались (SO, 25.10).
+        guard shift != nil, !saving else { return }
+        do { _ = try validatedCustomExpenses() } catch { flash(error.localizedDescription); return }
+        saving = true
+        defer { saving = false }
+        if !force, await closeChecklistIncomplete() { showChecklistWarn = true; saving = false; return }
         // C8 (юзер-фидбок 2026-08-15) — мягкий гейт: панель долгов позволяет отметить сразу ВСЕ
         // открытые долги ресторана (любых дат), одним save может увести кассу глубоко в минус
         // без подтверждения. Обычные расходы это НЕ блокируют (существующее поведение — только
         // красный текст), но батч-погашение долгов достаточно рискованно, чтобы спросить лишний раз.
-        if !force, debtSettleTotal > 0, calc.balance < 0 { showDebtNegativeWarn = true; return }
-        saving = true
+        if !force, debtSettleTotal > 0, calc.balance < 0 { showDebtNegativeWarn = true; saving = false; return }
+        let closedDate = currentDate
+        let closedTotals = calc
+        let restaurantSession = UserDefaults.standard.data(forKey: "mise_restaurant")
+        let staffSession = UserDefaults.standard.data(forKey: "mise_staff")
         do {
             try await persist()
             locked = true
@@ -591,41 +755,52 @@ final class ManagerModel {
             loadedInkExpense = inkExpense; loadedInkReason = inkReason
             ShiftReminder.cancel() // отменить напоминание — смена закрыта
             flash(t("mg.shiftSaved"))
-            let c = calc
-            // Дайджест дня: сводка в защищённом теле (показывается, если включён show_cash_amount).
-            nonisolated struct HkSale: Codable, Sendable { let quantity: Double?; let price: Double?; let is_free: Bool? }
-            var hk = "", paid = 0, rev = 0.0
-            if let sales = try? await DB.from("hookah_sales").select("quantity, price, is_free, date")
-                .eq("date", key(currentDate)).list(HkSale.self) {
-                paid = sales.filter { $0.is_free != true }.reduce(0) { $0 + Int($1.quantity ?? 0) }
-                rev = sales.filter { $0.is_free != true }.reduce(0.0) { $0 + ($1.quantity ?? 0) * ($1.price ?? 0) }
-                if paid > 0 { hk = " · \(t("mg.dHookah")) \(paid) (\(Money.s(rev)))" }
+            Task { @MainActor in
+                await sendCloseNotification(closedTotals, date: closedDate,
+                                            restaurantSession: restaurantSession, staffSession: staffSession)
             }
-            var digest = "\(t("mg.dRevenue")) \(Money.s(c.inc))"
-            if c.card > 0 { digest += " + \(t("mg.dCard")) \(Money.s(c.card))" }
-            digest += " · \(t("mg.dExpense")) \(Money.s(c.totalExp))"
-            if c.ink > 0 { digest += " · \(t("mg.dCollection")) \(Money.s(c.ink))" }
-            digest += " · \(t("mg.dCash")) \(Money.s(c.balance))" + hk
-
-            var segs: [[String: String]] = [["key": "notify.dRevenue", "value": Money.s(c.inc)]]
-            if c.card > 0 { segs.append(["key": "notify.dCard", "value": Money.s(c.card), "sep": " + "]) }
-            segs.append(["key": "notify.dExpense", "value": Money.s(c.totalExp)])
-            if c.ink > 0 { segs.append(["key": "notify.dCollection", "value": Money.s(c.ink)]) }
-            segs.append(["key": "notify.dCash", "value": Money.s(c.balance)])
-            if paid > 0 { segs.append(["key": "notify.dHookah", "value": "\(paid) (\(Money.s(rev)))"]) }
-
-            // shift_date в data — тап по уведомлению открывает Analytics сразу на эту смену
-            // (юзер-фидбек 2026-07-22), не просто модуль.
-            await Notify.send(type: "cash_close", title: t("mg.pushCashClosed"), body: t("mg.pushShiftClosed"),
-                              audience: ["managers": true],
-                              titleKey: "notify.cashCloseTitle", bodyKey: "notify.cashCloseBody",
-                              bodyParams: ["date": dayMonth(currentDate)],
-                              secureBody: digest, secureBodySegments: segs,
-                              data: ["module": "analytics", "shift_date": key(currentDate)])
         } catch {
             flash(t("saveFailed", ["err": error.localizedDescription]))
         }
-        saving = false
+    }
+
+    private func sendCloseNotification(_ c: Calc, date: Date, restaurantSession: Data?, staffSession: Data?) async {
+        func sameSession() -> Bool {
+            UserDefaults.standard.data(forKey: "mise_restaurant") == restaurantSession
+                && UserDefaults.standard.data(forKey: "mise_staff") == staffSession
+        }
+        guard sameSession() else { return }
+        // Дайджест дня: сводка в защищённом теле (показывается, если включён show_cash_amount).
+        nonisolated struct HkSale: Codable, Sendable { let quantity: Double?; let price: Double?; let is_free: Bool? }
+        var hk = "", paid = 0, rev = 0.0
+        if let sales = try? await DB.from("hookah_sales").select("quantity, price, is_free, date")
+            .eq("date", key(date)).list(HkSale.self) {
+            paid = sales.filter { $0.is_free != true }.reduce(0) { $0 + Int($1.quantity ?? 0) }
+            rev = sales.filter { $0.is_free != true }.reduce(0.0) { $0 + ($1.quantity ?? 0) * ($1.price ?? 0) }
+            if paid > 0 { hk = " · \(t("mg.dHookah")) \(paid) (\(Money.s(rev)))" }
+        }
+        var digest = "\(t("mg.dRevenue")) \(Money.s(c.inc))"
+        if c.card > 0 { digest += " + \(t("mg.dCard")) \(Money.s(c.card))" }
+        digest += " · \(t("mg.dExpense")) \(Money.s(c.totalExp))"
+        if c.ink > 0 { digest += " · \(t("mg.dCollection")) \(Money.s(c.ink))" }
+        digest += " · \(t("mg.dCash")) \(Money.s(c.balance))" + hk
+
+        var segs: [[String: String]] = [["key": "notify.dRevenue", "value": Money.s(c.inc)]]
+        if c.card > 0 { segs.append(["key": "notify.dCard", "value": Money.s(c.card), "sep": " + "]) }
+        segs.append(["key": "notify.dExpense", "value": Money.s(c.totalExp)])
+        if c.ink > 0 { segs.append(["key": "notify.dCollection", "value": Money.s(c.ink)]) }
+        segs.append(["key": "notify.dCash", "value": Money.s(c.balance)])
+        if paid > 0 { segs.append(["key": "notify.dHookah", "value": "\(paid) (\(Money.s(rev)))"]) }
+
+        // shift_date в data — тап по уведомлению открывает Analytics сразу на эту смену
+        // (юзер-фидбек 2026-07-22), не просто модуль.
+        guard sameSession() else { return }
+        await Notify.send(type: "cash_close", title: t("mg.pushCashClosed"), body: t("mg.pushShiftClosed"),
+                          audience: ["managers": true],
+                          titleKey: "notify.cashCloseTitle", bodyKey: "notify.cashCloseBody",
+                          bodyParams: ["date": dayMonth(date)],
+                          secureBody: digest, secureBodySegments: segs,
+                          data: ["module": "analytics", "shift_date": key(date)])
     }
 
     #if DEBUG
@@ -755,12 +930,16 @@ private struct ManagerBody: View {
     private let accent = BrandKit.manager
     @State private var showDatePicker = false
     @State private var showDebts = false
+    @State private var newCustomExpenseId: String?
+    @State private var customScrollTarget: String?
+    @State private var customScrollRequest = 0
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack(alignment: .top) {
             Group {
                 Color.miseBg.ignoresSafeArea()
+                ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 14) {
                         dateRow
@@ -783,6 +962,7 @@ private struct ManagerBody: View {
                         .animation(.spring(duration: 0.4, bounce: 0.08), value: m.shift == nil)
                         .animation(.easeInOut(duration: 0.25), value: m.loadError)
                     }
+                    .disabled(m.saving || m.customPersistenceBusy)
                     .padding(16)
                     .padding(.bottom, 40)
                     .opacity(m.loading ? 0 : 1)
@@ -790,8 +970,14 @@ private struct ManagerBody: View {
                     .animation(.spring(duration: 0.45, bounce: 0.1), value: m.loading)
                 }
                 .refreshable {
+                    guard !m.saving, !m.customPersistenceBusy else { return }
                     await DB.clearCacheNow() // pull-to-refresh должен идти в сеть, не в кеш
                     await m.loadDay(m.currentDate)
+                }
+                .onChange(of: customScrollRequest) { _, _ in
+                    guard let id = customScrollTarget else { return }
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .top) }
+                }
                 }
             }
             // Spotlight-эффект под ИИ-чатом: слегка размываем реальный контент модуля,
@@ -901,7 +1087,7 @@ private struct ManagerBody: View {
               // доступным при закрытой смене: он не часть смены (свои записи, своя таблица).
               Group {
                 staffSection
-                if !m.openDebts.isEmpty {
+                if !m.selectableDebts.isEmpty {
                     debtsBadge
                 }
                 if !m.categories.isEmpty {
@@ -919,6 +1105,7 @@ private struct ManagerBody: View {
                         }
                     }
                 }
+                customExpenseSection
                 sectionTitle(t("mg.inkass"))
                 card {
                     fieldRow(t("mg.inkSum"), text: $m.inkSum)
@@ -951,6 +1138,45 @@ private struct ManagerBody: View {
             if m.locked { closedOverlay }
         }
         if !m.locked { saveBar }
+    }
+
+    private var customExpenseSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !m.customExpenses.isEmpty {
+                sectionTitle(t("mg.customExpenses"))
+                card {
+                    ForEach($m.customExpenses) { $row in
+                        let rowId = row.id
+                        CustomExpenseRow(row: $row, focusName: row.id == newCustomExpenseId,
+                                         scope: "\(m.rid):\(m.key(m.currentDate))",
+                                         reveal: { customScrollTarget = rowId; customScrollRequest += 1 },
+                                         suggestions: { try await m.expenseNameSuggestions(prefix: $0) }) {
+                            m.customExpenses.removeAll { $0.id == rowId }
+                        }
+                        .id(rowId)
+                        if row.id != m.customExpenses.last?.id { divider }
+                    }
+                }
+            }
+            Button {
+                let row = CustomExpenseDraft()
+                m.customExpenses.append(row)
+                newCustomExpenseId = row.id
+            } label: {
+                Label(t("mg.addExpense"), systemImage: "plus.circle.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(.plain)
+            if let error = m.customExpenseError {
+                Text(error).font(.system(size: 13)).foregroundStyle(.red)
+                    .accessibilityIdentifier("custom-expense-error")
+            }
+        }
+        .disabled(m.saving || m.customPersistenceBusy)
+        .onChange(of: m.customExpenses) { _, _ in m.customExpenseError = nil }
     }
 
     private var closedOverlay: some View {
@@ -1023,7 +1249,7 @@ private struct ManagerBody: View {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(.system(size: 16)).foregroundStyle(BrandKit.stash)
                     Text(t("an.debts")).font(.system(size: 15, weight: .medium)).foregroundStyle(.primary)
-                    Text("\(m.openDebts.count)")
+                    Text("\(m.selectableDebts.count)")
                         .font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
                         .padding(.horizontal, 7).padding(.vertical, 2)
                         .background(BrandKit.stash, in: Capsule())
@@ -1038,7 +1264,7 @@ private struct ManagerBody: View {
             }
             .buttonStyle(.plain)
             if showDebts {
-                ForEach(Array(m.openDebts.enumerated()), id: \.element.id) { i, d in
+                ForEach(Array(m.selectableDebts.enumerated()), id: \.element.id) { i, d in
                     Button {
                         if m.selectedDebtIds.contains(d.id) { m.selectedDebtIds.remove(d.id) } else { m.selectedDebtIds.insert(d.id) }
                     } label: {
@@ -1056,7 +1282,7 @@ private struct ManagerBody: View {
                         .padding(.horizontal, 14).padding(.vertical, 10)
                     }
                     .buttonStyle(.plain)
-                    if i < m.openDebts.count - 1 { divider }
+                    if i < m.selectableDebts.count - 1 { divider }
                 }
                 .padding(.bottom, 8)
             }
@@ -1201,6 +1427,104 @@ private struct ManagerBody: View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 15, weight: .bold)).foregroundStyle(.primary)
                 .frame(width: 40, height: 40)
+        }
+    }
+}
+
+private struct CustomExpenseRow: View {
+    @Binding var row: CustomExpenseDraft
+    let focusName: Bool
+    let scope: String
+    let reveal: () -> Void
+    let suggestions: (String) async throws -> [String]
+    let remove: () -> Void
+    private enum Field: Hashable { case name, amount }
+    @FocusState private var focused: Field?
+    @State private var names: [String] = []
+    @State private var suggestionsFailed = false
+    private var query: String { "\(scope)|\(row.name)|\(focused == .name)" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(t("mg.expenseName")).font(.system(size: 12)).foregroundStyle(.secondary)
+                    TextField(t("mg.expenseName"), text: $row.name)
+                        .font(.system(size: 15)).textInputAutocapitalization(.sentences)
+                        .autocorrectionDisabled().focused($focused, equals: .name)
+                        .submitLabel(.next).onSubmit { focused = .amount }
+                        .accessibilityIdentifier("custom-expense-name")
+                        .frame(minHeight: 34)
+                }
+                Button(role: .destructive, action: remove) {
+                    Image(systemName: "trash").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(t("delete"))
+            }
+            if focused == .name, !names.isEmpty {
+                ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(names, id: \.self) { name in
+                        Button {
+                            row.name = name
+                            names = []
+                            focused = .amount
+                        } label: {
+                            Text(name).font(.system(size: 15)).foregroundStyle(.primary)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .padding(.horizontal, 10)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                }
+                .frame(height: min(CGFloat(names.count) * 44, 176))
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+            }
+            if focused == .name, suggestionsFailed {
+                Text(t("mg.expenseSuggestionsUnavailable"))
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(t("mg.topupAmount")).font(.system(size: 12)).foregroundStyle(.secondary)
+                    TextField(Money.symbol + " 0", text: $row.amount)
+                        .keyboardType(.decimalPad).focused($focused, equals: .amount)
+                        .font(.system(size: 15, weight: .semibold))
+                        .padding(10).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                        .accessibilityLabel(t("mg.topupAmount"))
+                        .accessibilityIdentifier("custom-expense-amount")
+                }
+                Toggle(isOn: $row.unpaid) { Text(t("mg.expenseUnpaid")).font(.system(size: 14)) }
+                    .toggleStyle(.button).tint(BrandKit.stash)
+                    .accessibilityHint(t("mg.debtToggle"))
+                    .frame(minHeight: 44)
+            }
+        }
+        .padding(14)
+        .task { if focusName { focused = .name } }
+        .onChange(of: focused) { _, field in if field != nil { reveal() } }
+        .task(id: query) {
+            names = []; suggestionsFailed = false
+            let prefix = normalizeExpenseName(row.name)
+            guard focused == .name, !prefix.isEmpty else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(300))
+                let matches = try await suggestions(prefix)
+                try Task.checkCancellation()
+                names = matches
+                if !matches.isEmpty { reveal() }
+            } catch {
+                if !Task.isCancelled { suggestionsFailed = true }
+            }
+        }
+        .toolbar {
+            if focused != nil {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button(t("done")) { focused = nil }
+                }
+            }
         }
     }
 }

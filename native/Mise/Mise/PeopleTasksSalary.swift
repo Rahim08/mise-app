@@ -156,7 +156,7 @@ struct TasksTab: View {
             }
             Spacer(minLength: 0)
             if m.canDelete(task) {
-                Button { Task { await m.removeTask(task.id) } } label: {
+                Button { pendingDelete = task } label: {
                     Image(systemName: "trash").font(.system(size: 14)).foregroundStyle(.primary.opacity(0.3))
                 }
                 .buttonStyle(.plain)
@@ -261,6 +261,7 @@ func reportTypeColor(_ t: String?) -> Color {
 
 struct ReportsTab: View {
     @Bindable var m: PeopleModel
+    @State private var pendingDelete: StaffReport?
     @State private var showForm = false
 
     var body: some View {
@@ -290,6 +291,7 @@ struct ReportsTab: View {
         }
         .task(id: m.tasksSeg) { if m.tasksSeg == "reports" && !m.reportsLoaded { await m.loadReports() } }
         .sheet(isPresented: $showForm) { ReportFormSheet(m: m) }
+        .confirmDelete(t("pe.deleteReportConfirm"), $pendingDelete) { r in Task { await m.deleteReport(r.id) } }
     }
 
     private func card(_ r: StaffReport) -> some View {
@@ -315,7 +317,7 @@ struct ReportsTab: View {
                 Text(m.staffName(r.author_id)).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.4))
                 Spacer()
                 if m.canDeleteReport(r) {
-                    Button { Task { await m.deleteReport(r.id) } } label: {
+                    Button { pendingDelete = r } label: {
                         Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3))
                     }
                 }
@@ -380,6 +382,12 @@ struct PeopleSalaryTab: View {
             monthNav
             if !m.salaryLoaded {
                 RowListSkeleton(rows: 3)
+            } else if m.salaryFailed {
+                VStack(spacing: 12) {
+                    Text(t("pe.salaryLoadFailed")).font(.system(size: 15)).foregroundStyle(.primary.opacity(0.5))
+                        .multilineTextAlignment(.center)
+                    Button(t("retry")) { Task { await m.loadSalary() } }.buttonStyle(.borderedProminent)
+                }.padding(.top, 40)
             } else if let r = m.salaryRows.first {
                 staffCard(r)
                 staffBreakdown(r)
@@ -418,6 +426,8 @@ struct PeopleSalaryTab: View {
     // пометка «Не выплачено» вместо числа.
     private func payStatus(_ r: PeopleModel.SalRow) -> (String, Color)? {
         guard r.total > 0 else { return nil }
+        // Открытый ЗП-долг — ещё не выплачено (раньше показывалось «Выплачено»).
+        if r.status == "debt" { return (t("pe.salaryDebtOwed", ["amount": eur(r.openDebt)]), .orange) }
         if r.remaining <= 0 {
             let fFrac = ISO8601DateFormatter(); fFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             if let last = r.lastPaidAt, let d = fFrac.date(from: last) ?? ISO8601DateFormatter().date(from: last) {

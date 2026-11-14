@@ -14,7 +14,7 @@ import { fmtDate } from '@/lib/format'
 import { tCurrent } from '@/lib/i18n'
 import { ScheduleTab } from '@/components/people/ScheduleTab'
 import { hoursOf, fmtHours } from './shared'
-import { resolveEmployeesForMonth } from '@/lib/salaryHistory'
+import { fetchMySalary } from '@/lib/peopleClient'
 
 
 // Зарплата — личный вид (одинаковый у сотрудника и менеджера, реструктура 2026-08-13,
@@ -34,70 +34,25 @@ export function SalaryTab({ me, accent, t }: { me: any; accent: string; t: any }
   const isCurrentMonth = ym === fmtDate(new Date()).slice(0, 7)
   const monthLabel = viewDate.toLocaleDateString(tr('dash.locale'), { month: 'long', year: 'numeric' })
   const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
   const [rows, setRows] = useState<any[]>([])
 
-  // Расчёт зарплаты за произвольный месяц (targetYm) — канон = iOS (PeopleView.loadSalary,
-  // решение 2026-07-17): авансы вычитаются, карта строго помесячная (БЕЗ fallback на
-  // employees.card_amount), авто-прогулы (source='auto' — черновики крона) деньги не удерживают.
-  // salary_payments — факт фактической выдачи (People→Зарплата, ЗП-долг 2026-07-28): уменьшает
-  // остаток независимо от аванса; monthly_card_amounts не трогаем (юзер: сумма всегда ручная).
-  const computeMonth = async (targetYm: string) => {
-    const monthStart = `${targetYm}-01`
-    const monthEnd = fmtDate(new Date(Number(targetYm.slice(0, 4)), Number(targetYm.slice(5, 7)), 0))
-    const [{ data: rawEmps }, { data: abs }, { data: cards }, { data: att }, { data: dir }, { data: advs }, { data: pays }, { data: salHist }, { data: debtRows }] = await Promise.all([
-      db.from('employees').select('id, name, salary, deduct_per_absence').eq('is_active', true).order('name'),
-      db.from('shift_absences').select('employee_id, date, source').gte('date', monthStart).lte('date', monthEnd),
-      db.from('monthly_card_amounts').select('employee_id, card_amount').eq('month', targetYm),
-      db.from('attendance_records').select('staff_id, check_in_at, check_out_at, date').gte('date', monthStart).lte('date', monthEnd),
-      db.from('staff_directory').select('id, name').eq('is_active', true),
-      // Фильтр по period (месяц ЗП), не по date (день списания из кассы) — паритет с
-      // app/manager/tabs-salary.tsx (юзер-фидбок 2026-08-15).
-      db.from('salary_advances').select('*').eq('period', monthStart),
-      db.from('salary_payments').select('*').eq('period', monthStart),
-      // Оклад/вычет-за-прогул, действовавшие в targetYm (salary-history-2026-09.sql) —
-      // без этого правка оклада сегодня меняла бы расчёт за прошлые месяцы задним числом.
-      db.from('salary_history').select('employee_id, salary, deduct_per_absence, effective_from').lte('effective_from', monthStart),
-      // Открытый ЗП-долг за месяц — уже обещан через Manager→Долги (паритет с Manager→Зарплата).
-      db.from('shift_expenses').select('employee_id, amount').eq('is_paid', false).eq('note', `SALPERIOD:${monthStart}`),
-    ])
-    const openDebtByEmp: Record<string, number> = {}
-    ;(debtRows || []).forEach((d: any) => { if (d.employee_id) openDebtByEmp[d.employee_id] = (openDebtByEmp[d.employee_id] || 0) + Number(d.amount || 0) })
-    const emps = resolveEmployeesForMonth(rawEmps || [], salHist || [], monthStart)
-    const staffName: Record<string, string> = {}; (dir || []).forEach((s: any) => { staffName[s.id] = s.name })
-    const hoursByName: Record<string, number> = {}
-    ;(att || []).forEach((r: any) => { const n = staffName[r.staff_id]; if (n) hoursByName[n] = (hoursByName[n] || 0) + hoursOf(r) })
-    const cardByEmp: Record<string, number> = {}; (cards || []).forEach((c: any) => { cardByEmp[c.employee_id] = Number(c.card_amount || 0) })
-    const absByEmp: Record<string, string[]> = {}
-    ;(abs || []).forEach((a: any) => { if (a.source !== 'auto') (absByEmp[a.employee_id] = absByEmp[a.employee_id] || []).push(a.date) })
-    const advByEmp: Record<string, number> = {}
-    ;(advs || []).forEach((a: any) => { advByEmp[a.employee_id] = (advByEmp[a.employee_id] || 0) + Number(a.amount || 0) })
-    // «Осталось» уменьшают только наличные выплаты — карта уже вычтена из cash через
-    // monthly_card_amounts (паритет с Manager→Зарплата A2, аудит 2026-09-27). paid (всего) —
-    // для отображения.
-    const paidByEmp: Record<string, number> = {}; const paidCashByEmp: Record<string, number> = {}; const lastPaidByEmp: Record<string, string> = {}
-    ;(pays || []).forEach((p: any) => {
-      paidByEmp[p.employee_id] = (paidByEmp[p.employee_id] || 0) + Number(p.amount || 0)
-      if ((p.method || 'cash') === 'cash') paidCashByEmp[p.employee_id] = (paidCashByEmp[p.employee_id] || 0) + Number(p.amount || 0)
-      if (!lastPaidByEmp[p.employee_id] || p.paid_at > lastPaidByEmp[p.employee_id]) lastPaidByEmp[p.employee_id] = p.paid_at
-    })
-    return (emps || []).map((e: any) => {
-      const salary = Number(e.salary || 0)
-      const dates = (absByEmp[e.id] || []).sort()
-      const deduct = dates.length * Number(e.deduct_per_absence || 0)
-      const card = cardByEmp[e.id] ?? 0
-      const advance = advByEmp[e.id] || 0
-      const paid = paidByEmp[e.id] || 0
-      const total = Math.max(0, salary - deduct)
-      const cash = Math.max(0, total - advance - card)
-      const remaining = Math.max(0, cash - (paidCashByEmp[e.id] || 0) - (openDebtByEmp[e.id] || 0))
-      return { id: e.id, name: e.name, salary, dates, absences: dates.length, deduct, card, advance, paid, remaining, total, cash, lastPaidAt: lastPaidByEmp[e.id] || null, hours: hoursByName[e.name] || 0 }
-    })
-  }
-
+  // Расчёт делает сервер (/api/people/salary, аудит People 2026-11-14): только своя строка
+  // по staff.employee_id (не по имени — однофамильцы видели чужую сумму), сбой любой
+  // составляющей — ошибка, а не нули. reqSeq отбрасывает запоздавший ответ прошлого месяца
+  // при быстром листании.
+  const reqSeq = React.useRef(0)
   const load = async () => {
-    setLoading(true)
-    const list = await computeMonth(ym)
-    setRows(list.filter((r: any) => r.name === me.name))
+    const seq = ++reqSeq.current
+    setLoading(true); setFailed(false)
+    try {
+      const row = await fetchMySalary(ym)
+      if (seq !== reqSeq.current) return
+      setRows(row ? [{ ...row, absences: row.absences, dates: row.dates }] : [])
+    } catch {
+      if (seq !== reqSeq.current) return
+      setRows([]); setFailed(true)
+    }
     setLoading(false)
   }
   useEffect(() => { load() }, [ym])
@@ -109,10 +64,14 @@ export function SalaryTab({ me, accent, t }: { me: any; accent: string; t: any }
   // заголовке, повторять её в статусе не надо (юзер-фидбок: «дублируется») — нейтральная
   // пометка «Не выплачено» вместо числа.
   const payStatus = (r: any) => {
-    if (r.total <= 0) return null
-    if (r.remaining <= 0) return { label: r.lastPaidAt ? tr('pe.paidOn', { date: absDate(r.lastPaidAt) }) : tr('pe.paidStatus'), color: t.green }
-    if (r.remaining === r.total) return { label: tr('pe.notPaidYet'), color: t.orange }
-    return { label: tr('pe.oweAmount', { amount: eur(r.remaining) }), color: t.orange }
+    switch (r.status) {
+      case 'none': return null
+      case 'paid': return { label: r.lastPaidAt ? tr('pe.paidOn', { date: absDate(r.lastPaidAt) }) : tr('pe.paidStatus'), color: t.green }
+      // Открытый ЗП-долг — обещание выплатить позже, не выплата.
+      case 'debt': return { label: tr('pe.salaryDebtOwed', { amount: eur(r.openDebt) }), color: t.orange }
+      case 'unpaid': return { label: tr('pe.notPaidYet'), color: t.orange }
+      default: return { label: tr('pe.oweAmount', { amount: eur(r.remaining) }), color: t.orange }
+    }
   }
 
   const MonthNav = () => (
@@ -128,6 +87,15 @@ export function SalaryTab({ me, accent, t }: { me: any; accent: string; t: any }
   )
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
+  if (failed) return (
+    <div>
+      <MonthNav />
+      <div style={{ textAlign: 'center', padding: '40px 20px', color: t.text3 }}>
+        <div style={{ fontSize: 14, marginBottom: 12 }}>{tr('pe.salaryLoadFailed')}</div>
+        <button onClick={load} style={{ padding: '10px 18px', borderRadius: 12, border: 'none', background: accent, color: '#fff', fontFamily: 'inherit', fontWeight: 700, cursor: 'pointer' }}>{tr('bk.retry')}</button>
+      </div>
+    </div>
+  )
   if (rows.length === 0) return (
     <div style={{ textAlign: 'center', padding: '60px 20px', color: t.text3 }}>
       <div style={{ width: 72, height: 72, borderRadius: 20, background: `${accent}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>

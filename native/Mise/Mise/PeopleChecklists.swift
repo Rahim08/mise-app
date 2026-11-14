@@ -77,6 +77,7 @@ struct AuditsTab: View {
     @Bindable var m: PeopleModel
     @State private var edit: ChecklistEdit?
     @State private var auditHistoryOf: ShiftChecklist?
+    @State private var pendingDelete: String?
 
     var body: some View {
         Group {
@@ -88,6 +89,7 @@ struct AuditsTab: View {
         }
         .sheet(item: $edit) { e in ChecklistEditSheet(m: m, edit: e) }
         .sheet(item: $auditHistoryOf) { a in AuditHistorySheet(m: m, list: a) }
+        .confirmDelete(t("pe.deleteAuditConfirm"), $pendingDelete) { id in Task { await m.deleteChecklist(id) } }
     }
 
     private var auditsSection: some View {
@@ -136,7 +138,7 @@ struct AuditsTab: View {
                                                               kind: "audit", targetScope: a.target_scope ?? "venue", assignedStaffId: a.assigned_staff_id, title: a.title ?? "",
                                                               recurrence: a.recurrence ?? "none", recurrenceWeekdays: Set(a.recurrenceWeekdays ?? []), recurrenceDayOfMonth: a.recurrenceDayOfMonth ?? 1)
                                     } label: { Image(systemName: "pencil").font(.system(size: 13)).foregroundStyle(PEOPLE_ACCENT) }
-                                    Button { Task { await m.deleteChecklist(a.id) } } label: {
+                                    Button { pendingDelete = a.id } label: {
                                         Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.primary.opacity(0.3))
                                     }
                                 }
@@ -396,7 +398,20 @@ struct ItemNoteSheet: View {
 /// Счёт прогона (ревью Б3/Б4, весы — Б6): N/A вне знаменателя, pass = выполнено;
 /// legacy-записи без result — done = pass. Пункт весит item.weight (по умолчанию 1 —
 /// чек-листы смены без весов считаются как раньше, поштучно).
-nonisolated func auditRunScore(_ items: [ChecklistItem], _ state: [ChecklistItemState]) -> (pass: Int, total: Int) {
+/// Пункты прогона: снимок label/weight из items_state важнее текущего шаблона — правка
+/// шаблона не должна менять трактовку уже пройденной проверки (аудит People 2026-11-14).
+nonisolated func runChecklistItems(_ items: [ChecklistItem], _ state: [ChecklistItemState]) -> [ChecklistItem] {
+    let snapCount = state.filter { $0.label != nil }.count
+    return (0..<max(items.count, snapCount)).map { i in
+        let base = i < items.count ? items[i] : ChecklistItem(id: "\(i)", label: "", photo_required: false, weight: 1)
+        let st: ChecklistItemState? = i < state.count ? state[i] : nil
+        let w = st?.weight ?? base.weight
+        return ChecklistItem(id: base.id, label: st?.label ?? base.label, photo_required: base.photo_required, weight: w > 0 ? w : 1)
+    }
+}
+
+nonisolated func auditRunScore(_ templateItems: [ChecklistItem], _ state: [ChecklistItemState]) -> (pass: Int, total: Int) {
+    let items = runChecklistItems(templateItems, state)
     var pass = 0, total = 0
     for i in items.indices {
         let st: ChecklistItemState? = i < state.count ? state[i] : nil
@@ -537,6 +552,7 @@ struct AuditPdfPayload: Identifiable { let id = UUID(); let url: URL }
 
 /// Отчёт по прогону (ревью Б3): пункты со статусами, комментарии, фото + экспорт PDF.
 struct AuditRunReportView: View {
+    @Environment(AppModel.self) private var app
     @Bindable var m: PeopleModel
     let list: ShiftChecklist
     let run: ChecklistCompletion
@@ -544,8 +560,8 @@ struct AuditRunReportView: View {
     @State private var payload: AuditPdfPayload?
 
     var body: some View {
-        let items = list.itemDetails ?? []
         let state = run.items_state ?? []
+        let items = runChecklistItems(list.itemDetails ?? [], state)
         let score = auditRunScore(items, state)
         let pct = score.total > 0 ? Int((Double(score.pass) / Double(score.total) * 100).rounded()) : 0
         NavigationStack {
@@ -593,17 +609,22 @@ struct AuditRunReportView: View {
             .navigationTitle(list.title?.isEmpty == false ? list.title! : t("pe.auditReport"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { export() } label: {
-                        if generating { ProgressView().controlSize(.small) }
-                        else { Image(systemName: "square.and.arrow.up") }
+                if app.isOfficial {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button { export() } label: {
+                            if generating { ProgressView().controlSize(.small) }
+                            else { Image(systemName: "square.and.arrow.up") }
+                        }
+                        .disabled(generating)
                     }
-                    .disabled(generating)
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
         }
-        .sheet(item: $payload) { p in AuditShareSheet(url: p.url) }
+        .sheet(item: $payload) { p in
+            if app.isOfficial { AuditShareSheet(url: p.url) }
+        }
+        .onChange(of: app.isOfficial) { _, allowed in if !allowed { payload = nil } }
     }
 
     private func resultTag(_ eff: String?) -> some View {
@@ -617,10 +638,10 @@ struct AuditRunReportView: View {
     }
 
     private func export() {
-        guard !generating else { return }
+        guard app.isOfficial, !generating else { return }
         generating = true
-        let items = list.itemDetails ?? []
         let state = run.items_state ?? []
+        let items = runChecklistItems(list.itemDetails ?? [], state)
         let score = auditRunScore(items, state)
         let pct = score.total > 0 ? Int((Double(score.pass) / Double(score.total) * 100).rounded()) : 0
         var rows: [AuditPdfRow] = []
@@ -644,10 +665,12 @@ struct AuditRunReportView: View {
             }
             let snap = AuditPdfSnapshot(title: snap0.title, meta: snap0.meta, scoreLine: snap0.scoreLine, rows: rows, photos: photos)
             let data = await Task.detached(priority: .userInitiated) { renderAuditPdf(snap) }.value
+            guard app.isOfficial else { generating = false; return }
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("mise-audit-\(Int(Date().timeIntervalSince1970)).pdf")
             if (try? data.write(to: url)) != nil {
                 // Как в ReportExportView: даём Task осесть, иначе share-лист не открывается.
                 try? await Task.sleep(nanoseconds: 300_000_000)
+                guard app.isOfficial else { generating = false; return }
                 payload = AuditPdfPayload(url: url)
             } else {
                 m.flash(t("saveFailed", ["err": "pdf"]))
@@ -696,7 +719,7 @@ func uploadAuditPhoto(image: UIImage, restaurantId: String, completionId: String
         "data_base64": jpeg.base64EncodedString(),
     ]
     req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-    guard let (data, resp) = try? await URLSession.shared.data(for: req),
+    guard let (data, resp) = try? await MiseSharedSession.session.data(for: req),
           let http = resp as? HTTPURLResponse, http.statusCode == 200,
           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let urlStr = obj["url"] as? String else { return nil }
@@ -931,9 +954,10 @@ struct StatisticsSection: View {
         var violationCounts: [String: Int] = [:]
         var staffTotal: [String: Int] = [:], staffDone: [String: Int] = [:]
         for c in m.clHistory {
-            guard let cl = m.checklistTitle(c.checklist_id), let items = cl.itemDetails else { continue }
+            guard let cl = m.checklistTitle(c.checklist_id), let tplItems = cl.itemDetails else { continue }
             guard (cl.kind ?? "shift") == kind else { continue }
             let state = c.items_state ?? []
+            let items = runChecklistItems(tplItems, state)
             let staffLabel = m.staffName(c.staff_id)
             for i in items.indices {
                 // Оценки Б1: N/A выпадает из знаменателя, pass = выполнено, fail = нет;

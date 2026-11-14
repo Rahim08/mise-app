@@ -83,30 +83,21 @@ final class ManagerChecklistsModel {
     /// Прогоны, готовые к верификации — сотрудник дожал чек-лист до status="done".
     var verifiable: [ShiftChecklist] { checklists.filter { completion($0)?.status == "done" } }
 
+    /// Оценка пункта менеджером — атомарно на сервере (/api/people/checklist-item, verify:
+    /// исполнитель прогона не перезаписывается). Раньше весь items_state перезаписывался и
+    /// мог затереть параллельную отметку сотрудника (аудит People 2026-11-14).
     func gradeChecklistItem(_ list: ShiftChecklist, _ idx: Int, result: String?) async {
-        let itemsList = list.itemDetails ?? []
-        var state = completion(list)?.items_state ?? Array(repeating: ChecklistItemState(done: false), count: itemsList.count)
-        while state.count <= idx { state.append(ChecklistItemState(done: false)) }
-        var item = state[idx]
+        guard let i = completions.firstIndex(where: { $0.checklist_id == list.id }) else { return }
+        let comp = completions[i]
+        var item = (comp.items_state ?? []).indices.contains(idx) ? comp.items_state![idx] : ChecklistItemState(done: false)
         item.result = result
         item.done = result != nil
-        state[idx] = item
-        var allDone = state.allSatisfy { $0.done }
-        guard let i = completions.firstIndex(where: { $0.checklist_id == list.id }) else { return }
-        let cid = completions[i].id
-        // Против lost update: свежая копия с сервера, мержим ТОЛЬКО свой индекс.
-        if let freshState = try? await DB.from("shift_checklist_completions").select().fresh().eq("id", cid).limit(1).list(ChecklistCompletion.self).first?.items_state {
-            var merged = freshState
-            while merged.count <= idx { merged.append(ChecklistItemState(done: false)) }
-            merged[idx] = item
-            state = merged
-            allDone = state.allSatisfy { $0.done }
-        }
-        completions[i].items_state = state
+        var body: [String: Any] = ["checklist_id": list.id, "idx": idx, "item": item.asDict, "completion_id": comp.id, "verify": true]
+        if let d = comp.date { body["date"] = d }
         do {
-            try await DB.from("shift_checklist_completions").update([
-                "items_state": state.map { $0.asDict }, "status": allDone ? "done" : "in_progress",
-            ] as [String: Any]).eq("id", cid).run()
+            if let row = try await API.people("/api/people/checklist-item", body: body, as: ChecklistCompletion.self) {
+                completions[i] = row
+            }
         } catch { flash(t("saveFailed", ["err": error.localizedDescription])) }
     }
 

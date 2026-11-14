@@ -17,18 +17,32 @@ final class GoogleReviewsModel {
     var reviews: [GoogleReview] = []
     var snapshots: [GoogleRatingSnapshot] = []
 
+    var loading = false
+    var error: String?
+    private var generation = 0
+
     func load() async {
-        guard let row = try? await DB.from("restaurant_settings").select("google_place_id").limit(1).list(PlaceIdRow.self).first,
-              row.google_place_id?.isEmpty == false else {
-            configured = false
-            return
+        generation += 1
+        let request = generation
+        loading = true; error = nil
+        defer { if request == generation { loading = false } }
+        do {
+            let row = try await DB.from("restaurant_settings").fresh().select("google_place_id").limit(1).list(PlaceIdRow.self).first
+            guard request == generation, !Task.isCancelled else { return }
+            guard row?.google_place_id?.isEmpty == false else { configured = false; return }
+            async let r = DB.from("google_reviews").fresh().select().order("review_time", ascending: false).list(GoogleReview.self)
+            async let s = DB.from("google_rating_snapshots").fresh().select("captured_at, rating, ratings_total")
+                .order("captured_at", ascending: false).limit(90).list(GoogleRatingSnapshot.self)
+            let (reviewRows, snapshotRows) = try await (r, s)
+            guard request == generation, !Task.isCancelled else { return }
+            configured = true
+            reviews = reviewRows; snapshots = Array(snapshotRows.reversed())
+        } catch {
+            guard request == generation, !Task.isCancelled else { return }
+            self.error = error.localizedDescription
         }
-        configured = true
-        async let r = DB.from("google_reviews").select().order("review_time", ascending: false).list(GoogleReview.self)
-        async let s = DB.from("google_rating_snapshots").select("captured_at, rating, ratings_total").order("captured_at").limit(90).list(GoogleRatingSnapshot.self)
-        reviews = (try? await r) ?? []
-        snapshots = (try? await s) ?? []
     }
+
 }
 
 struct GoogleReviewsView: View {
@@ -52,7 +66,13 @@ struct GoogleReviewsView: View {
             ZStack {
                 Color.miseBg.ignoresSafeArea()
                 Group {
-                    if m.configured == nil {
+                    if let error = m.error {
+                        VStack(spacing: 12) {
+                            Text(t("loadFailed")).font(.system(size: 16, weight: .semibold))
+                            Text(error).font(.system(size: 13)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            Button(t("retry")) { Task { await m.load() } }.frame(minHeight: 44)
+                        }.padding(24)
+                    } else if m.configured == nil || m.loading {
                         ProgressView()
                     } else if m.configured == false {
                         emptyState

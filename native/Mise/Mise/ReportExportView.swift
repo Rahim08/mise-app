@@ -659,20 +659,23 @@ struct ReportExportView: View {
     }
 
     private func generate() {
-        guard !generating else { return }
+        guard app.isOfficial, !generating else { return }
         generating = true
         Task {
             let m = ReportModel(rid: app.restaurant?.id ?? "")
             m.periodMode = periodMode
             m.currentDate = currentDate
             await m.load()
+            guard app.isOfficial else { generating = false; return }
             // Рендер вне main: страницы рисуются долго, на main это замораживало UI.
             let snap = m.pdfSnapshot(venueName: app.restaurant?.name ?? "")
             let data = await Task.detached(priority: .userInitiated) { ReportModel.renderPDF(snap) }.value
+            guard app.isOfficial else { generating = false; return }
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("mise-report-\(Int(Date().timeIntervalSince1970)).pdf")
             if (try? data.write(to: url)) != nil {
                 // Как в ExportMenuButton: даём Task осесть, иначе share-лист не откроется.
                 try? await Task.sleep(nanoseconds: 300_000_000)
+                guard app.isOfficial else { generating = false; return }
                 payload = ReportSharePayload(url: url)
             } else {
                 failed = true
@@ -684,54 +687,59 @@ struct ReportExportView: View {
     var body: some View {
         ZStack {
             Color.miseBg.ignoresSafeArea()
-            List {
-                Section(t("rp.period")) {
-                    Picker(t("rp.period"), selection: $periodMode) {
-                        Text(t("rp.periodMonth")).tag("month")
-                        Text(t("rp.periodAll")).tag("all")
-                    }
-                    .pickerStyle(.segmented)
-                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+            if app.isOfficial {
+                List {
+                    Section(t("rp.period")) {
+                        Picker(t("rp.period"), selection: $periodMode) {
+                            Text(t("rp.periodMonth")).tag("month")
+                            Text(t("rp.periodAll")).tag("all")
+                        }
+                        .pickerStyle(.segmented)
+                        .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
 
-                    if periodMode == "month" {
-                        HStack {
-                            Button { changeMonth(-1) } label: { Image(systemName: "chevron.left") }
-                            Spacer()
-                            Text(monthLabelStr).font(.system(size: 15, weight: .semibold))
-                            Spacer()
-                            Button { changeMonth(1) } label: { Image(systemName: "chevron.right") }
-                                .disabled(Calendar.current.isDate(currentDate, equalTo: Date(), toGranularity: .month))
+                        if periodMode == "month" {
+                            HStack {
+                                Button { changeMonth(-1) } label: { Image(systemName: "chevron.left") }
+                                Spacer()
+                                Text(monthLabelStr).font(.system(size: 15, weight: .semibold))
+                                Spacer()
+                                Button { changeMonth(1) } label: { Image(systemName: "chevron.right") }
+                                    .disabled(Calendar.current.isDate(currentDate, equalTo: Date(), toGranularity: .month))
+                            }
+                            .foregroundStyle(BrandKit.analytics)
                         }
-                        .foregroundStyle(BrandKit.analytics)
+                    }
+                    Section(t("rp.includes")) {
+                        Label(t("rp.secOverview"), systemImage: "chart.line.uptrend.xyaxis").foregroundStyle(.primary)
+                        Label(t("rp.secCash"), systemImage: "banknote").foregroundStyle(.primary)
+                        Label(t("rp.secSales"), systemImage: "flame").foregroundStyle(.primary)
+                        Label(t("rp.secStaff"), systemImage: "person.2").foregroundStyle(.primary)
+                    }
+                    Section {
+                        Button { generate() } label: {
+                            HStack {
+                                Spacer()
+                                if generating { ProgressView().tint(.white) }
+                                else { Label(t("rp.generate"), systemImage: "square.and.arrow.up") }
+                                Spacer()
+                            }
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.vertical, 4)
+                        }
+                        .listRowBackground(BrandKit.analytics)
+                        .disabled(generating)
                     }
                 }
-                Section(t("rp.includes")) {
-                    Label(t("rp.secOverview"), systemImage: "chart.line.uptrend.xyaxis").foregroundStyle(.primary)
-                    Label(t("rp.secCash"), systemImage: "banknote").foregroundStyle(.primary)
-                    Label(t("rp.secSales"), systemImage: "flame").foregroundStyle(.primary)
-                    Label(t("rp.secStaff"), systemImage: "person.2").foregroundStyle(.primary)
-                }
-                Section {
-                    Button { generate() } label: {
-                        HStack {
-                            Spacer()
-                            if generating { ProgressView().tint(.white) }
-                            else { Label(t("rp.generate"), systemImage: "square.and.arrow.up") }
-                            Spacer()
-                        }
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.vertical, 4)
-                    }
-                    .listRowBackground(BrandKit.analytics)
-                    .disabled(generating)
-                }
+                .scrollContentBackground(.hidden)
             }
-            .scrollContentBackground(.hidden)
         }
         .navigationTitle(t("rp.title")).navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.miseBg, for: .navigationBar)
-        .sheet(item: $payload) { p in ReportShareSheet(activityItems: [p.url]) }
+        .sheet(item: $payload) { p in
+            if app.isOfficial { ReportShareSheet(activityItems: [p.url]) }
+        }
+        .onChange(of: app.isOfficial) { _, allowed in if !allowed { payload = nil } }
         .alert(t("an.exportFailed"), isPresented: $failed) { Button(t("done")) {} }
     }
 }

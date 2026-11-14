@@ -21,6 +21,18 @@ enum DB {
         for table in tables { invalidateCache(table: table) }
     }
 
+    /// Return the canonical row from an atomic write without an additional SELECT.
+    /// Like rpc(), never retry: a lost response may already have applied the delta.
+    static func rpcRow<T: Decodable>(_ fn: String, args: [String: Any], cacheInvalidate tables: [String], as type: T.Type) async throws -> T {
+        let data = try await API.dbRequest(["op": "rpc", "fn": fn, "args": args])
+        for table in tables { invalidateCache(table: table) }
+        if let row = try? JSONDecoder().decode(RPCRow<T>.self, from: data) { return row.data }
+        if let rows = try? JSONDecoder().decode(RPCRow<[T]>.self, from: data), rows.data.count == 1 { return rows.data[0] }
+        throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Expected one confirmed RPC row"))
+    }
+
+    private struct RPCRow<T: Decodable>: Decodable { let data: T }
+
     /// Очистить кеш для конкретной таблицы (вызывать после мутаций).
     /// Fire-and-forget: порядок не критичен — кеш и так живёт максимум 5 минут (TTL).
     static func invalidateCache(table: String) { Task { await CacheStore.shared.invalidate(table: table) } }
@@ -251,6 +263,9 @@ final class DBQuery: @unchecked Sendable {
     /// Как list(), но дополнительно сообщает, что строки пришли из устаревшего кеша
     /// (сеть не ответила). Для экранов, где по данным принимают денежные решения.
     func listChecked<T: Decodable>(_ type: T.Type) async throws -> (rows: [T], stale: Bool) {
+        // Запись с .list() — вернуть затронутые строки (как .select() в lib/db.ts); без этого
+        // сервер отдаёт null и CAS-проверка «0 строк = гонка» срабатывала бы всегда.
+        if op != "select" { returning = "many" }
         let (data, stale) = try await dbRequestResilient()
         do {
             let wrap = try JSONDecoder().decode(Wrap<[Lossy<T>]>.self, from: data)

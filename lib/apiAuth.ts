@@ -10,21 +10,20 @@ import { verifyStaffToken, STAFF_COOKIE, verifyAdminViewToken, ADMIN_VIEW_COOKIE
 
 // uid/email — владелец (Supabase-аккаунт), via — суперадмин «глазами клиента»; нужны только
 // для журнала финансов (lib/financialAudit.ts), на авторизацию не влияют.
-export interface Caller { rid: string; owner: boolean; apps: string[]; sid?: string; uid?: string; email?: string; via?: 'admin_view' }
+export interface Caller { rid: string; owner: boolean; apps: string[]; sid?: string; uid?: string; email?: string; via?: 'admin_view'; name?: string }
 
 function serviceRoleClient() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 }
 
-// The staff token payload is signed once at PIN-login and trusted as-is for its ~10-year
-// TTL — deactivating a staff member (or unbinding their device) previously only affected
-// UI lists, never the actual data path. Re-check the live `staff` row here so a
-// deactivation takes effect immediately instead of only at token expiry. Owner tokens
-// (`sid: 'owner'`) have no `staff` row and are exempt.
-async function staffTokenRevoked(admin: ReturnType<typeof serviceRoleClient>, staff: { rid: string; sid: string }): Promise<boolean> {
-  if (staff.sid === 'owner') return false
-  const { data } = await admin.from('staff').select('is_active').eq('id', staff.sid).eq('restaurant_id', staff.rid).single()
-  return !data || data.is_active === false
+// PIN tokens establish identity only. Access and display identity come from the
+// current active row, so removing module access takes effect without another login.
+async function currentStaffCaller(admin: ReturnType<typeof serviceRoleClient>, staff: { rid: string; sid: string; owner: boolean }): Promise<Caller | null> {
+  if (staff.sid === 'owner') return staff.owner ? { rid: staff.rid, owner: true, apps: ['manager', 'analytics', 'stash', 'people'], sid: 'owner', name: 'Owner' } : null
+  const { data, error } = await admin.from('staff').select('is_active, apps, name').eq('id', staff.sid).eq('restaurant_id', staff.rid).single()
+  if (error || !data || data.is_active !== true) return null
+  return { rid: staff.rid, owner: false, sid: staff.sid, name: data.name || '',
+    apps: Array.isArray(data.apps) ? data.apps.filter((app: unknown): app is string => typeof app === 'string') : [] }
 }
 
 export async function resolveCaller(req: NextRequest): Promise<Caller | null> {
@@ -41,8 +40,7 @@ export async function resolveCaller(req: NextRequest): Promise<Caller | null> {
   const hasSbSession = req.cookies.getAll().some(c => c.name.startsWith('sb-') && c.name.includes('auth-token'))
   if (staff && !hasSbSession) {
     const admin = serviceRoleClient()
-    if (await staffTokenRevoked(admin, staff)) return null
-    return { rid: staff.rid, owner: staff.owner, apps: staff.apps || [], sid: staff.sid }
+    return currentStaffCaller(admin, staff)
   }
 
   const supabase = createServerClient(
@@ -54,23 +52,21 @@ export async function resolveCaller(req: NextRequest): Promise<Caller | null> {
   if (!user) {
     if (!staff) return null
     const admin = serviceRoleClient()
-    if (await staffTokenRevoked(admin, staff)) return null
-    return { rid: staff.rid, owner: staff.owner, apps: staff.apps || [], sid: staff.sid }
+    return currentStaffCaller(admin, staff)
   }
   const admin = serviceRoleClient()
   const { data } = await admin.from('restaurants').select('id').eq('owner_id', user.id).single()
   if (!data?.id) {
     if (!staff) return null
-    if (await staffTokenRevoked(admin, staff)) return null
-    return { rid: staff.rid, owner: staff.owner, apps: staff.apps || [], sid: staff.sid }
+    return currentStaffCaller(admin, staff)
   }
-  return { rid: data.id, owner: true, apps: ['manager', 'analytics', 'stash', 'people'], uid: user.id, email: user.email ?? undefined }
+  return { rid: data.id, owner: true, apps: ['manager', 'analytics', 'stash', 'people'], uid: user.id, email: user.email ?? undefined, name: 'Owner' }
 }
 
 // «Должностное лицо» — owner или staff.role в manager/admin (то же правило, что iOS
 // AppModel.isOfficial). Требует запроса к staff, поэтому вызывается только там, где UI-гейта
 // недостаточно (News: публикация/удаление от чужого имени, широковещательный пуш).
-export async function isOfficial(admin: any, caller: Caller): Promise<boolean> {
+export async function isOfficial(admin: Pick<ReturnType<typeof serviceRoleClient>, 'from'>, caller: Caller): Promise<boolean> {
   if (caller.owner) return true
   if (!caller.sid) return false
   const { data } = await admin.from('staff').select('role').eq('id', caller.sid).eq('restaurant_id', caller.rid).single()

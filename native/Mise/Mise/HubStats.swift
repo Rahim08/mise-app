@@ -20,37 +20,47 @@ final class HubStatsModel {
         return f
     }()
 
+    private var loadGeneration = 0
+
     func load(canSeeMoney: Bool, dayStartHour: Int) async {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { return }
+        #endif
+        loadGeneration += 1
+        let generation = loadGeneration
         let today = Self.dfKey.string(from: AppModel.businessDate(dayStartHour: dayStartHour))
+        if !canSeeMoney { managerCash = nil; analyticsIncome = nil }
 
-        // Статус Manager относится только к текущему операционному дню. Аналитика
-        // должна оставаться полезной и до открытия сегодняшней смены, поэтому для неё
-        // отдельно берём последнюю доступную смену.
-        async let todayShiftR: Shift? = Self.loadTodayShift(today: today)
-        async let analyticsShiftR: Shift? = canSeeMoney ? Self.loadLatestShift(upTo: today) : nil
-        async let lowR = Self.loadStashLow()
-        async let onShiftR = Self.loadOnShift(today: today)
-        async let bookingR = Self.loadNextBookingTime(today: today)
-
-        let (todayShift, analyticsShift, low, onShift, booking) = await (todayShiftR, analyticsShiftR, lowR, onShiftR, bookingR)
-
-        if let todayShift {
-            // Как в ManagerView/SnapshotWriter: касса на руках — closing_balance, если ещё
-            // не посчитан (смена только открыта) — падать на доход наличными+картой.
-            managerOpen = todayShift.status == "open"
-            if canSeeMoney {
-                managerCash = todayShift.closing_balance ?? ((todayShift.income ?? 0) + (todayShift.income_card ?? 0))
-            } else {
-                managerCash = nil
+        // Each tile publishes when its own query completes. A slow stock or bookings
+        // request must not keep an already available cash balance off the hub.
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { @MainActor in
+                let shift = await Self.loadTodayShift(today: today)
+                guard generation == self.loadGeneration, !Task.isCancelled else { return }
+                self.managerOpen = shift?.status == "open"
+                self.managerCash = canSeeMoney ? shift.map { $0.closing_balance ?? (($0.income ?? 0) + ($0.income_card ?? 0)) } : nil
             }
-        } else {
-            managerCash = nil
-            managerOpen = false
+            group.addTask { @MainActor in
+                let shift = canSeeMoney ? await Self.loadLatestShift(upTo: today) : nil
+                guard generation == self.loadGeneration, !Task.isCancelled else { return }
+                self.analyticsIncome = canSeeMoney ? shift.map { ($0.income ?? 0) + ($0.income_card ?? 0) } : nil
+            }
+            group.addTask { @MainActor in
+                let low = await Self.loadStashLow()
+                guard generation == self.loadGeneration, !Task.isCancelled else { return }
+                self.stashLowCount = low
+            }
+            group.addTask { @MainActor in
+                let count = await Self.loadOnShift(today: today)
+                guard generation == self.loadGeneration, !Task.isCancelled else { return }
+                self.peopleOnShift = count
+            }
+            group.addTask { @MainActor in
+                let booking = await Self.loadNextBookingTime(today: today)
+                guard generation == self.loadGeneration, !Task.isCancelled else { return }
+                self.nextBookingTime = booking
+            }
         }
-        analyticsIncome = canSeeMoney ? analyticsShift.map { ($0.income ?? 0) + ($0.income_card ?? 0) } : nil
-        stashLowCount = low
-        peopleOnShift = onShift
-        nextBookingTime = booking
     }
 
     private static func loadTodayShift(today: String) async -> Shift? {

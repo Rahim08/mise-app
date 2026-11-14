@@ -52,6 +52,14 @@ function restaurantRateLimitKey(restaurantId: string): string {
   return `rid:${restaurantId}`
 }
 
+// Лимит по IP (аудит безопасности 2026-10-26): deviceId присылает клиент — смена deviceId на
+// каждую попытку давала свежие 5 попыток, оставался только общий потолок ресторана.
+const IP_MAX_ATTEMPTS = 20
+function ipRateLimitKey(req: NextRequest, restaurantId: string): string {
+  const ip = req.headers.get('x-vercel-forwarded-for')?.split(',')[0] ?? req.headers.get('x-forwarded-for')?.split(',')[0] ?? req.headers.get('x-real-ip') ?? 'unknown'
+  return `ip:${ip}:${restaurantId}`
+}
+
 async function getAttempts(key: string, blockMs: number): Promise<{ count: number; blockedUntil: number }> {
   const { data } = await supabase.from('pin_attempts').select('count, blocked_until, updated_at').eq('key', key).maybeSingle()
   if (!data) return { count: 0, blockedUntil: 0 }
@@ -78,11 +86,24 @@ export async function POST(req: NextRequest) {
 
   const deviceKey = deviceRateLimitKey(req, restaurantId, deviceId)
   const ridKey = restaurantRateLimitKey(restaurantId)
-  const [deviceEntry, ridEntry] = await Promise.all([
+  const ipKey = ipRateLimitKey(req, restaurantId)
+  const [deviceEntry, ridEntry, ipEntry] = await Promise.all([
     getAttempts(deviceKey, BLOCK_MS),
     getAttempts(ridKey, RESTAURANT_BLOCK_MS),
+    getAttempts(ipKey, BLOCK_MS),
   ])
-  const blockedUntil = Math.max(deviceEntry.blockedUntil, ridEntry.blockedUntil)
+  // Общий потолок ресторана не блокирует устройство, уже привязанное к активному сотруднику
+  // (аудит безопасности 2026-10-26): иначе любой, кто знает id ресторана, 50 неверными PIN
+  // запирал вход всей команде на 15 минут, и так по кругу. Чужой привязанный deviceId
+  // угадать нельзя, а личный лимит устройства/IP на него по-прежнему действует.
+  // То же для лимита по IP: в заведении весь персонал сидит на одном Wi-Fi.
+  let sharedBlockedUntil = Math.max(ridEntry.blockedUntil, ipEntry.blockedUntil)
+  if (Date.now() < sharedBlockedUntil) {
+    const { data: bound } = await supabase.from('staff').select('id')
+      .eq('restaurant_id', restaurantId).eq('is_active', true).eq('device_id', deviceId).limit(1)
+    if (bound && bound.length) sharedBlockedUntil = 0
+  }
+  const blockedUntil = Math.max(deviceEntry.blockedUntil, sharedBlockedUntil)
   if (Date.now() < blockedUntil) {
     const retryAfter = Math.ceil((blockedUntil - Date.now()) / 1000)
     return NextResponse.json({ error: 'Too many attempts' }, { status: 429, headers: { 'Retry-After': String(retryAfter) } })
@@ -98,7 +119,7 @@ export async function POST(req: NextRequest) {
   if (restaurant?.owner_pin) {
     const ownerMatch = await bcrypt.compare(pin, restaurant.owner_pin)
     if (ownerMatch) {
-      await Promise.all([clearAttempts(deviceKey), clearAttempts(ridKey)])
+      await Promise.all([clearAttempts(deviceKey), clearAttempts(ridKey), clearAttempts(ipKey)])
       const apps = ['manager', 'analytics', 'stash']
       const token = issueStaffToken({ rid: restaurantId, sid: 'owner', owner: true, apps })
       return withStaffCookie({ match: true, is_owner: true, apps }, token)
@@ -116,7 +137,7 @@ export async function POST(req: NextRequest) {
     if (!staff.pin_hash) continue
     const match = await bcrypt.compare(pin, staff.pin_hash)
     if (match) {
-      await Promise.all([clearAttempts(deviceKey), clearAttempts(ridKey)])
+      await Promise.all([clearAttempts(deviceKey), clearAttempts(ridKey), clearAttempts(ipKey)])
       // Enforce device binding: if staff already has a device_id and this request
       // comes from a different device, block login.
       if (staff.device_id && deviceId !== staff.device_id) {
@@ -143,6 +164,7 @@ export async function POST(req: NextRequest) {
   await Promise.all([
     recordFailure(deviceKey, MAX_ATTEMPTS, BLOCK_MS),
     recordFailure(ridKey, RESTAURANT_MAX_ATTEMPTS, RESTAURANT_BLOCK_MS),
+    recordFailure(ipKey, IP_MAX_ATTEMPTS, BLOCK_MS),
   ])
   return NextResponse.json({ match: false })
 }

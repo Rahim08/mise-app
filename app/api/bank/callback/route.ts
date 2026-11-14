@@ -8,8 +8,8 @@
 //
 // Авторизация — не cookie-сессия: на iOS этот запрос идёт из отдельного webview
 // (ASWebAuthenticationSession), у которого нет staff-cookie нашего URLSession. Доверяем
-// самому `state` — непредсказуемый UUID, созданный секундами ранее уже авторизованным
-// /api/bank/connect, и single-use: как только status уходит в 'linked', повторный вызов
+// самому `state` — id подключения + HMAC-подпись (signBankState), созданный секундами ранее
+// уже авторизованным /api/bank/connect, и single-use: как только status уходит в 'linked', повторный вызов
 // с тем же state больше не найдёт 'pending'-строку.
 //
 // bank_connections.requisition_id хранит session_id Enable Banking (переиспользуем
@@ -23,6 +23,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { createSession, syncConnection } from '@/lib/enableBanking'
+import { verifyBankState } from '@/lib/staffToken'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,8 +42,10 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')
   const rawState = req.nextUrl.searchParams.get('state')
   const origin = process.env.NEXT_PUBLIC_APP_URL
-  const [ref, platform] = (rawState || '').split(':')
+  const [signedRef, platform] = (rawState || '').split(':')
   const isIos = platform === 'ios'
+  // state подписан в /api/bank/connect (signBankState) — голый id подключения больше не принимается.
+  const ref = verifyBankState(signedRef)
 
   const fail = (msg: string) => isIos
     ? schemeRedirectHTML(`com.rahim.mise://bank-callback?error=${encodeURIComponent(msg)}`)

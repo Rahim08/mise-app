@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { resolveCaller } from '@/lib/apiAuth'
 import { findInstitutions, createAuth } from '@/lib/enableBanking'
+import { signBankState } from '@/lib/staffToken'
 
 export const dynamic = 'force-dynamic'
 
@@ -64,7 +65,8 @@ export async function POST(req: NextRequest) {
     // матчит redirect_url строго по строке, а в Control Panel зарегистрирован домен без
     // www → «Redirect URI not allowed» (юзер-фидбок 2026-08-16).
     const redirectUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/bank/callback`
-    const state = platform === 'ios' ? `${connection.id}:ios` : connection.id
+    const signed = signBankState(connection.id)
+    const state = platform === 'ios' ? `${signed}:ios` : signed
     const { link } = await createAuth(institution!, redirectUrl, state)
 
     return NextResponse.json({ link })

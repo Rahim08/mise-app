@@ -1,3 +1,5 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
+
 // Google-отзывы: синхронизация с Places API (New) — https://places.googleapis.com/v1/places/{placeId}
 // Возвращает средний рейтинг, общее число отзывов и до 5 последних отзывов текстом (ограничение
 // самого Google, не наше — полного архива через этот API не существует). Каждый вызов пишет
@@ -23,7 +25,7 @@ type PlacesResponse = {
 export type SyncResult = { ok: boolean; rating?: number; ratingsTotal?: number; error?: string }
 
 export async function syncRestaurantReviews(
-  admin: any, restaurantId: string, placeId: string, apiKey: string,
+  admin: Pick<SupabaseClient, 'from'>, restaurantId: string, placeId: string, apiKey: string,
 ): Promise<SyncResult> {
   let res: Response
   try {
@@ -42,10 +44,12 @@ export async function syncRestaurantReviews(
   if (!res.ok) return { ok: false, error: data?.error?.message || `Google API: ${res.status}` }
 
   const now = new Date().toISOString()
-  await admin.from('google_rating_snapshots').insert({
+  const { error: snapshotError } = await admin.from('google_rating_snapshots').insert({
     restaurant_id: restaurantId, captured_at: now,
     rating: data.rating ?? null, ratings_total: data.userRatingCount ?? null,
   })
+
+  if (snapshotError) return { ok: false, error: 'Could not save review rating' }
 
   const reviews = data.reviews || []
   if (reviews.length) {
@@ -59,7 +63,8 @@ export async function syncRestaurantReviews(
       relative_time: r.relativePublishTimeDescription || null,
       review_time: r.publishTime || null,
     }))
-    await admin.from('google_reviews').upsert(rows, { onConflict: 'restaurant_id,google_review_id' })
+    const { error: reviewError } = await admin.from('google_reviews').upsert(rows, { onConflict: 'restaurant_id,google_review_id' })
+    if (reviewError) return { ok: false, error: 'Could not save reviews' }
   }
 
   return { ok: true, rating: data.rating, ratingsTotal: data.userRatingCount }

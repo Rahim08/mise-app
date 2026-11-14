@@ -58,6 +58,7 @@ nonisolated struct Shift: Codable, Identifiable, Sendable {
 
 nonisolated struct ShiftExpense: Codable, Identifiable, Sendable {
     let id: String
+    var is_custom: Bool? = nil
     let employee_id: String?
     let category_id: String?
     let category_name: String?
@@ -224,6 +225,7 @@ nonisolated struct Schedule: Codable, Identifiable, Sendable {
     let shift_start: String?
     let shift_end: String?
     let note: String?
+    var published: Bool? = nil
 }
 
 nonisolated struct MenuItem: Codable, Identifiable, Sendable {
@@ -382,12 +384,17 @@ nonisolated struct ChecklistItemState: Codable, Sendable {
     // переживать iOS-тоггл (мы перезаписываем items_state целиком) — иначе оценки стираются.
     var result: String?
     var note: String?
+    // Снимок формулировки/веса пункта на момент прохождения (пишет /api/people/checklist-item,
+    // аудит People 2026-11-14): правка шаблона позже не меняет трактовку старых результатов.
+    var label: String? = nil
+    var weight: Int? = nil
 
-    init(done: Bool, photo_url: String? = nil, result: String? = nil, note: String? = nil) {
+    init(done: Bool, photo_url: String? = nil, result: String? = nil, note: String? = nil, label: String? = nil, weight: Int? = nil) {
         self.done = done; self.photo_url = photo_url; self.result = result; self.note = note
+        self.label = label; self.weight = weight
     }
 
-    private enum CodingKeys: String, CodingKey { case done, photo_url, result, note }
+    private enum CodingKeys: String, CodingKey { case done, photo_url, result, note, label, weight }
 
     init(from decoder: Decoder) throws {
         if let sv = try? decoder.singleValueContainer(), let b = try? sv.decode(Bool.self) {
@@ -399,6 +406,9 @@ nonisolated struct ChecklistItemState: Codable, Sendable {
         photo_url = try c.decodeIfPresent(String.self, forKey: .photo_url)
         result = try c.decodeIfPresent(String.self, forKey: .result)
         note = try c.decodeIfPresent(String.self, forKey: .note)
+        label = try? c.decodeIfPresent(String.self, forKey: .label)
+        if let w = try? c.decodeIfPresent(Int.self, forKey: .weight) { weight = w }
+        else if let w = try? c.decodeIfPresent(Double.self, forKey: .weight) { weight = Int(w) }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -407,12 +417,16 @@ nonisolated struct ChecklistItemState: Codable, Sendable {
         try c.encodeIfPresent(photo_url, forKey: .photo_url)
         try c.encodeIfPresent(result, forKey: .result)
         try c.encodeIfPresent(note, forKey: .note)
+        try c.encodeIfPresent(label, forKey: .label)
+        try c.encodeIfPresent(weight, forKey: .weight)
     }
 
     var asDict: [String: Any] {
         var d: [String: Any] = ["done": done, "photo_url": photo_url ?? NSNull()]
         if let result { d["result"] = result }
         if let note { d["note"] = note }
+        if let label { d["label"] = label }
+        if let weight { d["weight"] = weight }
         return d
     }
 }
@@ -649,6 +663,7 @@ nonisolated struct Booking: Codable, Identifiable, Sendable {
     var status: String?
     let created_by: String?
     let created_by_name: String?
+    var guest_key: String? = nil
 }
 
 // Google-отзывы (Places API sync) — read-only во всех клиентах, пишет только сервер.

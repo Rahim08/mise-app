@@ -21,6 +21,16 @@ struct ZalTab: View {
         case "tech":   TechCardsTab(m: m)
         default:       StopTab(m: m)
         }
+        // Новые заказы гостей и счётчик в сегменте подтягиваются сами, пока «Зал» открыт
+        // (раньше — только первая загрузка; на вебе тот же интервал).
+        Color.clear.frame(height: 0)
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 30_000_000_000)
+                    if Task.isCancelled { break }
+                    await m.loadOrders()
+                }
+            }
     }
 }
 
@@ -134,7 +144,7 @@ struct PurchaseTab: View {
                 }
             }
             if m.isManager || it.created_by == m.myId {
-                Button { Task { await m.removePurchase(it) } } label: {
+                Button { pendingDelete = it } label: {
                     Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.4))
                 }
             }
@@ -151,7 +161,10 @@ struct PurchaseTab: View {
     }
     private func waList() {
         let text = m.purchaseText(catLabel: purchaseCatLabel)
-        if let url = URL(string: "https://wa.me/?text=\(text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") {
+        // .urlQueryAllowed не кодирует & = + — текст обрезался на первом «&» (напр. «M&M's»).
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&=+?#")
+        if let url = URL(string: "https://wa.me/?text=\(text.addingPercentEncoding(withAllowedCharacters: allowed) ?? "")") {
             UIApplication.shared.open(url)
         }
     }
@@ -163,8 +176,23 @@ struct PurchaseFormSheet: View {
     @State private var cat = "kitchen"
     @State private var rows: [Row] = [Row()]
     @State private var saving = false
+    @FocusState private var focus: Field?
 
     struct Row: Identifiable { let id = UUID(); var name = ""; var qty = ""; var unit = "" }
+    enum Field: Hashable { case name(UUID), qty(UUID), unit(UUID) }
+
+    /// «Далее»: название → кол-во → ед. → название следующей строки (новая строка на последней).
+    private func advance(from f: Field) {
+        switch f {
+        case .name(let id): focus = .qty(id)
+        case .qty(let id): focus = .unit(id)
+        case .unit(let id):
+            if let i = rows.firstIndex(where: { $0.id == id }) {
+                if i + 1 >= rows.count { rows.append(Row()) }
+                focus = .name(rows[i + 1].id)
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -187,8 +215,13 @@ struct PurchaseFormSheet: View {
                         ForEach($rows) { $r in
                             HStack(spacing: 8) {
                                 TextField(t("pe.pNamePh"), text: $r.name).textFieldStyle(.roundedBorder)
+                                    .focused($focus, equals: .name(r.id)).submitLabel(.next)
+                                    .onSubmit { advance(from: .name(r.id)) }
                                 TextField(t("pe.pQtyEx"), text: $r.qty).textFieldStyle(.roundedBorder).frame(width: 56).keyboardType(.decimalPad)
+                                    .focused($focus, equals: .qty(r.id))
                                 TextField(t("pe.pUnitEx"), text: $r.unit).textFieldStyle(.roundedBorder).frame(width: 56)
+                                    .focused($focus, equals: .unit(r.id)).submitLabel(.next)
+                                    .onSubmit { advance(from: .unit(r.id)) }
                                 if rows.count > 1 {
                                     Button { rows.removeAll { $0.id == r.id } } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.primary.opacity(0.3)) }
                                 }
@@ -200,6 +233,13 @@ struct PurchaseFormSheet: View {
                                 .background(RoundedRectangle(cornerRadius: 12).strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5])).foregroundStyle(.primary.opacity(0.2)))
                         }
                     }.padding(16)
+                }
+            }
+            // decimalPad без клавиши Return — «Далее» в панели над клавиатурой.
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    if let f = focus { Button(t("st.nextField")) { advance(from: f) } }
                 }
             }
             .navigationTitle(t("pe.pNew")).navigationBarTitleDisplayMode(.inline)

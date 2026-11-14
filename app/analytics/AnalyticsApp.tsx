@@ -11,6 +11,9 @@ import { useI18n, tCurrent } from '@/lib/i18n'
 import { fmtDate, fv, dd, displayReason, businessDate } from '@/lib/format'
 import { computeAccruedToday } from '@/lib/analytics'
 import { resolveEmployeesForMonth, resolveSalaryFor } from '@/lib/salaryHistory'
+import { SALPERIOD_PREFIX } from '@/lib/shiftForm'
+import { canExportReports } from '@/lib/reportPermissions'
+import { getMe } from '@/components/people/helpers'
 import './analytics-web.css'
 const COLORS = ['#34c759', '#ff3b30', '#007aff', '#ff9500', '#af52de', '#00c7be', '#ff6b35', '#5856d6']
 
@@ -433,6 +436,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const mShort = (d: Date) => mFull(d).slice(0, 3)
   const dowShort = (d: Date) => cap(d.toLocaleDateString(locale, { weekday: 'short' }))
   const [restaurantId, setRestaurantId] = useState(rid)
+  const exportAllowed = () => canExportReports(embedded ? { is_owner: true } : getMe(restaurantId))
+  const canExport = exportAllowed()
   const [currency, setCurrency] = useState('€')
   const [isPro, setIsPro] = useState(false)
   const [tab, setTab] = useState<'period' | 'kassa' | 'bank' | 'salary' | 'hookah'>('period')
@@ -454,6 +459,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [bankQuery, setBankQuery] = useState('') // название банка — разные заведения подключают разные банки
   const [bankInstitutions, setBankInstitutions] = useState<{ name: string; country: string }[]>([])
   const [bankError, setBankError] = useState<string | null>(null)
+  const [bankConfirmOff, setBankConfirmOff] = useState(false)
   const [expSalary, setExpSalary] = useState<string | null>(null) // раскрытая карточка ЗП (сворачиваемые)
   const [expDay, setExpDay] = useState<string | null>(null)       // раскрытый день в «По дням» (кальян)
   // Кальян: настройки + остатки (all-time) + строки смен кальянщика за месяц
@@ -485,10 +491,16 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const [advances, setAdvances] = useState<any[]>([])
   const [payments, setPayments] = useState<any[]>([])
   const [prevPayments, setPrevPayments] = useState<any[]>([])
+  // Открытый ЗП-долг за просматриваемый месяц (SALPERIOD-строки shift_expenses) — «Осталось»
+  // вычитает его, как Manager/People→Зарплата (аудит 2026-09-30), иначе провоцирует двойную выплату.
+  const [salDebts, setSalDebts] = useState<any[]>([])
   const [prevAbsences, setPrevAbsences] = useState<any[]>([])
   const [prevAdvances, setPrevAdvances] = useState<any[]>([])
   const [prevCardAmounts, setPrevCardAmounts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [salaryLoading, setSalaryLoading] = useState(true)
+  const loadGenerationRef = useRef(0)
+  const settingsLoadRef = useRef<PromiseLike<unknown> | null>(null)
   const [showMonthPicker, setShowMonthPicker] = useState(false)
   const [showAI, setShowAI] = useState(false)
   const [showDebts, setShowDebts] = useState(false)
@@ -514,7 +526,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       if (rest?.currency) setCurrency(rest.currency)
       setIsPro(rest?.subscription_plan === 'pro' && ['active', 'trialing', 'canceling'].includes(rest?.subscription_status))
     })
-    db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
+    settingsLoadRef.current = db.from('restaurant_settings').select('*').limit(1).then(({ data }: any) => {
       const r = Array.isArray(data) ? data[0] : data
       setIncludeCard(!!r?.include_card_in_analytics)
       setPayoutDay(r?.salary_payout_day ?? null)
@@ -525,7 +537,11 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       // AppModel.businessDate (iOS).
       if (typeof r?.day_start_hour === 'number' && !businessDateAppliedRef.current) {
         businessDateAppliedRef.current = true
-        setCurrentDate(businessDate(r.day_start_hour))
+        const initialDate = businessDate(r.day_start_hour)
+        setCurrentDate(initialDate)
+        if (initialDate.getMonth() !== new Date().getMonth() || initialDate.getFullYear() !== new Date().getFullYear()) {
+          void loadAll(restaurantId, initialDate)
+        }
       }
     })
     // Кальян: склад, выдано в зал (all-time) и продано (all-time) — для остатка «в заведении»
@@ -583,16 +599,33 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     } finally { setBankBusy(false) }
   }
 
+  const disconnectBank = async () => {
+    setBankBusy(true); setBankError(null)
+    try {
+      const res = await fetch('/api/bank/disconnect', { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { setBankError(data?.error || 'error'); return }
+      setBankConfirmOff(false); setBankTx([])
+      await loadBank()
+    } catch (err: any) {
+      setBankError(err?.message || 'error')
+    } finally { setBankBusy(false) }
+  }
+
   const loadAll = async (rid: string, date: Date) => {
+    const generation = ++loadGenerationRef.current
+    const isCurrent = () => generation === loadGenerationRef.current
     setLoading(true)
+    setSalaryLoading(true)
     const monthStart = fmtDate(new Date(date.getFullYear(), date.getMonth(), 1))
     const monthEnd = fmtDate(new Date(date.getFullYear(), date.getMonth() + 1, 0))
     const prevStart = fmtDate(new Date(date.getFullYear(), date.getMonth() - 1, 1))
     const prevEnd = fmtDate(new Date(date.getFullYear(), date.getMonth(), 0))
 
-    const [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13] = await Promise.all([
-      db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd).order('date'),
-      db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', prevStart).lte('date', prevEnd).order('date'),
+    // Payroll and hookah do not gate turnover or the shift detail queries.
+    const payrollTask = (async () => {
+      try {
+        const [s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14] = await Promise.all([
       // Без фильтра is_active — уволенный остаётся в месяцах, где у него есть выплаты/авансы/
       // прогулы/карта (аудит 2026-09-27, паритет с Manager→Зарплата); фильтр ниже.
       db.from('employees').select('*').eq('restaurant_id', rid).order('name'),
@@ -615,8 +648,11 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       db.from('salary_history').select('employee_id, salary, deduct_per_absence, effective_from'),
       // Выплаты за прошлый месяц — «начислено» до payout_day вычитает уже выплаченное.
       db.from('salary_payments').select('*').eq('period', prevStart),
-    ])
+      db.from('shift_expenses').select('employee_id, amount').eq('restaurant_id', rid).eq('is_paid', false).eq('note', `${SALPERIOD_PREFIX}${monthStart}`),
+        ])
+        if (!isCurrent()) return
     setPrevPayments(s13.data || [])
+    setSalDebts(s14.data || [])
     setAdvances(s7.data || [])
     setPayments(s11.data || [])
     setHookahRows(s6.data || [])
@@ -626,47 +662,70 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     const salHist = s12.data || []
     setSalaryHistory(salHist)
 
-    const shiftList = s1.data || []
-    setShifts(shiftList); setPrevShifts(s2.data || [])
     // Авто-прогулы (source='auto') — черновик до подтверждения менеджером при закрытии смены.
     // Исключаем из расчёта ЗП, пока не подтверждены (тогда source='manager'). Фильтр в JS —
     // чтобы не падать до применения миграции (у старых строк source отсутствует → учитываются).
     // employees резолвится к просматриваемому месяцу (monthStart) — иначе правка оклада
     // сегодня меняла бы «Зарплату»/экспорт/ФОТ за прошлый открытый месяц задним числом.
     const monthAbs = (s5.data || []).filter((a: any) => a.source !== 'auto')
-    const activeIds = new Set<string>([...monthAbs, ...(s7.data || []), ...(s11.data || []), ...(s4.data || [])].map((r: any) => r.employee_id))
+    const activeIds = new Set<string>([...monthAbs, ...(s7.data || []), ...(s11.data || []), ...(s4.data || []), ...(s14.data || [])].map((r: any) => r.employee_id))
     const monthEmps = (s3.data || []).filter((e: any) => e.is_active !== false || activeIds.has(e.id))
     setEmployees(resolveEmployeesForMonth(monthEmps, salHist, monthStart)); setCardAmounts(s4.data || []); setAbsences(monthAbs)
 
-    if (shiftList.length > 0) {
-      const ids = shiftList.map((s: any) => s.id)
-      const { data: e1 } = await db.from('shift_expenses').select('*').in('shift_id', ids)
-      setExpenses(e1 || [])
-      const { data: inkRows } = await db.from('inkassations').select('shift_id, amount, expense, reason, salary, salary_note').in('shift_id', ids)
-      const byShift: Record<string, any> = {}
-      ;(inkRows || []).forEach((r: any) => { if (r.shift_id) byShift[r.shift_id] = r })
-      setInkByShift(byShift)
-    }
-    setLoading(false)
+      } finally {
+        if (isCurrent()) setSalaryLoading(false)
+      }
+    })()
+    const periodTask = (async () => {
+      try {
+        const [current, previous] = await Promise.all([
+          db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', monthStart).lte('date', monthEnd).order('date'),
+          db.from('shifts').select('*').eq('restaurant_id', rid).gte('date', prevStart).lte('date', prevEnd).order('date'),
+        ])
+        // Card inclusion must be known before publishing revenue.
+        await settingsLoadRef.current
+        if (!isCurrent()) return
+        if (current.data) setShifts(current.data)
+        if (previous.data) setPrevShifts(previous.data)
+        if (!current.data) return
+        const ids = current.data.map((s: any) => s.id)
+        const [expenseResult, inkResult] = ids.length ? await Promise.all([
+          db.from('shift_expenses').select('*').in('shift_id', ids),
+          db.from('inkassations').select('shift_id, amount, expense, reason, salary, salary_note').in('shift_id', ids),
+        ]) : [{ data: [] }, { data: [] }]
+        if (!isCurrent()) return
+        if (expenseResult.data) setExpenses(expenseResult.data)
+        if (inkResult.data) {
+          const byShift: Record<string, any> = {}
+          inkResult.data.forEach((r: any) => { if (r.shift_id) byShift[r.shift_id] = r })
+          setInkByShift(byShift)
+        }
+      } finally {
+        if (isCurrent()) setLoading(false)
+      }
+    })()
+    await Promise.all([periodTask, payrollTask])
   }
 
   const loadAllHistory = async (rid: string) => {
     // Баланс (VIEW), all-time shifts и топ-апы не зависят друг от друга — параллельно, не
     // одно за другим (было 3-4 последовательных запроса на каждый pull-to-refresh).
-    const [{ data: bal }, { data: sh }, { data: tp }] = await Promise.all([
-      db.from('inkassation_balance').select('balance').limit(1),
-      // Инкассация копится через месяцы, не обнуляется 1-го числа (как «Касса» на iOS) —
-      // отсюда all-time; сам баланс теперь считает Postgres, см. cumulativeInkass выше.
-      db.from('shifts').select('*').eq('restaurant_id', rid).order('date'),
-      db.from('inkassation_topups').select('id, date, amount, reason').order('date'),
+    await Promise.all([
+      db.from('inkassation_balance').select('balance').limit(1).then(({ data }: any) => {
+        if (data) setCumulativeInkass(Number(data[0]?.balance || 0))
+      }),
+      db.from('inkassation_topups').select('id, date, amount, reason').order('date').then(({ data }: any) => {
+        if (data) setAllTopups(data)
+      }),
+      (async () => {
+        const { data: sh } = await db.from('shifts').select('*').eq('restaurant_id', rid).order('date')
+        if (!sh) return
+        setAllShifts(sh)
+        if (!sh.length) { setAllExpenses([]); return }
+        const { data: ex } = await db.from('shift_expenses').select('*').in('shift_id', sh.map((s: any) => s.id))
+        if (ex) setAllExpenses(ex)
+      })(),
     ])
-    setCumulativeInkass(Number(bal?.[0]?.balance || 0))
-    setAllShifts(sh || [])
-    setAllTopups(tp || [])
-    if (sh && sh.length > 0) {
-      const { data: ex } = await db.from('shift_expenses').select('*').in('shift_id', sh.map((s: any) => s.id))
-      setAllExpenses(ex || [])
-    }
   }
 
   // ── COMPUTED ──
@@ -778,6 +837,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   const monthTitle = `${mFull(currentDate)} ${currentDate.getFullYear()}`
 
   const exportShifts = () => {
+    if (loading || salaryLoading || !exportAllowed()) return
     const rows: (string | number)[][] = [[tr('an.csvDate'), tr('an.csvEntry'), tr('an.csvIncome'), tr('an.csvExpense'), tr('an.csvDeposit'), tr('an.csvCash')]]
     shiftsDisplay.forEach((s: any) => rows.push([
       s.date,
@@ -792,6 +852,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   }
 
   const exportShiftsPDF = async () => {
+    const exportGeneration = loadGenerationRef.current
+    if (loading || salaryLoading || !exportAllowed()) return
     const doc = await makePdfDoc()
     const headers = [tr('an.csvDate'), tr('an.csvEntry'), tr('an.csvIncome'), tr('an.csvExpense'), tr('an.csvDeposit'), tr('an.csvCash')]
     const colX = [40, 130, 220, 310, 400, 485]
@@ -805,6 +867,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
     ])
     rows.push([tr('an.csvTotal'), '', pdfCur + fv(totalIncome), pdfCur + fv(totalExpense), pdfCur + fv(totalInkass), pdfCur + fv(lastShift?.closing_balance || 0)])
     pdfTable(doc, `Смены — ${monthTitle}`, headers, rows, colX)
+    if (loading || salaryLoading || !exportAllowed()) return
+    if (exportGeneration !== loadGenerationRef.current) return
     doc.save(`smeny_${monthTag}.pdf`)
   }
 
@@ -818,6 +882,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   }
 
   const exportSession = () => {
+    if (loading || salaryLoading || !exportAllowed()) return
     const { dayStr, dayShift, dayExps } = sessionData()
     if (!dayShift) return
     const rows: (string | number)[][] = [[tr('an.csvDate'), tr('an.csvEntry'), tr('an.csvIncome'), tr('an.csvExpense'), tr('an.csvDeposit'), tr('an.csvCash')]]
@@ -838,6 +903,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   }
 
   const exportSessionPDF = async () => {
+    const exportGeneration = loadGenerationRef.current
+    if (loading || salaryLoading || !exportAllowed()) return
     const { dayStr, dayShift, dayExps } = sessionData()
     if (!dayShift) return
     const doc = await makePdfDoc()
@@ -856,6 +923,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       doc.addPage()
       pdfTable(doc, `${tr('an.dayExpenses')} — ${dd(dayStr)}`, [tr('an.csvCategory'), tr('an.csvAmount')], dayExps.map((e: any) => [e.category_name, pdfCur + fv(e.amount || 0)]), [40, 300])
     }
+    if (loading || salaryLoading || !exportAllowed()) return
+    if (exportGeneration !== loadGenerationRef.current) return
     doc.save(`smena_${dayStr}.pdf`)
   }
 
@@ -868,9 +937,13 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   // Только наличные выплаты — паритет с Manager→Зарплата (A2): карта уже вычтена из cash через
   // monthly_card_amounts, иначе «осталось» в Аналитике и в Manager расходилось (аудит 2026-09-27).
   const paidOf = (emp: any) => payments.filter((p: any) => p.employee_id === emp.id && (p.method || 'cash') === 'cash').reduce((s: number, p: any) => s + Number(p.amount || 0), 0)
-  const prevPaidCashTotal = prevPayments.filter((p: any) => (p.method || 'cash') === 'cash').reduce((s: number, p: any) => s + Number(p.amount || 0), 0)
+  // Только сотрудники, чей оклад вошёл в prevTotalCash (тот же набор employees) — иначе выплата
+  // уволенному без активности в этом месяце вычиталась без его начисления (аудит 2026-09-30).
+  const prevPaidCashTotal = prevPayments.filter((p: any) => (p.method || 'cash') === 'cash' && employees.some((e: any) => e.id === p.employee_id)).reduce((s: number, p: any) => s + Number(p.amount || 0), 0)
+  const openDebtOf = (emp: any) => salDebts.filter((d: any) => d.employee_id === emp.id).reduce((s: number, d: any) => s + Number(d.amount || 0), 0)
 
   const exportSalary = () => {
+    if (loading || salaryLoading || !exportAllowed()) return
     const rows: (string | number)[][] = [[tr('an.csvEmployee'), tr('an.csvSalary'), tr('an.csvAbsences'), tr('an.csvDeduct'), tr('an.csvCard'), tr('an.csvCashPay'), tr('an.csvTotal')]]
     employees.forEach((emp: any) => {
       const abs = absences.filter((a: any) => a.employee_id === emp.id).length
@@ -884,6 +957,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
   }
 
   const exportSalaryPDF = async () => {
+    const exportGeneration = loadGenerationRef.current
+    if (loading || salaryLoading || !exportAllowed()) return
     const doc = await makePdfDoc()
     const headers = [tr('an.csvEmployee'), tr('an.csvSalary'), tr('an.csvAbsences'), tr('an.csvDeduct'), tr('an.csvCard'), tr('an.csvCashPay'), tr('an.csvTotal')]
     const colX = [40, 200, 270, 330, 400, 465, 520]
@@ -896,6 +971,8 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       return [emp.name, pdfCur + fv(emp.salary || 0), String(abs), pdfCur + fv(deduct), pdfCur + fv(card), pdfCur + fv(cash), pdfCur + fv(total)]
     })
     pdfTable(doc, `Зарплаты — ${monthTitle}`, headers, rows, colX)
+    if (loading || salaryLoading || !exportAllowed()) return
+    if (exportGeneration !== loadGenerationRef.current) return
     doc.save(`zarplaty_${monthTag}.pdf`)
   }
 
@@ -946,7 +1023,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
             {!embedded && <StatCard label={tr('an.expense')} value={`${currency}${fv(dayShift.total_expense)}`} rawValue={dayShift.total_expense} color={t.red} sm t={t} />}
             <StatCard label={tr('an.cKassa')} value={`${currency}${fv(dayShift.closing_balance)}`} rawValue={dayShift.closing_balance} color={t.blue} sm t={t} />
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginBottom: 4 }}>
+          {canExport && !loading && !salaryLoading && <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginBottom: 4 }}>
             <button onClick={exportSession} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.green}18`, border: 'none', borderRadius: 16, padding: '5px 12px', fontSize: 12, fontWeight: 600, color: t.green, cursor: 'pointer', fontFamily: 'inherit' }}>
               <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
               Excel
@@ -955,7 +1032,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
               <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
               PDF
             </button>
-          </div>
+          </div>}
           {dayExps.length > 0 && <>
             <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.dayExpenses')}</div>
             <div style={{ background: t.surface, borderRadius: 16, overflow: 'hidden', marginBottom: 12, boxShadow: t.sh }}>
@@ -1188,7 +1265,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
           </>}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 4px 8px' }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{tr('an.byDays')}</div>
-            {filled.length > 0 && (
+            {canExport && !loading && !salaryLoading && filled.length > 0 && (
               <div style={{ display: 'flex', gap: 6 }}>
                 <button onClick={exportShifts} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.green}18`, border: 'none', borderRadius: 16, padding: '5px 12px', fontSize: 12, fontWeight: 600, color: t.green, cursor: 'pointer', fontFamily: 'inherit' }}>
                   <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
@@ -1272,7 +1349,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
       <div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
           <StatCard label={tr('an.totalInkass')} rawValue={inkBal} value={`${currency}${fv(inkBal)}`} color={t.orange} t={t} />
-          <StatCard label={tr('an.salToday')} rawValue={salToday} value={`${currency}${fv(salToday)}`} color={diff >= 0 ? t.green : t.red} sub={`${diff >= 0 ? tr('an.ahead') : tr('an.behind')} ${currency}${fv(Math.abs(diff))}`} t={t} />
+          {salaryLoading ? <Spinner /> : <StatCard label={tr('an.salToday')} rawValue={salToday} value={`${currency}${fv(salToday)}`} color={diff >= 0 ? t.green : t.red} sub={`${diff >= 0 ? tr('an.ahead') : tr('an.behind')} ${currency}${fv(Math.abs(diff))}`} t={t} />}
         </div>
         {shiftsWithInk.length > 1 && <>
           <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5, padding: '12px 4px 8px' }}>{tr('an.dynamics')}</div>
@@ -1363,7 +1440,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 4px 8px' }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: t.text3, textTransform: 'uppercase', letterSpacing: 0.5 }}>{tr('an.employees')}</div>
-          {employees.length > 0 && (
+          {canExport && !loading && !salaryLoading && employees.length > 0 && (
             <div style={{ display: 'flex', gap: 6 }}>
               <button onClick={exportSalary} style={{ display: 'flex', alignItems: 'center', gap: 5, background: `${t.green}18`, border: 'none', borderRadius: 16, padding: '5px 12px', fontSize: 12, fontWeight: 600, color: t.green, cursor: 'pointer', fontFamily: 'inherit' }}>
                 <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
@@ -1385,7 +1462,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
             const total = Math.max(0, (emp.salary || 0) - deduct)
             const cash = Math.max(0, total - advance - card)
             const paid = paidOf(emp)
-            const remaining = Math.max(0, cash - paid)
+            const remaining = Math.max(0, cash - paid - openDebtOf(emp))
 
             const open = expSalary === emp.id
 
@@ -1533,6 +1610,22 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
             ))
           }
         </div>
+        <div style={{ marginTop: 16, textAlign: 'center' as const }}>
+          {bankConfirmOff ? (
+            <div style={{ background: t.surface, borderRadius: 16, padding: 16, boxShadow: t.sh }}>
+              <div style={{ fontSize: 13, color: t.text2, marginBottom: 12 }}>{tr('an.bankDisconnectConfirm')}</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setBankConfirmOff(false)} disabled={bankBusy}
+                  style={{ flex: 1, padding: '12px', borderRadius: 12, background: t.fill, color: t.text, border: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>{tr('an.back')}</button>
+                <button onClick={disconnectBank} disabled={bankBusy}
+                  style={{ flex: 1, padding: '12px', borderRadius: 12, background: t.red, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 14, fontWeight: 700, cursor: 'pointer', opacity: bankBusy ? 0.6 : 1 }}>{bankBusy ? '···' : tr('an.bankDisconnect')}</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setBankConfirmOff(true)}
+              style={{ background: 'none', border: 'none', color: t.red, fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 8 }}>{tr('an.bankDisconnect')}</button>
+          )}
+        </div>
       </div>
     )
   }
@@ -1642,9 +1735,9 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
 
           {tab === 'bank' && renderBank()}
 
-          {tab === 'salary' && renderSalary()}
+          {tab === 'salary' && (salaryLoading ? <Spinner /> : renderSalary())}
 
-          {tab === 'hookah' && (() => {
+          {tab === 'hookah' && (salaryLoading ? <Spinner /> : (() => {
             // Смены кальянщика из Mise Stash: выручка = кол-во × цена, табак = кол-во × порция
             // Бесплатные (владелец/сотрудники) не входят в выручку, но табак расходуют
             const paidRows = hookahRows.filter((r: any) => !r.is_free)
@@ -1824,7 +1917,7 @@ export default function AnalyticsApp({ rid = '' }: { rid?: string }) {
                 )}
               </div>
             )
-          })()}
+          })())}
         </div>
       </div>
 

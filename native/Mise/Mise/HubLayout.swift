@@ -24,6 +24,14 @@ enum HubTileSize: String, Codable, CaseIterable {
     var stepIndex: Int { Self.ordered.firstIndex(of: self) ?? 0 }
     static func at(_ i: Int) -> HubTileSize { ordered[min(max(i, 0), ordered.count - 1)] }
 
+    var minHeight: CGFloat { self == .large ? 150 : 76 }
+
+    static func resized(from size: HubTileSize, translation: CGSize) -> HubTileSize {
+        let delta = (translation.width + translation.height) / CGFloat(2).squareRoot()
+        guard delta.isFinite else { return size }
+        return at(size.stepIndex + Int(min(2, max(-2, (delta / 54).rounded()))))
+    }
+
     var label: String {
         switch self {
         case .small: return "S"
@@ -77,20 +85,100 @@ enum HubLayoutStore {
     static func load(staffId: String, fallback: [String]) -> [HubItem] {
         if let data = UserDefaults.standard.data(forKey: key(staffId)),
            let saved = try? JSONDecoder().decode([HubItem].self, from: data) {
-            let known = saved.filter { fallback.contains($0.id) }
+            var seen = Set<String>()
+            let known = saved.filter { fallback.contains($0.id) && seen.insert($0.id).inserted }
             if !known.isEmpty {
                 let knownIds = Set(known.map(\.id))
-                let missing = fallback.filter { !knownIds.contains($0) }
+                let missing = fallback.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+                let additions = missing.filter { !knownIds.contains($0) }
                     .map { HubItem(id: $0, size: defaultSize(for: $0)) }
-                return known + missing
+                return known + additions
             }
         }
-        return fallback.map { HubItem(id: $0, size: defaultSize(for: $0)) }
+        var seen = Set<String>()
+        return fallback.filter { seen.insert($0).inserted }.map { HubItem(id: $0, size: defaultSize(for: $0)) }
     }
 
     static func save(_ items: [HubItem], staffId: String) {
         guard let data = try? JSONEncoder().encode(items) else { return }
         UserDefaults.standard.set(data, forKey: key(staffId))
+    }
+}
+
+struct HubGridGeometry {
+    let frames: [String: CGRect]
+    let height: CGFloat
+}
+
+/// Measured row packing shared by Layout and the regression tests.
+func hubGridGeometry(_ items: [HubItem], width proposedWidth: CGFloat, heights: [String: CGFloat], spacing: CGFloat = 10) -> HubGridGeometry {
+    let width = proposedWidth.isFinite ? max(0, proposedWidth) : 0
+    let gap = min(max(0, spacing), width / 2)
+    let unit = max(0, (width - gap * 2) / 3)
+    var frames: [String: CGRect] = [:]
+    var used = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
+    for item in items {
+        if used + item.size.units > 3 {
+            y += rowHeight + gap; used = 0; rowHeight = 0
+        }
+        let measured = heights[item.id] ?? item.size.minHeight
+        let height = measured.isFinite ? max(item.size.minHeight, measured) : item.size.minHeight
+        let frame = CGRect(x: CGFloat(used) * (unit + gap), y: y,
+                           width: unit * CGFloat(item.size.units) + gap * CGFloat(item.size.units - 1), height: height)
+        frames[item.id] = frame
+        rowHeight = max(rowHeight, height); used += item.size.units
+    }
+    return HubGridGeometry(frames: frames, height: items.isEmpty ? 0 : y + rowHeight)
+}
+
+/// Destination geometry stays fixed for the lifetime of a touch. Reflow cannot feed
+/// back into hit testing and move a stationary tile again.
+struct HubDragSession {
+    let id: String
+    let items: [HubItem]
+    let frames: [String: CGRect]
+    let origin: CGRect
+    private(set) var destination: Int
+    private(set) var translation: CGSize = .zero
+
+    init?(items: [HubItem], frames: [String: CGRect], id: String) {
+        guard let index = items.firstIndex(where: { $0.id == id }), let origin = frames[id] else { return nil }
+        self.items = items; self.frames = frames; self.id = id; self.origin = origin; destination = index
+    }
+
+    var previewItems: [HubItem] {
+        guard let item = items.first(where: { $0.id == id }) else { return items }
+        var result = items.filter { $0.id != id }
+        result.insert(item, at: min(max(0, destination), result.count))
+        return result
+    }
+
+    mutating func update(at point: CGPoint, translation: CGSize) {
+        self.translation = translation
+        guard !origin.contains(point) else {
+            destination = items.firstIndex(where: { $0.id == id }) ?? 0; return
+        }
+        let remaining = items.filter { $0.id != id }
+        let rows = packHubRows(items).compactMap { row -> [(String, CGRect)]? in
+            let entries = row.compactMap { item -> (String, CGRect)? in
+                guard item.id != id, let frame = frames[item.id] else { return nil }
+                return (item.id, frame)
+            }
+            return entries.isEmpty ? nil : entries
+        }
+        guard let row = rows.min(by: { distance(point.y, row: $0) < distance(point.y, row: $1) }) else { return }
+        let entries = row.sorted { $0.1.minX < $1.1.minX }
+        if point.y < (rows.first?.map { $0.1.minY }.min() ?? 0) { destination = 0; return }
+        if point.y > (rows.last?.map { $0.1.maxY }.max() ?? 0) { destination = remaining.count; return }
+        for entry in entries where point.x < entry.1.midX {
+            destination = remaining.firstIndex(where: { $0.id == entry.0 }) ?? destination; return
+        }
+        if let last = entries.last, let index = remaining.firstIndex(where: { $0.id == last.0 }) { destination = index + 1 }
+    }
+
+    private func distance(_ y: CGFloat, row: [(String, CGRect)]) -> CGFloat {
+        let low = row.map { $0.1.minY }.min() ?? 0, high = row.map { $0.1.maxY }.max() ?? 0
+        return y < low ? low - y : max(0, y - high)
     }
 }
 
@@ -144,284 +232,213 @@ private struct HubTileFramesKey: PreferenceKey {
     }
 }
 
+/// Flat identity is retained when a tile moves to another packed row.
+private struct HubFlowLayout: Layout {
+    let items: [HubItem]
+
+    private func geometry(width: CGFloat, subviews: Subviews) -> HubGridGeometry {
+        let widths = hubGridGeometry(items, width: width, heights: [:])
+        var heights: [String: CGFloat] = [:]
+        for index in subviews.indices where index < items.count {
+            let item = items[index]
+            heights[item.id] = subviews[index].sizeThatFits(
+                ProposedViewSize(width: widths.frames[item.id]?.width, height: nil)).height
+        }
+        return hubGridGeometry(items, width: width, heights: heights)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 320
+        return CGSize(width: width, height: geometry(width: width, subviews: subviews).height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let layout = geometry(width: bounds.width, subviews: subviews)
+        for index in subviews.indices where index < items.count {
+            guard let frame = layout.frames[items[index].id] else { continue }
+            subviews[index].place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                                  anchor: .topLeading, proposal: ProposedViewSize(frame.size))
+        }
+    }
+}
+
+/// GestureState also resets when UIKit cancels a touch, unlike onEnded alone.
+private struct HubTileTouch: ViewModifier {
+    let editing: Bool
+    let changed: (DragGesture.Value) -> Void
+    let ended: (DragGesture.Value) -> Void
+    let cancelled: () -> Void
+    @GestureState private var touching = false
+
+    func body(content: Content) -> some View {
+        // Compensate for UIKit touch slop so adjacent gaps remain scrollable.
+        content.contentShape(Rectangle().inset(by: 20)).simultaneousGesture(
+            DragGesture(minimumDistance: 8, coordinateSpace: .named("hubGrid"))
+                .updating($touching) { _, active, _ in active = true }
+                .onChanged(changed).onEnded(ended),
+            including: editing ? .all : .subviews
+        )
+        .onChange(of: touching) { _, active in
+            guard !active else { return }
+            Task { @MainActor in
+                await Task.yield()
+                if !touching { cancelled() }
+            }
+        }
+        .onDisappear { cancelled() }
+    }
+}
+
 struct HubGridView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Binding var editing: Bool
-
     @State private var order: [HubItem] = []
-    // Кто сейчас перетаскивается. В сетке этот тайл остаётся как placeholder, а настоящая
-    // карточка летит отдельным overlay-слоем от исходного фрейма. Так reflow соседей не
-    // сдвигает сам объект под пальцем.
-    @State private var draggingItemID: String?
-    @State private var dragTranslation: CGSize = .zero
-    @State private var dragTargetIndex: Int?
-    @State private var dragOriginFrame: CGRect?
+    @State private var drag: HubDragSession?
+    @State private var resizingID: String?
+    @State private var resizeStartSize: HubTileSize?
+    @State private var resizePreview: HubTileSize?
+    @State private var ignoredTouchID: String?
+    @State private var sizePickerID: String?
     @State private var tileFrames: [String: CGRect] = [:]
     @State private var stats = HubStatsModel()
     @State private var gridWidth: CGFloat = 0
-    // Живой ресайз за уголок: preview держит форму, в которую плитка "перетекла бы" при
-    // отпускании — сам массив order (и раскладка) меняется только на .onEnded, чтобы не
-    // дёргать layout всей сетки на каждый пиксель драга. Сам тайл при этом визуально
-    // растёт/сжимается под пальцем через scaleEffect (см. tile()) — это чистый рендер-слой,
-    // соседей по HStack не толкает, поэтому дёшево и не дёргает раскладку на каждый кадр.
-    @State private var resizingID: String?
-    @State private var resizePreview: HubTileSize?
-    @Namespace private var hubNS
+    private static let reflow = Animation.spring(response: 0.36, dampingFraction: 0.9)
+    private var displayedOrder: [HubItem] { drag?.previewItems ?? order }
+    private var activeID: String? { drag?.id ?? resizingID }
 
-    /// Общая пружина для reflow (resize/reorder) — один и тот же профиль везде, чтобы
-    /// плитки не "спорили" разными кривыми в одном кадре. Задемпфирована сильнее дефолтной
-    /// SwiftUI-пружины: почти без перехлёста — тяжеловесное, а не дёрганое движение.
-    private static let reflow = Animation.spring(response: 0.42, dampingFraction: 0.87)
-
-    // Reorder теперь контролируем сами: один DragGesture на плитке, ручка ресайза — отдельный
-    // sibling поверх неё. Активная плитка не участвует в matchedGeometryEffect как летящий
-    // объект; в layout остаётся только placeholder, поэтому смена строк не дёргает карточку
-    // под пальцем.
     var body: some View {
-        let rows = packHubRows(order)
         ZStack(alignment: .topLeading) {
             ScrollView {
-                VStack(spacing: 10) {
-                    ForEach(rows.indices, id: \.self) { i in
-                        rowView(rows[i])
+                HubFlowLayout(items: displayedOrder) {
+                    ForEach(displayedOrder) { item in
+                        tile(item)
+                            .background(GeometryReader { geometry in
+                                Color.clear.preference(key: HubTileFramesKey.self,
+                                    value: [item.id: geometry.frame(in: .named("hubGrid"))])
+                            })
                     }
                 }
-                .background(
-                    GeometryReader { g in
-                        Color.clear
-                            .onAppear { gridWidth = g.size.width }
-                            .onChange(of: g.size.width) { _, w in gridWidth = w }
-                    }
-                )
-                .padding(.horizontal, 20).padding(.bottom, 20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .animation(reduceMotion ? nil : Self.reflow, value: displayedOrder)
+                .background(GeometryReader { geometry in
+                    Color.clear.onAppear { gridWidth = geometry.size.width }
+                        .onChange(of: geometry.size.width) { _, width in
+                            cancelInteraction(); gridWidth = width
+                        }
+                })
+                .padding(.horizontal, 20).padding(.bottom, 24)
+                .contentShape(Rectangle())
             }
-
+            .scrollDisabled(activeID != nil)
             dragOverlay()
         }
         .coordinateSpace(name: "hubGrid")
-        // Жест живёт на корневом контейнере, а не на конкретной плитке. Во время reorder
-        // плитка может перейти в другую строку, из-за чего SwiftUI пересоздаёт её subtree и
-        // отменяет gesture, прикреплённый к самой плитке. Корень сетки при этом стабилен.
-        .simultaneousGesture(hubReorderGesture(), including: .all)
         .onPreferenceChange(HubTileFramesKey.self) { tileFrames = $0 }
-        // Скролл гасим во время активного редактирования жестом: ScrollView иначе конкурирует
-        // за тот же палец и даёт ощущение рывка/потери захвата.
-        .scrollDisabled(draggingItemID != nil || resizingID != nil)
         .onAppear { loadOrder() }
         .onChange(of: app.availableApps) { _, _ in loadOrder() }
-        .onChange(of: editing) { _, now in
-            if !now {
-                // Выход из правки — жёсткий сброс любого зависшего drag/resize состояния
-                // (защита от края: если .dropDestination почему-то не отработал).
-                draggingItemID = nil
-                dragTranslation = .zero
-                dragTargetIndex = nil
-                dragOriginFrame = nil
-                resizingID = nil
-                resizePreview = nil
-            }
-        }
+        .onChange(of: app.staff?.id) { _, _ in loadOrder() }
+        .onChange(of: editing) { _, value in if !value { cancelInteraction(); sizePickerID = nil } }
+        .onChange(of: dynamicTypeSize) { _, _ in cancelInteraction() }
+        .onDisappear { cancelInteraction() }
         .task { await refreshStats() }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
-            Task { await refreshStats() }
+            if phase == .active { Task { await refreshStats() } }
+            else { cancelInteraction(); sizePickerID = nil }
         }
-    }
-
-    private func rowView(_ items: [HubItem]) -> some View {
-        let spacing: CGFloat = 10
-        let unitWidth = gridWidth > spacing * 2 ? (gridWidth - spacing * 2) / 3 : 0
-        return HStack(alignment: .top, spacing: spacing) {
-            ForEach(items) { item in
-                tile(item)
-                    .frame(width: unitWidth > 0
-                           ? unitWidth * CGFloat(item.size.units) + spacing * CGFloat(item.size.units - 1)
-                           : nil)
-                    .background(
-                        GeometryReader { g in
-                            Color.clear.preference(
-                                key: HubTileFramesKey.self,
-                                value: [item.id: g.frame(in: .named("hubGrid"))]
-                            )
-                        }
-                    )
-            }
-        }
-    }
-
-    /// Минимальная, НЕ фиксированная высота — контент может занять больше места (длинный
-    /// перевод, крупная сумма), плитка должна вырасти сама, а не обрезаться/наезжать на
-    /// следующий ряд.
-    private func tileMinHeight(_ size: HubTileSize) -> CGFloat {
-        switch size {
-        case .small: return 76
-        case .medium: return 76
-        case .large: return 150
-        }
-    }
-
-    // MARK: - плитка
-
-    @ViewBuilder
-    private func tile(_ item: HubItem) -> some View {
-        if let mod = miseModules[item.id] {
-            let isResizing = resizingID == item.id
-            let isDragging = draggingItemID == item.id
-
-            let body = tileBody(item, mod: mod, isResizing: isResizing, isDraggingPlaceholder: isDragging, useMatchedGeometry: true)
-                .onTapGesture { if !editing { UIImpactFeedbackGenerator(style: .medium).impactOccurred(); app.openApp(item.id) } }
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.4).onEnded { _ in
-                        guard !editing else { return }
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        withAnimation(Self.reflow) { editing = true }
-                    }
-                )
-
-            // Ручка ресайза — САЙБЛИНГ в ZStack, а не .overlay поверх draggable-вью: раньше
-            // она была декорацией той же вью-ноды, что и жест переноса, и оба срабатывали на
-            // один тач. Отдельный узел дерева — хит-тест на уголок физически не долетает до
-            // .draggable ниже (draggable конкурирует за область как обычный interaction, а не
-            // как simultaneousGesture, так что более вложенный узел с СВОИМ жестом выигрывает
-            // приоритет на свою область без ручных гейтов).
-            ZStack(alignment: .topTrailing) {
-                body
-                if editing {
-                    resizeHandle(item).padding(6)
-                    if isResizing, let preview = resizePreview {
-                        resizeIndicator(preview, color: mod.color)
-                            .padding(.top, 8)
-                            .padding(.trailing, 44)
-                            .allowsHitTesting(false)
-                            .transition(.scale.combined(with: .opacity))
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func tileBody(_ item: HubItem, mod: MiseModule, isResizing: Bool, isDraggingPlaceholder: Bool, useMatchedGeometry: Bool) -> some View {
-        let activeGesture = draggingItemID != nil || resizingID != nil
-        // Small/medium/large меняют не только ширину, но и место в строке. Поэтому во
-        // время жеста оставляем текущую форму и меняем её только после отпускания.
-        // Иначе контент перескакивает в новый режим раньше самой раскладки.
-        let body = tileContent(item, mod: mod)
-            .padding(item.size == .large ? 16 : (item.size == .small ? 12 : 14))
-            .frame(maxWidth: .infinity, minHeight: tileMinHeight(item.size), maxHeight: .infinity, alignment: .topLeading)
-            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(mod.color.opacity(isDraggingPlaceholder ? 0.045 : 0.10)))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(mod.color.opacity(isResizing ? 0.55 : (isDraggingPlaceholder ? 0.42 : 0.22)), lineWidth: isResizing ? 1.6 : 1))
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .opacity(isDraggingPlaceholder ? 0.28 : 1)
-            // ПРАВКА 2026-08-16 (юзер прислал скриншот: «такая херня» — плитка «размазана»
-            // поверх соседей): раньше здесь был scaleEffect(x:,y:) на реальное
-            // соотношение target/current units — для перехода small→medium/large это
-            // scaleX ≈ 3 (2 юнита → 6) при anchor: .topLeading, т.е. маленький квадратик
-            // растягивался в 3 раза по ширине и рисовался мимо своего слота в HStack,
-            // наезжая на всё, что справа/снизу. Small↔medium/large — это не плавное
-            // изменение размера, а смена ФОРМЫ и членства в ряду (из тройки в full-width
-            // строку); честно превью такое трансформом нельзя, только имитировать
-            // «живость» без искажения формы — единый лёгкий пульс по центру.
-            .scaleEffect(isResizing ? 1.025 : 1, anchor: .center)
-            .shadow(color: .black.opacity(isResizing ? 0.22 : 0), radius: 14, y: 8)
-            .modifier(WiggleRotation(
-                idx: order.firstIndex(where: { $0.id == item.id }) ?? 0,
-                size: item.size,
-                active: editing && !activeGesture && !reduceMotion
-            ))
-            .zIndex(isResizing ? 10 : 0)
-
-        if useMatchedGeometry {
-            body.matchedGeometryEffect(id: item.id, in: hubNS)
-        } else {
-            body
-        }
-    }
-
-    @ViewBuilder
-    private func dragOverlay() -> some View {
-        if let id = draggingItemID,
-           let item = order.first(where: { $0.id == id }),
-           let mod = miseModules[id],
-           let frame = dragOriginFrame ?? tileFrames[id] {
-            tileBody(item, mod: mod, isResizing: false, isDraggingPlaceholder: false, useMatchedGeometry: false)
-                .frame(width: frame.width, height: frame.height, alignment: .topLeading)
-                .scaleEffect(1.035)
-                .shadow(color: .black.opacity(0.28), radius: 18, y: 10)
-                .offset(x: frame.minX + dragTranslation.width, y: frame.minY + dragTranslation.height)
-                .zIndex(100)
-                .allowsHitTesting(false)
-        }
-    }
-
-    /// Ручка в углу — тащишь по диагонали: вправо-вниз крупнее, влево-вверх мельче. Живой
-    /// снап к ближайшей из 3 форм с визуальным индикатором над пальцем И лёгким масштабом самого
-    /// тайла (см. scaleEffect в tile()), как при ресайзе виджета на Домашнем экране. Сама
-    /// раскладка (order/packHubRows) перекладывается один раз на отпускании — не на каждый
-    /// кадр драга, чтобы не дёргать соседние плитки хаотично.
-    @ViewBuilder
-    private func resizeHandle(_ item: HubItem) -> some View {
-        let isActive = resizingID == item.id
-        ZStack {
-            Circle().fill(.black.opacity(0.38))
-            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                .font(.system(size: 9, weight: .black)).foregroundStyle(.white)
-        }
-        .frame(width: 24, height: 24)
-        // Видимый кружок остаётся 24pt, но тач-зона расширена до HIG-минимума (~44pt) —
-        // маленькая ручка в углу иначе легко промахивается, что читается как «прыгает».
-        .contentShape(Circle().inset(by: -10))
-        .scaleEffect(isActive ? 1.3 : 1)
-        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: resizePreview)
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 2)
-                .onChanged { value in
-                    if resizingID != item.id {
-                        resizingID = item.id
-                        resizePreview = item.size
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    }
-                    // Диагональ (width+height) была не откалибрована: чистый диагональный
-                    // драг физической длины L даёт width=height=L/√2, значит width+height ≈
-                    // 1.41×L — на 41% чувствительнее, чем горизонтальный/вертикальный драг
-                    // той же длины (порог 54pt настроен под одну ось). Делим на √2, чтобы
-                    // порог был одинаков независимо от угла драга.
-                    let delta = (value.translation.width + value.translation.height) / 1.4142135
-                    let steps = Int((delta / 54).rounded())
-                    let preview = HubTileSize.at(item.size.stepIndex + steps)
-                    if preview != resizePreview {
-                        resizePreview = preview
-                        UISelectionFeedbackGenerator().selectionChanged()
-                    }
-                }
-                .onEnded { _ in
-                    if let idx = order.firstIndex(where: { $0.id == item.id }), let preview = resizePreview, preview != order[idx].size {
-                        withAnimation(Self.reflow) { order[idx].size = preview }
-                        persist()
-                    }
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                        resizingID = nil
-                        resizePreview = nil
-                    }
-                }
-        )
-    }
-
-    private func mod(_ item: HubItem) -> Color { miseModules[item.id]?.color ?? .accentColor }
-
-    private func resizeIndicator(_ selected: HubTileSize, color: Color) -> some View {
-        HStack(spacing: 5) {
+        .confirmationDialog(t("hub.tileSize"), isPresented: Binding(
+            get: { sizePickerID != nil }, set: { if !$0 { sizePickerID = nil } }
+        ), titleVisibility: .visible) {
             ForEach(HubTileSize.ordered, id: \.self) { size in
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(size == selected ? color : Color.primary.opacity(0.22))
-                    .frame(width: size == .small ? 9 : 18, height: size == .large ? 13 : (size == .medium ? 8 : 9))
+                Button(size.label) {
+                    if let id = sizePickerID { setSize(size, for: id) }
+                    sizePickerID = nil
+                }
             }
+            Button(t("cancel"), role: .cancel) { sizePickerID = nil }
         }
-        .padding(.horizontal, 7).padding(.vertical, 5)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(color.opacity(0.28), lineWidth: 1))
+    }
+
+    @ViewBuilder private func tile(_ item: HubItem) -> some View {
+        if let mod = miseModules[item.id] {
+            ZStack(alignment: .topTrailing) {
+                tileBody(item, mod: mod, placeholder: drag?.id == item.id)
+                    .contentShape(RoundedRectangle(cornerRadius: 18))
+                    .gesture(TapGesture().onEnded {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred(); app.openApp(item.id)
+                    }, including: editing ? .subviews : .all)
+                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.4).onEnded { _ in
+                        guard !editing else { return }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred(); editing = true
+                    }, including: editing ? .subviews : .all)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(mod.title)
+                    .accessibilityValue(editing ? item.size.label : (statLine(for: item.id) ?? ""))
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityIdentifier("hub-tile-" + item.id)
+                    .accessibilityAction {
+                        if editing { sizePickerID = item.id } else { app.openApp(item.id) }
+                    }
+                    .accessibilityActions {
+                        if editing {
+                            Button(t("hub.moveEarlier")) { move(item.id, by: -1) }
+                            Button(t("hub.moveLater")) { move(item.id, by: 1) }
+                        }
+                    }
+                if editing {
+                    ZStack {
+                        Circle().fill(.black.opacity(0.38)).frame(width: 24, height: 24)
+                        if resizingID == item.id, let preview = resizePreview {
+                            Text(preview.label).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                        } else {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 10, weight: .black)).foregroundStyle(.white)
+                        }
+                    }
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+                    .onTapGesture { guard activeID == nil else { return }; sizePickerID = item.id }
+                    .accessibilityLabel(t("hub.tileSize") + " · " + mod.title)
+                    .accessibilityValue(item.size.label)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityIdentifier("hub-resize-" + item.id)
+                    .accessibilityAction { sizePickerID = item.id }
+                    .accessibilityAdjustableAction { direction in
+                        let step = direction == .increment ? 1 : -1
+                        setSize(.at(item.size.stepIndex + step), for: item.id)
+                    }
+                    .padding(2)
+                }
+            }
+            .modifier(HubTileTouch(editing: editing,
+                changed: { changeTouch($0, itemID: item.id) },
+                ended: { endTouch($0, itemID: item.id) },
+                cancelled: { cancelTouch(item.id) }))
+        }
+    }
+
+    private func tileBody(_ item: HubItem, mod: MiseModule, placeholder: Bool) -> some View {
+        tileContent(item, mod: mod)
+            .padding(item.size == .large ? 16 : (item.size == .small ? 12 : 14))
+            .frame(maxWidth: .infinity, minHeight: item.size.minHeight, maxHeight: .infinity, alignment: .topLeading)
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(mod.color.opacity(placeholder ? 0.045 : 0.10)))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(mod.color.opacity(resizingID == item.id ? 0.55 : (placeholder ? 0.42 : 0.22)), lineWidth: resizingID == item.id ? 1.6 : 1))
+            .opacity(placeholder ? 0.28 : 1)
+            .modifier(WiggleRotation(idx: order.firstIndex(where: { $0.id == item.id }) ?? 0,
+                size: item.size, active: editing && activeID == nil && !reduceMotion))
+    }
+
+    @ViewBuilder private func dragOverlay() -> some View {
+        if let drag, let item = order.first(where: { $0.id == drag.id }), let mod = miseModules[item.id] {
+            tileBody(item, mod: mod, placeholder: false)
+                .frame(width: drag.origin.width, height: drag.origin.height)
+                .shadow(color: .black.opacity(0.28), radius: 16, y: 8)
+                .offset(x: drag.origin.minX + drag.translation.width, y: drag.origin.minY + drag.translation.height)
+                .allowsHitTesting(false).accessibilityHidden(true).zIndex(100)
+        }
     }
 
     /// Три формы — три разных смысла, не одно и то же содержимое в разных обёртках:
@@ -533,106 +550,75 @@ struct HubGridView: View {
         }
     }
 
-    // MARK: - drag/reorder/persist
 
-    private func moveItem(_ id: String, to rawIndex: Int) {
-        guard let from = order.firstIndex(where: { $0.id == id }) else { return }
-        let insertion = min(max(rawIndex, 0), order.count)
-        let to = insertion > from ? insertion - 1 : insertion
-        guard from != to else { return }
-        withAnimation(Self.reflow) {
-            let moved = order.remove(at: from)
-            order.insert(moved, at: min(max(to, 0), order.count))
+    private func changeTouch(_ value: DragGesture.Value, itemID: String) {
+        guard editing, scenePhase == .active, ignoredTouchID != itemID else { return }
+        if activeID == nil {
+            guard let item = order.first(where: { $0.id == itemID }), let frame = tileFrames[itemID], frame.contains(value.startLocation) else { return }
+            let handle = CGRect(x: frame.maxX - 48, y: frame.minY, width: 48, height: 48)
+            if handle.contains(value.startLocation) {
+                resizingID = itemID; resizeStartSize = item.size; resizePreview = item.size
+            } else { drag = HubDragSession(items: order, frames: tileFrames, id: itemID) }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
-        UISelectionFeedbackGenerator().selectionChanged()
-    }
-
-    private func hubReorderGesture() -> some Gesture {
-        DragGesture(minimumDistance: 8, coordinateSpace: .named("hubGrid"))
-            .onChanged { value in
-                guard editing, resizingID == nil else { return }
-                if draggingItemID == nil {
-                    guard let item = item(at: value.startLocation),
-                          !isResizeHandle(at: value.startLocation, for: item) else { return }
-                    draggingItemID = item.id
-                    dragTranslation = .zero
-                    dragTargetIndex = order.firstIndex(where: { $0.id == item.id })
-                    dragOriginFrame = tileFrames[item.id]
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                }
-                dragTranslation = value.translation
-                guard let id = draggingItemID,
-                      let target = insertionIndex(at: value.location, moving: id),
-                      target != dragTargetIndex else { return }
-                dragTargetIndex = target
-                moveItem(id, to: target)
-            }
-            .onEnded { _ in
-                guard draggingItemID != nil else { return }
-                persist()
-                withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
-                    draggingItemID = nil
-                    dragTranslation = .zero
-                    dragTargetIndex = nil
-                    dragOriginFrame = nil
-                }
-            }
-    }
-
-    private func item(at point: CGPoint) -> HubItem? {
-        order.first { item in
-            guard let frame = tileFrames[item.id] else { return false }
-            return frame.contains(point)
+        if var session = drag, session.id == itemID {
+            let old = session.destination
+            session.update(at: value.location, translation: value.translation); drag = session
+            if old != session.destination { UISelectionFeedbackGenerator().selectionChanged() }
+        } else if resizingID == itemID, let start = resizeStartSize {
+            let preview = HubTileSize.resized(from: start, translation: value.translation)
+            if resizePreview != preview { resizePreview = preview; UISelectionFeedbackGenerator().selectionChanged() }
         }
     }
 
-    private func isResizeHandle(at point: CGPoint, for item: HubItem) -> Bool {
-        guard let frame = tileFrames[item.id] else { return false }
-        // Визуальный кружок 24pt, но его интерактивная область расширена до 44pt.
-        let hitArea = CGRect(x: frame.maxX - 50, y: frame.minY - 6, width: 56, height: 56)
-        return hitArea.contains(point)
+    private func endTouch(_ value: DragGesture.Value, itemID: String) {
+        guard editing, ignoredTouchID != itemID else { cancelTouch(itemID); return }
+        if var session = drag, session.id == itemID {
+            session.update(at: value.location, translation: value.translation)
+            let result = session.previewItems
+            clearInteraction()
+            if result != order { order = result; persist() }
+        } else if resizingID == itemID, let start = resizeStartSize {
+            let size = HubTileSize.resized(from: start, translation: value.translation)
+            clearInteraction(); setSize(size, for: itemID)
+        }
     }
 
-    private func insertionIndex(at point: CGPoint, moving id: String) -> Int? {
-        let visible = order.enumerated().filter { $0.element.id != id }
-        guard !visible.isEmpty else { return nil }
+    private func clearInteraction() {
+        drag = nil; resizingID = nil; resizeStartSize = nil; resizePreview = nil
+    }
 
-        // Сначала выбираем визуальный ряд по вертикали, затем точку вставки по центрам
-        // плиток. Старый алгоритм считал любую точку в нижней половине карточки командой
-        // «после неё», из-за чего плитки магнитились и перескакивали при движении вбок.
-        let rows = packHubRows(order)
-        var rowCandidates: [(items: [HubItem], distance: CGFloat)] = []
-        for row in rows {
-            let frames = row.compactMap { tileFrames[$0.id] }
-            guard !frames.isEmpty else { continue }
-            let minY = frames.map(\.minY).min() ?? 0
-            let maxY = frames.map(\.maxY).max() ?? 0
-            let distance: CGFloat = point.y < minY ? minY - point.y : (point.y > maxY ? point.y - maxY : 0)
-            rowCandidates.append((row, distance))
-        }
-        guard let row = rowCandidates.min(by: { $0.distance < $1.distance })?.items else { return nil }
+    private func cancelInteraction() {
+        if let id = activeID { ignoredTouchID = id }
+        clearInteraction()
+    }
 
-        let visibleRow = row.compactMap { item -> (item: HubItem, index: Int, frame: CGRect)? in
-            guard item.id != id,
-                  let index = order.firstIndex(where: { $0.id == item.id }),
-                  let frame = tileFrames[item.id] else { return nil }
-            return (item, index, frame)
-        }.sorted { $0.frame.minX < $1.frame.minX }
+    private func cancelTouch(_ id: String) {
+        if activeID == id { clearInteraction() }
+        if ignoredTouchID == id { ignoredTouchID = nil }
+    }
 
-        for entry in visibleRow where point.x < entry.frame.midX {
-            return entry.index
-        }
-        return (visibleRow.last?.index ?? order.count - 1) + 1
+    private func setSize(_ size: HubTileSize, for id: String) {
+        guard editing, activeID == nil, let index = order.firstIndex(where: { $0.id == id }), order[index].size != size else { return }
+        order[index].size = size; persist(); UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    private func move(_ id: String, by step: Int) {
+        guard editing, activeID == nil, let index = order.firstIndex(where: { $0.id == id }) else { return }
+        let target = min(max(0, index + step), order.count - 1)
+        guard index != target else { return }
+        let item = order.remove(at: index); order.insert(item, at: target); persist()
     }
 
     private func loadOrder() {
-        guard let staffId = app.staff?.id else { return }
-        order = HubLayoutStore.load(staffId: staffId, fallback: app.availableApps)
+        cancelInteraction(); sizePickerID = nil; tileFrames = [:]
+        guard let staffID = app.staff?.id else { order = []; return }
+        order = HubLayoutStore.load(staffId: staffID, fallback: app.availableApps)
     }
 
     private func persist() {
-        guard let staffId = app.staff?.id else { return }
-        HubLayoutStore.save(order, staffId: staffId)
+        guard let staffID = app.staff?.id else { return }
+        HubLayoutStore.save(order, staffId: staffID)
     }
 
     private func refreshStats() async {

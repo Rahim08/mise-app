@@ -9,8 +9,8 @@ extension ManagerModel {
     struct SalRow: Identifiable {
         let id: String; let name: String; let salary: Double; let absences: Int
         let absenceList: [String]
-        let deduct: Double; let card: Double; let advance: Double
-        let advanceList: [SalaryAdvance]; let total: Double; let cash: Double
+        let deduct: Double; let card: Double; var advance: Double
+        var advanceList: [SalaryAdvance]; let total: Double; var cash: Double
         var paid: Double = 0; var remaining: Double = 0; var lastPaidAt: String? = nil
         var paidCash: Double = 0
     }
@@ -28,6 +28,7 @@ final class ManagerSalaryModel {
     var debtTotal: Double = 0
     var debtByEmp: [String: Double] = [:]
     var payoutDay: Int? = nil
+    private var loadGeneration = 0
 
     var isCurrentMonth: Bool { Calendar.current.isDate(viewMonth, equalTo: Date(), toGranularity: .month) }
     var fund: Double { rows.reduce(0) { $0 + $1.total } }
@@ -56,9 +57,11 @@ final class ManagerSalaryModel {
     func key(_ d: Date) -> String { dfKey.string(from: d) }
 
     func changeMonth(_ dir: Int) {
+        guard !moneyBusy else { return }
         if dir > 0 && isCurrentMonth { return }
         guard let d = Calendar.current.date(byAdding: .month, value: dir, to: viewMonth) else { return }
         viewMonth = d
+        loaded = false
         Task { await load() }
     }
 
@@ -122,16 +125,21 @@ final class ManagerSalaryModel {
     }
 
     func load() async {
-        if payoutDay == nil {
-            payoutDay = (try? await DB.from("restaurant_settings").select("salary_payout_day").limit(1).list(PayoutDayRow.self))?.first?.salary_payout_day
+        loadGeneration += 1
+        let generation = loadGeneration, month = viewMonth
+        let isCurrent = Calendar.current.isDate(month, equalTo: Date(), toGranularity: .month)
+        var payout = payoutDay
+        if payout == nil {
+            payout = (try? await DB.from("restaurant_settings").select("salary_payout_day").limit(1).list(PayoutDayRow.self))?.first?.salary_payout_day
         }
-        rows = await computeSalary(monthOf: viewMonth)
-        // C3 (аудит 2026-08-15): нужен только пока не наступил payout_day текущего месяца —
-        // но считаем всегда при isCurrentMonth, дёшево (та же computeSalary, что и loadDebt).
-        if isCurrentMonth, let prevMonthDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) {
-            let prevRows = await computeSalary(monthOf: prevMonthDate)
-            prevCashTotal = prevRows.reduce(0) { $0 + $1.cash }
-            prevPaidCash = prevRows.reduce(0) { $0 + $1.paidCash }
+        let currentRows = await computeSalary(monthOf: month)
+        guard generation == loadGeneration, month == viewMonth else { return }
+        rows = currentRows; payoutDay = payout
+        if isCurrent, let previous = Calendar.current.date(byAdding: .month, value: -1, to: month) {
+            let previousRows = await computeSalary(monthOf: previous)
+            guard generation == loadGeneration, month == viewMonth else { return }
+            prevCashTotal = previousRows.reduce(0) { $0 + $1.cash }
+            prevPaidCash = previousRows.reduce(0) { $0 + $1.paidCash }
         }
         loaded = true
     }
@@ -140,10 +148,10 @@ final class ManagerSalaryModel {
     // 2026-08-14: Analytics стал read-only, редактирование — только здесь, единая точка,
     // без риска задвоенной правки). Логика письма в инкассацию не менялась.
     private func findShift(forDate date: String) async -> Shift? {
-        (try? await DB.from("shifts").select().eq("date", date).order("opened_at", ascending: false).limit(1).list(Shift.self))?.first
+        (try? await DB.from("shifts").select().fresh().eq("date", date).order("opened_at", ascending: false).limit(1).list(Shift.self))?.first
     }
     private func findInkassation(forShiftId shiftId: String) async -> Inkassation? {
-        try? await DB.from("inkassations").select("shift_id, amount, expense, reason, total, salary, salary_note")
+        try? await DB.from("inkassations").select("shift_id, amount, expense, reason, total, salary, salary_note").fresh()
             .eq("shift_id", shiftId).limit(1).list(Inkassation.self).first
     }
 
@@ -167,10 +175,30 @@ final class ManagerSalaryModel {
     // Синхронный замок от двойного нажатия/параллельной записи денег (аванс, выплата): второй
     // вызов, пришедший пока первый ещё пишет, молча отбрасывается — так исключены дубли (реальный
     // случай: выплата Артемию €1530 записана дважды, SO, 2026-09-14).
-    private var moneyBusy = false
+    private(set) var moneyBusy = false
+    private(set) var advanceError: String?
 
-    func addAdvance(empId: String, amount: Double, date: String) async {
-        guard !moneyBusy else { return }
+    func prepareAdvance() -> Bool {
+        guard loaded, !moneyBusy else { return false }
+        advanceError = nil; toast = nil
+        return true
+    }
+
+    private func advanceContext(forDate date: String) async -> (shift: Shift?, ink: Inkassation?) {
+        guard let shift = await findShift(forDate: date) else { return (nil, nil) }
+        return (shift, await findInkassation(forShiftId: shift.id))
+    }
+
+    @discardableResult
+    func addAdvance(empId: String, amount: Double, date: String) async -> Bool {
+        guard !moneyBusy else { return false }
+        advanceError = nil
+        func fail(_ message: String) -> Bool {
+            advanceError = message; flash(message); return false
+        }
+        guard amount.isFinite else { return fail(t("mg.topupErrAmount")) }
+        let amount = (amount * 100).rounded() / 100
+        guard amount.isFinite, amount > 0, let parsedDate = dfKey.date(from: date), key(parsedDate) == date else { return fail(t("bk.saveFailed")) }
         moneyBusy = true
         defer { moneyBusy = false }
         // A6-ревизия (юзер-фидбок 2026-08-15): аванс относится к зарплате МЕСЯЦА ЭКРАНА
@@ -178,28 +206,31 @@ final class ManagerSalaryModel {
         // списания. date — только день, когда деньги физически уходят из кассы; можно указать
         // и вне viewMonth (взять сегодня в счёт ещё не закрытого месяца) — это на period не
         // влияет. Веб-паритет: tabs-salary.tsx addAdvance.
-        guard let row = rows.first(where: { $0.id == empId }) else { return }
+        guard loaded, let row = rows.first(where: { $0.id == empId }) else { return fail(t("refreshFailed")) }
+        let period = String(key(viewMonth).prefix(7)) + "-01"
+        toast = nil
+        // These are read-only and independent of the cash-pool check and advance insert.
+        async let context = advanceContext(forDate: date)
         // Аванс не может увести сотрудника в минус по ЗП (юзер-фидбок 2026-08-14) — row.remaining
         // уже = max(0, cash − paid), т.е. именно то, что ещё можно выдать (авансом или доплатой)
         // до конца месяца. amount не должен его превышать.
-        guard amount <= row.remaining else {
-            flash(t("an.advanceExceedsRemaining", ["avail": Money.s(row.remaining)])); return
+        guard amount <= (row.remaining * 100).rounded() / 100 else {
+            return fail(t("an.advanceExceedsRemaining", ["avail": Money.s(row.remaining)]))
         }
         // Аванс уходит из инкассации — та же проверка баланса, что у выплаты ЗП (аудит 2026-09-27:
         // раньше аванс мог увести баланс инкассации в минус без предупреждения).
-        guard let balRows = try? await DB.from("inkassation_balance").select("balance").eq("restaurant_id", rid).limit(1).list(InkBalanceRow.self) else {
-            flash(t("refreshFailed")); return
+        guard let balRows = try? await DB.from("inkassation_balance").select("balance").fresh().eq("restaurant_id", rid).limit(1).list(InkBalanceRow.self) else {
+            return fail(t("refreshFailed"))
         }
-        let available = balRows.first?.balance ?? 0
+        let available = ((balRows.first?.balance ?? 0) * 100).rounded() / 100
         guard amount <= available else {
-            flash(t("pe.insufficientInkassationPool", ["avail": Money.s(max(0, available))])); return
+            return fail(t("pe.insufficientInkassationPool", ["avail": Money.s(max(0, available))]))
         }
         let empName = row.name
-        let period = String(key(viewMonth).prefix(7)) + "-01"
         guard let advRow = try? await DB.from("salary_advances").insert([
             "restaurant_id": rid, "employee_id": empId,
             "amount": amount, "date": date, "period": period, "note": empName + " аванс",
-        ] as [String: Any]).single(SalaryAdvance.self) else { flash(t("bk.saveFailed")); return }
+        ] as [String: Any]).single(SalaryAdvance.self) else { return fail(t("bk.saveFailed")) }
         let advTag = advanceTag(name: empName, amount: amount, id: advRow.id)
 
         // Аванс и списание из инкассации — «оба или ничего»: раньше при сбое списания (нет смены,
@@ -208,7 +239,8 @@ final class ManagerSalaryModel {
         // смены на дату нет — она создаётся (как при выплате ЗП, ensureShift).
         var shiftId: String?
         var shiftInk = 0.0
-        if let shift = await findShift(forDate: date) {
+        let existing = await context
+        if let shift = existing.shift {
             shiftId = shift.id; shiftInk = shift.inkassation ?? 0
         } else if let d = dfKey.date(from: date), let created = await ensureShift(dateStr: date, before: d) {
             shiftId = created.id; shiftInk = created.inkassation
@@ -216,7 +248,7 @@ final class ManagerSalaryModel {
         var ok = false
         var errMsg = "race"
         if let shiftId {
-            var ink = await findInkassation(forShiftId: shiftId)
+            var ink = existing.shift?.id == shiftId ? existing.ink : await findInkassation(forShiftId: shiftId)
             func applyAdvance(_ base: Inkassation?) -> (baseAmount: Double, newExpense: Double, newReason: String, newTotal: Double) {
                 let baseAmount = base?.amount ?? shiftInk
                 let newExpense = (base?.expense ?? 0) + amount
@@ -253,10 +285,27 @@ final class ManagerSalaryModel {
         }
         if !ok {
             do { try await DB.from("salary_advances").delete().eq("id", advRow.id).run() }
-            catch { flash(t("pe.paymentRollbackFailed")); await load(); return }
-            flash(errMsg == "race" ? t("pe.raceRetry") : t("saveFailed", ["err": errMsg]))
+            catch { _ = fail(t("pe.paymentRollbackFailed")); await load(); return false }
+            _ = fail(errMsg == "race" ? t("pe.raceRetry") : t("saveFailed", ["err": errMsg]))
+            await load()
+            return false
         }
-        await load()
+        // All financial writes are confirmed. Invalidate older payroll responses, then
+        // apply this one advance without recalculating every employee and previous month.
+        loadGeneration += 1
+        if String(key(viewMonth).prefix(7)) + "-01" == period {
+            var updated = rows.first(where: { $0.id == empId }) ?? row
+            if !updated.advanceList.contains(where: { $0.id == advRow.id }) {
+                updated.advanceList.append(advRow)
+                updated.advance = ((updated.advance + amount) * 100).rounded() / 100
+                updated.cash = max(0, ((updated.cash - amount) * 100).rounded() / 100)
+                updated.remaining = max(0, ((updated.remaining - amount) * 100).rounded() / 100)
+            }
+            if let index = rows.firstIndex(where: { $0.id == empId }) { rows[index] = updated }
+            else { rows.append(updated) }
+            loaded = true
+        }
+        return true
     }
 
     // A5 (аудит 2026-08-16): раньше salary_advances удалялся ПЕРВЫМ безусловно, а компенсация
@@ -267,6 +316,11 @@ final class ManagerSalaryModel {
     // компенсируем СНАЧАЛА, до 5 попыток; salary_advances удаляем только после подтверждённой
     // компенсации — деньги не теряются даже под затяжной гонкой.
     func deleteAdvance(_ a: SalaryAdvance) async {
+        // Замок от двойного тапа (аудит дублей 2026-10-26): каждый прогон перечитывает свежий
+        // expense и вычитает аванс — второй тап вычитал его из инкассации повторно.
+        guard !moneyBusy else { return }
+        moneyBusy = true
+        defer { moneyBusy = false }
         if let date = a.date, let shift = await findShift(forDate: date) {
             let empName = rows.first { $0.id == a.employee_id }?.name ?? ""
             // A4 (аудит 2026-08-15): точный тег по id (см. advanceTag) — с фолбэком на старый
@@ -436,9 +490,11 @@ final class ManagerSalaryModel {
             let cur = ex.amount ?? 0
             // CAS по amount — параллельная запись с другого устройства не теряется молча.
             do {
+                // .list, не .single: 0 строк (CAS проиграл) на .single — исключение PostgREST,
+                // и юзер видел сырую ошибку вместо «кто-то ещё сохранял».
                 let upd = try await DB.from("shift_expenses").update(["amount": cur + amount])
-                    .eq("id", ex.id).eq("amount", cur).single(ShiftExpense.self)
-                return upd == nil ? "race" : nil
+                    .eq("id", ex.id).eq("amount", cur).list(ShiftExpense.self)
+                return upd.isEmpty ? "race" : nil
             } catch { return error.localizedDescription }
         }
         guard let dateDate = dfKey.date(from: dateStr),
@@ -463,7 +519,7 @@ final class ManagerSalaryModel {
         defer { moneyBusy = false }
         let period = String(key(viewMonth).prefix(7)) + "-01"
         if let err = await addSalaryDebt(empId: employeeId, period: period, dateStr: key(date), amount: amount) {
-            flash(t("saveFailed", ["err": err])); return false
+            flash(err == "race" ? t("pe.raceRetry") : t("saveFailed", ["err": err])); return false
         }
         insufficientFunds = false
         flash(t("pe.markedAsDebt"))
@@ -732,8 +788,8 @@ private struct ManagerSalaryBody: View {
             }
         }
         .sheet(isPresented: $showAdvanceSheet) {
-            AdvanceAddSheet { amount, date in
-                Task { await sm.addAdvance(empId: advEmpId, amount: amount, date: date) }
+            AdvanceAddSheet(error: sm.advanceError) { amount, date in
+                await sm.addAdvance(empId: advEmpId, amount: amount, date: date)
             }
         }
     }
@@ -753,7 +809,7 @@ private struct ManagerSalaryBody: View {
                     .background(Color.primary.opacity(0.06), in: Circle())
             }
             .disabled(sm.isCurrentMonth)
-        }
+        }.disabled(sm.moneyBusy)
     }
     private func monthLabel(_ d: Date) -> String {
         let f = DateFormatter(); f.locale = appLocale(); f.dateFormat = "LLLL yyyy"
@@ -856,7 +912,7 @@ private struct ManagerSalaryBody: View {
                     .padding(.vertical, 5)
                 }
             }
-            Button { advEmpId = r.id; showAdvanceSheet = true } label: {
+            Button { if sm.prepareAdvance() { advEmpId = r.id; showAdvanceSheet = true } } label: {
                 Label(t("an.addAdvance"), systemImage: "plus")
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(BrandKit.stash)
             }

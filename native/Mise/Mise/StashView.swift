@@ -33,7 +33,12 @@ final class StashModel {
     var mode = "paid"
     var freeCats: [String] = DEFAULT_FREE_CATS   // категории бесплатных — настраиваются владельцем в дашборде
     var freeCat = DEFAULT_FREE_CATS[0]
-    var venueBase = 0.0
+    // Keep historical deficits for subsequent deltas; only presentation is clamped.
+    private var rawVenueBase = 0.0
+    var venueBase: Double {
+        get { max(0, rawVenueBase) }
+        set { rawVenueBase = newValue }
+    }
     var shiftLoading = true
     var saving = false
     // Снэпшот уже сохранённых сегодня продаж — грамовка ЗАФИКСИРОВАНА на момент loadShift()
@@ -41,6 +46,10 @@ final class StashModel {
     // в Настройках задним числом двигает venueLeft для уже пробитых сегодня чеков.
     var savedGrams = 0.0
     var savedQtyByType: [String: Int] = [:]
+    // Цена/граммовка, с которыми день уже сохранён (по виду кальяна). Пересохранение
+    // прошлого дня после смены цены в настройках не должно переписывать его историю.
+    var savedPrice: [String: Double] = [:]
+    var savedPortion: [String: Double] = [:]
 
     // KPI-цели по кальянам (текущий календарный месяц)
     var goals: [HookahGoal] = []
@@ -56,6 +65,10 @@ final class StashModel {
     var showOutOfStock = false
     var movMode = "in"
     var warehouseLoading = true
+    private var warehouseGeneration = 0
+    private var shiftGeneration = 0
+    private var activeShiftLoads = 0
+    private var shiftLoadWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(rid: String, canSeeMoney: Bool) { self.rid = rid; self.canSeeMoney = canSeeMoney }
 
@@ -69,11 +82,22 @@ final class StashModel {
     // MARK: смена
 
     @discardableResult
-    func loadShift() async -> Bool {
+    func loadShift(whileSaving: Bool = false) async -> Bool {
+        guard !saving || whileSaving else { return false }
+        activeShiftLoads += 1
+        defer {
+            activeShiftLoads -= 1
+            if activeShiftLoads == 0 {
+                let waiters = shiftLoadWaiters; shiftLoadWaiters = []
+                for waiter in waiters { waiter.resume() }
+            }
+        }
+        shiftGeneration += 1
+        let generation = shiftGeneration
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedDemo(); return true }
         #endif
-        shiftLoading = true; defer { shiftLoading = false }
+        shiftLoading = true; defer { if generation == shiftGeneration { shiftLoading = false } }
         async let tpsR = try? DB.from("hookah_types").select().eq("is_active", true).order("created_at").list(HookahType.self)
         // venueBase = вся история «выдано в зал» минус «использовано» минус «списано с зала» —
         // нет running-агрегата на сервере, поэтому тянем всё целиком. Без явного .limit()
@@ -81,7 +105,7 @@ final class StashModel {
         // бы за этим потолком. .limit() тут — не полный фикс (потолок всё ещё есть), а страховка
         // от тихого урезания на разумный срок; настоящий фикс — серверный агрегат.
         async let salesR = try? DB.from("hookah_sales")
-            .select("hookah_type_id, quantity, portion_g, is_free, date, flavor").limit(20000).list(HookahSale.self)
+            .select("hookah_type_id, quantity, price, portion_g, is_free, date, flavor").limit(20000).list(HookahSale.self)
         // Полный select — Movement требует brand/flavor (иначе строки отбрасываются Lossy-декодом).
         async let outsR = try? DB.from("tobacco_movements").select().eq("type", "out").limit(20000).list(Movement.self)
         async let venueWoR = try? DB.from("tobacco_movements").select().eq("type", "writeoff").limit(20000).list(Movement.self)
@@ -96,15 +120,25 @@ final class StashModel {
             if !types.isEmpty { flash(t("refreshFailed")) }
             return false
         }
+        guard generation == shiftGeneration else { return false }
         types = tps
         var p: [String: String] = [:], fr: [String: [String: String]] = [:]
         var pastGrams = 0.0
         var todaySavedGrams = 0.0
         var todaySavedQty: [String: Int] = [:]
+        // Взвешенные по количеству суммы (Σq·x, Σq) — на случай нескольких строк одного вида
+        var priceAcc: [String: (Double, Double)] = [:], portionAcc: [String: (Double, Double)] = [:]
         for r in sales {
             if r.date == dateStr, let id = r.hookah_type_id {
                 let q = Int(r.quantity ?? 0)
                 todaySavedQty[id, default: 0] += q
+                let qd = r.quantity ?? 0
+                if let pg = r.portion_g, qd > 0 {
+                    let a = portionAcc[id] ?? (0, 0); portionAcc[id] = (a.0 + qd * pg, a.1 + qd)
+                }
+                if r.is_free != true, let pr = r.price, qd > 0 {
+                    let a = priceAcc[id] ?? (0, 0); priceAcc[id] = (a.0 + qd * pr, a.1 + qd)
+                }
                 todaySavedGrams += (r.quantity ?? 0) * (r.portion_g ?? 0)
                 if r.is_free == true {
                     let cat = r.flavor ?? (freeCats.first ?? "")
@@ -121,9 +155,11 @@ final class StashModel {
         paid = p; free = fr
         savedGrams = todaySavedGrams
         savedQtyByType = todaySavedQty
+        savedPrice = priceAcc.mapValues { $0.0 / $0.1 }
+        savedPortion = portionAcc.mapValues { $0.0 / $0.1 }
         // Списание «с заведения» = движение writeoff без бренда/вкуса (общий вес зала).
         let venueWriteoff = venueWo.filter { $0.brand.isEmpty && $0.flavor.isEmpty }.reduce(0) { $0 + $1.quantity_g }
-        venueBase = max(0, outs.reduce(0) { $0 + $1.quantity_g } - pastGrams - venueWriteoff)
+        rawVenueBase = outs.reduce(0) { $0 + $1.quantity_g } - pastGrams - venueWriteoff
         return true
     }
 
@@ -166,7 +202,12 @@ final class StashModel {
         (g.type_ids ?? []).reduce(0) { $0 + (monthQty[$1] ?? 0) }
     }
 
+    // Замок от двойного тапа — без него цель вставлялась дважды (аудит дублей 2026-10-26).
+    private var goalBusy = false
+
     func saveGoal(title: String?, typeIds: [String], target: Int) async {
+        guard !goalBusy else { return }
+        goalBusy = true; defer { goalBusy = false }
         let values: [String: Any] = [
             "title": title ?? NSNull(), "type_ids": typeIds,
             "target_qty": target, "month": monthKey,
@@ -194,7 +235,10 @@ final class StashModel {
 
     var paidTotal: Int { types.reduce(0) { $0 + paidOf($1.id) } }
     var freeTotal: Int { types.reduce(0) { $0 + freeTotalOf($1.id) } }
-    var revenue: Double { types.reduce(0) { $0 + Double(paidOf($1.id)) * ($1.price ?? 0) } }
+    // Уже сохранённый день держит свои цену/граммовку; живая настройка — только для новых видов
+    func priceOf(_ tp: HookahType) -> Double { savedPrice[tp.id] ?? tp.price ?? 0 }
+    func portionOf(_ tp: HookahType) -> Double { savedPortion[tp.id] ?? tp.portion_g ?? 0 }
+    var revenue: Double { types.reduce(0) { $0 + Double(paidOf($1.id)) * priceOf($1) } }
     // Сохранённая часть — по реальной portion_g из БД (savedGrams). Несохранённая
     // дельта (то, что ввели, но ещё не нажали «Сохранить смену») — по живой настройке,
     // это единственно верное значение для нового ввода, ведь в БД его ещё нет.
@@ -202,7 +246,7 @@ final class StashModel {
         savedGrams + types.reduce(0) { acc, tp in
             let currentQty = paidOf(tp.id) + freeTotalOf(tp.id)
             let delta = max(0, currentQty - (savedQtyByType[tp.id] ?? 0))
-            return acc + Double(delta) * (tp.portion_g ?? 0)
+            return acc + Double(delta) * portionOf(tp)
         }
     }
     // НЕ клампим в 0 — отрицательное значение сигналит расхождение (продано больше, чем
@@ -222,7 +266,7 @@ final class StashModel {
                 let p = paidOf(tp.id)
                 if p > 0 {
                     rows.append(["hookah_type_id": tp.id, "quantity": p, "date": dateStr,
-                                 "price": tp.price ?? 0, "portion_g": tp.portion_g ?? 0, "is_free": false])
+                                 "price": priceOf(tp), "portion_g": portionOf(tp), "is_free": false])
                 }
                 // Категории из настроек + категории, реально присутствующие в введённых данных —
                 // если владелец убрал категорию в дашборде уже после того, как по ней были продажи
@@ -232,14 +276,14 @@ final class StashModel {
                     let f = freeOf(tp.id, cat)
                     if f > 0 {
                         rows.append(["hookah_type_id": tp.id, "quantity": f, "date": dateStr,
-                                     "price": 0, "portion_g": tp.portion_g ?? 0, "is_free": true, "flavor": cat])
+                                     "price": 0, "portion_g": portionOf(tp), "is_free": true, "flavor": cat])
                     }
                 }
             }
             if !rows.isEmpty { try await DB.from("hookah_sales").insert(rows).run() }
             // Перечитываем — иначе savedGrams/savedQtyByType остаются старыми, и плитка «Табак»/
             // остаток зала завышены (считают уже сохранённый ввод ещё раз как «несохранённую дельту»).
-            await loadShift()
+            await loadShift(whileSaving: true)
             flash(t("st.shiftSaved", ["p": "\(paidTotal)"]) + (freeTotal > 0 ? t("st.shiftSavedFree", ["f": "\(freeTotal)"]) : ""))
         } catch {
             flash(t("saveFailed", ["err": error.localizedDescription]))
@@ -247,23 +291,29 @@ final class StashModel {
     }
 
     func shiftDay(_ d: Int) async {
+        guard !saving else { return }
         let prev = currentDate
         currentDate = Calendar.current.date(byAdding: .day, value: d, to: currentDate) ?? currentDate
         // Сбой загрузки нового дня раньше оставлял на экране данные ПРЕДЫДУЩЕГО дня под
         // датой НОВОГО — «Сохранить» дописал бы их не туда. Откатываем дату при неудаче.
-        if !(await loadShift()) { currentDate = prev }
+        let generation = shiftGeneration + 1
+        if !(await loadShift()), generation == shiftGeneration { currentDate = prev }
     }
 
     /// Переход к сегодняшнему дню — тот же откат на сбое, что и в shiftDay().
     func goToToday() async {
+        guard !saving else { return }
         let prev = currentDate
         currentDate = Date()
-        if !(await loadShift()) { currentDate = prev }
+        let generation = shiftGeneration + 1
+        if !(await loadShift()), generation == shiftGeneration { currentDate = prev }
     }
 
     // MARK: склад
 
     func loadWarehouse() async {
+        warehouseGeneration += 1
+        let generation = warehouseGeneration
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { warehouseLoading = false; return }
         #endif
@@ -278,6 +328,7 @@ final class StashModel {
             if !stock.isEmpty { flash(t("refreshFailed")) }
             return
         }
+        guard generation == warehouseGeneration else { return }
         stock = s; movements = mv; inventories = iv
     }
 
@@ -408,54 +459,82 @@ final class StashModel {
         return filled
     }
 
-    /// Собственно запись строк движения + апдейт остатка по переданному снэпшоту склада.
-    /// Не гвардит `saving` — вызывающий уже держит флаг.
+    private func finishShiftReads() async {
+        if activeShiftLoads > 0 { await withCheckedContinuation { shiftLoadWaiters.append($0) } }
+    }
+
+    private func venueContribution(_ rows: [Movement]) -> Double {
+        rows.reduce(0) { total, row in
+            if row.type == "out" { return total + row.quantity_g }
+            if row.type == "writeoff" && row.brand.isEmpty && row.flavor.isEmpty { return total - row.quantity_g }
+            return total
+        }
+    }
+
+    /// Apply confirmed records only; invalidate older full-screen reads first.
+    private func rememberMovements(_ inserted: [Movement], replacing oldIDs: Set<String> = []) {
+        warehouseGeneration += 1
+        let ids = Set(inserted.map(\.id)).union(oldIDs)
+        movements = Array((inserted + movements.filter { !ids.contains($0.id) })
+            .sorted { ($0.created_at ?? "") > ($1.created_at ?? "") }.prefix(1000))
+    }
+
+    /// One ledger insert, then independent atomic stock writes. Success requires every write.
+    /// Returned stock quantities include any concurrent changes made by another device.
     private func writeMovementRows(_ filled: [MovRow], reason: String, mode: String, batchId: String, stock fresh: [StockItem], createdAt: String? = nil) async -> Bool {
-        let rid = rid
         let defReason = reason.isEmpty ? (mode == "in" ? "Поставка" : mode == "out" ? "Выдача в зал" : "Списание") : reason
-        // Каждая строка — свой товар (после схлопывания дублей), запросы независимы →
-        // шлём параллельно вместо последовательной цепочки (было ~2×N round-trip'ов подряд).
-        // Значения из MainActor (mode/rid) сняты в локальные let ДО addTask — дочерние
-        // задачи не изолированы на MainActor и не могут читать его свойства напрямую.
-        return await withTaskGroup(of: Bool.self) { group in
-            for r in filled {
-                group.addTask { [norm] in
-                    let qty = Double(r.grams) ?? 0
-                    // Нечувствительный к регистру/пробелам поиск + канонические бренд/вкус из склада — не плодим дубли.
-                    let existing = fresh.first { norm($0.brand) == norm(r.brand) && norm($0.flavor) == norm(r.flavor) }
-                    let brand = existing?.brand ?? r.brand
-                    let flavor = existing?.flavor ?? r.flavor
-                    do {
-                        var values: [String: Any] = [
-                            "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty,
-                            "type": mode, "batch_id": batchId, "reason": defReason,
-                            "flavor_id": existing?.id ?? NSNull(),
-                        ]
-                        // Правка батча передаёт исходный created_at — иначе дата/время движения
-                        // «прыгали» на момент правки вместо исходного момента поставки/выдачи.
-                        if let createdAt { values["created_at"] = createdAt }
-                        try await DB.from("tobacco_movements").insert(values).run()
-                        if let ex = existing {
-                            let delta = mode == "in" ? qty : -qty
-                            // Атомарный инкремент на сервере, не read-modify-write с клиента —
-                            // иначе параллельное списание с другого устройства читает тот же
-                            // ex.quantity_g и второй write молча теряет эффект первого (MISE-006,
-                            // аудит 2026-08-28). Клампит в 0 сама SQL-функция.
-                            try await DB.rpc("increment_tobacco_stock", args: ["p_id": ex.id, "p_delta": delta], cacheInvalidate: ["tobacco_stock"])
-                        } else if mode == "in" {
-                            try await DB.from("tobacco_stock").insert([
-                                "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty, "flavor_name": flavor,
-                            ]).run()
-                        }
-                        return true
-                    } catch {
-                        return false
+        var movementRows: [[String: Any]] = []
+        var newStockRows: [[String: Any]] = []
+        var deltas: [(String, Double)] = []
+        for r in filled {
+            let qty = Double(r.grams) ?? 0
+            let existing = fresh.first { norm($0.brand) == norm(r.brand) && norm($0.flavor) == norm(r.flavor) }
+            let brand = existing?.brand ?? r.brand, flavor = existing?.flavor ?? r.flavor
+            var values: [String: Any] = [
+                "restaurant_id": rid, "brand": brand, "flavor": flavor, "quantity_g": qty,
+                "type": mode, "batch_id": batchId, "reason": defReason,
+                "flavor_id": existing?.id ?? NSNull(),
+            ]
+            if let createdAt { values["created_at"] = createdAt }
+            movementRows.append(values)
+            if let existing { deltas.append((existing.id, mode == "in" ? qty : -qty)) }
+            else if mode == "in" {
+                newStockRows.append(["restaurant_id": rid, "brand": brand, "flavor": flavor,
+                                     "quantity_g": qty, "flavor_name": flavor])
+            }
+        }
+        do {
+            let inserted = try await DB.from("tobacco_movements").insert(movementRows).list(Movement.self)
+            guard inserted.count == filled.count else { throw APIError.http(502, "Incomplete movement response") }
+            let stockInserts = newStockRows
+            let updated = try await withThrowingTaskGroup(of: [StockItem].self) { group in
+                if !stockInserts.isEmpty {
+                    group.addTask {
+                        let rows = try await DB.from("tobacco_stock").insert(stockInserts).list(StockItem.self)
+                        guard rows.count == stockInserts.count else { throw APIError.http(502, "Incomplete stock response") }
+                        return rows
                     }
                 }
+                for (id, delta) in deltas {
+                    group.addTask {
+                        let row = try await DB.rpcRow("increment_tobacco_stock", args: ["p_id": id, "p_delta": delta],
+                                                      cacheInvalidate: ["tobacco_stock"], as: StockItem.self)
+                        guard row.id == id else { throw APIError.http(502, "Unexpected stock response") }
+                        return [row]
+                    }
+                }
+                var all: [StockItem] = []
+                for try await rows in group { all += rows }
+                return all
             }
-            var allOk = true
-            for await r in group where !r { allOk = false }
-            return allOk
+            let byID = Dictionary(uniqueKeysWithValues: updated.map { ($0.id, $0) })
+            let oldIDs = Set(fresh.map(\.id))
+            stock = fresh.map { byID[$0.id] ?? $0 } + updated.filter { !oldIDs.contains($0.id) }
+            rememberMovements(inserted)
+            return true
+        } catch {
+            flash(t("saveFailed", ["err": error.localizedDescription]))
+            return false
         }
     }
 
@@ -465,6 +544,8 @@ final class StashModel {
         // этой проверки уходят два одинаковых батча движений.
         guard !saving else { return false }
         saving = true; defer { saving = false }
+        warehouseGeneration += 1
+        await finishShiftReads()
         let mvMode = mode ?? movMode
         // .fresh() — читаем мимо 5-минутного кеша DB.swift: без этого валидация и апдейт
         // остатка шли по устаревшим данным (read-modify-write по кешу теряло чужие правки).
@@ -475,10 +556,10 @@ final class StashModel {
         if mvMode == "writeoff" && reason.trimmingCharacters(in: .whitespaces).isEmpty { flash(t("st.writeoffReason")); return false }
         let batchId = UUID().uuidString
         let ok = await writeMovementRows(filled, reason: reason, mode: mvMode, batchId: batchId, stock: freshStock)
-        guard ok else { flash(t("ai.errGeneric")); await loadWarehouse(); return false }
-        await loadWarehouse()
-        // Выдача в зал (out) меняет venueBase — нужно сразу пересчитать смену.
-        if mvMode == "out" { await loadShift() }
+        guard ok else { await loadWarehouse(); return false }
+        // Only the confirmed issued grams changed; reloading sales would also erase
+        // an unsaved shift draft. No inventory/history reload is required.
+        if mvMode == "out" { rawVenueBase += filled.reduce(0) { $0 + (Double($1.grams) ?? 0) } }
         // Уведомление о движении — вместо растущего списка «товар1, товар2 +N ещё» на
         // каждое сохранение (юзер-фидбек 2026-08-09): просто факт что склад тронули.
         notifyMovement(mode: mvMode, count: filled.count)
@@ -514,18 +595,20 @@ final class StashModel {
         let qty = Double(gramsStr.filter { $0.isNumber || $0 == "." }) ?? 0
         if qty <= 0 { flash(t("st.fillRow")); return false }
         if reason.trimmingCharacters(in: .whitespaces).isEmpty { flash(t("st.writeoffReason")); return false }
-        if qty > venueBase { flash(t("st.onlyLeftVenue", ["g": grams(max(0, venueBase))])); return false }
         saving = true; defer { saving = false }
+        warehouseGeneration += 1
+        await finishShiftReads()
+        if qty > venueBase { flash(t("st.onlyLeftVenue", ["g": grams(venueBase)])); return false }
         do {
-            try await DB.from("tobacco_movements").insert([
+            guard let inserted = try await DB.from("tobacco_movements").insert([
                 "restaurant_id": rid, "brand": "", "flavor": "", "quantity_g": qty,
                 "type": "writeoff", "batch_id": batchId ?? UUID().uuidString, "reason": reason,
-            ]).run()
+            ]).single(Movement.self) else { throw APIError.http(502, "Missing movement response") }
+            rememberMovements([inserted])
+            rawVenueBase -= qty
         } catch {
             flash(t("saveFailed", ["err": error.localizedDescription])); return false
         }
-        await loadWarehouse()
-        await loadShift()
         flash(t("st.saved", ["n": "1"]))
         return true
     }
@@ -549,15 +632,29 @@ final class StashModel {
             adjust[ex.id, default: 0] += (mv.type == "in" ? -mv.quantity_g : mv.quantity_g)
             exById[ex.id] = ex
         }
-        var ok = true
-        for (id, delta) in adjust {
-            guard exById[id] != nil else { continue }
-            // Атомарный инкремент — см. комментарий MISE-006 выше в этом файле.
-            do { try await DB.rpc("increment_tobacco_stock", args: ["p_id": id, "p_delta": delta], cacheInvalidate: ["tobacco_stock"]) }
-            catch { ok = false }
+        // Позиции параллельно, удаление одним запросом (аудит скорости 2026-10-26: раньше
+        // 2×N последовательных round-trip'ов). Порядок прежний: сначала откат остатка, потом удаление.
+        let adjustments = adjust.filter { exById[$0.key] != nil }
+        let reverted = await withTaskGroup(of: StockItem?.self) { group in
+            for (id, delta) in adjustments {
+                group.addTask {
+                    guard let row = try? await DB.rpcRow("increment_tobacco_stock", args: ["p_id": id, "p_delta": delta],
+                                                        cacheInvalidate: ["tobacco_stock"], as: StockItem.self), row.id == id else { return nil }
+                    return row
+                }
+            }
+            var rows: [StockItem] = []
+            for await row in group { if let row { rows.append(row) } }
+            return rows
         }
-        for mv in items {
-            do { try await DB.from("tobacco_movements").delete().eq("id", mv.id).run() }
+        var ok = reverted.count == adjustments.count
+        if ok {
+            let byID = Dictionary(uniqueKeysWithValues: reverted.map { ($0.id, $0) })
+            warehouseGeneration += 1
+            stock = fresh.map { byID[$0.id] ?? $0 }
+        }
+        if !items.isEmpty {
+            do { try await DB.from("tobacco_movements").delete().in("id", items.map(\.id)).run() }
             catch { ok = false }
         }
         if !missing.isEmpty { flash(t("saveFailed", ["err": missing.joined(separator: ", ")])) }
@@ -571,7 +668,7 @@ final class StashModel {
         saving = true; defer { saving = false }
         let ok = await revertAndDelete(items)
         await loadWarehouse()
-        await loadShift()
+        await loadShift(whileSaving: true)
         if ok { flash(t("st.movDeleted")) }
     }
 
@@ -584,6 +681,8 @@ final class StashModel {
     func replaceMovementBatch(_ old: [Movement], rows: [MovRow], reason: String, mode: String? = nil) async -> Bool {
         guard !saving else { return false }
         saving = true; defer { saving = false }
+        warehouseGeneration += 1
+        await finishShiftReads()
         let mvMode = mode ?? old.first?.type ?? movMode
         guard let liveStock = try? await DB.from("tobacco_stock").select().fresh().list(StockItem.self) else {
             flash(t("refreshFailed")); return false
@@ -609,9 +708,10 @@ final class StashModel {
         guard let filled = prepareRows(rows, mode: mvMode, stock: postRevertStock) else { return false }
         let batchId = old.first?.batch_id ?? UUID().uuidString
         let ok = await writeMovementRows(filled, reason: reason, mode: mvMode, batchId: batchId, stock: postRevertStock, createdAt: old.first?.created_at)
-        guard ok else { flash(t("ai.errGeneric")); await loadWarehouse(); return false }
-        await loadWarehouse()
-        if mvMode == "out" || old.contains(where: { $0.type == "out" }) { await loadShift() }
+        guard ok else { await loadWarehouse(); return false }
+        rememberMovements([], replacing: Set(old.map(\.id)))
+        let issued = mvMode == "out" ? filled.reduce(0) { $0 + (Double($1.grams) ?? 0) } : 0
+        rawVenueBase += issued - venueContribution(old)
         notifyMovement(mode: mvMode, count: filled.count)
         flash(t("st.saved", ["n": "\(filled.count)"]))
         return true
@@ -624,10 +724,12 @@ final class StashModel {
         let qty = Double(gramsStr.filter { $0.isNumber || $0 == "." }) ?? 0
         if qty <= 0 { flash(t("st.fillRow")); return false }
         if reason.trimmingCharacters(in: .whitespaces).isEmpty { flash(t("st.writeoffReason")); return false }
-        let oldTotal = old.reduce(0) { $0 + $1.quantity_g }
-        let simulatedVenueBase = venueBase + oldTotal
-        if qty > simulatedVenueBase { flash(t("st.onlyLeftVenue", ["g": grams(max(0, simulatedVenueBase))])); return false }
         saving = true; defer { saving = false }
+        warehouseGeneration += 1
+        await finishShiftReads()
+        let restoredBase = rawVenueBase - venueContribution(old)
+        let simulatedVenueBase = max(0, restoredBase)
+        if qty > simulatedVenueBase { flash(t("st.onlyLeftVenue", ["g": grams(max(0, simulatedVenueBase))])); return false }
         guard await revertAndDelete(old) else { return false }
         let batchId = old.first?.batch_id ?? UUID().uuidString
         do {
@@ -636,12 +738,14 @@ final class StashModel {
                 "type": "writeoff", "batch_id": batchId, "reason": reason,
             ]
             if let createdAt = old.first?.created_at { values["created_at"] = createdAt }
-            try await DB.from("tobacco_movements").insert(values).run()
+            guard let inserted = try await DB.from("tobacco_movements").insert(values).single(Movement.self) else {
+                throw APIError.http(502, "Missing movement response")
+            }
+            rememberMovements([inserted], replacing: Set(old.map(\.id)))
+            rawVenueBase = restoredBase - qty
         } catch {
-            flash(t("saveFailed", ["err": error.localizedDescription])); await loadWarehouse(); await loadShift(); return false
+            flash(t("saveFailed", ["err": error.localizedDescription])); await loadWarehouse(); await loadShift(whileSaving: true); return false
         }
-        await loadWarehouse()
-        await loadShift()
         flash(t("st.saved", ["n": "1"]))
         return true
     }
@@ -664,14 +768,21 @@ final class StashModel {
             // 2026-09-27): раньше коррекция с iOS была видна только в tobacco_inventories, и
             // история движений на двух платформах расходилась. Пишем ДО правки остатка.
             let batchId = UUID().uuidString.lowercased()
-            for r in disc {
-                try await DB.from("tobacco_movements").insert([
-                    "restaurant_id": rid, "brand": r.brand, "flavor": r.flavor,
-                    "quantity_g": abs(r.actual - r.expected), "type": "inventory",
-                    "batch_id": batchId, "flavor_id": r.id,
-                    "reason": "Инвентаризация: было \(Int(r.expected.rounded())) г, стало \(Int(r.actual.rounded())) г",
-                ] as [String: Any]).run()
-                try await DB.from("tobacco_stock").update(["quantity_g": max(0, r.actual)]).eq("id", r.id).run()
+            let rid = rid
+            // Позиции параллельно (аудит скорости 2026-10-26); внутри позиции порядок прежний.
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for r in disc {
+                    group.addTask {
+                        try await DB.from("tobacco_movements").insert([
+                            "restaurant_id": rid, "brand": r.brand, "flavor": r.flavor,
+                            "quantity_g": abs(r.actual - r.expected), "type": "inventory",
+                            "batch_id": batchId, "flavor_id": r.id,
+                            "reason": "Инвентаризация: было \(Int(r.expected.rounded())) г, стало \(Int(r.actual.rounded())) г",
+                        ] as [String: Any]).run()
+                        try await DB.from("tobacco_stock").update(["quantity_g": max(0, r.actual)]).eq("id", r.id).run()
+                    }
+                }
+                try await group.waitForAll()
             }
         } catch {
             flash(t("saveFailed", ["err": error.localizedDescription]))
@@ -712,6 +823,11 @@ final class StashModel {
             .init(id: "i1", created_at: "2026-06-10T18:00:00Z",
                   items: [.init(brand: "Darkside", flavor: "Supernova", expected_g: 200, actual_g: 140, diff_g: -60)]),
         ]
+        if StashSaveFixture.enabled {
+            stock = StashSaveFixture.initialStock
+            movements = []; inventories = []
+            aiMovRows = stock.map { MovRow(brand: $0.brand, flavor: $0.flavor, grams: "25") }
+        }
         shiftLoading = false
     }
     #endif
@@ -1141,6 +1257,22 @@ private struct MovementBatchRow: View {
         // Списание «с заведения» — без бренда/вкуса.
         (mv.brand.isEmpty && mv.flavor.isEmpty) ? t("st.venueWriteoffLabel") : "\(mv.brand) · \(mv.flavor)"
     }
+    // Свёрнутая строка раньше показывала только дату и «N позиц.» — чтобы понять, что это
+    // была за поставка/выдача и почему списали, приходилось раскрывать каждую (аудит склада
+    // 2026-10-26). Теперь видно бренды и причину сразу.
+    private var brandsSummary: String {
+        var seen: [String] = []
+        for mv in items {
+            let b = (mv.brand.isEmpty && mv.flavor.isEmpty) ? t("st.venueWriteoffLabel") : mv.brand
+            if !seen.contains(b) { seen.append(b) }
+        }
+        return seen.count > 2 ? seen.prefix(2).joined(separator: ", ") + " +\(seen.count - 2)" : seen.joined(separator: ", ")
+    }
+    private var reasonText: String? {
+        let r = (items.first?.reason ?? "").trimmingCharacters(in: .whitespaces)
+        // Подставленные по умолчанию «Поставка/Выдача в зал/Списание» ничего не добавляют.
+        return r.isEmpty || ["Поставка", "Выдача в зал", "Списание"].contains(r) ? nil : r
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1148,7 +1280,11 @@ private struct MovementBatchRow: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(movDate(items.first?.created_at)).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
-                        Text(t("st.positions", ["n": "\(items.count)"])).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
+                        Text(brandsSummary + " · " + t("st.positions", ["n": "\(items.count)"]))
+                            .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5)).lineLimit(1)
+                        if let r = reasonText {
+                            Text(r).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.7)).lineLimit(2)
+                        }
                     }
                     Spacer()
                     Text((isIn ? "+" : "−") + grams(total))
@@ -1195,8 +1331,11 @@ private struct AutoField: View {
     @Binding var text: String
     var suggestions: [String]
     var disabled = false
+    let focus: FocusState<MovementField?>.Binding
+    let field: MovementField
+    let advance: () -> Void
     var onPick: (() -> Void)? = nil
-    @FocusState private var focused: Bool
+    private var focused: Bool { focus.wrappedValue == field }
 
     private var filtered: [String] {
         let q = text.trimmingCharacters(in: .whitespaces).lowercased()
@@ -1211,13 +1350,15 @@ private struct AutoField: View {
     var body: some View {
         VStack(spacing: 0) {
             TextField(placeholder, text: $text)
-                .textFieldStyle(.plain).focused($focused).disabled(disabled)
+                .textFieldStyle(.plain).focused(focus, equals: field).disabled(disabled)
+                .submitLabel(.next).onSubmit(advance)
+                .id(field.scrollID).accessibilityIdentifier(field.scrollID)
                 .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
-                .foregroundStyle(disabled ? .white.opacity(0.3) : .white)
+                .foregroundStyle(disabled ? Color.primary.opacity(0.3) : Color.primary)   // .white был не виден в светлой теме
             if focused && !filtered.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(Array(filtered.enumerated()), id: \.element) { idx, s in
-                        Button { text = s; onPick?(); focused = false } label: {
+                        Button { text = s; onPick?(); advance() } label: {
                             HStack {
                                 Text(s).font(.system(size: 15)).foregroundStyle(.primary)
                                 Spacer()
@@ -1254,6 +1395,81 @@ private struct MovGroup: Identifiable {
     var lines: [MovLine] = [MovLine()]
 }
 
+// Text fields can send didEndEditing after their row has disappeared. Resolve by ID,
+// never by a captured collection index, and ignore callbacks for removed rows.
+private func movementBrandBinding(_ groups: Binding<[MovGroup]>, groupID: UUID) -> Binding<String> {
+    Binding(get: { groups.wrappedValue.first { $0.id == groupID }?.brand ?? "" }, set: { value in
+        guard let index = groups.wrappedValue.firstIndex(where: { $0.id == groupID }) else { return }
+        groups.wrappedValue[index].brand = value
+    })
+}
+
+private func movementLineBinding(_ groups: Binding<[MovGroup]>, groupID: UUID, lineID: UUID,
+                                 keyPath: WritableKeyPath<MovLine, String>) -> Binding<String> {
+    Binding(get: {
+        groups.wrappedValue.first { $0.id == groupID }?.lines.first { $0.id == lineID }?[keyPath: keyPath] ?? ""
+    }, set: { value in
+        guard let group = groups.wrappedValue.firstIndex(where: { $0.id == groupID }),
+              let line = groups.wrappedValue[group].lines.firstIndex(where: { $0.id == lineID }) else { return }
+        groups.wrappedValue[group].lines[line][keyPath: keyPath] = value
+    })
+}
+
+private enum MovementField: Hashable {
+    case brand(UUID), flavor(UUID), grams(UUID), stock(String), venueGrams, reason
+
+    var scrollID: String {
+        switch self {
+        case .brand(let id): return "stash-brand-\(id)"
+        case .flavor(let id): return "stash-flavor-\(id)"
+        case .grams(let id): return "stash-grams-\(id)"
+        case .stock(let id): return "stash-stock-\(id)"
+        case .venueGrams: return "stash-venue-grams"
+        case .reason: return "stash-writeoff-reason"
+        }
+    }
+}
+
+private func movementFocusOrder(groups: [MovGroup], outOnly: Bool, fromStock: Bool,
+                                stockIDs: [String], venue: Bool, reason: Bool) -> [MovementField] {
+    var fields: [MovementField] = []
+    if venue { fields = [.venueGrams] }
+    else if fromStock { fields = stockIDs.map { .stock($0) } }
+    else {
+        for group in groups {
+            fields.append(.brand(group.id))
+            for line in group.lines {
+                if !outOnly || !group.brand.trimmingCharacters(in: .whitespaces).isEmpty { fields.append(.flavor(line.id)) }
+                fields.append(.grams(line.id))
+            }
+        }
+    }
+    if reason { fields.append(.reason) }
+    return fields
+}
+
+private func nextMovementField(after field: MovementField, in fields: [MovementField]) -> MovementField? {
+    guard let index = fields.firstIndex(of: field), index + 1 < fields.count else { return nil }
+    return fields[index + 1]
+}
+
+private enum MovementFocusRequest: Hashable {
+    case field(MovementField), after(MovementField)
+
+    func target(in fields: [MovementField]) -> MovementField? {
+        switch self {
+        case .field(let field): return fields.contains(field) ? field : nil
+        case .after(let field): return nextMovementField(after: field, in: fields)
+        }
+    }
+}
+
+private func repairedMovementFocus(_ field: MovementField?, previous: [MovementField], remaining: [MovementField]) -> MovementField? {
+    guard let field, !remaining.isEmpty else { return nil }
+    if remaining.contains(field) { return field }
+    return remaining[min(previous.firstIndex(of: field) ?? 0, remaining.count - 1)]
+}
+
 private struct AddMovementSheet: View {
     @Bindable var m: StashModel
     var editBatch: [Movement]? = nil               // непусто → режим редактирования батча
@@ -1266,6 +1482,8 @@ private struct AddMovementSheet: View {
     @State private var venueGrams = ""                 // вес списания с заведения
     @State private var primed = false
     @State private var confirmDiscard = false
+    @FocusState private var focused: MovementField?
+    @State private var requestedFocus: MovementFocusRequest?
     // Тип операции ВНУТРИ листа — отдельно от m.movMode (это фильтр вкладки «Движения»).
     // Раньше лист писал прямо в m.movMode: открыл правку выдачи, будучи на вкладке «Приход» —
     // после закрытия лента молча переключалась на «Выдачу», а смена сегмента посреди правки
@@ -1279,6 +1497,33 @@ private struct AddMovementSheet: View {
     }
 
     private var isEditing: Bool { editBatch != nil }
+    private var focusOrder: [MovementField] {
+        movementFocusOrder(groups: groups, outOnly: formMode != "in", fromStock: fromStock,
+                           stockIDs: pickGroups.flatMap { $0.1.map(\.id) },
+                           venue: formMode == "writeoff" && writeoffVenue, reason: formMode == "writeoff")
+    }
+    private func advance(from field: MovementField) { requestedFocus = .after(field) }
+    private func revealFocus(_ proxy: ScrollViewProxy) {
+        guard let focused else { return }
+        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(focused.scrollID, anchor: .center) }
+    }
+    @ViewBuilder private var keyboardNavigation: some View {
+        if focused != nil {
+            HStack {
+                Button(t("st.nextField")) { if let focused { advance(from: focused) } }
+                    .disabled(focused.flatMap { nextMovementField(after: $0, in: focusOrder) } == nil)
+                    .accessibilityIdentifier("stash-next-field")
+                    .frame(minWidth: 60, minHeight: 44)
+                Spacer()
+                Button(t("done")) { requestedFocus = nil; focused = nil }
+                    .accessibilityIdentifier("stash-done-field")
+                    .frame(minWidth: 60, minHeight: 44)
+            }
+            .font(.system(size: 16, weight: .semibold))
+            .padding(.horizontal, 16).padding(.vertical, 4)
+            .background(.bar)
+        }
+    }
     // Есть введённые данные → свайп вниз не должен молча их стирать (см. случай, когда
     // заполнили много строк, пролистнули вверх перепроверить — и свайп закрыл лист).
     private var isDirty: Bool {
@@ -1310,11 +1555,16 @@ private struct AddMovementSheet: View {
         return g.map { ($0.key, $0.value.sorted { $0.flavor < $1.flavor }) }
                 .sorted { $0.0.lowercased() < $1.0.lowercased() }
     }
+    // Только видимые в пикере позиции: при «Приход» видны и нулевые остатки, и введённые там
+    // граммы раньше молча переезжали в «Выдачу» после смены типа — их не видно, но они
+    // считались в итог и уходили в сохранение (аудит склада 2026-10-26).
+    private var visiblePickIds: Set<String> { Set(pickGroups.flatMap { $0.1.map(\.id) }) }
     private var takeTotal: Double {
-        picks.values.reduce(0) { $0 + (Double($1.filter(\.isNumber)) ?? 0) }
+        picks.filter { visiblePickIds.contains($0.key) }.values.reduce(0) { $0 + (Double($1.filter(\.isNumber)) ?? 0) }
     }
     private func pickedRows() -> [StashModel.MovRow] {
-        m.stock.compactMap { s in
+        let visible = visiblePickIds
+        return m.stock.filter { visible.contains($0.id) }.compactMap { s in
             let v = (picks[s.id] ?? "").filter(\.isNumber)
             guard (Double(v) ?? 0) > 0 else { return nil }
             return StashModel.MovRow(brand: s.brand, flavor: s.flavor, grams: v)
@@ -1329,6 +1579,8 @@ private struct AddMovementSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(t("st.venueWriteoffHint")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
             TextField(t("st.grams"), text: $venueGrams).keyboardType(.numberPad)
+                .focused($focused, equals: .venueGrams).id(MovementField.venueGrams.scrollID)
+                .accessibilityIdentifier(MovementField.venueGrams.scrollID)
                 .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.primary)
             HStack {
                 Text(t("st.venueAvailable")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
@@ -1400,6 +1652,7 @@ private struct AddMovementSheet: View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 Color.miseBg.ignoresSafeArea()
+                ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 12) {
                         Picker("", selection: $formMode) {
@@ -1425,32 +1678,57 @@ private struct AddMovementSheet: View {
 
                         if formMode == "writeoff" {
                             TextField(t("st.writeoffReasonField"), text: $reason).textFieldStyle(.plain)
+                                .focused($focused, equals: .reason).id(MovementField.reason.scrollID)
+                                .accessibilityIdentifier(MovementField.reason.scrollID)
+                                .submitLabel(.done).onSubmit { focused = nil }
                                 .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.primary)
                         }
                     }
+                    .disabled(m.saving)
                     .padding(16)
-                    .contentShape(Rectangle())
-                    .onTapGesture { hideKeyboard() }
+                    .padding(.bottom, 60)
                 }
-                .scrollDismissesKeyboard(.immediately)
+                .scrollDismissesKeyboard(.interactively)
+                .task(id: focused) {
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    revealFocus(proxy)
+                }
+                .task(id: requestedFocus) {
+                    guard let request = requestedFocus else { return }
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    focused = request.target(in: focusOrder)
+                    requestedFocus = nil
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in revealFocus(proxy) }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidChangeFrameNotification)) { _ in revealFocus(proxy) }
+                }
                 toastOverlay
             }
+            // Keep this beside the form: switching manual/stock fields must not leave
+            // a stale UIKit keyboard toolbar. The safe area follows the actual keyboard.
+            .safeAreaInset(edge: .bottom, spacing: 0) { keyboardNavigation }
             .animation(.easeInOut(duration: 0.2), value: m.toast)
             .navigationTitle(isEditing ? t("st.editMovement") : t("st.movement")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { requestClose() } }
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { requestClose() }.disabled(m.saving) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(t("save")) { Task { await commit() } }.disabled(m.saving)
+                    Button(m.saving ? t("saving") : t("save")) { Task { await commit() } }.disabled(m.saving)
                 }
-                ToolbarItemGroup(placement: .keyboard) { Spacer(); Button(t("done")) { hideKeyboard() } }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
-            .interactiveDismissDisabled(isDirty)
+            .interactiveDismissDisabled(isDirty || m.saving)
             .confirmationDialog(t("discard.title"), isPresented: $confirmDiscard, titleVisibility: .visible) {
                 Button(t("discard.confirm"), role: .destructive) { dismiss() }
                 Button(t("cancel"), role: .cancel) {}
             } message: { Text(t("discard.msg")) }
-            .onChange(of: formMode) { _, mode in if mode != "writeoff" { writeoffVenue = false } }
+            .onChange(of: formMode) { _, mode in requestedFocus = nil; focused = nil; if mode != "writeoff" { writeoffVenue = false } }
+            .onChange(of: fromStock) { _, _ in requestedFocus = nil; focused = nil }
+            .onChange(of: writeoffVenue) { _, _ in requestedFocus = nil; focused = nil }
+            .onChange(of: focusOrder) { previous, remaining in
+                focused = repairedMovementFocus(focused, previous: previous, remaining: remaining)
+            }
             .onAppear {
                 guard !primed else { return }
                 primed = true
@@ -1470,55 +1748,84 @@ private struct AddMovementSheet: View {
     // не нужно перепечатывать название N раз.
     @ViewBuilder private var manualRows: some View {
         let outOnly = formMode != "in"
-        ForEach($groups) { $group in
+        ForEach(groups) { group in
             VStack(spacing: 8) {
                 HStack {
-                    AutoField(placeholder: t("st.brand"), text: $group.brand,
+                    AutoField(placeholder: t("st.brand"), text: movementBrandBinding($groups, groupID: group.id),
                               suggestions: m.brandSuggestions(outOnly),
+                              focus: $focused, field: .brand(group.id), advance: { advance(from: .brand(group.id)) },
                               // Смена бренда — сбрасываем вкусы строк: подсказки вкуса зависят
                               // от бренда, старый вкус мог не существовать у нового.
-                              onPick: { for i in group.lines.indices { group.lines[i].flavor = "" } })
+                              onPick: {
+                                  guard let index = groups.firstIndex(where: { $0.id == group.id }) else { return }
+                                  for line in groups[index].lines.indices { groups[index].lines[line].flavor = "" }
+                              })
                     if groups.count > 1 {
                         Button { groups.removeAll { $0.id == group.id } } label: {
                             Image(systemName: "xmark.circle.fill").font(.system(size: 16)).foregroundStyle(.primary.opacity(0.3))
                         }.buttonStyle(.plain)
                     }
                 }
-                ForEach($group.lines) { $line in
+                ForEach(group.lines) { line in
                     let avail = m.stockOf(group.brand, line.flavor)
                     VStack(spacing: 6) {
                         HStack(spacing: 8) {
-                            AutoField(placeholder: t("st.flavor"), text: $line.flavor,
+                            AutoField(placeholder: t("st.flavor"), text: movementLineBinding($groups, groupID: group.id, lineID: line.id, keyPath: \.flavor),
                                       suggestions: m.flavorsForBrand(group.brand, outOnly: outOnly),
-                                      disabled: outOnly && group.brand.trimmingCharacters(in: .whitespaces).isEmpty)
-                            TextField(t("st.grams"), text: $line.grams).keyboardType(.numberPad)
+                                      disabled: outOnly && group.brand.trimmingCharacters(in: .whitespaces).isEmpty,
+                                      focus: $focused, field: .flavor(line.id), advance: { advance(from: .flavor(line.id)) })
+                            TextField(t("st.grams"), text: movementLineBinding($groups, groupID: group.id, lineID: line.id, keyPath: \.grams)).keyboardType(.numberPad)
+                                .focused($focused, equals: .grams(line.id)).id(MovementField.grams(line.id).scrollID)
+                                .accessibilityIdentifier(MovementField.grams(line.id).scrollID)
                                 .multilineTextAlignment(.trailing)
                                 .padding(10).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
                                 .foregroundStyle(.primary)
                                 .frame(width: 88)
                             if group.lines.count > 1 {
-                                Button { group.lines.removeAll { $0.id == line.id } } label: {
+                                Button {
+                                    guard let index = groups.firstIndex(where: { $0.id == group.id }) else { return }
+                                    groups[index].lines.removeAll { $0.id == line.id }
+                                } label: {
                                     Image(systemName: "xmark.circle.fill").font(.system(size: 15)).foregroundStyle(.primary.opacity(0.3))
                                 }.buttonStyle(.plain)
                             }
                         }
                         if let a = avail, !line.flavor.isEmpty {
+                            // Выдача/списание больше остатка — подсвечиваем сразу, а не тостом после «Сохранить».
+                            let over = outOnly && (Double(line.grams) ?? 0) > a.quantity_g
                             HStack {
                                 Text("\(t("st.available")): \(grams(a.quantity_g))")
-                                    .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
+                                    .font(.system(size: 12, weight: over ? .semibold : .regular))
+                                    .foregroundStyle(over ? BrandKit.menu : .primary.opacity(0.5))
                                 Spacer()
                             }
                         }
                     }
                 }
-                Button { group.lines.append(MovLine()) } label: {
+                Button {
+                    guard let index = groups.firstIndex(where: { $0.id == group.id }) else { return }
+                    let line = MovLine(); groups[index].lines.append(line)
+                    requestedFocus = .field(outOnly && group.brand.trimmingCharacters(in: .whitespaces).isEmpty ? .brand(group.id) : .flavor(line.id))
+                } label: {
                     Label(t("st.addFlavor"), systemImage: "plus").font(.system(size: 13, weight: .medium)).foregroundStyle(BrandKit.stash)
                 }
             }
             .padding(12).background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
         }
-        Button { groups.append(MovGroup()) } label: {
+        Button {
+            let group = MovGroup(); groups.append(group); requestedFocus = .field(.brand(group.id))
+        } label: {
             Label(t("st.addBrand"), systemImage: "plus").font(.system(size: 14, weight: .medium)).foregroundStyle(BrandKit.stash)
+        }
+        // Бегущий итог и в ручном вводе — раньше был только в «Из склада» (аудит склада 2026-10-26).
+        let manualTotal = groups.flatMap(\.lines).reduce(0.0) { $0 + (Double($1.grams) ?? 0) }
+        if manualTotal > 0 {
+            HStack {
+                Text(totalLabel).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary.opacity(0.6))
+                Spacer()
+                Text(grams(manualTotal)).font(.system(size: 15, weight: .bold)).foregroundStyle(BrandKit.stash)
+            }
+            .padding(.horizontal, 4).padding(.top, 2)
         }
     }
 
@@ -1539,9 +1846,12 @@ private struct AddMovementSheet: View {
                                     .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
                             }
                             Spacer()
+                            let over = formMode != "in" && (Double(picks[s.id] ?? "") ?? 0) > s.quantity_g
                             TextField("0", text: pickBinding(s.id))
+                                .focused($focused, equals: .stock(s.id)).id(MovementField.stock(s.id).scrollID)
+                                .accessibilityIdentifier(MovementField.stock(s.id).scrollID)
                                 .keyboardType(.numberPad).multilineTextAlignment(.trailing)
-                                .font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
+                                .font(.system(size: 15, weight: .semibold)).foregroundStyle(over ? BrandKit.menu : .primary)
                                 .frame(width: 72)
                                 .padding(.horizontal, 8).padding(.vertical, 6)
                                 .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))

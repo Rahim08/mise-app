@@ -57,3 +57,11 @@ CLAUDE CONTEXT.md
 
 # Xcode user-specific IDE state (workspace UI, breakpoints — not project config)
 native/Mise/**/xcuserdata/
+
+# Project reference originals: personal documents and large design files stay local.
+/PROJECT_DATA/private/
+/PROJECT_DATA/brand/*.pdf
+/PROJECT_DATA/brand/logos/*.ai
+
+# Playwright MCP session output (screenshots, logs, exported CSVs)
+/.playwright-mcp/

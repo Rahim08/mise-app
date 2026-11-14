@@ -2,35 +2,25 @@ import SwiftUI
 
 // MARK: - GuestsView — лояльность гостей
 //
-// Агрегирует все брони за ~12 месяцев, группируя по нормализованному ключу
-// (телефон-цифры, иначе lowercase-имя). Показывает количество визитов,
+// Агрегирует полную историю броней по стабильному ключу гостя.
+// Легаси-строки без ключа не объединяются по имени или суффиксу телефона. Показывает количество визитов,
 // дату последнего визита, суммарных гостей.
 
 private let GS_ACCENT = BrandKit.bookings
 
 // MARK: - Агрегация
 
-private func guestKey(_ b: Booking) -> String {
-    let digits = (b.phone ?? "").filter { $0.isNumber }
-    if !digits.isEmpty { return digits }
-    return (b.guest_name ?? "").lowercased().trimmingCharacters(in: .whitespaces)
-}
-
-// «Визит» — та же трактовка, что в pastVisitCount (BookingsView.swift): любая бронь
-// кроме отменённой и неявки. Раньше здесь считались и отменённые — гость мог выглядеть
-// «постоянным» в Guests, но не на строке брони, где cancelled уже исключался.
-private func isRealVisit(_ b: Booking) -> Bool { b.status != "cancelled" && b.status != "no_show" }
-
 func buildGuestProfiles(from bookings: [Booking]) -> [GuestProfile] {
     var dict: [String: GuestProfile] = [:]
+    let today = bookingDateKey(Date())
     let sorted = bookings.sorted { ($0.booking_date ?? "") < ($1.booking_date ?? "") }
 
     for b in sorted {
-        let key = guestKey(b)
+        let key = bookingGuestKey(b)
         guard !key.isEmpty else { continue }
         let displayName = b.guest_name?.isEmpty == false ? b.guest_name! :
             (b.phone?.isEmpty == false ? b.phone! : key)
-        let visit = isRealVisit(b)
+        let visit = bookingIsVisit(b, today: today)
         let noShow = b.status == "no_show"
 
         if var existing = dict[key] {
@@ -73,19 +63,19 @@ func buildGuestProfiles(from bookings: [Booking]) -> [GuestProfile] {
 
 struct GuestsView: View {
     let m: BookingsModel
-    var onNewBooking: (String?, String?, Int, Int) -> Void = { _, _, _, _ in }
+    var onNewBooking: (String?, String?, Int, Int, String) -> Void = { _, _, _, _, _ in }
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var app
     @State private var searchText = ""
     @State private var selectedGuest: GuestProfile?
     @State private var editingGuest: GuestProfile?
-    @State private var editingProfile = GuestEditPrefill(lastName: "", email: "", birthday: nil, note: "")
     // Форсит пересоздание GuestDetailView (полный ре-фетч loadNote) после успешного
     // сохранения в GuestEditSheet — иначе уже открытая карточка не увидит свежие данные.
     @State private var detailRefreshTick = 0
     @State private var deleteTarget: GuestProfile?
     @State private var errorMsg: String?
     @State private var showReviews = false
+    @State private var deletingGuest = false
 
     // Как canEdit(_:) в BookingsView, но для гостя целиком: массовая правка/удаление
     // разрешены только должностным лицам или если ВСЕ брони гостя создал текущий сотрудник.
@@ -128,7 +118,15 @@ struct GuestsView: View {
 
                         LazyVStack(spacing: 10) {
                             ReviewsEntryRow { showReviews = true }
-                            if m.allBookings.isEmpty {
+                            if m.guestsLoading && m.allBookings.isEmpty { RowListSkeleton(rows: 4) }
+                            if let error = m.guestsError {
+                                VStack(spacing: 8) {
+                                    Text(t("loadFailed")).font(.system(size: 15, weight: .semibold))
+                                    Text(error).font(.system(size: 12)).foregroundStyle(.secondary)
+                                    Button(t("retry")) { Task { await m.loadAllBookings(force: true) } }.frame(minHeight: 44)
+                                }.padding(14)
+                            }
+                            if m.allBookings.isEmpty && !m.guestsLoading && m.guestsError == nil {
                                 emptyState
                             } else {
                                 ForEach(filtered) { guest in
@@ -179,25 +177,19 @@ struct GuestsView: View {
             // модала (список гостей). "Новая бронь" теперь единственный dismiss на выходе
             // (см. onNewBooking) вместо цепочки из нескольких закрывающихся шитов подряд.
             .navigationDestination(item: $selectedGuest) { g in
-                GuestDetailView(guest: g, rid: m.rid, canEdit: canEditGuest(g), onNewBooking: onNewBooking, onEdit: { prefill in
-                    editingProfile = prefill
+                GuestDetailView(guest: g, rid: m.rid, canEdit: canEditGuest(g), onNewBooking: onNewBooking, onEdit: { _ in
                     editingGuest = g
                 }, onDelete: {
-                    deleteTarget = g
+                    try await m.deleteGuest(g)
                 })
                 .id(detailRefreshTick)
             }
             .sheet(item: $editingGuest) { g in
-                GuestEditSheet(guest: g, rid: m.rid, prefill: editingProfile) { newName, newPhone in
+                GuestEditSheet(guest: g, rid: m.rid) { newName, newPhone in
                     editingGuest = nil
+                    m.guestDidUpdate(key: g.id, name: newName, phone: newPhone)
+                    if selectedGuest?.id == g.id { selectedGuest = buildGuestProfiles(from: m.allBookings).first { $0.id == g.id } }
                     detailRefreshTick += 1
-                    // Отражаем правку локально сразу — без этого список гостей оставался
-                    // со старым именем/телефоном до следующей полной перезагрузки броней.
-                    let ids = Set(g.bookings.map { $0.id })
-                    for i in m.allBookings.indices where ids.contains(m.allBookings[i].id) {
-                        if !newName.isEmpty { m.allBookings[i].guest_name = newName }
-                        m.allBookings[i].phone = newPhone
-                    }
                 }
             }
             .alert(t("gs.deleteGuest"), isPresented: .init(
@@ -215,25 +207,15 @@ struct GuestsView: View {
     }
 
     private func deleteGuest(_ guest: GuestProfile) {
+        guard !deletingGuest else { return }
+        deletingGuest = true
         Task {
-            var deletedIds: [String] = []
-            var lastError: Error?
-            for b in guest.bookings {
-                do {
-                    try await DB.from("bookings").delete().eq("id", b.id).run()
-                    deletedIds.append(b.id)
-                } catch {
-                    lastError = error
-                }
-            }
-            try? await DB.from("guest_notes").delete().eq("guest_key", guest.id).run()
-            await MainActor.run {
-                let ids = Set(deletedIds)
-                m.allBookings.removeAll { ids.contains($0.id) }
-                if let lastError {
-                    flash(t("saveFailed", ["err": lastError.localizedDescription]))
-                }
-            }
+            defer { deletingGuest = false }
+            do {
+                try await m.deleteGuest(guest)
+                deleteTarget = nil
+                if selectedGuest?.id == guest.id { selectedGuest = nil }
+            } catch { flash(error.localizedDescription) }
         }
     }
 
@@ -370,12 +352,12 @@ struct GuestDetailView: View {
     let guest: GuestProfile
     let rid: String
     var canEdit: Bool = true
-    var onNewBooking: (String?, String?, Int, Int) -> Void = { _, _, _, _ in }
+    var onNewBooking: (String?, String?, Int, Int, String) -> Void = { _, _, _, _, _ in }
     // Передаём уже загруженный профиль (фамилия/email/ДР) в шторку правки — там и только
     // там их теперь можно менять (юзер-фидбек: не дублировать поля в самой карточке, они
     // должны появляться только если зайти в «Редактировать» и заполнить).
     var onEdit: (GuestEditPrefill) -> Void = { _ in }
-    var onDelete: () -> Void = {}
+    var onDelete: () async throws -> Void = {}
     @Environment(\.dismiss) private var dismiss
 
     @State private var note = ""
@@ -384,6 +366,9 @@ struct GuestDetailView: View {
     @State private var hasBirthday = false
     @State private var birthday = Date()
     @State private var noteLoaded = false
+    @State private var noteError: String?
+    @State private var noteGeneration = 0
+    @State private var deleteState = BookingSaveState()
     @State private var showPhoneMenu = false
     @State private var confirmDelete = false
 
@@ -403,7 +388,6 @@ struct GuestDetailView: View {
     // Имя гостя для префилла новой брони (не телефон). Берём из самой свежей брони с именем.
     private var guestName: String? {
         sortedBookings.compactMap { $0.guest_name }.first { !$0.isEmpty }
-            ?? (guest.displayName == guest.id ? nil : guest.displayName)
     }
 
     // Телефон для префилла — из любой брони гостя, не только профильной (которая берётся
@@ -423,6 +407,11 @@ struct GuestDetailView: View {
                     newBookingButton
                     statsCard
                     noteSection
+                    if let error = noteError {
+                        Text(error).font(.system(size: 13)).foregroundStyle(.secondary)
+                        Button(t("retry")) { Task { await loadNote() } }.frame(minHeight: 44)
+                    }
+                    if let error = deleteState.error { Text(error).font(.system(size: 13)).foregroundStyle(.red) }
 
                     // История броней
                     VStack(alignment: .leading, spacing: 10) {
@@ -456,7 +445,9 @@ struct GuestDetailView: View {
         }
         .alert(t("gs.deleteGuest"), isPresented: $confirmDelete) {
             Button(t("cancel"), role: .cancel) {}
-            Button(t("delete"), role: .destructive) { dismiss(); onDelete() }
+            Button(t("delete"), role: .destructive) {
+                Task { if await deleteState.perform({ try await onDelete() }) { dismiss() } }
+            }.disabled(deleteState.saving)
         } message: {
             Text(t("gs.deleteGuestConfirm", ["name": guest.displayName]))
         }
@@ -464,7 +455,7 @@ struct GuestDetailView: View {
     }
 
     private var newBookingButton: some View {
-        Button { onNewBooking(guestName, guestPhone, guest.visitCount, guest.noShowCount) } label: {
+        Button { onNewBooking(guestName, guestPhone, guest.visitCount, guest.noShowCount, guest.id) } label: {
             Label(t("gs.newBooking"), systemImage: "calendar.badge.plus")
                 .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                 .frame(maxWidth: .infinity).padding(.vertical, 13)
@@ -608,15 +599,21 @@ struct GuestDetailView: View {
     }
 
     private func loadNote() async {
-        if let row = try? await DB.from("guest_notes").select().eq("guest_key", guest.id).single(GuestNote.self) {
-            note = row.note ?? ""
-            lastName = row.last_name ?? ""
-            email = row.email ?? ""
-            if let bd = row.birthday, let d = Self.bdayFmt.date(from: bd) {
-                birthday = d; hasBirthday = true
-            }
+        noteGeneration += 1
+        let request = noteGeneration
+        noteError = nil
+        do {
+            let row = try await DB.from("guest_notes").fresh().select().eq("guest_key", guest.id).single(GuestNote.self)
+            guard request == noteGeneration, !Task.isCancelled else { return }
+            note = row?.note ?? ""; lastName = row?.last_name ?? ""; email = row?.email ?? ""
+            if let birthdayValue = row?.birthday, let date = Self.bdayFmt.date(from: birthdayValue) {
+                birthday = date; hasBirthday = true
+            } else { hasBirthday = false }
+            noteLoaded = true
+        } catch {
+            guard request == noteGeneration, !Task.isCancelled else { return }
+            noteError = error.localizedDescription
         }
-        noteLoaded = true
     }
 
     private func historyRow(_ b: Booking) -> some View {
@@ -671,133 +668,117 @@ struct GuestDetailView: View {
 private struct GuestEditSheet: View {
     let guest: GuestProfile
     let rid: String
-    var onDone: (String, String) -> Void
+    var onDone: (String?, String?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var phone: String
-    @State private var lastName: String
-    @State private var email: String
-    @State private var hasBirthday: Bool
-    @State private var birthday: Date
-    @State private var saving = false
-    @State private var errorMsg: String?
+    private let originalName: String
+    private let originalPhone: String
+    @State private var lastName = ""
+    @State private var email = ""
+    @State private var note = ""
+    @State private var hasBirthday = false
+    @State private var birthday = Date()
+    @State private var profile: BookingGuestDetailsModel
+    @State private var saveState = BookingSaveState()
 
     private static let bdayFmt: DateFormatter = {
-        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"; df.locale = Locale(identifier: "en_US_POSIX")
-        return df
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX"); return f
     }()
 
-    @State private var note: String
-
-    // Всё про одного гостя — одна форма, один Save (юзер-фидбек 2026-07-22: не разносить
-    // имя/фамилию/заметку по разным местам). prefill приходит уже загруженным из
-    // GuestDetailView (см. onEdit) — единственное место, где это теперь редактируется.
-    init(guest: GuestProfile, rid: String, prefill: GuestEditPrefill, onDone: @escaping (String, String) -> Void) {
-        self.guest = guest
-        self.rid = rid
-        self.onDone = onDone
-        _name = State(initialValue: guest.displayName == guest.id ? "" : guest.displayName)
-        _phone = State(initialValue: guest.phone ?? "")
-        _lastName = State(initialValue: prefill.lastName)
-        _email = State(initialValue: prefill.email)
-        _hasBirthday = State(initialValue: prefill.birthday != nil)
-        _birthday = State(initialValue: prefill.birthday ?? Date())
-        _note = State(initialValue: prefill.note)
+    init(guest: GuestProfile, rid: String, onDone: @escaping (String?, String?) -> Void) {
+        self.guest = guest; self.rid = rid; self.onDone = onDone
+        let newest = guest.bookings.sorted { ($0.booking_date ?? "") > ($1.booking_date ?? "") }
+        let name = newest.compactMap(\.guest_name).first { !$0.isEmpty } ?? ""
+        let phone = guest.phone ?? ""
+        self.originalName = name; self.originalPhone = phone
+        _name = State(initialValue: name); _phone = State(initialValue: phone)
+        _profile = State(initialValue: BookingGuestDetailsModel(key: guest.id))
     }
 
     var body: some View {
         NavigationStack {
-            ZStack { Color.miseBg.ignoresSafeArea()
-                Form {
-                    // Имя/фамилия/ДР — это всё о личности гостя, не контакт; телефон/email —
-                    // отдельно, это способы связи (юзер-фидбек: ДР не контактные данные).
+            Form {
+                if profile.loading { ProgressView() }
+                if let error = profile.error {
+                    Section {
+                        Text(t("loadFailed")).fontWeight(.semibold)
+                        Text(error).font(.caption).foregroundStyle(.secondary)
+                        Button(t("retry")) { Task { await loadProfile() } }
+                    }
+                }
+                Group {
                     Section(t("gs.guestInfo")) {
                         TextField(t("gs.namePh"), text: $name)
                         TextField(t("gs.lastName"), text: $lastName)
-                        // Без тумблера — просто дата: пусто = нет ДР, выбрана = есть (юзер-
-                        // фидбек: незачем отдельный флаг, когда сама дата уже это говорит).
                         if hasBirthday {
                             HStack {
                                 DatePicker(t("gs.birthday"), selection: $birthday, displayedComponents: .date)
-                                Button { withAnimation { hasBirthday = false } } label: {
-                                    Image(systemName: "xmark.circle.fill").foregroundStyle(.primary.opacity(0.3))
-                                }.buttonStyle(.plain)
+                                Button { hasBirthday = false } label: {
+                                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                                }.buttonStyle(.plain).accessibilityLabel(t("delete"))
                             }
                         } else {
-                            Button { withAnimation { hasBirthday = true; birthday = Date() } } label: {
-                                Label(t("gs.birthday"), systemImage: "plus.circle").foregroundStyle(GS_ACCENT)
-                            }.buttonStyle(.plain)
+                            Button { hasBirthday = true; birthday = Date() } label: { Label(t("gs.birthday"), systemImage: "plus.circle") }
                         }
                     }
                     Section(t("gs.secContacts")) {
-                        TextField(t("gs.phonePh"), text: $phone)
-                            .keyboardType(.phonePad)
-                        TextField(t("gs.email"), text: $email)
-                            .keyboardType(.emailAddress).textInputAutocapitalization(.never)
+                        TextField(t("gs.phonePh"), text: $phone).keyboardType(.phonePad)
+                        TextField(t("gs.email"), text: $email).keyboardType(.emailAddress).textInputAutocapitalization(.never)
                     }
                     Section(t("gs.note")) {
                         TextField(t("gs.notePh"), text: $note, axis: .vertical).lineLimit(2...5)
                     }
                 }
-                if let errorMsg {
-                    Text(errorMsg)
-                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
-                        .padding(.horizontal, 18).padding(.vertical, 12)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .padding(.bottom, 60)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
+                .disabled(!profile.loaded || saveState.saving)
             }
-            .animation(.easeInOut(duration: 0.2), value: errorMsg)
+            .tint(GS_ACCENT)
             .navigationTitle(t("gs.editGuest"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() }.disabled(saveState.saving) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(t("bk.save")) { save() }.disabled(saving)
+                    Button(saveState.saving ? t("saving") : t("bk.save")) { save() }
+                        .disabled(!profile.loaded || saveState.saving)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if let error = saveState.error {
+                    Text(error).font(.system(size: 13)).foregroundStyle(.red).multilineTextAlignment(.center)
+                        .padding(14).frame(maxWidth: .infinity).background(.regularMaterial)
                 }
             }
         }
+        .interactiveDismissDisabled(saveState.saving)
+        .task { await loadProfile() }
     }
 
-    private func flash(_ msg: String) {
-        errorMsg = msg
-        Task { try? await Task.sleep(nanoseconds: 2_400_000_000); if errorMsg == msg { errorMsg = nil } }
+    private func loadProfile() async {
+        await profile.load()
+        guard profile.loaded, !Task.isCancelled else { return }
+        lastName = profile.details.last_name ?? ""; email = profile.details.email ?? ""; note = profile.details.note ?? ""
+        if let text = profile.details.birthday, let date = Self.bdayFmt.date(from: text) { birthday = date; hasBirthday = true }
+        else { hasBirthday = false }
     }
 
     private func save() {
-        guard !saving else { return }
-        saving = true
-        let newName = name.trimmingCharacters(in: .whitespaces)
-        let newPhone = phone.trimmingCharacters(in: .whitespaces)
+        guard profile.loaded, !saveState.saving else { return }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPhone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+        let changedName: String? = trimmedName == originalName ? nil : trimmedName
+        let changedPhone: String? = trimmedPhone == originalPhone ? nil : trimmedPhone
+        var patch: [String: Any] = [:]
+        let last = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let birthdayValue = hasBirthday ? Self.bdayFmt.string(from: birthday) : nil
+        if last != (profile.details.last_name ?? "") { patch["last_name"] = last }
+        if mail != (profile.details.email ?? "") { patch["email"] = mail }
+        if text != (profile.details.note ?? "") { patch["note"] = text }
+        if birthdayValue != profile.details.birthday { patch["birthday"] = birthdayValue ?? NSNull() }
         Task {
-            var failure: Error?
-            for b in guest.bookings {
-                var patch: [String: Any] = [:]
-                if !newName.isEmpty { patch["guest_name"] = newName }
-                patch["phone"] = newPhone
-                do {
-                    try await DB.from("bookings").update(patch).eq("id", b.id).run()
-                } catch {
-                    failure = error
-                    break
-                }
-            }
-            let lastTrim = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let emailTrim = email.trimmingCharacters(in: .whitespacesAndNewlines)
-            let noteTrim = note.trimmingCharacters(in: .whitespacesAndNewlines)
-            var values: [String: Any] = ["guest_key": guest.id, "last_name": lastTrim, "email": emailTrim, "note": noteTrim]
-            values["birthday"] = hasBirthday ? Self.bdayFmt.string(from: birthday) : NSNull()
-            try? await DB.from("guest_notes").upsert(values, onConflict: "restaurant_id,guest_key").run()
-            await MainActor.run {
-                saving = false
-                if let failure {
-                    flash(t("saveFailed", ["err": failure.localizedDescription]))
-                } else {
-                    onDone(newName, newPhone)
-                    dismiss()
-                }
+            if await saveState.perform({ try await BookingGuestService.update(key: guest.id, name: changedName, phone: changedPhone, profile: patch) }) {
+                onDone(changedName, changedPhone); dismiss()
             }
         }
     }

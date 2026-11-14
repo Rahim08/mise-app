@@ -3,7 +3,7 @@
 // Публикует owner/manager (на этом дашборде — всегда owner), читают все сотрудники.
 // priority — колонка из отдельной миграции (news-priority-2026-06.sql); если её нет,
 // insert с priority получит 400 — тогда сохраняем без неё и прячем контрол (см. save()).
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { db } from '@/lib/db'
 import { notify as pushNotify } from '@/lib/notifyClient'
 import { useI18n } from '@/lib/i18n'
@@ -57,8 +57,15 @@ export default function NewsPage() {
 
   useEffect(() => { if (restaurantId) load() }, [restaurantId])
 
+  // Синхронный замок: двойной клик до перерисовки публиковал два поста и слал два пуша (аудит 2026-10-26).
+  const publishBusy = useRef(false)
   const publish = async () => {
-    if (!body.trim()) return
+    if (!body.trim() || publishBusy.current) return
+    publishBusy.current = true
+    try { await publishInner() } finally { publishBusy.current = false }
+  }
+
+  const publishInner = async () => {
     setPublishing(true)
     // created_by/created_by_name — тот же паттерн, что NewsCompose на iOS (NewsView.swift:195):
     // owner-дашборд не имеет staff-строки, поэтому фиксированный id "owner".

@@ -234,8 +234,10 @@ export function TechCardsView({ isManager, accent, t, toast }: { isManager: bool
     setEdit(null); toast(tr('pe.saved')); await load()
   }
   const remove = async (id: string) => {
+    if (!window.confirm(tr('pe.deleteTechConfirm'))) return
     setCards(cs => cs.filter(c => c.id !== id))
-    await db.from('tech_cards').update({ is_active: false }).eq('id', id)
+    const { error } = await db.from('tech_cards').update({ is_active: false }).eq('id', id)
+    if (error) { toast(tr('dash.notSaved') + error.message); load() }
   }
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
@@ -339,8 +341,13 @@ export function PurchaseTab({ me, isManager, accent, t, toast }: { me: any; isMa
   const [saving, setSaving] = useState(false)
 
   const load = async () => {
-    const { data } = await db.from('purchase_items').select('*').order('created_at', { ascending: false }).limit(300)
-    setItems(data || []); setLoading(false)
+    // «К закупке» — все открытые позиции; общий лимит 300 выбрасывал старые некупленные.
+    const [{ data: todo, error: e1 }, { data: done, error: e2 }] = await Promise.all([
+      db.from('purchase_items').select('*').eq('status', 'todo').order('created_at', { ascending: false }).limit(1000),
+      db.from('purchase_items').select('*').neq('status', 'todo').order('created_at', { ascending: false }).limit(300),
+    ])
+    if (!e1 && !e2) setItems([...(todo || []), ...(done || [])])
+    setLoading(false)
   }
   useEffect(() => { load(); const iv = setInterval(load, 30000); return () => clearInterval(iv) }, [])
 
@@ -351,7 +358,7 @@ export function PurchaseTab({ me, isManager, accent, t, toast }: { me: any; isMa
 
   const submit = async () => {
     const valid = rows.map(r => ({ ...r, name: r.name.trim() })).filter(r => r.name)
-    if (!valid.length) return
+    if (!valid.length || saving) return
     setSaving(true)
     const payload = valid.map(r => ({
       category: cat,
@@ -385,23 +392,27 @@ export function PurchaseTab({ me, isManager, accent, t, toast }: { me: any; isMa
     const now = new Date().toISOString()
     const bought = status === 'bought'
     setItems(xs => xs.map(x => x.id === it.id ? { ...x, status, bought_at: bought ? now : null } : x))
-    await db.from('purchase_items').update({
+    const { error } = await db.from('purchase_items').update({
       status,
       bought_by: bought ? ((me.id && me.id !== 'owner') ? me.id : null) : null,
       bought_at: bought ? now : null,
     }).eq('id', it.id)
+    if (error) { toast(tr('dash.notSaved') + error.message); load() }
   }
 
   const remove = async (it: any) => {
+    if (!window.confirm(tr('pe.deletePurchaseConfirm'))) return
     setItems(xs => xs.filter(x => x.id !== it.id))
-    await db.from('purchase_items').delete().eq('id', it.id)
+    const { error } = await db.from('purchase_items').delete().eq('id', it.id)
+    if (error) { toast(tr('dash.notSaved') + error.message); load() }
   }
 
   const clearDone = async () => {
     const ids = items.filter(x => x.status !== 'todo').map(x => x.id)
     if (!ids.length) return
     setItems(xs => xs.filter(x => x.status === 'todo'))
-    await db.from('purchase_items').delete().in('id', ids)
+    const { error } = await db.from('purchase_items').delete().in('id', ids)
+    if (error) { toast(tr('dash.notSaved') + error.message); load(); return }
     toast(tr('pe.pClearDone'))
   }
 

@@ -109,3 +109,19 @@ export function verifyAdminViewToken(token: string | undefined | null): AdminVie
 
 export const ADMIN_VIEW_COOKIE_NAME = ADMIN_VIEW_COOKIE
 export const ADMIN_VIEW_COOKIE_MAXAGE = ADMIN_VIEW_TTL_SECONDS
+
+// Подпись `state` для колбэка банка (аудит безопасности 2026-10-26): раньше state был голым
+// bank_connections.id — колбэк без авторизации, и любой, кто узнал id «ожидающего»
+// подключения, мог привязать к ресторану свой банковский счёт. Теперь state = id.подпись.
+export function signBankState(connectionId: string): string {
+  return `${connectionId}.${sign('bank:' + connectionId, secret()).slice(0, 22)}`
+}
+
+export function verifyBankState(state: string | undefined | null): string | null {
+  if (!state) return null
+  const [id, sig] = state.split('.')
+  if (!id || !sig) return null
+  const expected = sign('bank:' + id, secret()).slice(0, 22)
+  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null
+  return id
+}

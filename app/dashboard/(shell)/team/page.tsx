@@ -1,6 +1,6 @@
 'use client'
 // Команда: HR (employees) + доступы (staff). Перенесено из TeamTab старого dashboard/page.tsx.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { db } from '@/lib/db'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
 import { track } from '@/lib/analytics'
@@ -97,8 +97,16 @@ export default function TeamPage() {
   }
 
   // One save handles both HR (employees) and access (staff).
+  // Синхронный замок: двойной клик до перерисовки создавал двух сотрудников (аудит 2026-10-26).
+  const saveBusy = useRef(false)
   const save = async () => {
     if (!form.name.trim()) { alert(tr('dash.enterName')); return }
+    if (saveBusy.current) return
+    saveBusy.current = true
+    try { await saveInner() } finally { saveBusy.current = false }
+  }
+
+  const saveInner = async () => {
     setSaving(true)
     const name = form.name.trim()
     const empPayload = { restaurant_id: restaurantId, name, salary: +form.salary || 0, deduct_per_absence: +form.deduct || 0, card_amount: +form.card || 0, is_active: true }

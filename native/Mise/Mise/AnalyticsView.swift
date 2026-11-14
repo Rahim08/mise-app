@@ -78,6 +78,10 @@ final class AnalyticsModel {
     var advances: [SalaryAdvance] = []
     var payments: [SalaryPayment] = []
     var prevPayments: [SalaryPayment] = []
+    // Открытый ЗП-долг за месяц (SALPERIOD-строки shift_expenses) — «Осталось» вычитает его,
+    // как Manager/People→Зарплата (аудит 2026-09-30), иначе провоцирует двойную выплату.
+    nonisolated struct SalDebtRow: Codable, Sendable { let employee_id: String?; let amount: Double? }
+    var salDebts: [SalDebtRow] = []
     // Прошлый месяц — для «Начислено» до payout_day (см. cycleTotalCash в карточке кассы):
     // до дня выплаты карточка ещё показывает не выплаченную ЗП за прошлый месяц.
     var prevCardAmounts: [CardAmount] = []
@@ -194,143 +198,165 @@ final class AnalyticsModel {
     // зависит от currentDate — только verdict "на конец какого месяца" считается локально.
     // Теперь фетчатся один раз за сессию, обновляются только явным pull-to-refresh (forceRefresh: true).
     private var histLoaded = false
+    var historyLoading = false
     // Поступления в инкассацию (inkassation_topups) — в баланс входят, в кассу/выручку нет.
     // Грузим на каждый load (одним лёгким запросом), не кэшируем в histLoaded — правятся в Manager.
     var allTopups: [InkTopup] = []
+
+    private var loadGeneration = 0
+    private func isCurrentLoad(_ generation: Int) -> Bool {
+        generation == loadGeneration && !Task.isCancelled
+    }
 
     func load(forceRefresh: Bool = false) async {
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedDemo(); return }
         #endif
+        loadGeneration += 1
+        let generation = loadGeneration
         if forceRefresh { histLoaded = false }
-        loading = true; defer { loading = false }
+        loading = true
+        defer { if generation == loadGeneration { loading = false } }
+        let date = currentDate
+        // All-time modules must not delay the period or its cash collection balance.
+        async let period: Void = loadPeriod(date: date, generation: generation)
+        async let balance: Void = loadInkassationSummary(generation: generation)
+        async let history: Void = loadHistory(generation: generation)
+        await period
+        if isCurrentLoad(generation) { loading = false }
+        await balance
+        await history
+    }
+
+    private func loadPeriod(date: Date, generation: Int) async {
         let cal = Calendar.current
-        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: currentDate)) ?? currentDate
+        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: date)) ?? date
         let monthEnd = cal.date(byAdding: DateComponents(month: 1, day: -1), to: monthStart) ?? monthStart
         let prevStart = cal.date(byAdding: .month, value: -1, to: monthStart) ?? monthStart
         let prevEnd = cal.date(byAdding: .day, value: -1, to: monthStart) ?? monthStart
-        let ym = String(key(currentDate).prefix(7))
+        let ym = String(key(date).prefix(7))
+        let prevYm = String(key(prevStart).prefix(7))
+        async let settings = try? DB.from("restaurant_settings").select().limit(1).list(AnalyticsSettings.self)
+        async let sh = try? DB.from("shifts").select().gte("date", key(monthStart)).lte("date", key(monthEnd)).order("date").list(Shift.self)
+        async let prev = try? DB.from("shifts").select().gte("date", key(prevStart)).lte("date", key(prevEnd)).order("date").list(Shift.self)
+        // Keep inactive employees with activity and resolve historical salaries as before.
+        async let emps = try? DB.from("employees").select().order("name").list(Employee.self)
+        async let cards = try? DB.from("monthly_card_amounts").select("id, employee_id, card_amount").eq("month", ym).list(CardAmount.self)
+        async let abs = try? DB.from("shift_absences").select().gte("date", key(monthStart)).lte("date", key(monthEnd)).list(Absence.self)
+        async let hk = try? DB.from("hookah_sales").select().gte("date", key(monthStart)).lte("date", key(monthEnd)).order("date").list(HookahSale.self)
+        async let prevCards = try? DB.from("monthly_card_amounts").select("id, employee_id, card_amount").eq("month", prevYm).list(CardAmount.self)
+        async let prevAbs = try? DB.from("shift_absences").select().gte("date", key(prevStart)).lte("date", key(prevEnd)).list(Absence.self)
+        async let prevAdv = try? DB.from("salary_advances").select().eq("period", prevYm + "-01").list(SalaryAdvance.self)
+        async let prevPays = try? DB.from("salary_payments").select().eq("period", prevYm + "-01").list(SalaryPayment.self)
+        async let salHist = try? DB.from("salary_history").select("employee_id, salary, deduct_per_absence, effective_from").list(SalaryHistoryRow.self)
+        async let advRes = try? DB.from("salary_advances").select().eq("period", ym + "-01").list(SalaryAdvance.self)
+        async let paysRes = try? DB.from("salary_payments").select().eq("period", ym + "-01").list(SalaryPayment.self)
+        async let debtsRes = try? DB.from("shift_expenses").select("employee_id, amount")
+            .eq("is_paid", false).eq("note", "\(ManagerSalaryModel.salperiodPrefix)\(key(monthStart))").list(SalDebtRow.self)
+        nonisolated struct CatPin: Codable, Sendable { let name: String?; let is_pinned: Bool? }
+        async let catsRes = try? DB.from("expense_categories").select("name, is_pinned").list(CatPin.self)
 
-        if let s = try? await DB.from("restaurant_settings").select().limit(1).list(AnalyticsSettings.self).first {
+        // Start shift details as soon as shifts arrive, without waiting for payroll.
+        let shiftRows = await sh
+        let previousRows = await prev
+        guard isCurrentLoad(generation) else { return }
+        let ids = (shiftRows ?? shiftsRaw).map(\.id)
+        let prevIds = (previousRows ?? prevShiftsRaw).map(\.id)
+        async let expensesRes: [ShiftExpense]? = ids.isEmpty ? [] : (try? await DB.from("shift_expenses").select().in("shift_id", ids).list(ShiftExpense.self))
+        async let inksRes: [Inkassation]? = ids.isEmpty ? [] : (try? await DB.from("inkassations").select("shift_id, amount, expense, reason, total, salary, salary_note").in("shift_id", ids).list(Inkassation.self))
+        async let prevExpRes: [ShiftExpense]? = prevIds.isEmpty ? [] : (try? await DB.from("shift_expenses").select().in("shift_id", prevIds).list(ShiftExpense.self))
+        let settingsRows = await settings
+        guard isCurrentLoad(generation) else { return }
+        if let s = settingsRows?.first {
             includeCard = s.include_card_in_analytics ?? false
             hkPrice = s.hookah_price ?? 0
             hkPortion = s.hookah_portion_g ?? 20
             payoutDay = s.salary_payout_day
         }
-
-        // Грузим в optional и присваиваем в state ТОЛЬКО при успехе: при сетевом сбое
-        // (напр. pull-to-refresh без связи) прошлые данные сохраняются, а не обнуляются.
-        async let sh = try? DB.from("shifts").select().gte("date", key(monthStart)).lte("date", key(monthEnd)).order("date").list(Shift.self)
-        async let prev = try? DB.from("shifts").select().gte("date", key(prevStart)).lte("date", key(prevEnd)).order("date").list(Shift.self)
-        // Без фильтра is_active — уволенный остаётся в месяцах, где у него есть выплаты/авансы/
-        // прогулы/карта (аудит 2026-09-27, паритет с Manager→Зарплата); фильтр — ниже, после payments.
-        async let emps = try? DB.from("employees").select().order("name").list(Employee.self)
-        async let cards = try? DB.from("monthly_card_amounts").select("id, employee_id, card_amount").eq("month", ym).list(CardAmount.self)
-        async let abs = try? DB.from("shift_absences").select().gte("date", key(monthStart)).lte("date", key(monthEnd)).list(Absence.self)
-        async let hk = try? DB.from("hookah_sales").select().gte("date", key(monthStart)).lte("date", key(monthEnd)).order("date").list(HookahSale.self)
-        let prevYm = String(key(prevStart).prefix(7))
-        async let prevCards = try? DB.from("monthly_card_amounts").select("id, employee_id, card_amount").eq("month", prevYm).list(CardAmount.self)
-        async let prevAbs = try? DB.from("shift_absences").select().gte("date", key(prevStart)).lte("date", key(prevEnd)).list(Absence.self)
-        // Фильтр по period (месяц ЗП), не по date (день списания из кассы) — паритет с
-        // ManagerSalary.computeSalary (юзер-фидбок 2026-08-15).
-        async let prevAdv = try? DB.from("salary_advances").select().eq("period", prevYm + "-01").list(SalaryAdvance.self)
-        // Оклад/вычет по месяцам (salary-history-2026-09.sql) — иначе правка оклада сегодня
-        // меняет расчёт за просматриваемый прошлый месяц задним числом.
-        async let prevPays = try? DB.from("salary_payments").select().eq("period", prevYm + "-01").list(SalaryPayment.self)
-        async let salHist = try? DB.from("salary_history").select("employee_id, salary, deduct_per_absence, effective_from").list(SalaryHistoryRow.self)
-
-        shiftsRaw = (await sh) ?? shiftsRaw
-        prevShiftsRaw = (await prev) ?? prevShiftsRaw
-        if let h = await salHist { salaryHistory = h }
-        let rawEmps = await emps
-        prevPayments = (await prevPays) ?? prevPayments
-        cardAmounts = (await cards) ?? cardAmounts
-        if let a = await abs { absences = a.filter { $0.source != "auto" } }
-        hookahRows = (await hk) ?? hookahRows
-        prevCardAmounts = (await prevCards) ?? prevCardAmounts
-        if let pa = await prevAbs { prevAbsences = pa.filter { $0.source != "auto" } }
-        prevAdvances = (await prevAdv) ?? prevAdvances
-
-        // Всё ниже — независимые чтения (разные таблицы/состояния), раньше шли одно за другим
-        // (каждый лишний последовательный await — это ещё один сетевой round-trip до Supabase,
-        // юзер-фидбок 2026-09-22: "кнопки/баланс стали дольше грузиться"). async let запускает
-        // их одновременно, ждём все разом — то же самое присваивание state, тот же результат.
-        let ids = shiftsRaw.map(\.id)
-        let prevIds = prevShiftsRaw.map(\.id)
-        async let expensesRes: [ShiftExpense]? = ids.isEmpty ? [] : (try? await DB.from("shift_expenses").select().in("shift_id", ids).list(ShiftExpense.self))
-        async let inksRes: [Inkassation]? = ids.isEmpty ? [] : (try? await DB.from("inkassations").select("shift_id, amount, expense, reason, total, salary, salary_note").in("shift_id", ids).list(Inkassation.self))
-        async let prevExpRes: [ShiftExpense]? = prevIds.isEmpty ? [] : (try? await DB.from("shift_expenses").select().in("shift_id", prevIds).list(ShiftExpense.self))
-        // Фильтр по period (месяц ЗП), не по date (день списания из кассы) — паритет с
-        // ManagerSalary.computeSalary (юзер-фидбок 2026-08-15).
-        async let advRes = try? DB.from("salary_advances").select()
-            .eq("period", ym + "-01").list(SalaryAdvance.self)
-        async let paysRes = try? DB.from("salary_payments").select()
-            .eq("period", String(key(monthStart).prefix(7)) + "-01").list(SalaryPayment.self)
-        // Закреплённые категории расходов — показываются первыми в разбивке.
-        nonisolated struct CatPin: Codable, Sendable { let name: String?; let is_pinned: Bool? }
-        async let catsRes = try? DB.from("expense_categories").select("name, is_pinned").list(CatPin.self)
-        // Поступления в инкассацию — не зависят ни от ids, ни от histLoaded; запускаем в той
-        // же волне вместо отдельного await в конце функции (было ещё одним лишним round-trip).
-        async let topupsRes = try? DB.from("inkassation_topups").select("id, date, amount, reason").order("date").list(InkTopup.self)
-        // Баланс инкассации — готовый агрегат из VIEW (1 строка), не all-time перекачка
-        // shifts+inkassations (юзер-фидбок 2026-09-23: плашка не ускорилась вместе с остальным
-        // потому что этот кусок так и тянул всю историю заведения на каждый refresh).
-        async let balanceRes = try? DB.from("inkassation_balance").select("balance").limit(1).list(InkBalanceRow.self)
-
-        if let e = await expensesRes { expenses = e }
-        if let inks = await inksRes {
-            var d: [String: Inkassation] = [:]
-            for ink in inks { if let sid = ink.shift_id { d[sid] = ink } }
-            inkDetails = d
+        if let shiftRows { shiftsRaw = shiftRows }
+        if let previousRows { prevShiftsRaw = previousRows }
+        let (expenseRows, inkRows, previousExpenseRows) = await (expensesRes, inksRes, prevExpRes)
+        guard isCurrentLoad(generation) else { return }
+        if let expenseRows { expenses = expenseRows }
+        if let inkRows {
+            var byShift: [String: Inkassation] = [:]
+            for ink in inkRows { if let sid = ink.shift_id { byShift[sid] = ink } }
+            inkDetails = byShift
         }
-        if let pe = await prevExpRes { prevExpenses = pe }
-        if let adv = await advRes { advances = adv }
-        if let pays = await paysRes { payments = pays }
+        if let previousExpenseRows { prevExpenses = previousExpenseRows }
+
+        let (rawEmps, history, currentCards, currentAbs, hookah, previousCards, previousAbs,
+             previousAdv, previousPays, currentAdv, currentPays, debts, cats) = await
+            (emps, salHist, cards, abs, hk, prevCards, prevAbs, prevAdv, prevPays, advRes, paysRes, debtsRes, catsRes)
+        guard isCurrentLoad(generation) else { return }
+        if let history { salaryHistory = history }
+        if let currentCards { cardAmounts = currentCards }
+        if let currentAbs { absences = currentAbs.filter { $0.source != "auto" } }
+        if let hookah { hookahRows = hookah }
+        if let previousCards { prevCardAmounts = previousCards }
+        if let previousAbs { prevAbsences = previousAbs.filter { $0.source != "auto" } }
+        if let previousAdv { prevAdvances = previousAdv }
+        if let previousPays { prevPayments = previousPays }
+        if let currentAdv { advances = currentAdv }
+        if let currentPays { payments = currentPays }
+        if let debts { salDebts = debts }
         if let rawEmps {
-            var withActivity = Set<String>()
-            for id in absences.compactMap(\.employee_id) + cardAmounts.compactMap(\.employee_id)
-                + advances.compactMap(\.employee_id) + payments.compactMap(\.employee_id) { withActivity.insert(id) }
-            let monthEmps = rawEmps.filter { $0.is_active != false || withActivity.contains($0.id) }
-            employees = resolveEmployees(monthEmps, history: salaryHistory, monthStart: key(monthStart))
+            let withActivity = Set(absences.compactMap(\.employee_id) + cardAmounts.compactMap(\.employee_id)
+                + advances.compactMap(\.employee_id) + payments.compactMap(\.employee_id) + salDebts.compactMap(\.employee_id))
+            employees = resolveEmployees(rawEmps.filter { $0.is_active != false || withActivity.contains($0.id) }, history: salaryHistory, monthStart: key(monthStart))
         }
-        if let cats = await catsRes {
-            pinnedCats = Set(cats.filter { $0.is_pinned == true }.compactMap { $0.name })
-        }
+        if let cats { pinnedCats = Set(cats.filter { $0.is_pinned == true }.compactMap { $0.name }) }
+    }
 
-        if !histLoaded {
-            // кальян all-time + склад — тоже не зависит от currentDate, грузим вместе с историей
-            async let allHk = try? DB.from("hookah_sales").select("quantity, portion_g").list(HookahSale.self)
-            async let stock = try? DB.from("tobacco_stock").select("id, brand, flavor, quantity_g, min_quantity_g").list(StockItem.self)
-            async let movs = try? DB.from("tobacco_movements").select().list(Movement.self)
-            async let tps = try? DB.from("hookah_types").select("id, name").list(HookahType.self)
-            allHookah = (await allHk) ?? allHookah
-            stockRows = (await stock) ?? stockRows
-            if let mv = await movs { issuedG = mv.filter { $0.type == "out" }.reduce(0) { $0 + $1.quantity_g } }
-            stockG = stockRows.reduce(0) { $0 + $1.quantity_g }
-            types = (await tps) ?? types
-            await loadDebts()
-            await loadBank()
-            histLoaded = true
-        }
+    private func loadInkassationSummary(generation: Int) async {
+        async let topups = try? DB.from("inkassation_topups").select("id, date, amount, reason").order("date").list(InkTopup.self)
+        let balance = try? await DB.from("inkassation_balance").select("balance").limit(1).list(InkBalanceRow.self)
+        guard isCurrentLoad(generation) else { return }
+        // This aggregate is independent of selected month, history, payroll and bank.
+        if let row = balance?.first { cumulativeInkass = row.balance ?? 0 }
+        let topupRows = await topups
+        guard isCurrentLoad(generation) else { return }
+        if let topupRows { allTopups = topupRows }
+    }
 
-        // Инкассация — общий баланс заведения, не привязан к просматриваемому месяцу
-        // (юзер-фидбок 2026-08-16: цифра не должна ехать при пролистывании назад/вперёд).
-        // Считает Postgres (VIEW inkassation_balance), клиент только читает готовое число.
-        if let tp = await topupsRes { allTopups = tp }
-        if let b = (await balanceRes)?.first { cumulativeInkass = b.balance ?? 0 }
+    private func loadHistory(generation: Int) async {
+        guard !histLoaded else { return }
+        historyLoading = true
+        defer { if generation == loadGeneration { historyLoading = false } }
+        async let allHk = try? DB.from("hookah_sales").select("quantity, portion_g").list(HookahSale.self)
+        async let stock = try? DB.from("tobacco_stock").select("id, brand, flavor, quantity_g, min_quantity_g").list(StockItem.self)
+        async let movs = try? DB.from("tobacco_movements").select().list(Movement.self)
+        async let tps = try? DB.from("hookah_types").select("id, name").list(HookahType.self)
+        async let debts: Void = loadDebts(generation: generation)
+        async let bank: Void = loadBank(generation: generation)
+        let (hookah, stockRowsResult, movements, typeRows) = await (allHk, stock, movs, tps)
+        guard isCurrentLoad(generation) else { return }
+        if let hookah { allHookah = hookah }
+        if let stockRowsResult { stockRows = stockRowsResult; stockG = stockRowsResult.reduce(0) { $0 + $1.quantity_g } }
+        if let movements { issuedG = movements.filter { $0.type == "out" }.reduce(0) { $0 + $1.quantity_g } }
+        if let typeRows { types = typeRows }
+        historyLoading = false
+        await debts
+        await bank
+        guard isCurrentLoad(generation) else { return }
+        // Retry failed history reads on the next navigation instead of caching a failure.
+        histLoaded = hookah != nil && stockRowsResult != nil && movements != nil && typeRows != nil && !debtsLoadFailed
     }
 
     // MARK: - Банк (Open Banking)
 
-    func loadBank() async {
+    func loadBank(generation: Int? = nil) async {
         guard let c = try? await DB.from("bank_connections").select()
             .order("created_at", ascending: false).limit(1).list(BankConnection.self).first else {
+            guard generation.map(isCurrentLoad) ?? !Task.isCancelled else { return }
             bankConnection = nil; return
         }
+        guard generation.map(isCurrentLoad) ?? !Task.isCancelled else { return }
         guard c.status == "linked" else { bankConnection = nil; return }
         bankConnection = c
         if let tx = try? await DB.from("bank_transactions").select()
             .eq("connection_id", c.id).order("booking_date", ascending: false).list(BankTransaction.self) {
+            guard generation.map(isCurrentLoad) ?? !Task.isCancelled else { return }
             bankTx = tx
         }
     }
@@ -366,6 +392,20 @@ final class AnalyticsModel {
             if resp.ok == false { bankError = resp.error ?? "error" }
         } catch {
             bankError = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+        await loadBank()
+    }
+
+    func disconnectBank() async {
+        bankBusy = true; bankError = nil
+        defer { bankBusy = false }
+        do {
+            let resp = try await API.postJSON("/api/bank/disconnect", body: [:], as: BankSyncResponse.self)
+            if resp.ok != true { bankError = resp.error ?? "error"; return }
+            bankTx = []
+        } catch {
+            bankError = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            return
         }
         await loadBank()
     }
@@ -605,7 +645,8 @@ final class AnalyticsModel {
             // Только наличные — паритет с Manager→Зарплата (A2): карта уже вычтена через
             // monthly_card_amounts, иначе «осталось» расходилось между экранами (аудит 2026-09-27).
             let paid = payments.filter { $0.employee_id == e.id && ($0.method ?? "cash") == "cash" }.reduce(0) { $0 + ($1.amount ?? 0) }
-            let remaining = max(0, cash - paid)
+            let openDebt = salDebts.filter { $0.employee_id == e.id }.reduce(0) { $0 + ($1.amount ?? 0) }
+            let remaining = max(0, cash - paid - openDebt)
             return SalaryRow(id: e.id, name: e.name, salary: e.salary ?? 0, abs: absN, deduct: deduct, card: card, cash: cash, total: total, advance: advance, advanceList: advList, paid: paid, remaining: remaining)
         }
     }
@@ -655,7 +696,13 @@ final class AnalyticsModel {
         // computeAccruedToday (C3, аудит 2026-08-15).
         computeAccruedToday(isCurrentMonth: isCurrentMonth, totalCash: salCash, daysInMonth: daysInMonth, payoutDay: payoutDay, prevTotalCash: prevSalCash, prevDaysInMonth: prevDaysInMonth,
                             paidCash: salaryRows.reduce(0) { $0 + $1.paid },
-                            prevPaidCash: prevPayments.filter { ($0.method ?? "cash") == "cash" }.reduce(0) { $0 + ($1.amount ?? 0) }).rounded()
+                            prevPaidCash: prevPaidCash).rounded()
+    }
+    // Только сотрудники, чей оклад вошёл в prevSalCash (тот же набор employees) — иначе выплата
+    // уволенному без активности в этом месяце вычиталась без его начисления (аудит 2026-09-30).
+    var prevPaidCash: Double {
+        let ids = Set(employees.map(\.id))
+        return prevPayments.filter { ($0.method ?? "cash") == "cash" && ids.contains($0.employee_id ?? "") }.reduce(0) { $0 + ($1.amount ?? 0) }
     }
     // Аванс/сумма-на-карту (запись) — переехали в Manager→Зарплата (ManagerSalary.swift,
     // реструктура 2026-08-14). advances/cardAmounts здесь остаются read-only для отображения.
@@ -705,7 +752,7 @@ final class AnalyticsModel {
         return paidShiftId == e.shift_id
     }
 
-    func loadDebts() async {
+    func loadDebts(generation: Int? = nil) async {
         nonisolated struct DebtExp: Codable, Sendable {
             let id: String; let shift_id: String?; let category_id: String?; let category_name: String?
             let employee_id: String?; let amount: Double?; let is_paid: Bool?; let paid_at: String?
@@ -721,11 +768,13 @@ final class AnalyticsModel {
         do {
             let unpaid = try await unpaidQ
             let settled = (try await settledQ).filter { $0.paid_shift_id != $0.shift_id }
+            guard generation.map(isCurrentLoad) ?? !Task.isCancelled else { return }
             let all = unpaid + settled
             guard !all.isEmpty else { debts = []; debtHistory = []; debtsLoadFailed = false; return }
             let shiftIds = Array(Set(all.compactMap { $0.shift_id }))
             nonisolated struct ShiftDateRow: Codable, Sendable { let id: String; let date: String }
             let shiftDates = try await DB.from("shifts").select("id, date").in("id", shiftIds).list(ShiftDateRow.self)
+            guard generation.map(isCurrentLoad) ?? !Task.isCancelled else { return }
             let dateById = Dictionary(uniqueKeysWithValues: shiftDates.map { ($0.id, $0.date) })
             func toRow(_ e: DebtExp) -> DebtRow? {
                 guard let sid = e.shift_id, let date = dateById[sid] else { return nil }
@@ -739,6 +788,7 @@ final class AnalyticsModel {
             // MISE-009: не обнуляем debts/debtHistory — оставляем последнее успешно
             // загруженное значение на экране, только сигнализируем баннером, что цифра
             // может быть устаревшей (честнее, чем молча показать «0 долгов»).
+            guard generation.map(isCurrentLoad) ?? !Task.isCancelled else { return }
             debtsLoadFailed = true
         }
     }
@@ -1139,9 +1189,13 @@ private struct AnalyticsBody: View {
                             .tabItem { Label(t("tab.kassa"), systemImage: "banknote.fill") }.tag("kassa")
                         AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { BankTab(m: m, bankEnabled: aiEnabled) }
                             .tabItem { Label(t("tab.bank"), systemImage: "building.columns.fill") }.tag("bank")
-                        AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { SalaryTab(m: m) }
+                        AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) {
+                            if m.loading { ProgressView().padding(.top, 40) } else { SalaryTab(m: m) }
+                        }
                             .tabItem { Label(t("tab.salary"), systemImage: "creditcard.fill") }.tag("salary")
-                        AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) { HookahTab(m: m) }
+                        AppTabPage(refresh: { await m.load(forceRefresh: true) }, scrollResetKey: m.tab) {
+                            if m.loading || m.historyLoading { ProgressView().padding(.top, 40) } else { HookahTab(m: m) }
+                        }
                             .tabItem { Label(t("tab.hookah"), systemImage: "flame.fill") }.tag("hookah")
                     }
                     .tint(BrandKit.analytics)
@@ -1608,7 +1662,9 @@ struct CardInputRow: View {
 
 // Не private — переиспользуется Manager→Зарплата (ManagerSalary.swift, реструктура 2026-08-14).
 struct AdvanceAddSheet: View {
-    let onSave: (Double, String) -> Void
+    let onSave: (Double, String) async -> Bool
+    let error: String?
+    @State private var saving = false
     @State private var amount = ""
     @State private var date = Date()
     @Environment(\.dismiss) private var dismiss
@@ -1617,8 +1673,8 @@ struct AdvanceAddSheet: View {
     // дня); можно указать вне просматриваемого месяца — взять сегодня в счёт ещё не закрытой
     // ЗП. К зарплате КАКОГО месяца отнести сумму, решает не эта дата, а viewMonth на экране в
     // момент нажатия «добавить» (см. addAdvance/computeSalary, period). Дефолт — «сегодня».
-    init(onSave: @escaping (Double, String) -> Void) {
-        self.onSave = onSave
+    init(error: String? = nil, onSave: @escaping (Double, String) async -> Bool) {
+        self.error = error; self.onSave = onSave
     }
 
     var body: some View {
@@ -1629,6 +1685,7 @@ struct AdvanceAddSheet: View {
                     HStack(spacing: 8) {
                         Text(Money.symbol).font(.system(size: 22, weight: .bold)).foregroundStyle(.primary.opacity(0.4))
                         TextField("0", text: $amount)
+                            .accessibilityIdentifier("advance-amount")
                             .keyboardType(.decimalPad)
                             .font(.system(size: 28, weight: .heavy)).foregroundStyle(BrandKit.analytics)
                     }
@@ -1638,29 +1695,43 @@ struct AdvanceAddSheet: View {
                     DatePicker(t("an.date"), selection: $date, displayedComponents: .date)
                         .datePickerStyle(.compact).tint(BrandKit.analytics)
 
+                    if let error {
+                        Text(error).font(.system(size: 13, weight: .medium)).foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     Spacer()
                 }
                 .padding(20)
+                .disabled(saving)
             }
             .navigationTitle(t("an.addAdvance")).navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(t("cancel")) { dismiss() }
+                    Button(t("cancel")) { dismiss() }.disabled(saving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(t("done")) {
+                    Button(saving ? t("saving") : t("done")) {
+                        guard !saving else { return }
+                        saving = true
                         let df = DateFormatter()
                         df.dateFormat = "yyyy-MM-dd"
                         df.locale = Locale(identifier: "en_US_POSIX")
-                        onSave(Double(amount.replacingOccurrences(of: ",", with: ".")) ?? 0, df.string(from: date))
-                        dismiss()
+                        let submittedAmount = Double(amount.replacingOccurrences(of: ",", with: ".")) ?? 0
+                        let submittedDate = df.string(from: date)
+                        Task {
+                            let saved = await onSave(submittedAmount, submittedDate)
+                            saving = false
+                            if saved { dismiss() }
+                        }
                     }
-                    .disabled((Double(amount.replacingOccurrences(of: ",", with: ".")) ?? 0) <= 0)
+                    .disabled(saving || (Double(amount.replacingOccurrences(of: ",", with: ".")) ?? 0) <= 0)
+                    .accessibilityIdentifier("advance-save")
                     .fontWeight(.bold)
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
         }
+        .interactiveDismissDisabled(saving)
         .presentationDetents([.medium])
     }
 }
@@ -1739,11 +1810,13 @@ private struct SharePayload: Identifiable { let id = UUID(); let url: URL }
 /// A small export menu button (CSV + PDF) for analytics tabs.
 /// `compact` — иконка без подписи, для встраивания в строку заголовка («ПО ДНЯМ»).
 private struct ExportMenuButton: View {
+    @Environment(AppModel.self) private var app
     let m: AnalyticsModel
     var compact: Bool = false
     @State private var payload: SharePayload?
 
     private func writePDF() -> URL? {
+        guard app.isOfficial, !m.loading else { return nil }
         let data = m.buildPDF()
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("analytics-\(m.navLabel.replacingOccurrences(of: " ", with: "-")).pdf")
@@ -1753,36 +1826,47 @@ private struct ExportMenuButton: View {
     // Презентация share-листа прямо из Menu-действия в SwiftUI ненадёжна (лист не
     // открывается) — даём меню закрыться и только потом ставим item.
     private func present(_ url: URL?) {
-        guard let url else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { payload = SharePayload(url: url) }
+        guard app.isOfficial, !m.loading, let url else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard app.isOfficial, !m.loading else { return }
+            payload = SharePayload(url: url)
+        }
     }
 
     var body: some View {
-        Menu {
-            Button { present(m.csvFileURL()) } label: {
-                Label(t("an.exportCSV"), systemImage: "tablecells")
-            }
-            Button { present(writePDF()) } label: {
-                Label(t("an.exportPDF"), systemImage: "doc.richtext")
-            }
-        } label: {
-            if compact {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(BrandKit.analytics)
-                    .padding(6)
-                    .background(Color.primary.opacity(0.07), in: Circle())
-            } else {
-                Label(t("an.export"), systemImage: "square.and.arrow.up")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(BrandKit.analytics)
-                    .padding(.vertical, 6).padding(.horizontal, 12)
-                    .background(Color.primary.opacity(0.07), in: Capsule())
+        Group {
+            if app.isOfficial, !m.loading {
+                Menu {
+                    Button {
+                        guard app.isOfficial, !m.loading else { return }
+                        present(m.csvFileURL())
+                    } label: {
+                        Label(t("an.exportCSV"), systemImage: "tablecells")
+                    }
+                    Button { present(writePDF()) } label: {
+                        Label(t("an.exportPDF"), systemImage: "doc.richtext")
+                    }
+                } label: {
+                    if compact {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(BrandKit.analytics)
+                            .padding(6)
+                            .background(Color.primary.opacity(0.07), in: Circle())
+                    } else {
+                        Label(t("an.export"), systemImage: "square.and.arrow.up")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(BrandKit.analytics)
+                            .padding(.vertical, 6).padding(.horizontal, 12)
+                            .background(Color.primary.opacity(0.07), in: Capsule())
+                    }
+                }
             }
         }
         .sheet(item: $payload) { p in
-            ShareSheet(activityItems: [p.url])
+            if app.isOfficial, !m.loading { ShareSheet(activityItems: [p.url]) }
         }
+        .onChange(of: app.isOfficial) { _, allowed in if !allowed { payload = nil } }
     }
 }
 
@@ -1893,7 +1977,7 @@ private struct KassaTab: View {
             let diff = m.cumulativeInkass - salToday
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
                 stat(t("an.totalInkass"), cur(m.cumulativeInkass), BrandKit.stash)
-                stat(t("an.salaryToday"), cur(salToday), diff >= 0 ? BrandKit.analytics : BrandKit.menu)
+                stat(t("an.salaryToday"), m.loading ? "—" : cur(salToday), diff >= 0 ? BrandKit.analytics : BrandKit.menu)
             }
             if m.inkHistory.isEmpty {
                 Text(t("an.noInkass")).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.4)).padding(.top, 30)
@@ -2143,6 +2227,7 @@ private func bankTimestamp(_ iso: String?) -> String {
 private struct BankTab: View {
     @Bindable var m: AnalyticsModel
     let bankEnabled: Bool
+    @State private var confirmDisconnect = false
 
     var body: some View {
         if !bankEnabled {
@@ -2279,6 +2364,18 @@ private struct BankTab: View {
                     }
                 }
                 .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+            }
+
+            Button(role: .destructive) { confirmDisconnect = true } label: {
+                Text(m.bankBusy ? "···" : t("an.bankDisconnect"))
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(BrandKit.menu)
+                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+            }
+            .disabled(m.bankBusy)
+            .confirmationDialog(t("an.bankDisconnect"), isPresented: $confirmDisconnect, titleVisibility: .visible) {
+                Button(t("an.bankDisconnect"), role: .destructive) { Task { await m.disconnectBank() } }
+            } message: {
+                Text(t("an.bankDisconnectConfirm"))
             }
         }
     }

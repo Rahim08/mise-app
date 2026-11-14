@@ -3,6 +3,7 @@
 // Используется из /api/notify (события из приложения) и из cron (напоминания о сменах).
 // Получатели задаются «аудиторией»: конкретные сотрудники, владелец, и/или все менеджеры.
 
+import { createHash } from 'node:crypto'
 import { sendPush } from './apns'
 import { renderNotify, renderCategory, renderSegments } from './notifyStrings'
 
@@ -41,6 +42,8 @@ export interface Audience { staff_ids?: string[]; owner?: boolean; managers?: bo
 
 export interface NotifyInput {
   type: string
+  /** Internal booking event identity, stable across lease retries; never a lease token. */
+  eventKey?: string
   /** Литерал-фолбэк: язык отправителя. Используется только если *Key не задан (старые
    *  клиенты) или для типов без шаблона (news/booking — свободный пользовательский текст). */
   title: string
@@ -67,9 +70,24 @@ export interface NotifyInput {
 
 interface Recipient { staff_id: string | null; to_owner: boolean }
 
+// UUIDv8: deterministic SHA-256 identity for a tenant/event/recipient journal entry.
+// Ignoring duplicate IDs preserves the original sent_at/read_at on a retried event.
+function bookingJournalId(eventKey: string, rid: string, recipient: Recipient): string {
+  const bytes = createHash('sha256').update(JSON.stringify(['booking-notification-v1', rid, eventKey,
+    recipient.to_owner ? 'owner' : recipient.staff_id])).digest().subarray(0, 16)
+  bytes[6] = (bytes[6] & 0x0f) | 0x80
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = bytes.toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 // admin — supabase service-role клиент (тип any, чтобы не тащить зависимость в сигнатуру).
 export async function dispatchNotification(admin: any, rid: string, input: NotifyInput): Promise<{ inserted: number; push: number }> {
-  const { type, title, body = '', titleKey, titleParams, bodyKey, bodyParams, bodySegments, secureBody, secureBodySegments, data = {}, audience } = input
+  const { eventKey, type, title, body = '', titleKey, titleParams, bodyKey, bodyParams, bodySegments, secureBody, secureBodySegments, data = {}, audience } = input
+
+  if (eventKey !== undefined && (type !== 'booking' || typeof eventKey !== 'string' || !eventKey.trim() || eventKey.length > 200)) {
+    throw new Error('Invalid booking notification event key')
+  }
 
   // 1. Получатели
   const recipients: Recipient[] = []
@@ -77,22 +95,25 @@ export async function dispatchNotification(admin: any, rid: string, input: Notif
 
   const staffSet = new Set<string>(audience.staff_ids || [])
   if (audience.all) {
-    const { data: all } = await admin.from('staff')
+    const { data: all, error: staffError } = await admin.from('staff')
       .select('id').eq('restaurant_id', rid).eq('is_active', true)
+    if (eventKey && (staffError || !Array.isArray(all))) throw new Error('Booking notification recipients could not be read')
     ;(all || []).forEach((s: any) => staffSet.add(s.id))
   } else if (audience.managers) {
     // "managers" = у кого есть доступ к приложению Manager (staff.apps), а не должность
     // (role) — доступ к приложениям выдаётся отдельно от цеха/должности сотрудника.
-    const { data: staff } = await admin.from('staff')
+    const { data: staff, error: staffError } = await admin.from('staff')
       .select('id, apps').eq('restaurant_id', rid).eq('is_active', true)
+    if (eventKey && (staffError || !Array.isArray(staff))) throw new Error('Booking notification recipients could not be read')
     ;(staff || []).forEach((s: any) => { if (Array.isArray(s.apps) && s.apps.includes('manager')) staffSet.add(s.id) })
   }
   staffSet.forEach(id => recipients.push({ staff_id: id, to_owner: false }))
   if (!recipients.length) return { inserted: 0, push: 0 }
 
   // 2. Персональные настройки
-  const { data: prefRows } = await admin.from('notification_prefs')
+  const { data: prefRows, error: prefsError } = await admin.from('notification_prefs')
     .select('staff_id, to_owner, prefs').eq('restaurant_id', rid)
+  if (eventKey && (prefsError || !Array.isArray(prefRows))) throw new Error('Booking notification preferences could not be read')
   const prefsFor = (r: Recipient): Record<string, any> =>
     (prefRows || []).find((p: any) => r.to_owner ? p.to_owner : p.staff_id === r.staff_id)?.prefs || {}
 
@@ -125,6 +146,7 @@ export async function dispatchNotification(admin: any, rid: string, input: Notif
     const segs = isSecure(r) ? (secureBodySegments ?? null) : (bodySegments ?? null)
     const usesTemplate = !isSecure(r) && !!bodyKey && !segs
     return {
+      ...(eventKey ? { id: bookingJournalId(eventKey, rid, r) } : {}),
       restaurant_id: rid, staff_id: r.staff_id, to_owner: r.to_owner,
       type, title: enTitle, body: bodyFor(r, 'en'),
       data, sent_at: now,
@@ -133,44 +155,63 @@ export async function dispatchNotification(admin: any, rid: string, input: Notif
       body_params: segs ? { segments: segs } : (usesTemplate ? (bodyParams ?? null) : null),
     }
   })
-  await admin.from('notifications').insert(rows)
+  let inserted = rows.length
+  let insertedJournalIds: Set<string> | null = null
+  if (eventKey) {
+    const { data: insertedRows, error: journalError } = await admin.from('notifications')
+      .upsert(rows, { onConflict: 'id', ignoreDuplicates: true }).select('id')
+    if (journalError || !Array.isArray(insertedRows)) throw new Error('Booking notification journal could not be saved')
+    inserted = insertedRows.length
+    insertedJournalIds = new Set(insertedRows.map((row: { id: string }) => row.id))
+  } else {
+    await admin.from('notifications').insert(rows)
+  }
 
   // 4. Push — рендерим per-recipient НА ЯЗЫКЕ УСТРОЙСТВА (push_subscriptions.lang), не отправителя.
-  const { data: subs } = await admin.from('push_subscriptions')
-    .select('staff_id, to_owner, device_token, lang').eq('restaurant_id', rid).not('device_token', 'is', null)
-  const subsFor = (r: Recipient) =>
-    (subs || []).filter((s: any) => r.to_owner ? s.to_owner : s.staff_id === r.staff_id)
-
+  // Durable booking delivery means a journal row, not exactly-once APNs delivery.
+  // After that commit, push failures must not turn the event back into a failed write.
   let pushed = 0
-  const invalid: string[] = []
-  for (const r of allowed) {
-    // Закуп: получатели в режиме «раз в день» push сейчас не получают (им шлёт дайджест cron);
-    // запись в журнал у них уже есть — увидят в колокольчике. Сам дайджест (data.digest)
-    // адресован именно им — его не глушим.
-    if (type === 'purchase' && !data.digest && prefsFor(r).purchase_digest === 'daily') continue
-    const recSubs = subsFor(r)
-    if (!recSubs.length) continue
-    // Группируем токены по языку устройства — одному получателю с 2 устройствами на
-    // разных языках каждое получит свой рендер.
-    const byLang = new Map<string, string[]>()
-    for (const s of recSubs) {
-      const lang = (s.lang as string) || 'en'
-      if (!byLang.has(lang)) byLang.set(lang, [])
-      byLang.get(lang)!.push(s.device_token)
+  try {
+    const { data: subs } = await admin.from('push_subscriptions')
+      .select('staff_id, to_owner, device_token, lang').eq('restaurant_id', rid).not('device_token', 'is', null)
+    const subsFor = (r: Recipient) =>
+      (subs || []).filter((s: any) => r.to_owner ? s.to_owner : s.staff_id === r.staff_id)
+
+    const invalid: string[] = []
+    for (const r of allowed) {
+      // Only a freshly inserted journal entry permits a booking push attempt. A lease
+      // completion retry must not resend pushes for already durable recipient rows.
+      if (eventKey && !insertedJournalIds?.has(bookingJournalId(eventKey, rid, r))) continue
+      // Закуп: получатели в режиме «раз в день» push сейчас не получают (им шлёт дайджест cron);
+      // запись в журнал у них уже есть — увидят в колокольчике. Сам дайджест (data.digest)
+      // адресован именно им — его не глушим.
+      if (type === 'purchase' && !data.digest && prefsFor(r).purchase_digest === 'daily') continue
+      const recSubs = subsFor(r)
+      if (!recSubs.length) continue
+      // Группируем токены по языку устройства — одному получателю с 2 устройствами на
+      // разных языках каждое получит свой рендер.
+      const byLang = new Map<string, string[]>()
+      for (const s of recSubs) {
+        const lang = (s.lang as string) || 'en'
+        if (!byLang.has(lang)) byLang.set(lang, [])
+        byLang.get(lang)!.push(s.device_token)
+      }
+      for (const [lang, tokens] of byLang) {
+        const pTitle = titleKey ? renderNotify(lang, titleKey, resolveParams(lang, titleParams)) : title
+        const pBody = bodyFor(r, lang)
+        // type в data явно — iOS читает его из userInfo при тапе по системному пушу
+        // (PushManager.didReceive response:), чтобы открыть нужный модуль/вкладку.
+        const res = await sendPush(tokens, { title: pTitle, body: pBody, data: { ...data, type } })
+        pushed += res.sent
+        invalid.push(...res.invalid)
+      }
     }
-    for (const [lang, tokens] of byLang) {
-      const pTitle = titleKey ? renderNotify(lang, titleKey, resolveParams(lang, titleParams)) : title
-      const pBody = bodyFor(r, lang)
-      // type в data явно — iOS читает его из userInfo при тапе по системному пушу
-      // (PushManager.didReceive response:), чтобы открыть нужный модуль/вкладку.
-      const res = await sendPush(tokens, { title: pTitle, body: pBody, data: { ...data, type } })
-      pushed += res.sent
-      invalid.push(...res.invalid)
+    if (invalid.length) {
+      await admin.from('push_subscriptions').delete().eq('restaurant_id', rid).in('device_token', invalid)
     }
-  }
-  if (invalid.length) {
-    await admin.from('push_subscriptions').delete().eq('restaurant_id', rid).in('device_token', invalid)
+  } catch (error) {
+    if (!eventKey) throw error
   }
 
-  return { inserted: rows.length, push: pushed }
+  return { inserted, push: pushed }
 }

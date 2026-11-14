@@ -3,7 +3,7 @@
 // Отдельная таблица inkassation_topups: кассу (shifts/наличные/карта) не трогает, в выручку и
 // прибыль не входит. Здесь — добавление/правка/удаление (Manager); Analytics только читает.
 // Удаление физическое — «до»-образ остаётся в financial_audit_log (триггер + /api/db).
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { db } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
@@ -58,8 +58,15 @@ export function InkassationTopups({ restaurantId, t, toast }: { restaurantId: st
     setSheet({ id: r.id })
   }
 
+  // state `saving` в замыкании — два клика до перерисовки оба проходили проверку (аудит 2026-10-26).
+  const busy = useRef(false)
   const save = async () => {
-    if (saving || !sheet) return
+    if (busy.current || !sheet) return
+    busy.current = true
+    try { await saveInner(sheet) } finally { busy.current = false }
+  }
+
+  const saveInner = async (sheet: { id: string | null }) => {
     const amt = parseAmount(amount)
     if (!(amt > 0)) { setErr(tr('mg.topupErrAmount')); return }
     if (!reason.trim()) { setErr(tr('mg.topupErrReason')); return }
@@ -80,15 +87,18 @@ export function InkassationTopups({ restaurantId, t, toast }: { restaurantId: st
   }
 
   const remove = async () => {
-    if (saving || !sheet?.id) return
+    if (busy.current || !sheet?.id) return
     if (!confirmDelete) { setConfirmDelete(true); return }
+    busy.current = true
     setSaving(true); setErr('')
-    const g = await guardReduction(Number(rows.find(r => r.id === sheet.id)?.amount || 0))
-    if (g) { setSaving(false); setConfirmDelete(false); setErr(g); return }
-    const { error } = await db.from('inkassation_topups').delete().eq('id', sheet.id)
-    setSaving(false)
-    if (error) { setErr(tr('mg.err') + ': ' + error.message); return }
-    setSheet(null); load()
+    try {
+      const g = await guardReduction(Number(rows.find(r => r.id === sheet.id)?.amount || 0))
+      if (g) { setSaving(false); setConfirmDelete(false); setErr(g); return }
+      const { error } = await db.from('inkassation_topups').delete().eq('id', sheet.id)
+      setSaving(false)
+      if (error) { setErr(tr('mg.err') + ': ' + error.message); return }
+      setSheet(null); load()
+    } finally { busy.current = false }
   }
 
   const label = { fontSize: 12, color: t.text3, fontWeight: 500, marginBottom: 6, textTransform: 'uppercase' as const, letterSpacing: 0.3 }

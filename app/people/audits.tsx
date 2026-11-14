@@ -1,8 +1,9 @@
 'use client'
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { db } from '@/lib/db'
+import { saveChecklistItem } from '@/lib/peopleClient'
 import { notify as pushNotify } from '@/lib/notifyClient'
 import { renderNotify, renderCategory, renderSegments } from '@/lib/notifyStrings'
 import { useTheme } from '@/hooks/useTheme'
@@ -357,30 +358,20 @@ export function ShiftChecklistsView({ isManager, myId, myRole, canFill, openShif
   // Сотрудник видит общие (role=null) + по своей роли; менеджер — все цеха.
   const relevant = lists.filter(l => l.type === type && (isManager || !l.role || l.role === myRole))
 
+  // Отметка пункта — атомарно на сервере (/api/people/checklist-item): раньше веб писал весь
+  // массив items_state, параллельные отметки коллег терялись, а ответ записи не проверялся
+  // — «Открытие выполнено» показывалось и после отказа сохранения (аудит People 2026-11-14).
   const setItem = async (list: any, idx: number, next: { done: boolean; photo_url: string | null }) => {
     if (!openShiftId) { toast(tr('pe.openShiftFirst')); return }
-    const items = (Array.isArray(list.items) ? list.items : []).map((x: any, i: number) => normItem(x, i))
     const completion = completions.find(c => c.checklist_id === list.id)
-    const curState = (Array.isArray(completion?.items_state) ? completion.items_state : []).map(normState)
-    let nextState = items.map((_, i) => i === idx ? next : (curState[i] || { done: false, photo_url: null }))
-    let allDone = nextState.every(s => s.done)
-    if (completion?.id) {
-      // Против lost update: перечитываем свежую строку и мержим ТОЛЬКО свой индекс —
-      // параллельные отметки коллег не затираем.
-      const { data: freshRows } = await db.from('shift_checklist_completions').select('items_state').eq('id', completion.id)
-      const freshState = (Array.isArray(freshRows?.[0]?.items_state) ? freshRows[0].items_state : curState).map(normState)
-      nextState = items.map((_, i) => i === idx ? next : (freshState[i] || { done: false, photo_url: null }))
-      allDone = nextState.every(s => s.done)
-      setCompletions(cs => cs.map(c => c.id === completion.id ? { ...c, items_state: nextState } : c))
-      await db.from('shift_checklist_completions').update({ items_state: nextState, status: allDone ? 'done' : 'in_progress', staff_id: myId || null, completed_at: allDone ? new Date().toISOString() : null }).eq('id', completion.id)
-    } else {
-      const { data } = await db.from('shift_checklist_completions').insert({
-        checklist_id: list.id, shift_id: openShiftId, date: today, staff_id: myId || null,
-        items_state: nextState, status: allDone ? 'done' : 'in_progress', completed_at: allDone ? new Date().toISOString() : null,
-      }).select().single()
-      if (data) setCompletions(cs => [...cs, data])
+    try {
+      const row = await saveChecklistItem({ checklist_id: list.id, idx, item: next, completion_id: completion?.id, shift_id: openShiftId, date: today })
+      setCompletions(cs => cs.some(c => c.id === row.id) ? cs.map(c => c.id === row.id ? row : c) : [...cs, row])
+      if (row.status === 'done') toast(type === 'open' ? tr('pe.openDone') : tr('pe.closeDone'))
+    } catch (e: any) {
+      toast(tr('dash.notSaved') + (e?.message || ''))
+      await load()
     }
-    if (allDone) toast(type === 'open' ? tr('pe.openDone') : tr('pe.closeDone'))
   }
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: t.text3 }}>{tr('pe.loading')}</div>
@@ -463,27 +454,15 @@ export function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFil
   )
 
   const setItem = async (audit: any, idx: number, next: ItemState) => {
-    const items = (Array.isArray(audit.items) ? audit.items : []).map((x: any, i: number) => normItem(x, i))
     const completion = completions.find(c => c.checklist_id === audit.id && c.date === today)
-    const curState = (Array.isArray(completion?.items_state) ? completion.items_state : []).map(normState)
-    let nextState = items.map((_, i) => i === idx ? next : (curState[i] || { done: false, photo_url: null }))
-    let allDone = nextState.every(s => s.done)
-    if (completion?.id) {
-      // Против lost update: свежая строка с сервера, мержим ТОЛЬКО свой индекс.
-      const { data: freshRows } = await db.from('shift_checklist_completions').select('items_state').eq('id', completion.id)
-      const freshState = (Array.isArray(freshRows?.[0]?.items_state) ? freshRows[0].items_state : curState).map(normState)
-      nextState = items.map((_, i) => i === idx ? next : (freshState[i] || { done: false, photo_url: null }))
-      allDone = nextState.every(s => s.done)
-      setCompletions(cs => cs.map(c => c.id === completion.id ? { ...c, items_state: nextState } : c))
-      await db.from('shift_checklist_completions').update({ items_state: nextState, status: allDone ? 'done' : 'in_progress', staff_id: myId || null, completed_at: allDone ? new Date().toISOString() : null }).eq('id', completion.id)
-    } else {
-      const { data } = await db.from('shift_checklist_completions').insert({
-        checklist_id: audit.id, date: today, staff_id: myId || null,
-        items_state: nextState, status: allDone ? 'done' : 'in_progress', completed_at: allDone ? new Date().toISOString() : null,
-      }).select().single()
-      if (data) setCompletions(cs => [...cs, data])
+    try {
+      const row = await saveChecklistItem({ checklist_id: audit.id, idx, item: next, completion_id: completion?.id, date: today })
+      setCompletions(cs => cs.some(c => c.id === row.id) ? cs.map(c => c.id === row.id ? row : c) : [...cs, row])
+      if (row.status === 'done') toast(tr('pe.auditDone'))
+    } catch (e: any) {
+      toast(tr('dash.notSaved') + (e?.message || ''))
+      await load()
     }
-    if (allDone) toast(tr('pe.auditDone'))
   }
 
   // Пуш целевой аудитории аудита (запуск сегодняшнего прогона).
@@ -681,7 +660,7 @@ export function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFil
           onOpenRun={c => { setReportOf({ audit: historyOf, completion: c }); setHistoryOf(null) }} />
       )}
       {reportOf != null && (
-        <AuditReportSheet audit={reportOf.audit} completion={reportOf.completion} staff={staff} accent={accent} t={t}
+        <AuditReportSheet audit={reportOf.audit} completion={reportOf.completion} staff={staff} accent={accent} t={t} canExport={isManager}
           onClose={() => setReportOf(null)} />
       )}
     </div>
@@ -691,12 +670,26 @@ export function AdHocAuditsView({ isManager, myId, myName, myRole, staff, canFil
 // Счёт прогона (ревью Б3/Б4, весы — Б6): N/A вне знаменателя; fail и «не проверено» = не
 // выполнено. Пункт весит items[i].weight (по умолчанию 1 — старые записи и чек-листы смены
 // без весов считаются как раньше, поштучно).
+// Снимок label/weight в самом пункте прогона (пишет /api/people/checklist-item) важнее
+// текущего шаблона: правка шаблона не должна менять оценку уже пройденных проверок.
+export function runItems(templateItems: any[], state: any[]): { id: string; label: string; photo_required: boolean; weight: number }[] {
+  const base = (Array.isArray(templateItems) ? templateItems : []).map((x: any, i: number) => normItem(x, i))
+  const n = Math.max(base.length, (Array.isArray(state) ? state : []).filter((s: any) => s && typeof s === 'object' && typeof s.label === 'string').length)
+  return Array.from({ length: n }, (_, i) => {
+    const b = base[i] || { id: String(i), label: '', photo_required: false, weight: 1 }
+    const snap: any = state?.[i]
+    const w = Number(snap?.weight)
+    return { ...b, label: typeof snap?.label === 'string' ? snap.label : b.label, weight: Number.isFinite(w) && w > 0 ? w : b.weight }
+  })
+}
+
 export function runScore(items: any[], state: ItemState[]): { pass: number; total: number } {
   let pass = 0, total = 0
   items.forEach((it, i) => {
     const eff = effResult(state[i])
     if (eff === 'na') return
-    const w = Number(it?.weight) > 0 ? Number(it.weight) : 1
+    const sw = Number((state[i] as any)?.weight)
+    const w = sw > 0 ? sw : Number(it?.weight) > 0 ? Number(it.weight) : 1
     total += w
     if (eff === 'pass') pass += w
   })
@@ -705,7 +698,8 @@ export function runScore(items: any[], state: ItemState[]): { pass: number; tota
 
 // PDF-отчёт прогона (ревью Б3): шапка, пункты со статусами, комментарии, фото.
 // Та же инфраструктура, что в Analytics (jsPDF + PT Sans для кириллицы).
-async function exportAuditRunPdf(opts: { audit: any; completion: any; staffName: string; targetLabel: string; tr: (k: string, v?: Record<string, string | number>) => string }) {
+async function exportAuditRunPdf(opts: { audit: any; completion: any; staffName: string; targetLabel: string; canExport: () => boolean; tr: (k: string, v?: Record<string, string | number>) => string }) {
+  if (!opts.canExport()) return
   const { audit, completion, staffName, targetLabel, tr } = opts
   const { jsPDF } = await import('jspdf')
   const { ptSansBase64 } = await import('@/lib/ptSansFont')
@@ -713,7 +707,7 @@ async function exportAuditRunPdf(opts: { audit: any; completion: any; staffName:
   doc.addFileToVFS('PTSans.ttf', ptSansBase64)
   doc.addFont('PTSans.ttf', 'PTSans', 'normal')
   doc.setFont('PTSans')
-  const items = (Array.isArray(audit.items) ? audit.items : []).map((x: any, i: number) => normItem(x, i))
+  const items = runItems(audit.items, completion.items_state)
   const state = (Array.isArray(completion.items_state) ? completion.items_state : []).map(normState)
   const { pass, total } = runScore(items, state)
   let y = 46
@@ -754,6 +748,7 @@ async function exportAuditRunPdf(opts: { audit: any; completion: any; staffName:
     }
     y += 8
   }
+  if (!opts.canExport()) return
   doc.save(`audit-${(audit.title || 'report').replace(/[^0-9A-Za-zЀ-ӿ-]+/g, '_')}-${completion.date || ''}.pdf`)
 }
 
@@ -783,7 +778,7 @@ export function AuditHistorySheet({ audit, staff, accent, t, onClose, onOpenRun 
           <div style={{ background: t.fill, borderRadius: 16, overflow: 'hidden' }}>
             {runs.map((c, i) => {
               const state = (Array.isArray(c.items_state) ? c.items_state : []).map(normState)
-              const { pass, total } = runScore(items, state)
+              const { pass, total } = runScore(runItems(audit.items, c.items_state), state)
               const pct = total > 0 ? Math.round((pass / total) * 100) : 0
               const pending = c.status === 'pending'
               const who = staff.find((s: any) => s.id === c.staff_id)?.name || '—'
@@ -807,12 +802,17 @@ export function AuditHistorySheet({ audit, staff, accent, t, onClose, onOpenRun 
 }
 
 // Отчёт по прогону (ревью Б3): пункты со статусами, комментарии, фото + экспорт PDF.
-export function AuditReportSheet({ audit, completion, staff, accent, t, onClose }: {
-  audit: any; completion: any; staff: any[]; accent: string; t: any; onClose: () => void
+export function AuditReportSheet({ audit, completion, staff, accent, t, onClose, canExport = false }: {
+  audit: any; completion: any; staff: any[]; accent: string; t: any; onClose: () => void; canExport?: boolean
 }) {
   const { t: tr } = useI18n()
   const [exporting, setExporting] = useState(false)
-  const items = (Array.isArray(audit.items) ? audit.items : []).map((x: any, i: number) => normItem(x, i))
+  const exportPermission = useRef(canExport)
+  useLayoutEffect(() => {
+    exportPermission.current = canExport
+    return () => { exportPermission.current = false }
+  }, [canExport])
+  const items = runItems(audit.items, completion.items_state)
   const state = (Array.isArray(completion.items_state) ? completion.items_state : []).map(normState)
   const { pass, total } = runScore(items, state)
   const pct = total > 0 ? Math.round((pass / total) * 100) : 0
@@ -851,10 +851,10 @@ export function AuditReportSheet({ audit, completion, staff, accent, t, onClose 
             )
           })}
         </div>
-        <button disabled={exporting} onClick={async () => { setExporting(true); try { await exportAuditRunPdf({ audit, completion, staffName, targetLabel, tr }) } finally { setExporting(false) } }}
+        {canExport && <button disabled={exporting} onClick={async () => { if (!canExport) return; setExporting(true); try { await exportAuditRunPdf({ audit, completion, staffName, targetLabel, tr, canExport: () => exportPermission.current }) } finally { setExporting(false) } }}
           style={{ width: '100%', padding: '14px', borderRadius: 14, border: 'none', background: accent, color: '#fff', fontFamily: 'inherit', fontSize: 15, fontWeight: 700, cursor: 'pointer', opacity: exporting ? 0.6 : 1, boxShadow: `0 4px 16px ${accent}44` }}>
           {exporting ? '...' : `PDF · ${tr('pe.auditReport')}`}
-        </button>
+        </button>}
       </div>
     </Sheet>
   )
@@ -1090,6 +1090,8 @@ export function useOpsGate(me: any) {
       // (shifts.date уникален по (restaurant_id, date) — см. CLAUDE.md), как на iOS.
       db.from('shifts').select('id,status').eq('date', today).order('opened_at', { ascending: false }).limit(1),
     ]).then(([rs, dir, att, sh]: any) => {
+      // Сбой загрузки настроек/явки = неизвестно, нужна ли гео-явка: закрыто, а не открыто.
+      if (rs.error || att.error) { setGeoRequired(true); setCheckedInToday(false); setStaff(dir.data || []); setOpenShiftId(sh.data?.[0]?.id || null); setReady(true); return }
       const s = Array.isArray(rs.data) ? rs.data[0] : rs.data
       setGeoRequired(!!s?.attendance_enabled)
       setStaff(dir.data || [])
@@ -1101,7 +1103,10 @@ export function useOpsGate(me: any) {
 
   // Fail-closed до загрузки данных (гео/явка/смена) — как на iOS (requireGeoCheckIn ждёт
   // loadAttendance перед решением), не оставляем короткое окно кликабельности "вслепую".
-  const canFill = ready && (!geoRequired || !myId || checkedInToday)
+  // Должностные лица явку не отмечают («Я здесь» только у сотрудника) — гео-гейт их не
+  // касается; раньше при включённой гео-явке менеджер/владелец не мог отметить ни пункта.
+  const official = !!me.is_owner || me.role === 'manager' || me.role === 'admin'
+  const canFill = ready && (official || !geoRequired || checkedInToday)
   return { staff, canFill, openShiftId, ready }
 }
 

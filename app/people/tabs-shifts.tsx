@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { db } from '@/lib/db'
+import { approveSwap } from '@/lib/peopleClient'
 import { notify as pushNotify } from '@/lib/notifyClient'
 import { renderNotify, renderCategory, renderSegments } from '@/lib/notifyStrings'
 import { useTheme } from '@/hooks/useTheme'
@@ -114,6 +115,7 @@ export function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManag
   const now = () => new Date().toISOString()
 
   const create = async () => {
+    if (saving) return
     if (!form.schedule_id || !form.target_id) { toast(tr('pe.selectShiftColleague')); return }
     setSaving(true)
     const sc = sched(form.schedule_id)
@@ -157,12 +159,17 @@ export function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManag
       { titleKey: 'notify.swapDeclinedTitle', bodyKey: 'notify.swapDeclinedByManagerBody' })
     await load()
   }
+  // Заявка и график меняются одной серверной операцией (/api/people/swap): раньше смена
+  // перевешивалась отдельным запросом и при сбое второго обмен применялся наполовину.
+  const approving = useRef(false)
   const approve = async (r: any) => {
-    // Reassign the shift to the target, then mark approved.
-    const { error: e1 } = await db.from('staff_schedules').update({ staff_id: r.target_id }).eq('id', r.schedule_id)
-    if (e1) { toast(tr('dash.notSaved') + e1.message); return }
-    const { error: e2 } = await db.from('shift_swap_requests').update({ status: 'approved', manager_id: me.is_owner ? null : myId, manager_responded_at: now() }).eq('id', r.id)
-    if (e2) { toast(tr('dash.notSaved') + e2.message); return }
+    if (approving.current) return
+    approving.current = true
+    try {
+      await approveSwap(r.id)
+    } catch (e: any) {
+      toast(tr('dash.notSaved') + (e?.message || '')); await load(); return
+    } finally { approving.current = false }
     await notify(r.requester_id, 'swap_result', tr('pe.swapApprovedTitle'), tr('pe.swapApprovedBody'),
       { titleKey: 'notify.swapApprovedTitle', bodyKey: 'notify.swapApprovedBody' })
     toast(tr('pe.swapApprovedToast')); await load()
@@ -305,7 +312,11 @@ export function AttendanceTab({ me, isManager, accent, t, toast, onOpenDisciplin
   }
   useEffect(() => { load() }, [])
 
+  // Ночная смена: запись, открытая вчера и ещё не закрытая, после полуночи остаётся
+  // «сегодняшней» — иначе после 00:00 нельзя было ни уйти, ни увидеть себя на смене.
+  const yesterday = fmtDate(addDays(new Date(), -1))
   const todayRec = history.find(r => r.staff_id === myId && r.date === today)
+    || (new Date().getHours() < 12 ? history.find(r => r.staff_id === myId && r.date === yesterday && r.check_in_at && !r.check_out_at) : undefined)
 
   // Geolocation — следим за дистанцией пока экран открыт (foreground). Сам приход — по кнопке «Я пришёл».
   useEffect(() => {
@@ -374,7 +385,8 @@ export function AttendanceTab({ me, isManager, accent, t, toast, onOpenDisciplin
 
   const checkOut = async () => {
     if (!pos) return
-    const { error } = await db.from('attendance_records').update({ check_out_at: new Date().toISOString(), check_out_lat: pos.lat, check_out_lng: pos.lng }).eq('staff_id', myId).eq('date', today)
+    if (!todayRec?.id) return
+    const { error } = await db.from('attendance_records').update({ check_out_at: new Date().toISOString(), check_out_lat: pos.lat, check_out_lng: pos.lng }).eq('id', todayRec.id)
     if (error) { toast(tr('dash.notSaved') + error.message); return }
     toast(tr('pe.checkedOut')); await load()
   }

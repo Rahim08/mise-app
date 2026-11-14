@@ -265,9 +265,13 @@ struct WalkRunnerView: View {
         if case .inBlock(let id) = stage { label = template.blocks.first { $0.id == id }?.label ?? "" }
         else { label = "" }
         if isPaused {
-            activity.update(blockLabel: label, startDate: Date(), isPaused: true, pausedSeconds: elapsed, steps: steps)
+            activity.update(blockLabel: label, startDate: Date(), isPaused: true, pausedSeconds: Int(accumulated), steps: steps)
         } else {
-            activity.update(blockLabel: label, startDate: Date().addingTimeInterval(-accumulated), isPaused: false, pausedSeconds: 0, steps: steps)
+            // Начало отсчёта = начало текущего отрезка минус накопленное до него. Раньше бралось
+            // Date() - accumulated: в непрерывном режиме accumulated = 0, и каждый пуш (раз в 10 с)
+            // сбрасывал таймер в Dynamic Island на ноль.
+            let origin = (segmentStart ?? Date()).addingTimeInterval(-accumulated)
+            activity.update(blockLabel: label, startDate: origin, isPaused: false, pausedSeconds: 0, steps: steps)
         }
     }
 
@@ -276,12 +280,21 @@ struct WalkRunnerView: View {
     /// иначе прогон (чек-лист/время/шаги) молча терялся без следа в истории.
     @discardableResult
     private func teardown(save: Bool) async -> Bool {
-        if !isContinuous, let s = segmentStart { accumulated += Date().timeIntervalSince(s); segmentStart = nil }
+        guard save, started else {
+            pedometer.stop()
+            await activity.end()
+            return true
+        }
+        // Сначала сохраняем, и только на успехе останавливаем шагомер/таймер/Live Activity:
+        // раньше всё глушилось до записи, и после неудачного сохранения раннер оставался
+        // открытым, но шаги и время больше не считались.
+        let duration = Int(accumulated + (segmentStart.map { Date().timeIntervalSince($0) } ?? 0))
+        let state = template.flatItems.map { ChecklistItemState(done: checked.contains($0.id), label: $0.label) }
+        guard await m.finishWalkRun(template: template, itemsState: state, durationSeconds: duration, steps: steps) else { return false }
+        if let s = segmentStart { accumulated += Date().timeIntervalSince(s); segmentStart = nil }
         pedometer.stop()
         await activity.end()
-        guard save, started else { return true }
-        let state = template.flatItems.map { ChecklistItemState(done: checked.contains($0.id)) }
-        return await m.finishWalkRun(template: template, itemsState: state, durationSeconds: elapsed, steps: steps)
+        return true
     }
 }
 
@@ -388,6 +401,7 @@ struct WalkHistorySheet: View {
 // из PeopleChecklists.swift — та же форма отчёта, что у обычных аудитов, без фото).
 
 struct WalkRunReportView: View {
+    @Environment(AppModel.self) private var app
     @Bindable var m: PeopleModel
     let template: WalkTemplate
     let run: WalkRun
@@ -446,20 +460,25 @@ struct WalkRunReportView: View {
             .navigationTitle(template.title ?? t("pe.auditReport"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { export() } label: {
-                        if generating { ProgressView().controlSize(.small) }
-                        else { Image(systemName: "square.and.arrow.up") }
-                    }.disabled(generating)
+                if app.isOfficial {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button { export() } label: {
+                            if generating { ProgressView().controlSize(.small) }
+                            else { Image(systemName: "square.and.arrow.up") }
+                        }.disabled(generating)
+                    }
                 }
             }
             .toolbarBackground(Color.miseBg, for: .navigationBar)
         }
-        .sheet(item: $payload) { p in AuditShareSheet(url: p.url) }
+        .sheet(item: $payload) { p in
+            if app.isOfficial { AuditShareSheet(url: p.url) }
+        }
+        .onChange(of: app.isOfficial) { _, allowed in if !allowed { payload = nil } }
     }
 
     private func export() {
-        guard !generating else { return }
+        guard app.isOfficial, !generating else { return }
         generating = true
         var rows: [AuditPdfRow] = []
         for block in template.blocks {
@@ -480,9 +499,11 @@ struct WalkRunReportView: View {
         )
         Task {
             let data = await Task.detached(priority: .userInitiated) { renderAuditPdf(snap) }.value
+            guard app.isOfficial else { generating = false; return }
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("mise-walk-\(Int(Date().timeIntervalSince1970)).pdf")
             if (try? data.write(to: url)) != nil {
                 try? await Task.sleep(nanoseconds: 300_000_000)
+                guard app.isOfficial else { generating = false; return }
                 payload = AuditPdfPayload(url: url)
             } else {
                 m.flash(t("saveFailed", ["err": "pdf"]))

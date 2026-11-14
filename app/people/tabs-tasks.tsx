@@ -55,13 +55,16 @@ export function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boo
 
   const load = async () => {
     setLoading(true)
-    const [{ data: tk }, { data: rp }, { data: dir }] = await Promise.all([
-      db.from('staff_tasks').select('*').order('created_at', { ascending: false }).limit(200),
+    // Открытые задачи — все, без общего лимита (раньше старая незакрытая задача выпадала из
+    // списка, как только набиралось 200 более свежих); выполненные — свежие 200.
+    const [{ data: open }, { data: done }, { data: rp }, { data: dir }] = await Promise.all([
+      db.from('staff_tasks').select('*').neq('status', 'done').order('created_at', { ascending: false }).limit(1000),
+      db.from('staff_tasks').select('*').eq('status', 'done').order('created_at', { ascending: false }).limit(200),
       // Лимиты на растущие таблицы (ревью Д1): свежие 200 достаточно для рабочего списка.
       db.from('staff_reports').select('*').order('created_at', { ascending: false }).limit(200),
       db.from('staff_directory').select('*').eq('is_active', true).order('name'),
     ])
-    setTasks(tk || []); setReports(rp || []); setStaff(dir || []); setLoading(false)
+    setTasks([...(open || []), ...(done || [])]); setReports(rp || []); setStaff(dir || []); setLoading(false)
   }
   useEffect(() => { load() }, [])
   const staffName = (id: string) => staff.find(s => s.id === id)?.name || '—'
@@ -71,6 +74,7 @@ export function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boo
   const visibleTasks = isManager ? tasks : tasks.filter(x => x.assigned_to === myId || x.created_by === myId)
 
   const createTask = async () => {
+    if (saving) return
     if (!form.title.trim() || !form.assigned_to) { toast(tr('pe.taskNeedTitleAssignee')); return }
     setSaving(true)
     // Назначение на роль (assigned_to = "role:<role>") → отдельная задача каждому сотруднику цеха.
@@ -106,6 +110,7 @@ export function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boo
     if (error) { setTasks(ts => ts.map(x => x.id === task.id ? { ...x, status: prevStatus } : x)); toast(tr('dash.notSaved') + error.message) }
   }
   const removeTask = async (id: string) => {
+    if (typeof window !== 'undefined' && !window.confirm(tr('pe.deleteTaskConfirm'))) return
     const removed = tasks.find(x => x.id === id)
     setTasks(ts => ts.filter(x => x.id !== id))
     const { error } = await db.from('staff_tasks').delete().eq('id', id)
@@ -114,6 +119,7 @@ export function TasksTab({ isManager, myId, accent, t, toast }: { isManager: boo
   const canDelete = (task: any) => isManager || task.created_by === myId
 
   const createReport = async () => {
+    if (saving) return
     if (!rform.title.trim()) { toast(tr('pe.describeProblem')); return }
     setSaving(true)
     const { error } = await db.from('staff_reports').insert({ type: rform.type, title: rform.title.trim(), description: rform.description.trim() || null, author_id: myId === 'owner' ? null : myId, status: 'new' })

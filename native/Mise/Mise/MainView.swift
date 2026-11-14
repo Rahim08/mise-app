@@ -44,10 +44,16 @@ struct MainView: View {
         }
         // Снимок для виджета: считаем при входе и при возврате на передний план.
         .task {
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { return }
+            #endif
             await SnapshotWriter.refresh(canSeeMoney: app.canSeeMoney, dayStartHour: app.dayStartHour)
             if !app.notifsLoaded { await app.loadNotifications() }
         }
         .onChange(of: scenePhase) { _, phase in
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { return }
+            #endif
             if phase == .active {
                 PushManager.shared.reuploadIfPossible()
                 Task {
@@ -77,6 +83,7 @@ private struct LauncherView: View {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { editing = false }
                     }
                     .font(.system(size: 15, weight: .semibold))
+                    .accessibilityIdentifier("hub-done")
                 } else {
                     NotificationBell()
                     Button { showSettings = true } label: {
@@ -238,6 +245,9 @@ private struct NotificationsSheet: View {
             }
         }
         .task {
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { return }
+            #endif
             if !app.notifsLoaded { await app.loadNotifications() }
             await app.markNotificationsRead()
         }
@@ -286,6 +296,7 @@ private struct NotificationsSheet: View {
 /// под нативный таб-бар (liquid glass на iOS 26).
 struct AppTabPage<Content: View>: View {
     var refresh: (() async -> Void)? = nil
+    var clearCacheOnRefresh = true
     // Не-nil только там, где нужен сброс скролла к началу при каждом переключении
     // вкладки (см. AnalyticsView) — прочие вызовы оставляют nil и поведение не меняется,
     // т.к. onChange никогда не срабатывает на переходе nil → nil.
@@ -308,7 +319,7 @@ struct AppTabPage<Content: View>: View {
                 .scrollDismissesKeyboard(.interactively)
                 .refreshable {
                     // Обойти свежий кеш: иначе pull-to-refresh отдаёт те же данные (см. DB.clearCacheNow).
-                    if refresh != nil { await DB.clearCacheNow() }
+                    if refresh != nil && clearCacheOnRefresh { await DB.clearCacheNow() }
                     await refresh?()
                 }
                 .onChange(of: scrollResetKey) { _, _ in proxy.scrollTo("top", anchor: .top) }
@@ -378,10 +389,12 @@ struct SettingsView: View {
                         } label: {
                             Label(t("pe.nsTitle"), systemImage: "bell.badge")
                         }
-                        NavigationLink {
-                            ReportExportView()
-                        } label: {
-                            Label(t("rp.title"), systemImage: "doc.richtext")
+                        if app.isOfficial {
+                            NavigationLink {
+                                ReportExportView()
+                            } label: {
+                                Label(t("rp.title"), systemImage: "doc.richtext")
+                            }
                         }
                     }
                     Section {

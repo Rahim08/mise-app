@@ -136,7 +136,8 @@ struct PeopleBody: View {
     private func refreshShifts() async {
         switch m.shiftsView {
         case "swaps": await m.loadSwaps()
-        case "audit": await m.loadChecklists(); await m.loadAudits()
+        // Восьмёрка живёт в том же хабе — жест обновления раньше её не перечитывал.
+        case "audit": await m.loadChecklists(); await m.loadAudits(); await m.loadWalks()
         default: await m.loadAttendance(); await m.loadSchedule()
         }
     }
@@ -165,4 +166,19 @@ func dayLabel(_ ymd: String) -> String {
     guard let d = inF.date(from: ymd) else { return ymd }
     let f = DateFormatter(); f.locale = appLocale(); f.dateFormat = "EEE, d MMM"
     return f.string(from: d).capitalized
+}
+
+// Подтверждение удаления — общее для прямых кнопок «корзина» и свайпа (аудит People
+// 2026-11-14: кнопки удаляли сразу, в обход подтверждения, которое было у свайпа).
+extension View {
+    func confirmDelete<T>(_ title: String, _ pending: Binding<T?>, perform: @escaping (T) -> Void) -> some View {
+        confirmationDialog(title, isPresented: Binding(get: { pending.wrappedValue != nil }, set: { if !$0 { pending.wrappedValue = nil } }),
+                           titleVisibility: .visible) {
+            Button(t("delete"), role: .destructive) {
+                if let v = pending.wrappedValue { perform(v) }
+                pending.wrappedValue = nil
+            }
+            Button(t("cancel"), role: .cancel) { pending.wrappedValue = nil }
+        }
+    }
 }

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { QRCodeSVG as QRCode } from 'qrcode.react'
 import { Wordmark, AppIcon } from '@/components/brand'
 import { useTheme } from '@/hooks/useTheme'
+import { clearPendingDbReads } from '@/lib/db'
 
 const APPS = [
   { id: 'manager',   name: 'Mise Manager',   color: '#007aff', path: '/manager' },
@@ -106,6 +107,7 @@ export default function JoinPage() {
     const result = await res.json()
 
     if (result.match) {
+      clearPendingDbReads()
       if (result.is_owner) {
         const ownerData = { id: 'owner', name: 'Владелец', apps: ['manager', 'analytics', 'stash', 'people'], is_owner: true }
         localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify(ownerData))
@@ -134,7 +136,9 @@ export default function JoinPage() {
 
   const logout = () => {
     if (!restaurant) return
+    clearPendingDbReads()
     localStorage.removeItem('mise_staff_' + restaurant.id)
+    localStorage.removeItem('mise_me_' + restaurant.id)
     setStaffMember(null)
     setPin('')
     setPhase('pin')

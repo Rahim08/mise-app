@@ -16,6 +16,7 @@ let salperiodPrefix = "SALPERIOD:"
 func round2(_ v: Double) -> Double { (v * 100).rounded() / 100 }
 
 struct ShiftFormSplit {
+    var customExpenses: [CustomExpenseDraft] = []
     var catAmounts: [String: Double] = [:]
     var catNotes: [String: String] = [:]
     var catUnpaid: [String: Bool] = [:]
@@ -30,7 +31,8 @@ struct ShiftFormSplit {
 }
 
 func splitShiftExpenses(_ rows: [ShiftExpense], shiftId: String,
-                        activeCategoryIds: Set<String>, activeEmployeeIds: Set<String>) -> ShiftFormSplit {
+                        activeCategoryIds: Set<String>, activeEmployeeIds: Set<String>,
+                        includeCustom: Bool = false) -> ShiftFormSplit {
     var out = ShiftFormSplit()
     var unpaidByKey: [String: Bool] = [:]
     for e in rows {
@@ -41,6 +43,17 @@ func splitShiftExpenses(_ rows: [ShiftExpense], shiftId: String,
         }
         let unpaid = e.is_paid == false
         let isSalaryDebt = e.note?.hasPrefix(salperiodPrefix) ?? false
+        if e.is_custom == true {
+            if includeCustom, !isSalaryDebt, e.category_id == nil, e.employee_id == nil,
+               let name = e.category_name, !normalizeExpenseName(name).isEmpty {
+                out.customExpenses.append(CustomExpenseDraft(id: e.id, name: name,
+                    amount: String(round2(amount)), unpaid: unpaid, note: e.note ?? ""))
+                out.ownedIds.append(e.id)
+            } else if !unpaid {
+                out.unmanagedPaidTotal += amount
+            }
+            continue
+        }
         var key: String? = nil
         if !isSalaryDebt {
             if let emp = e.employee_id { key = activeEmployeeIds.contains(emp) ? "e:" + emp : nil }

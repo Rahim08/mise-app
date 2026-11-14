@@ -15,6 +15,7 @@ struct TechCardsTab: View {
     @Bindable var m: PeopleModel
     @State private var openId: String?
     @State private var edit: TechEdit?
+    @State private var pendingDelete: String?
 
     struct TechEdit: Identifiable {
         var id = UUID()
@@ -46,6 +47,7 @@ struct TechCardsTab: View {
         }
         .task(id: m.opsView) { if m.opsView == "tech" && !m.techLoaded { await m.loadTechCards() } }
         .sheet(item: $edit) { e in TechCardSheet(m: m, edit: e) }
+        .confirmDelete(t("pe.deleteTechConfirm"), $pendingDelete) { id in Task { await m.deleteTechCard(id) } }
     }
 
     private func card(_ c: TechCard) -> some View {
@@ -76,7 +78,7 @@ struct TechCardsTab: View {
                         HStack(spacing: 8) {
                             Button(t("edit")) { edit = TechEdit(cardId: c.id, name: c.name, category: c.category ?? "dish", items: items.isEmpty ? [""] : items) }
                                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(PEOPLE_ACCENT)
-                            Button(t("delete")) { Task { await m.deleteTechCard(c.id) } }
+                            Button(t("delete")) { pendingDelete = c.id }
                                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(BrandKit.menu)
                         }
                         .padding(.top, 4)

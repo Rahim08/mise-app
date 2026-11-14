@@ -22,6 +22,10 @@ final class PeopleModel {
     var dir: [StaffDir] = []
     var tasksLoaded = false
     var tasksSeg = "tasks" // tasks | reports
+    var creatingTask = false
+    var creatingReport = false
+    var creatingPurchase = false
+    var creatingSwap = false
     var speech = SpeechManager()
 
     // заявки менеджеру (предложение / заказать / поломка)
@@ -115,10 +119,13 @@ final class PeopleModel {
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedTasks(); return }
         #endif
         // Лимит на растущую таблицу (ревью Д1) — как на вебе.
-        async let tkR = try? DB.from("staff_tasks").select().order("created_at", ascending: false).limit(200).list(StaffTask.self)
+        // Открытые — все (старая незакрытая задача не должна выпадать из-за 200 свежих),
+        // выполненные — свежие 200.
+        async let openR = try? DB.from("staff_tasks").select().neq("status", "done").order("created_at", ascending: false).limit(1000).list(StaffTask.self)
+        async let doneR = try? DB.from("staff_tasks").select().eq("status", "done").order("created_at", ascending: false).limit(200).list(StaffTask.self)
         async let dR = try? DB.from("staff_directory").select().eq("is_active", true).order("name").list(StaffDir.self)
-        let tkO = await tkR, dO = await dR
-        if let tk = tkO { tasks = tk } else if !tasks.isEmpty { flash(t("refreshFailed")) }
+        let openO = await openR, doneO = await doneR, dO = await dR
+        if let o = openO, let d = doneO { tasks = o + d } else if !tasks.isEmpty { flash(t("refreshFailed")) }
         if let d = dO { dir = d }
         tasksLoaded = true
     }
@@ -152,6 +159,9 @@ final class PeopleModel {
     func createTask(title: String, desc: String, assignee: String, priority: String, due: String,
                      sourceCompletionId: String? = nil, sourceItemLabel: String? = nil, photoURL: String? = nil) async -> Bool {
         guard !title.trimmingCharacters(in: .whitespaces).isEmpty, !assignee.isEmpty else { flash(t("pe.taskNeedTitle")); return false }
+        // Повторный тап, пока идёт запись, создавал дубль.
+        guard !creatingTask else { return false }
+        creatingTask = true; defer { creatingTask = false }
         var base: [String: Any] = [
             "restaurant_id": rid, "title": title, "priority": priority, "status": "todo",
             "created_by": myId == "owner" ? NSNull() : myId,
@@ -178,7 +188,10 @@ final class PeopleModel {
             } catch { failed += 1; lastError = error }
         }
         if failed == targets.count, let lastError {
+            // Форма остаётся открытой с введённым текстом (раньше возвращали true — шторка
+            // закрывалась и текст терялся).
             flash(t("saveFailed", ["err": lastError.localizedDescription]))
+            return false
         } else {
             flash(targets.count > 1 ? t("pe.taskCreatedN", ["n": "\(targets.count)"]) : t("pe.taskCreated"))
         }
@@ -206,7 +219,7 @@ final class PeopleModel {
         }
         // Назначаем на первого сотрудника (или себя)
         let assignee = dir.first?.id ?? myId
-        _ = await createTask(title: title, desc: "", assignee: assignee, priority: "normal", due: "")
+        _ = await createTask(title: title, desc: "", assignee: assignee, priority: "medium", due: "")
     }
 
     // MARK: заявки менеджеру
@@ -228,6 +241,8 @@ final class PeopleModel {
 
     func createReport(type: String, title: String, desc: String) async -> Bool {
         guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { flash(t("pe.reportNeedTitle")); return false }
+        guard !creatingReport else { return false }
+        creatingReport = true; defer { creatingReport = false }
         var v: [String: Any] = [
             "restaurant_id": rid, "type": type, "title": title, "status": "new",
             "author_id": myId == "owner" || myId.isEmpty ? NSNull() : myId,
@@ -261,7 +276,13 @@ final class PeopleModel {
         let deduct: Double; let card: Double; let advance: Double
         let advanceList: [SalaryAdvance]; let total: Double; let cash: Double
         var paid: Double = 0; var remaining: Double = 0; var lastPaidAt: String? = nil
+        /// Открытый ЗП-долг — обещание выплатить позже, не выплата.
+        var openDebt: Double = 0
+        /// paid | debt | partial | unpaid | none — считает сервер.
+        var status: String = "none"
     }
+    var salaryFailed = false
+    private var salarySeq = 0
 
     var salaryViewMonth: Date = Date()
 
@@ -271,67 +292,42 @@ final class PeopleModel {
         if dir > 0 && salaryIsCurrentMonth { return }
         guard let d = Calendar.current.date(byAdding: .month, value: dir, to: salaryViewMonth) else { return }
         salaryViewMonth = d
+        salaryLoaded = false
         Task { await loadSalary() }
     }
 
-    // Расчёт зарплаты за произвольный месяц — канон расчёта решение 2026-07-17 (паритет
-    // с ManagerModel.computeSalary — там же фонд/долг/оплата всех сотрудников).
-    private func computeSalary(monthOf date: Date) async -> [SalRow] {
-        let cal = Calendar.current
-        let ym = String(key(date).prefix(7))
-        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: date)) ?? date
-        // ym+"-31" в 30-дневных месяцах — невалидная дата для колонки типа date (400 → записи
-        // молча пропадали). Считаем реальный конец месяца.
-        let monthEnd = cal.date(byAdding: DateComponents(month: 1, day: -1), to: monthStart) ?? monthStart
-        async let empsR = try? DB.from("employees").select("id, name, salary, deduct_per_absence").eq("is_active", true).order("name").list(Employee.self)
-        async let absR = try? DB.from("shift_absences").select("employee_id, date, source").gte("date", ym + "-01").lte("date", key(monthEnd)).list(Absence.self)
-        async let cardsR = try? DB.from("monthly_card_amounts").select("employee_id, card_amount").eq("month", ym).list(CardAmount.self)
-        // Фильтр по period (месяц ЗП), не по date (день списания из кассы) — паритет с
-        // ManagerModel.computeSalary (ManagerSalary.swift, юзер-фидбок 2026-08-15).
-        async let advR = try? DB.from("salary_advances").select().eq("period", ym + "-01").list(SalaryAdvance.self)
-        async let paysR = try? DB.from("salary_payments").select().eq("period", ym + "-01").list(SalaryPayment.self)
-        // Открытый ЗП-долг за месяц — уже обещан через Manager→Долги (паритет с ManagerSalary, аудит 2026-09-27).
-        nonisolated struct DebtAmt: Codable, Sendable { let employee_id: String?; let amount: Double? }
-        async let debtsR = try? DB.from("shift_expenses").select("employee_id, amount").eq("is_paid", false).eq("note", "SALPERIOD:\(ym)-01").list(DebtAmt.self)
-        // Оклад/вычет, действовавшие в этом месяце (salary-history-2026-09.sql) — иначе
-        // правка оклада сегодня меняет расчёт за прошлые месяцы задним числом.
-        async let salHistR = try? DB.from("salary_history").select("employee_id, salary, deduct_per_absence, effective_from").lte("effective_from", key(monthStart)).list(SalaryHistoryRow.self)
-        guard let rawEmployees = await empsR else { return [] }
-        let absences = (await absR) ?? [], cardAmounts = (await cardsR) ?? []
-        let advances = (await advR) ?? [], payments = (await paysR) ?? []
-        let employees = resolveEmployees(rawEmployees, history: (await salHistR) ?? [], monthStart: key(monthStart))
-        var openDebtByEmp: [String: Double] = [:]
-        for d in (await debtsR) ?? [] { if let id = d.employee_id { openDebtByEmp[id, default: 0] += d.amount ?? 0 } }
-
-        return employees.map { e -> SalRow in
-            let absForEmp = absences.filter { $0.employee_id == e.id && $0.source != "auto" }
-            let absN = absForEmp.count
-            let absenceList = absForEmp.compactMap { $0.date }.sorted()
-            let deduct = Double(absN) * (e.deduct_per_absence ?? 0)
-            // Строго помесячно: сумма «на карту» берётся из monthly_card_amounts за этот
-            // месяц; без записи — 0 (без fallback на employees.card_amount, иначе одно
-            // значение «прилипало» ко всем месяцам).
-            let card = cardAmounts.first { $0.employee_id == e.id }?.card_amount ?? 0
-            let advForEmp = advances.filter { $0.employee_id == e.id }
-            let advance = advForEmp.reduce(0) { $0 + ($1.amount ?? 0) }
-            let paysForEmp = payments.filter { $0.employee_id == e.id }
-            let paid = paysForEmp.reduce(0) { $0 + ($1.amount ?? 0) }
-            let lastPaidAt = paysForEmp.compactMap { $0.paid_at }.max()
-            let total = max(0, (e.salary ?? 0) - deduct)
-            let cash = max(0, total - advance - card)
-            // «Осталось» — только наличные выплаты и открытый ЗП-долг (паритет с ManagerSalary A2).
-            let paidCash = paysForEmp.filter { ($0.method ?? "cash") == "cash" }.reduce(0) { $0 + ($1.amount ?? 0) }
-            let remaining = max(0, cash - paidCash - (openDebtByEmp[e.id] ?? 0))
-            return SalRow(id: e.id, name: e.name, salary: e.salary ?? 0, absences: absN, absenceList: absenceList, deduct: deduct, card: card, advance: advance, advanceList: advForEmp, total: total, cash: cash, paid: paid, remaining: remaining, lastPaidAt: lastPaidAt)
-        }
+    /// Ответ /api/people/salary — личная строка, посчитанная сервером.
+    private nonisolated struct PersonalSalaryDTO: Decodable, Sendable {
+        let id: String; let name: String; let salary: Double; let dates: [String]; let absences: Int
+        let deduct: Double; let card: Double; let advance: Double; let advances: [SalaryAdvance]
+        let paid: Double; let total: Double; let cash: Double; let remaining: Double
+        let openDebt: Double; let lastPaidAt: String?; let status: String
     }
 
+    /// Личный расчёт ЗП делает сервер (аудит People 2026-11-14): только своя строка по
+    /// staff.employee_id (не по имени — однофамильцы видели чужую сумму), сбой любой
+    /// составляющей — ошибка, а не нули; запоздавший ответ прошлого месяца отбрасывается.
     func loadSalary() async {
         #if DEBUG
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { seedSalary(); return }
         #endif
-        let list = await computeSalary(monthOf: salaryViewMonth)
-        salaryRows = list.filter { $0.name == myName }
+        salarySeq += 1
+        let seq = salarySeq
+        let ym = String(key(salaryViewMonth).prefix(7))
+        do {
+            let r = try await API.people("/api/people/salary?month=\(ym)", method: "GET", as: PersonalSalaryDTO.self)
+            guard seq == salarySeq else { return }
+            salaryRows = r.map { d in
+                [SalRow(id: d.id, name: d.name, salary: d.salary, absences: d.absences, absenceList: d.dates, deduct: d.deduct,
+                        card: d.card, advance: d.advance, advanceList: d.advances, total: d.total, cash: d.cash,
+                        paid: d.paid, remaining: d.remaining, lastPaidAt: d.lastPaidAt, openDebt: d.openDebt, status: d.status)]
+            } ?? []
+            salaryFailed = false
+        } catch {
+            guard seq == salarySeq else { return }
+            salaryRows = []
+            salaryFailed = true
+        }
         salaryLoaded = true
     }
 
@@ -355,7 +351,8 @@ final class PeopleModel {
         }
         // Личный вид (реструктура 2026-08-13): всегда своя смена, даже у менеджера —
         // весь график всех сотрудников теперь Manager→Настройки→Расписание.
-        let rows = schAll.filter { $0.staff_id == myId }
+        // Черновики (published=false) сотруднику не показываем — менеджер ещё не опубликовал.
+        let rows = schAll.filter { $0.staff_id == myId && (isManager || $0.published != false) }
         schedules = rows.sorted { $0.date < $1.date }
         schedLoaded = true
     }
@@ -401,7 +398,10 @@ final class PeopleModel {
 
         let cal = Calendar.current
         let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: Date())) ?? Date()
-        if let g = try? await DB.from("restaurant_settings").select().limit(1).list(GeoSettings.self).first { geo = g }
+        // Нет строки настроек = гео-явка не настроена (не «неизвестно»): иначе гейт навсегда закрыт.
+        if let rows = try? await DB.from("restaurant_settings").select().limit(1).list(GeoSettings.self) {
+            geo = rows.first ?? GeoSettings(attendance_enabled: false, latitude: nil, longitude: nil, geo_radius_m: nil, late_grace_min: nil)
+        }
         if isManager {
             if let a = try? await DB.from("attendance_records").select().gte("date", key(monthStart)).order("date", ascending: false).limit(500).list(AttendanceRecord.self) {
                 attendance = a
@@ -415,8 +415,10 @@ final class PeopleModel {
             if let a = try? await DB.from("attendance_records").select().eq("staff_id", myId).order("date", ascending: false).limit(62).list(AttendanceRecord.self) {
                 attendance = a
             } else if !attendance.isEmpty { flash(t("refreshFailed")) }
+            let day = todayKey
             mySchedToday = try? await DB.from("staff_schedules").select()
-                .eq("staff_id", myId).eq("date", todayKey).eq("published", true).limit(1).list(Schedule.self).first
+                .eq("staff_id", myId).eq("date", day).eq("published", true).limit(1).list(Schedule.self).first
+            mySchedDate = day
         }
         attLoaded = true
 
@@ -424,12 +426,24 @@ final class PeopleModel {
         if !isManager && pendingCheckIn { await flushPendingCheckIn() }
     }
     var todayKey: String { key(Date()) }
-    var todayRec: AttendanceRecord? { attendance.first { $0.staff_id == myId && $0.date == todayKey } }
+    /// Сегодняшняя запись явки. Ночная смена: незакрытая вчерашняя запись до полудня остаётся
+    /// «текущей» — иначе после 00:00 нельзя было ни уйти, ни отметить пункты чек-листа.
+    var todayRec: AttendanceRecord? {
+        if let r = attendance.first(where: { $0.staff_id == myId && $0.date == todayKey }) { return r }
+        guard Calendar.current.component(.hour, from: Date()) < 12,
+              let y = Calendar.current.date(byAdding: .day, value: -1, to: Date()) else { return nil }
+        let yk = key(y)
+        return attendance.first { $0.staff_id == myId && $0.date == yk && $0.check_in_at != nil && $0.check_out_at == nil }
+    }
+    /// Дата, на которую загружен mySchedToday: после полуночи экран не должен жить вчерашним графиком.
+    var mySchedDate: String? = nil
 
     // MARK: ключ очереди офлайн-явки
     private var pendingCheckInKey: String { "mise_pending_checkin_\(rid)_\(myId)" }
 
     func checkIn() async {
+        // Перешли через полночь с открытым экраном — перечитываем график на новую дату.
+        if mySchedDate != todayKey { await loadAttendance() }
         guard todayRec == nil else { return }
         // Хард-гейт по графику (Д4, 2026-07-31): без опубликованной смены на сегодня «Я
         // здесь» не проходит — кнопка и сама не показывается (staffView), это защитная
@@ -477,7 +491,10 @@ final class PeopleModel {
             await loadAttendance()
         } catch {
             // Сеть недоступна — сохранить в очередь
-            let pending: [String: String] = ["date": todayKey, "ts": ISO8601DateFormatter().string(from: Date())]
+            // Опоздание и статус фиксируются в момент нажатия — при досылке из очереди их уже
+            // не восстановить (раньше офлайн-приход всегда уходил как «вовремя»).
+            var pending: [String: String] = ["date": todayKey, "ts": ISO8601DateFormatter().string(from: Date()), "status": status]
+            if let late { pending["late"] = String(late) }
             if let data = try? JSONEncoder().encode(pending) {
                 UserDefaults.standard.set(data, forKey: pendingCheckInKey)
             }
@@ -518,11 +535,13 @@ final class PeopleModel {
             UserDefaults.standard.removeObject(forKey: pendingCheckInKey)
             pendingCheckIn = false; return
         }
+        var row: [String: Any] = [
+            "restaurant_id": rid, "staff_id": myId, "date": date,
+            "check_in_at": ts, "status": pending["status"] ?? "present", "source": "manual",
+        ]
+        if let l = pending["late"].flatMap(Int.init) { row["late_minutes"] = l }
         do {
-            try await DB.from("attendance_records").insert([
-                "restaurant_id": rid, "staff_id": myId, "date": date,
-                "check_in_at": ts, "status": "present", "source": "manual",
-            ] as [String: Any]).run()
+            try await DB.from("attendance_records").insert(row).run()
             UserDefaults.standard.removeObject(forKey: pendingCheckInKey)
             pendingCheckIn = false
             flash(t("pe.checkedIn"))
@@ -564,14 +583,23 @@ final class PeopleModel {
     func swapPeerDecline(_ r: SwapRequest) async { await patchSwap(r, "peer_declined") }
     func swapCancel(_ r: SwapRequest) async { await patchSwap(r, "cancelled") }
     func swapReject(_ r: SwapRequest) async { await patchSwap(r, "rejected") }
+    /// Заявка и график меняются одной серверной операцией (/api/people/swap): раньше смена
+    /// перевешивалась, а статус мог не сохраниться — обмен применялся наполовину, но
+    /// приложение всё равно писало «Обмен утверждён».
     func swapApprove(_ r: SwapRequest) async {
-        if let sid = r.schedule_id, let tid = r.target_id {
-            do {
-                try await DB.from("staff_schedules").update(["staff_id": tid]).eq("id", sid).run()
-            } catch { flash(t("saveFailed", ["err": error.localizedDescription])); return }
+        struct Ok: Decodable { let id: String }
+        do {
+            _ = try await API.people("/api/people/swap", body: ["id": r.id], as: Ok.self)
+        } catch {
+            flash(t("saveFailed", ["err": error.localizedDescription])); await loadSwaps(); return
         }
-        await patchSwap(r, "approved")
+        if let i = swaps.firstIndex(where: { $0.id == r.id }) { swaps[i].status = "approved" }
+        if let rid = r.requester_id {
+            await Notify.send(type: "swap_result", title: t("pe.swapApproved"), body: t("pe.swapApproved"),
+                              audience: ["staff_ids": [rid]], titleKey: "notify.swapApprovedTitle", bodyKey: "notify.swapApprovedBody")
+        }
         flash(t("pe.swapApproved"))
+        await loadSwaps()
     }
 
     // MARK: чек-листы
@@ -698,52 +726,36 @@ final class PeopleModel {
         await persistAuditItem(list, idx, item)
     }
 
-    /// Общая запись пункта аудита (toggle/grade/note): мерж со свежей копией, update/insert,
-    /// офлайн-очередь. newItem кладётся ЦЕЛИКОМ в свой индекс — чужие индексы не трогаем.
+    /// Атомарная отметка одного пункта на сервере (/api/people/checklist-item, аудит People
+    /// 2026-11-14): сервер сливает пункт по compare-and-swap — параллельные отметки коллег
+    /// больше не затираются (раньше клиент перезаписывал весь items_state).
+    /// Сетевой сбой → URLError (вызывающий кладёт в офлайн-очередь), отказ сервера → APIError.
+    func saveChecklistItemRemote(checklistId: String, idx: Int, item: ChecklistItemState, completionId: String?,
+                                 shiftId: String?, date: String, verify: Bool = false) async throws -> ChecklistCompletion? {
+        var body: [String: Any] = ["checklist_id": checklistId, "idx": idx, "item": item.asDict, "date": date]
+        if let completionId { body["completion_id"] = completionId }
+        if let shiftId { body["shift_id"] = shiftId }
+        if let att = attendance.first(where: { $0.staff_id == myId && $0.date == todayKey })?.id { body["attendance_id"] = att }
+        if verify { body["verify"] = true }
+        return try await API.people("/api/people/checklist-item", body: body, as: ChecklistCompletion.self)
+    }
+
+    /// Общая запись пункта аудита (toggle/grade/note). Сеть недоступна — офлайн-очередь;
+    /// отказ сервера — сообщение и перечитка (раньше любой сбой молча уходил в очередь).
     private func persistAuditItem(_ list: ShiftChecklist, _ idx: Int, _ newItem: ChecklistItemState) async {
-        let itemsList = list.itemDetails ?? []
-        var state = auditRun(list)?.items_state ?? Array(repeating: ChecklistItemState(done: false), count: itemsList.count)
-        while state.count < max(itemsList.count, idx + 1) { state.append(ChecklistItemState(done: false)) }
-        state[idx] = newItem
-        var allDone = state.allSatisfy { $0.done }
-        let staffVal: Any = myId == "owner" || myId.isEmpty ? NSNull() : myId
-        if let i = auditRuns.firstIndex(where: { $0.checklist_id == list.id && $0.date == todayKey }) {
-            let cid = auditRuns[i].id
-            // Против lost update: свежая копия с сервера (мимо кеша), мержим ТОЛЬКО свой индекс —
-            // параллельные отметки коллег не затираем. Сеть упала → работаем со своей копией, уйдёт в очередь.
-            if let freshState = try? await DB.from("shift_checklist_completions").select().fresh().eq("id", cid).limit(1).list(ChecklistCompletion.self).first?.items_state {
-                var merged = freshState
-                while merged.count < max(itemsList.count, idx + 1) { merged.append(ChecklistItemState(done: false)) }
-                merged[idx] = newItem
-                state = merged
-                allDone = state.allSatisfy { $0.done }
+        let cid = auditRuns.first(where: { $0.checklist_id == list.id && $0.date == todayKey })?.id
+        do {
+            let row = try await saveChecklistItemRemote(checklistId: list.id, idx: idx, item: newItem, completionId: cid,
+                                                        shiftId: nil, date: todayKey)
+            if let row {
+                if let i = auditRuns.firstIndex(where: { $0.id == row.id }) { auditRuns[i] = row } else { auditRuns.insert(row, at: 0) }
+                if row.status == "done" { flash(t("pe.auditDone")) }
             }
-            let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
-            auditRuns[i].items_state = state
-            auditRuns[i].status = allDone ? "done" : "in_progress"
-            do {
-                try await DB.from("shift_checklist_completions").update([
-                    "items_state": state.map { $0.asDict }, "completed_at": completedAt,
-                    "status": allDone ? "done" : "in_progress", "staff_id": staffVal,
-                ] as [String: Any]).eq("id", cid).run()
-            } catch { queuePendingChecklistToggle(completionId: cid, idx: idx, done: newItem.done, photoURL: newItem.photo_url, newState: newItem) }
-        } else {
-            let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
-            let attId: Any = attendance.first(where: { $0.staff_id == myId && $0.date == todayKey })?.id ?? NSNull()
-            do {
-                try await DB.from("shift_checklist_completions").insert([
-                    "restaurant_id": rid, "checklist_id": list.id, "shift_id": openShiftId ?? NSNull(), "date": todayKey,
-                    "staff_id": staffVal, "items_state": state.map { $0.asDict }, "completed_at": completedAt,
-                    "attendance_id": attId, "status": allDone ? "done" : "in_progress",
-                ] as [String: Any]).run()
-            } catch {
-                // Офлайн: прогона ещё нет — кладём отметку в очередь по (checklist_id, date), flush создаст строку.
-                queuePendingChecklistToggle(checklistId: list.id, date: todayKey, shiftId: openShiftId, idx: idx, done: newItem.done, photoURL: newItem.photo_url, newState: newItem)
-                return
-            }
-            await loadAudits()
+        } catch is URLError {
+            queuePendingChecklistToggle(completionId: cid, checklistId: list.id, date: todayKey, idx: idx, done: newItem.done, photoURL: newItem.photo_url, newState: newItem)
+        } catch {
+            flash(t("saveFailed", ["err": error.localizedDescription])); await loadAudits()
         }
-        if allDone { flash(t("pe.auditDone")) }
     }
 
     /// Менеджер запускает разовую проверку по существующему шаблону: заводит прогон
@@ -784,9 +796,15 @@ final class PeopleModel {
     /// сотрудника уже есть сегодняшняя запись attendance_records — иначе открытая касса
     /// (Manager) одна не доказывает физическое присутствие ИМЕННО этого человека.
     private func requireGeoCheckIn() async -> Bool {
-        guard geo?.attendance_enabled == true else { return true }
-        if !attLoaded { await loadAttendance() }
-        guard attendance.contains(where: { $0.staff_id == myId && $0.date == todayKey }) else {
+        // Должностные лица явку не отмечают («Я здесь» только у сотрудника) — раньше при
+        // включённой гео-явке менеджер/владелец не мог отметить ни одного пункта.
+        if isManager { return true }
+        // Настройки ещё не загружены — сначала грузим, а не пропускаем проверку (раньше geo == nil
+        // трактовался как «гео выключена»). Не удалось загрузить — закрыто, а не открыто.
+        if geo == nil || !attLoaded { await loadAttendance() }
+        guard let g = geo else { flash(t("refreshFailed")); return false }
+        guard g.attendance_enabled == true else { return true }
+        guard todayRec != nil else {
             flash(t("pe.needCheckInFirst")); return false
         }
         return true
@@ -796,53 +814,27 @@ final class PeopleModel {
         guard let sid = openShiftId else { flash(t("pe.openShiftFirst")); return }
         guard await requireGeoCheckIn() else { return }
         let itemsList = list.itemDetails ?? []
-        var state = completion(list)?.items_state ?? Array(repeating: ChecklistItemState(done: false), count: itemsList.count)
-        while state.count < itemsList.count { state.append(ChecklistItemState(done: false)) }
-        let willBeDone = !state[idx].done
+        let comp = completion(list)
+        var item = (comp?.items_state ?? []).indices.contains(idx) ? comp!.items_state![idx] : ChecklistItemState(done: false)
+        let willBeDone = !item.done
         if willBeDone, idx < itemsList.count, itemsList[idx].photo_required, photoURL == nil {
             flash(t("pe.photoRequired")); return
         }
-        state[idx].done = willBeDone
-        if let photoURL { state[idx].photo_url = photoURL }
-        var allDone = state.allSatisfy { $0.done }
-        if let i = completions.firstIndex(where: { $0.checklist_id == list.id }) {
-            let cid = completions[i].id
-            // Против lost update: свежая копия с сервера (мимо кеша), мержим ТОЛЬКО свой индекс.
-            if let freshState = try? await DB.from("shift_checklist_completions").select().fresh().eq("id", cid).limit(1).list(ChecklistCompletion.self).first?.items_state {
-                var merged = freshState
-                while merged.count < max(itemsList.count, idx + 1) { merged.append(ChecklistItemState(done: false)) }
-                merged[idx] = state[idx]
-                state = merged
-                allDone = state.allSatisfy { $0.done }
+        item.done = willBeDone
+        if let photoURL { item.photo_url = photoURL }
+        do {
+            let row = try await saveChecklistItemRemote(checklistId: list.id, idx: idx, item: item, completionId: comp?.id,
+                                                        shiftId: sid, date: todayKey)
+            if let row {
+                if let i = completions.firstIndex(where: { $0.id == row.id }) { completions[i] = row } else { completions.append(row) }
+                if row.status == "done" { flash(clType == "open" ? t("pe.checklistOpenDone") : t("pe.checklistCloseDone")) }
             }
-            let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
-            completions[i].items_state = state
-            do {
-                try await DB.from("shift_checklist_completions").update([
-                    "items_state": state.map { $0.asDict }, "completed_at": completedAt,
-                    "status": allDone ? "done" : "in_progress",
-                    "staff_id": myId == "owner" || myId.isEmpty ? NSNull() : myId,
-                ] as [String: Any]).eq("id", cid).run()
-            } catch {
-                queuePendingChecklistToggle(completionId: cid, idx: idx, done: state[idx].done, photoURL: photoURL)
-            }
-        } else {
-            let completedAt: Any = allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull()
-            let attId: Any = attendance.first(where: { $0.staff_id == myId && $0.date == todayKey })?.id ?? NSNull()
-            do {
-                try await DB.from("shift_checklist_completions").insert([
-                    "restaurant_id": rid, "checklist_id": list.id, "shift_id": sid, "date": key(Date()),
-                    "staff_id": myId == "owner" || myId.isEmpty ? NSNull() : myId,
-                    "items_state": state.map { $0.asDict }, "completed_at": completedAt, "attendance_id": attId, "status": allDone ? "done" : "in_progress",
-                ] as [String: Any]).run()
-            } catch {
-                // Офлайн: строки ещё нет — очередь по (checklist_id, date), flush создаст прогон.
-                queuePendingChecklistToggle(checklistId: list.id, date: key(Date()), shiftId: sid, idx: idx, done: state[idx].done, photoURL: photoURL)
-                return
-            }
-            await loadChecklists()
+        } catch is URLError {
+            queuePendingChecklistToggle(completionId: comp?.id, checklistId: list.id, date: todayKey, shiftId: sid,
+                                        idx: idx, done: item.done, photoURL: photoURL, newState: item)
+        } catch {
+            flash(t("saveFailed", ["err": error.localizedDescription])); await loadChecklists()
         }
-        if allDone { flash(clType == "open" ? t("pe.checklistOpenDone") : t("pe.checklistCloseDone")) }
     }
 
     // gradeChecklistItem (менеджерская верификация сменного чек-листа) переехала в
@@ -888,58 +880,21 @@ final class PeopleModel {
     func flushPendingChecklistQueue() async {
         let queue = loadPendingChecklistQueue()
         guard !queue.isEmpty else { return }
-        let staffVal: Any = myId == "owner" || myId.isEmpty ? NSNull() : myId
         var remaining: [PendingChecklistToggle] = []
         for item in queue {
-            // Находим прогон: по id либо (checklist_id, date) — офлайн-INSERT строку так и не создал.
-            // Читаем мимо кеша: мерж по устаревшей копии = lost update.
-            var comp: ChecklistCompletion?
-            if let cid = item.completionId {
-                guard let found = try? await DB.from("shift_checklist_completions").select().fresh().eq("id", cid).limit(1).list(ChecklistCompletion.self).first else {
-                    remaining.append(item); continue
-                }
-                comp = found
-            } else if let clId = item.checklistId, let date = item.date {
-                do {
-                    comp = try await DB.from("shift_checklist_completions").select().fresh().eq("checklist_id", clId).eq("date", date).limit(1).list(ChecklistCompletion.self).first
-                } catch { remaining.append(item); continue } // сеть — попробуем позже
-            } else { continue } // битый элемент старого формата — выкидываем
-
-            if let comp {
-                var state = comp.items_state ?? []
-                while state.count <= item.idx { state.append(.init(done: false)) }
-                if let ns = item.newState { state[item.idx] = ns }
-                else {
-                    state[item.idx].done = item.done
-                    if let p = item.photoURL { state[item.idx].photo_url = p }
-                }
-                let allDone = state.allSatisfy { $0.done }
-                do {
-                    try await DB.from("shift_checklist_completions").update([
-                        "items_state": state.map { $0.asDict },
-                        "completed_at": allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull(),
-                        "status": allDone ? "done" : "in_progress",
-                        "staff_id": staffVal,
-                    ] as [String: Any]).eq("id", comp.id).run()
-                } catch { remaining.append(item) }
-            } else {
-                // Прогона нет — создаём со своей отметкой; размер по шаблону, чтобы не резать чужие индексы.
-                let tplCount = (checklists + audits).first { $0.id == item.checklistId }?.itemDetails?.count ?? 0
-                var state = Array(repeating: ChecklistItemState(done: false), count: max(tplCount, item.idx + 1))
-                if let ns = item.newState { state[item.idx] = ns }
-                else {
-                    state[item.idx].done = item.done
-                    if let p = item.photoURL { state[item.idx].photo_url = p }
-                }
-                let allDone = state.allSatisfy { $0.done }
-                do {
-                    try await DB.from("shift_checklist_completions").insert([
-                        "restaurant_id": rid, "checklist_id": item.checklistId ?? "", "shift_id": item.shiftId ?? NSNull(), "date": item.date ?? todayKey,
-                        "staff_id": staffVal, "items_state": state.map { $0.asDict },
-                        "completed_at": allDone ? ISO8601DateFormatter().string(from: Date()) : NSNull(),
-                        "status": allDone ? "done" : "in_progress",
-                    ] as [String: Any]).run()
-                } catch { remaining.append(item) }
+            guard let clId = item.checklistId ?? (completions + auditRuns).first(where: { $0.id == item.completionId })?.checklist_id else {
+                // Старый элемент без checklist_id и прогон не найден в памяти — пробуем позже.
+                if item.completionId != nil { remaining.append(item) }
+                continue
+            }
+            let state = item.newState ?? ChecklistItemState(done: item.done, photo_url: item.photoURL)
+            do {
+                _ = try await saveChecklistItemRemote(checklistId: clId, idx: item.idx, item: state, completionId: item.completionId,
+                                                      shiftId: item.shiftId, date: item.date ?? todayKey)
+            } catch is URLError {
+                remaining.append(item)
+            } catch {
+                // Сервер отверг (прогон удалён/нет доступа) — повтор бесполезен, выбрасываем.
             }
         }
         if remaining.isEmpty { UserDefaults.standard.removeObject(forKey: pendingChecklistKey) }
@@ -1071,6 +1026,8 @@ final class PeopleModel {
     }
     func createSwap(scheduleId: String, targetId: String, note: String) async -> Bool {
         guard !scheduleId.isEmpty, !targetId.isEmpty else { flash(t("pe.pickShiftPeer")); return false }
+        guard !creatingSwap else { return false }
+        creatingSwap = true; defer { creatingSwap = false }
         let noteVal: Any = note.isEmpty ? NSNull() : note
         do {
             try await DB.from("shift_swap_requests").insert([
@@ -1131,9 +1088,10 @@ final class PeopleModel {
 
     // закуп
     func loadPurchase() async {
-        if let p = try? await DB.from("purchase_items").select().order("created_at", ascending: false).limit(300).list(PurchaseItem.self) {
-            purchase = p
-        } else if !purchase.isEmpty { flash(t("refreshFailed")) }
+        // «К закупке» — все открытые; общий лимит 300 выбрасывал старые некупленные позиции.
+        async let todoR = try? DB.from("purchase_items").select().eq("status", "todo").order("created_at", ascending: false).limit(1000).list(PurchaseItem.self)
+        async let doneR = try? DB.from("purchase_items").select().neq("status", "todo").order("created_at", ascending: false).limit(300).list(PurchaseItem.self)
+        if let a = await todoR, let b = await doneR { purchase = a + b } else if !purchase.isEmpty { flash(t("refreshFailed")) }
         purchaseLoaded = true
     }
     var purchaseTodo: [PurchaseItem] { purchase.filter { $0.status == "todo" } }
@@ -1144,6 +1102,8 @@ final class PeopleModel {
     func addPurchase(category: String, rows: [(name: String, qty: String, unit: String)], catLabel: String) async -> Bool {
         let valid = rows.map { ($0.name.trimmingCharacters(in: .whitespaces), $0.qty, $0.unit) }.filter { !$0.0.isEmpty }
         if valid.isEmpty { return false }
+        guard !creatingPurchase else { return false }
+        creatingPurchase = true; defer { creatingPurchase = false }
         let creator: Any = myId == "owner" ? NSNull() : myId
         let payload: [[String: Any]] = valid.map { r in
             var v: [String: Any] = [

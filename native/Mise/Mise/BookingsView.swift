@@ -90,68 +90,148 @@ final class BookingsModel {
     }()
     func key(_ d: Date) -> String { dfKey.string(from: d) }
 
-    func load() async {
-        loading = true
-        defer { loading = false }
-        // Только при успехе перезаписываем — сбой на refresh не должен стирать данные.
+    var dayError: String?
+    var rangeError: String?
+    var monthError: String?
+    var guestsError: String?
+    var guestsLoading = false
+    private var dayGeneration = 0
+    private var rangeGeneration = 0
+    private var monthGeneration = 0
+    private var guestsGeneration = 0
+    private var loadedDay: String?
+    private var loadedRange: String?
+    private var loadedMonth: String?
+    private var statusGeneration: [String: Int] = [:]
+    private var statusTasks: [String: Task<Void, Never>] = [:]
+    private struct StatusSnapshot { let value: String? }
+    private var confirmedStatus: [String: StatusSnapshot] = [:]
+    private var pendingStatus: [String: String] = [:]
+    private var statusEpoch = 0
+    private var statusWrittenEpoch: [String: Int] = [:]
+
+    private func isCancelled(_ error: Error) -> Bool {
+        Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+
+    private func withPendingStatus(_ rows: [Booking], since readEpoch: Int) -> [Booking] {
+        rows.map { row in
+            var copy = row
+            if let status = pendingStatus[row.id] { copy.status = status }
+            else if (statusWrittenEpoch[row.id] ?? 0) > readEpoch { copy.status = confirmedStatus[row.id]?.value }
+            else { confirmedStatus[row.id] = StatusSnapshot(value: row.status) }
+            return copy
+        }
+    }
+
+    func load(force: Bool = false) async {
+        dayGeneration += 1
+        let request = dayGeneration
+        let readEpoch = statusEpoch
+        let day = key(currentDate)
+        if loadedDay != day { bookings = []; loadedDay = day }
+        loading = true; dayError = nil
+        defer { if request == dayGeneration { loading = false } }
         do {
-            let rows = try await DB.from("bookings").select()
-                .eq("booking_date", key(currentDate))
-                .order("booking_time").list(Booking.self)
-            // Сортировка: брони без времени — в конец.
-            bookings = rows.sorted {
+            let query = DB.from("bookings").select().eq("booking_date", day).order("booking_time")
+            if force { query.fresh() }
+            let rows = try await query.list(Booking.self)
+            guard request == dayGeneration, !Task.isCancelled else { return }
+            bookings = withPendingStatus(rows.sorted {
                 ($0.booking_time ?? "~", $0.created_by_name ?? "") < ($1.booking_time ?? "~", $1.created_by_name ?? "")
-            }
+            }, since: readEpoch)
         } catch {
-            // Причина найдена (юзер-фидбек 2026-07-22): pull-to-refresh отменяет предыдущий
-            // Task, URLSession кидает .cancelled — не настоящая ошибка сети, молчим.
-            let cancelled = error is CancellationError || (error as? URLError)?.code == .cancelled
-            if !cancelled && !bookings.isEmpty { flash(t("refreshFailed")) }
+            guard request == dayGeneration, !isCancelled(error) else { return }
+            dayError = error.localizedDescription
         }
     }
 
-    /// Загрузить брони за диапазон (today/tomorrow/week).
-    func loadRange(from: Date, to: Date) async {
-        rangeLoading = true
-        defer { rangeLoading = false }
-        if let rows = try? await DB.from("bookings").select()
-            .gte("booking_date", key(from))
-            .lte("booking_date", key(to))
-            .order("booking_date")
-            .order("booking_time").list(Booking.self) {
-            rangeBookings = rows
+    func loadRange(from: Date, to: Date, force: Bool = false) async {
+        rangeGeneration += 1
+        let request = rangeGeneration
+        let readEpoch = statusEpoch
+        let fromKey = key(from), toKey = key(to), scope = key(from) + ":" + key(to)
+        if loadedRange != scope { rangeBookings = []; loadedRange = scope }
+        rangeLoading = true; rangeError = nil
+        defer { if request == rangeGeneration { rangeLoading = false } }
+        do {
+            let query = DB.from("bookings").select().gte("booking_date", fromKey).lte("booking_date", toKey)
+                .order("booking_date").order("booking_time")
+            if force { query.fresh() }
+            let rows = try await query.list(Booking.self)
+            guard request == rangeGeneration, !Task.isCancelled else { return }
+            rangeBookings = withPendingStatus(rows, since: readEpoch)
+        } catch {
+            guard request == rangeGeneration, !isCancelled(error) else { return }
+            rangeError = error.localizedDescription
         }
     }
 
-    /// Загрузить все брони для CRM гостей (~12 месяцев назад).
-    /// force: игнорировать флаг «уже загружено» — для pull-to-refresh (брони с других
-    /// устройств не попадают в этот кеш иначе до перезапуска приложения).
+    /// Complete history, fetched through a tenant-scoped cursor RPC; never a cached 12-month subset.
     func loadAllBookings(force: Bool = false) async {
         guard !allBookingsLoaded || force else { return }
-        let cal = Calendar.current
-        let from = cal.date(byAdding: .month, value: -12, to: Date()) ?? Date()
-        if let rows = try? await DB.from("bookings").select()
-            .gte("booking_date", key(from))
-            .order("booking_date").list(Booking.self) {
-            allBookings = rows
+        guestsGeneration += 1
+        let request = guestsGeneration
+        let readEpoch = statusEpoch
+        guestsLoading = true; guestsError = nil
+        defer { if request == guestsGeneration { guestsLoading = false } }
+        nonisolated struct Page: Decodable { let data: [Booking]? }
+        var rows: [Booking] = [], seen = Set<String>()
+        var afterDate: String?, afterId: String?
+        do {
+            while true {
+                var args: [String: Any] = ["p_limit": 500]
+                if let afterDate, let afterId { args["p_after_date"] = afterDate; args["p_after_id"] = afterId }
+                let data = try await API.dbRequest(["op": "rpc", "fn": "booking_history_page", "args": args])
+                guard request == guestsGeneration, !Task.isCancelled else { return }
+                guard let page = try JSONDecoder().decode(Page.self, from: data).data else { throw bookingError("refreshFailed") }
+                let fresh = page.filter { seen.insert($0.id).inserted }
+                rows.append(contentsOf: fresh)
+                if page.count < 500 { break }
+                guard !fresh.isEmpty, let last = page.last, let date = last.booking_date,
+                      afterDate == nil || (date, last.id.lowercased()) < (afterDate!, afterId!.lowercased()) else {
+                    throw bookingError("refreshFailed")
+                }
+                afterDate = date; afterId = last.id
+            }
+            guard request == guestsGeneration, !Task.isCancelled else { return }
+            allBookings = withPendingStatus(rows, since: readEpoch)
             allBookingsLoaded = true
+        } catch {
+            guard request == guestsGeneration, !isCancelled(error) else { return }
+            guestsError = error.localizedDescription
         }
     }
 
-    /// Дни текущего месяца календаря, где есть брони — для точек-пометок.
-    func loadMonth() async {
+    func loadMonth(force: Bool = false) async {
+        monthGeneration += 1
+        let request = monthGeneration
         let cal = Calendar.current
         let first = cal.date(from: cal.dateComponents([.year, .month], from: visibleMonth)) ?? visibleMonth
-        let next = cal.date(byAdding: .month, value: 1, to: first) ?? first
-        let last = cal.date(byAdding: .day, value: -1, to: next) ?? next
-        guard let rows = try? await DB.from("bookings").select("booking_date")
-            .gte("booking_date", key(first)).lte("booking_date", key(last)).list(BookingDay.self) else { return }
-        monthDays = Set(rows.compactMap { $0.booking_date })
+        let last = cal.date(byAdding: DateComponents(month: 1, day: -1), to: first) ?? first
+        let scope = key(first)
+        if loadedMonth != scope { monthDays = []; loadedMonth = scope }
+        monthError = nil
+        do {
+            let query = DB.from("bookings").select("booking_date").gte("booking_date", scope).lte("booking_date", key(last))
+            if force { query.fresh() }
+            let rows = try await query.list(BookingDay.self)
+            guard request == monthGeneration, !Task.isCancelled else { return }
+            monthDays = Set(rows.compactMap { $0.booking_date })
+        } catch {
+            guard request == monthGeneration, !isCancelled(error) else { return }
+            monthError = error.localizedDescription
+        }
     }
 
-    func selectDay(_ d: Date) async {
-        currentDate = d
-        await load()
+    func selectDay(_ date: Date) async {
+        let changedMonth = String(key(visibleMonth).prefix(7)) != String(key(date).prefix(7))
+        currentDate = date; visibleMonth = date
+        if changedMonth {
+            async let day: Void = load()
+            async let month: Void = loadMonth()
+            await day; await month
+        } else { await load() }
     }
 
     func changeMonth(_ dir: Int) async {
@@ -159,56 +239,81 @@ final class BookingsModel {
         await loadMonth()
     }
 
-    func save(_ b: Booking, isNew: Bool) async {
-        guard !saving else { return }
-        saving = true; defer { saving = false }
-        var values: [String: Any] = [
-            "booking_date": b.booking_date ?? key(currentDate),
-        ]
-        // status NOT NULL DEFAULT 'new' в БД. Новая бронь создаётся БЕЗ статуса (пусть БД
-        // поставит default) — статус ставится свайпом. При РЕДАКТИРОВАНИИ статус шлём всегда,
-        // включая явный сброс на «нет статуса» из пикера (nil → "new", это одно и то же для БД) —
-        // иначе выбор «Нет статуса» в редакторе молча не сохранялся.
-        if isNew {
-            if let status = b.status { values["status"] = status }
-        } else {
-            values["status"] = b.status ?? "new"
-        }
-        values["booking_time"] = b.booking_time ?? NSNull()
-        values["guest_name"] = b.guest_name ?? NSNull()
-        values["guests_count"] = b.guests_count ?? NSNull()
-        values["phone"] = b.phone ?? NSNull()
-        values["table_label"] = b.table_label ?? NSNull()
-        values["note"] = b.note ?? NSNull()
+    private func invalidateGuestData(cancelReads: Bool = true) {
+        if cancelReads { guestsGeneration += 1; guestsLoading = false }
+        allBookingsLoaded = false
+    }
 
+    private func invalidateVisibleReads() {
+        dayGeneration += 1; rangeGeneration += 1; monthGeneration += 1
+        loading = false; rangeLoading = false
+    }
+
+    private func publish(_ row: Booking) {
+        let display = withPendingStatus([row], since: statusEpoch)[0]
+        if let index = allBookings.firstIndex(where: { $0.id == row.id }) { allBookings[index] = display }
+        else { allBookings.append(display) }
+        let day = key(currentDate)
+        if loadedDay != day { bookings = []; loadedDay = day }
+        bookings.removeAll { $0.id == row.id }
+        if row.booking_date == day { bookings.append(display) }
+        bookings.sort { ($0.booking_time ?? "~", $0.created_by_name ?? "") < ($1.booking_time ?? "~", $1.created_by_name ?? "") }
+        rangeBookings.removeAll { $0.id == row.id }
+        if let scope = loadedRange?.split(separator: ":"), scope.count == 2, let day = row.booking_date,
+           day >= scope[0] && day <= scope[1] { rangeBookings.append(display) }
+        rangeBookings.sort { ($0.booking_date ?? "", $0.booking_time ?? "~") < ($1.booking_date ?? "", $1.booking_time ?? "~") }
+    }
+
+    private func refreshVisibleInBackground() {
+        Task { @MainActor in
+            async let day: Void = load(force: true)
+            async let month: Void = loadMonth(force: true)
+            await day; await month
+        }
+    }
+
+    @discardableResult
+    func save(_ booking: Booking, isNew: Bool, lastName: String? = nil) async throws -> Booking {
+        guard !saving else { throw bookingError("saving") }
+        guard UUID(uuidString: booking.id) != nil else { throw bookingError("bk.saveFailed") }
+        saving = true; defer { saving = false }
+        var values: [String: Any] = ["booking_date": booking.booking_date ?? key(currentDate)]
+        if !isNew || booking.status != nil { values["status"] = booking.status ?? "new" }
+        values["booking_time"] = booking.booking_time ?? NSNull()
+        values["guest_name"] = booking.guest_name ?? NSNull()
+        values["guests_count"] = booking.guests_count ?? NSNull()
+        values["phone"] = booking.phone ?? NSNull()
+        values["table_label"] = booking.table_label ?? NSNull()
+        values["note"] = booking.note ?? NSNull()
+        let persisted: Booking?
         if isNew {
-            values["created_by"] = b.created_by ?? NSNull()
-            values["created_by_name"] = b.created_by_name ?? NSNull()
-            do {
-                try await DB.from("bookings").insert(values).run()
-            } catch {
-                flash(t("bk.saveFailed"))
-                return
+            values["id"] = booking.id.lowercased()
+            if let key = booking.guest_key {
+                guard bookingHasCanonicalGuestKey(key) else { throw bookingError("gs.refreshProfile") }
+                values["guest_key"] = key
             }
-            let segs = notifyBodySegments(b)
-            // booking_date в data — чтобы тап по уведомлению открыл ИМЕННО эту дату в Bookings,
-            // а не просто модуль (юзер-фидбек 2026-07-22).
-            await Notify.send(type: "booking", title: t("bk.new"), body: notifyBody(b),
-                              audience: ["managers": true], titleKey: "notify.bookingTitle",
-                              bodySegments: segs.isEmpty ? nil : segs,
-                              data: ["module": "bookings", "booking_date": b.booking_date ?? ""])
+            persisted = try await DB.from("bookings").insert(values).single(Booking.self)
         } else {
             values["updated_at"] = ISO8601DateFormatter().string(from: Date())
-            do {
-                try await DB.from("bookings").update(values).eq("id", b.id).run()
-            } catch {
-                flash(t("bk.saveFailed"))
-                return
+            persisted = try await DB.from("bookings").update(values).eq("id", booking.id).single(Booking.self)
+        }
+        guard let persisted else { throw bookingError("bk.saveFailed") }
+        // Retry uses the same booking ID if this second, profile-only step fails.
+        if isNew, let lastName, !lastName.isEmpty {
+            try await BookingGuestService.update(key: bookingGuestKey(persisted), profile: ["last_name": lastName])
+        }
+        invalidateVisibleReads(); invalidateGuestData(); publish(persisted)
+        if isNew {
+            let segments = notifyBodySegments(persisted)
+            Task { @MainActor in
+                await Notify.send(type: "booking", title: t("bk.new"), body: notifyBody(persisted),
+                                  audience: ["managers": true], titleKey: "notify.bookingTitle",
+                                  bodySegments: segments.isEmpty ? nil : segments,
+                                  data: ["module": "bookings", "booking_date": persisted.booking_date ?? "", "booking_id": persisted.id])
             }
         }
-        await load()
-        await loadMonth()
-        allBookingsLoaded = false // invalidate cache
+        refreshVisibleInBackground()
+        return persisted
     }
 
     /// Краткий текст пуша по брони: «Анна · 4 гостя · 19:30 · стол 5». Литерал-фолбэк
@@ -237,41 +342,79 @@ final class BookingsModel {
         return segs
     }
 
-    func delete(_ b: Booking) async {
-        do {
-            try await DB.from("bookings").delete().eq("id", b.id).run()
-        } catch {
-            flash(t("bk.saveFailed"))
-            return
-        }
-        await load()
-        await loadMonth()
-        allBookingsLoaded = false
+    func delete(_ booking: Booking) async throws {
+        try await DB.from("bookings").delete().eq("id", booking.id).run()
+        invalidateVisibleReads(); invalidateGuestData()
+        allBookings.removeAll { $0.id == booking.id }
+        bookings.removeAll { $0.id == booking.id }
+        rangeBookings.removeAll { $0.id == booking.id }
+        refreshVisibleInBackground()
     }
 
-    /// Свайп-отметка статуса (пришёл/опаздывает) — мгновенно локально (в обоих списках —
-    /// «сегодня» и текущий диапазон, иначе на вкладках Завтра/Неделя статус визуально не
-    /// меняется), затем на сервер; при сбое — откат + тост, а не тихое рассинхронивание.
-    func setStatus(_ b: Booking, to status: String) async {
-        let prevStatus = b.status
-        if let i = bookings.firstIndex(where: { $0.id == b.id }) { bookings[i].status = status }
-        if let i = rangeBookings.firstIndex(where: { $0.id == b.id }) { rangeBookings[i].status = status }
-        do {
-            try await DB.from("bookings").update([
-                "status": status, "updated_at": ISO8601DateFormatter().string(from: Date()),
-            ]).eq("id", b.id).run()
-        } catch {
-            if let i = bookings.firstIndex(where: { $0.id == b.id }) { bookings[i].status = prevStatus }
-            if let i = rangeBookings.firstIndex(where: { $0.id == b.id }) { rangeBookings[i].status = prevStatus }
-            flash(t("bk.saveFailed"))
-        }
+    func deleteGuest(_ guest: GuestProfile) async throws {
+        try await BookingGuestService.delete(key: guest.id)
+        invalidateVisibleReads(); invalidateGuestData()
+        allBookings.removeAll { bookingGuestKey($0) == guest.id }
+        bookings.removeAll { bookingGuestKey($0) == guest.id }
+        rangeBookings.removeAll { bookingGuestKey($0) == guest.id }
+        refreshVisibleInBackground()
     }
+
+    func guestDidUpdate(key: String, name: String?, phone: String?) {
+        invalidateGuestData()
+        func changed(_ rows: [Booking]) -> [Booking] {
+            rows.map { row in
+                guard bookingGuestKey(row) == key else { return row }
+                var copy = row
+                if let name { copy.guest_name = name.isEmpty ? nil : name }
+                if let phone { copy.phone = phone.isEmpty ? nil : phone }
+                return copy
+            }
+        }
+        bookings = changed(bookings); rangeBookings = changed(rangeBookings); allBookings = changed(allBookings)
+    }
+
+    private func publishStatus(_ id: String, _ status: String?) {
+        if let i = bookings.firstIndex(where: { $0.id == id }) { bookings[i].status = status }
+        if let i = rangeBookings.firstIndex(where: { $0.id == id }) { rangeBookings[i].status = status }
+        if let i = allBookings.firstIndex(where: { $0.id == id }) { allBookings[i].status = status }
+    }
+
+    /// Serialize writes per booking; a failed older action cannot undo a newer action.
+    func setStatus(_ booking: Booking, to status: String) async {
+        let id = booking.id
+        let request = (statusGeneration[id] ?? 0) + 1
+        statusGeneration[id] = request
+        if confirmedStatus[id] == nil { confirmedStatus[id] = StatusSnapshot(value: booking.status) }
+        pendingStatus[id] = status
+        publishStatus(id, status)
+        let previous = statusTasks[id]
+        let task = Task { @MainActor in
+            await previous?.value
+            do {
+                try await DB.from("bookings").update(["status": status, "updated_at": ISO8601DateFormatter().string(from: Date())])
+                    .eq("id", id).run()
+                confirmedStatus[id] = StatusSnapshot(value: status)
+                statusEpoch += 1; statusWrittenEpoch[id] = statusEpoch
+                invalidateGuestData(cancelReads: false)
+            } catch {
+                if statusGeneration[id] == request {
+                    publishStatus(id, confirmedStatus[id]?.value)
+                    flash(error.localizedDescription)
+                }
+            }
+            if statusGeneration[id] == request { pendingStatus[id] = nil; statusTasks[id] = nil }
+        }
+        statusTasks[id] = task
+        await task.value
+    }
+
 }
 
 // MARK: - Гостевой профиль (агрегат)
 
 struct GuestProfile: Identifiable, Hashable {
-    let id: String       // нормализованный ключ: телефон-цифры или lowercase-имя
+    let id: String       // стабильный guest_key; для старых read-only строк — полный телефон или id брони
     var displayName: String
     var phone: String?
     var visitCount: Int
@@ -293,7 +436,7 @@ struct GuestProfile: Identifiable, Hashable {
 // атомарно) → тап иногда не открывал ничего или открывал пустую «новую» бронь вместо нужной.
 // .sheet(item:) с Identifiable-целью пересоздаёт шит при каждой смене цели — гонки нет.
 private enum BookingEditorTarget: Identifiable {
-    case create(name: String?, phone: String?, visits: Int, noShows: Int)
+    case create(name: String?, phone: String?, visits: Int, noShows: Int, guestKey: String?)
     case edit(Booking)
 
     var id: String {
@@ -312,7 +455,7 @@ struct BookingsView: View {
     @State private var editorTarget: BookingEditorTarget?
     @State private var pendingDelete: Booking?
     @State private var showGuests = false
-    @State private var pendingNewBooking: (name: String?, phone: String?, visits: Int, noShows: Int)?
+    @State private var pendingNewBooking: (name: String?, phone: String?, visits: Int, noShows: Int, guestKey: String)?
     @State private var selectedRange: BookingRange = .today
     @State private var searchText = ""
     @State private var duplicating: Booking?
@@ -360,23 +503,20 @@ struct BookingsView: View {
     }
 
     // Кол-во предыдущих визитов гостя по текущей брони
-    private func pastVisitCount(for b: Booking, in allBookings: [Booking]) -> Int {
-        guard let bDate = b.booking_date else { return 0 }
-        let key = guestKey(b)
-        return allBookings.filter { other in
-            guestKey(other) == key &&
-            (other.booking_date ?? "") < bDate &&
-            other.status != "cancelled" && other.status != "no_show"
+    private func pastVisitCount(for booking: Booking, in allBookings: [Booking]) -> Int {
+        guard let date = booking.booking_date else { return 0 }
+        let key = bookingGuestKey(booking), today = bookingDateKey(Date())
+        return allBookings.filter {
+            bookingGuestKey($0) == key && ($0.booking_date ?? "") < date && bookingIsVisit($0, today: today)
         }.count
     }
 
-    // Последние 9 цифр (не весь номер) — иначе один и тот же гость, введённый один раз как
-    // «079…» (местный формат) и второй раз как «+4179…» (международный), давал два разных
-    // ключа, и его история/визиты рассыпались на два профиля.
-    private func guestKey(_ b: Booking) -> String {
-        let phone = (b.phone ?? "").filter { $0.isNumber }
-        if !phone.isEmpty { return String(phone.suffix(9)) }
-        return (b.guest_name ?? "").lowercased().trimmingCharacters(in: .whitespaces)
+    private func defaultBookingDate(_ model: BookingsModel) -> Date {
+        switch selectedRange {
+        case .today: return model.currentDate
+        case .tomorrow: return Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+        case .week: return Date()
+        }
     }
 
     var body: some View {
@@ -390,10 +530,15 @@ struct BookingsView: View {
                     rangePicker(m)
 
                     AppTabPage(refresh: {
-                        await m.load()
-                        await m.loadMonth()
-                        await refreshRange(m)
-                    }) {
+                        async let month: Void = m.loadMonth(force: true)
+                        await refreshRange(m, force: true)
+                        await month
+                    }, clearCacheOnRefresh: false) {
+                        if let error = selectedRange == .today ? m.dayError : m.rangeError {
+                            loadFailure(error) { Task { await refreshRange(m, force: true) } }
+                        } else if selectedRange == .today, let error = m.monthError {
+                            loadFailure(error) { Task { await m.loadMonth(force: true) } }
+                        }
                         if selectedRange == .today || selectedRange == .tomorrow {
                             // Calendar mode only for "today" to keep calendar navigation working
                             if selectedRange == .today {
@@ -408,7 +553,7 @@ struct BookingsView: View {
                             } else {
                                 let list = selectedRange == .today ? filteredBookings(m) : filteredRange(m)
                                 if list.isEmpty {
-                                    emptyState
+                                    if (selectedRange == .today ? m.dayError : m.rangeError) == nil { emptyState }
                                 } else {
                                     ForEach(list) { b in
                                         bookingRow(b, m: m)
@@ -422,7 +567,7 @@ struct BookingsView: View {
                             } else {
                                 let groups = groupedByDay(filteredRange(m))
                                 if groups.isEmpty {
-                                    emptyState
+                                    if m.rangeError == nil { emptyState }
                                 } else {
                                     ForEach(groups, id: \.0) { day, bks in
                                         weekDayHeader(day: day, bookings: bks)
@@ -455,7 +600,7 @@ struct BookingsView: View {
                                     isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                                     titleVisibility: .hidden) {
                     Button(t("bk.delete"), role: .destructive) {
-                        if let b = pendingDelete { deleteAndSync(b, m: m) }; pendingDelete = nil
+                        if let b = pendingDelete { requestDelete(b, m: m) }; pendingDelete = nil
                     }
                     Button(t("cancel"), role: .cancel) { pendingDelete = nil }
                 }
@@ -466,22 +611,23 @@ struct BookingsView: View {
                             booking: b,
                             defaultDate: m.key(m.currentDate),
                             canDelete: canEdit(b),
-                            onSave: { nb, isNew in saveAndSync(nb, isNew: isNew, m: m) },
-                            onDelete: { nb in deleteAndSync(nb, m: m) },
+                            onSave: { nb, isNew, lastName in try await saveAndSync(nb, isNew: isNew, lastName: lastName, m: m) },
+                            onDelete: { nb in try await deleteAndSync(nb, m: m) },
                             author: (app.staff?.id ?? "owner", app.staff?.name ?? t("role.owner"))
                         )
-                    case .create(let name, let phone, let visits, let noShows):
+                    case .create(let name, let phone, let visits, let noShows, let guestKey):
                         BookingEditor(
                             booking: nil,
-                            defaultDate: m.key(m.currentDate),
+                            defaultDate: m.key(defaultBookingDate(m)),
                             canDelete: false,
-                            onSave: { nb, isNew in saveAndSync(nb, isNew: isNew, m: m) },
+                            onSave: { nb, isNew, lastName in try await saveAndSync(nb, isNew: isNew, lastName: lastName, m: m) },
                             onDelete: { _ in },
                             author: (app.staff?.id ?? "owner", app.staff?.name ?? t("role.owner")),
                             prefillName: name,
                             prefillPhone: phone,
                             prefillVisits: visits,
-                            prefillNoShows: noShows
+                            prefillNoShows: noShows,
+                            prefillGuestKey: guestKey
                         )
                     }
                 }
@@ -491,18 +637,18 @@ struct BookingsView: View {
                 .sheet(isPresented: $showGuests, onDismiss: {
                     if let p = pendingNewBooking {
                         pendingNewBooking = nil
-                        editorTarget = .create(name: p.name, phone: p.phone, visits: p.visits, noShows: p.noShows)
+                        editorTarget = .create(name: p.name, phone: p.phone, visits: p.visits, noShows: p.noShows, guestKey: p.guestKey)
                     }
                 }) {
-                    GuestsView(m: m, onNewBooking: { name, phone, visits, noShows in
-                        pendingNewBooking = (name, phone, visits, noShows)
+                    GuestsView(m: m, onNewBooking: { name, phone, visits, noShows, guestKey in
+                        pendingNewBooking = (name, phone, visits, noShows, guestKey)
                         showGuests = false
                     })
                 }
                 .confirmationDialog(t("bk.duplicateTitle"), isPresented: $showDuplicateDialog, titleVisibility: .visible) {
                     Button(t("bk.duplicate")) {
                         if let b = duplicating {
-                            let newId = UUID().uuidString
+                            let newId = UUID().uuidString.lowercased()
                             let copy = Booking(
                                 id: newId,
                                 booking_date: m.key(duplicateDate),
@@ -514,9 +660,13 @@ struct BookingsView: View {
                                 note: b.note,
                                 status: nil,
                                 created_by: app.staff?.id ?? b.created_by,
-                                created_by_name: app.staff?.name ?? b.created_by_name
+                                created_by_name: app.staff?.name ?? b.created_by_name,
+                                guest_key: b.guest_key
                             )
-                            saveAndSync(copy, isNew: true, m: m)
+                            Task {
+                                do { try await saveAndSync(copy, isNew: true, m: m) }
+                                catch { m.flash(error.localizedDescription) }
+                            }
                         }
                     }
                     Button(t("cancel"), role: .cancel) {}
@@ -537,7 +687,7 @@ struct BookingsView: View {
                 // ДО первой загрузки, чтобы не грузить «сегодня» впустую и сразу открыть нужное.
                 if let dateStr = app.pendingBookingsDate, let d = Self.parseDateKey(dateStr) {
                     app.pendingBookingsDate = nil
-                    model.currentDate = d
+                    model.currentDate = d; model.visibleMonth = d
                 }
                 async let l: () = model.load()
                 async let lm: () = model.loadMonth()
@@ -567,18 +717,18 @@ struct BookingsView: View {
 
     // save()/delete() всегда обновляют только «сегодня» — если открыта Завтра/Неделя,
     // без этого правка/удаление брони не видны на экране до ручного pull-to-refresh.
-    private func saveAndSync(_ b: Booking, isNew: Bool, m: BookingsModel) {
-        Task {
-            await m.save(b, isNew: isNew)
-            if selectedRange != .today { await refreshRange(m) }
-        }
+    private func saveAndSync(_ booking: Booking, isNew: Bool, lastName: String? = nil, m: BookingsModel) async throws {
+        try await m.save(booking, isNew: isNew, lastName: lastName)
+        if selectedRange != .today { Task { await refreshRange(m, force: true) } }
     }
 
-    private func deleteAndSync(_ b: Booking, m: BookingsModel) {
-        Task {
-            await m.delete(b)
-            if selectedRange != .today { await refreshRange(m) }
-        }
+    private func deleteAndSync(_ booking: Booking, m: BookingsModel) async throws {
+        try await m.delete(booking)
+        if selectedRange != .today { Task { await refreshRange(m, force: true) } }
+    }
+
+    private func requestDelete(_ booking: Booking, m: BookingsModel) {
+        Task { do { try await deleteAndSync(booking, m: m) } catch { m.flash(error.localizedDescription) } }
     }
 
     private func loadInitialRange(_ m: BookingsModel) async {
@@ -588,18 +738,18 @@ struct BookingsView: View {
         await m.loadRange(from: today, to: in7)
     }
 
-    private func refreshRange(_ m: BookingsModel) async {
+    private func refreshRange(_ m: BookingsModel, force: Bool = false) async {
         let cal = Calendar.current
         let today = Date()
         switch selectedRange {
         case .today:
-            await m.load()
+            await m.load(force: force)
         case .tomorrow:
             let tomorrow = cal.date(byAdding: .day, value: 1, to: today) ?? today
-            await m.loadRange(from: tomorrow, to: tomorrow)
+            await m.loadRange(from: tomorrow, to: tomorrow, force: force)
         case .week:
             let in7 = cal.date(byAdding: .day, value: 6, to: today) ?? today
-            await m.loadRange(from: today, to: in7)
+            await m.loadRange(from: today, to: in7, force: force)
         }
     }
 
@@ -641,7 +791,7 @@ struct BookingsView: View {
                     Label(t("edit"), systemImage: "pencil")
                 }
                 Button(role: .destructive) {
-                    deleteAndSync(b, m: m)
+                    requestDelete(b, m: m)
                 } label: {
                     Label(t("bk.delete"), systemImage: "trash")
                 }
@@ -732,6 +882,17 @@ struct BookingsView: View {
         .padding(.horizontal, 4).padding(.top, 8).padding(.bottom, 2)
     }
 
+    private func loadFailure(_ message: String, retry: @escaping () -> Void) -> some View {
+        VStack(spacing: 8) {
+            Text(t("loadFailed")).font(.system(size: 15, weight: .semibold))
+            Text(message).font(.system(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Button(t("retry"), action: retry).frame(minHeight: 44)
+        }
+        .padding(14).frame(maxWidth: .infinity)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityElement(children: .contain)
+    }
+
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "calendar.badge.clock").font(.system(size: 34, weight: .light)).foregroundStyle(BK_ACCENT)
@@ -758,7 +919,7 @@ struct BookingsView: View {
 
     private var addButton: some View {
         Button {
-            editorTarget = .create(name: nil, phone: nil, visits: 0, noShows: 0)
+            editorTarget = .create(name: nil, phone: nil, visits: 0, noShows: 0, guestKey: nil)
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         } label: {
             Image(systemName: "plus").font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
@@ -1015,13 +1176,14 @@ private struct BookingEditor: View {
     let booking: Booking?
     let defaultDate: String
     let canDelete: Bool
-    let onSave: (Booking, Bool) -> Void
-    let onDelete: (Booking) -> Void
+    let onSave: (Booking, Bool, String?) async throws -> Void
+    let onDelete: (Booking) async throws -> Void
     let author: (String, String)
     var prefillName: String? = nil     // префилл для «Новая бронь» из карточки гостя
     var prefillPhone: String? = nil
     var prefillVisits: Int = 0         // визитов/неявок у гостя — подсказка при создании из карточки
     var prefillNoShows: Int = 0
+    var prefillGuestKey: String? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -1031,6 +1193,8 @@ private struct BookingEditor: View {
     @State private var guests = ""
     @State private var table = ""
     @State private var note = ""
+    // Двойной тап «Сохранить» до закрытия шита создавал две брони (аудит дублей 2026-10-26).
+    @State private var saveState = BookingSaveState()
     @State private var status: String? = nil    // nil = без статуса (новая бронь)
     @State private var hasTime = false
     @State private var time = Date()
@@ -1150,20 +1314,31 @@ private struct BookingEditor: View {
                                 Label(t("bk.delete"), systemImage: "trash")
                             }
                             .confirmationDialog(t("bk.delete"), isPresented: $confirmDelete, titleVisibility: .hidden) {
-                                Button(t("bk.delete"), role: .destructive) { onDelete(b); dismiss() }
+                                Button(t("bk.delete"), role: .destructive) {
+                                    Task { if await saveState.perform({ try await onDelete(b) }) { dismiss() } }
+                                }
                                 Button(t("cancel"), role: .cancel) {}
                             }
                         }
                     }
                 }
+                .disabled(saveState.saving)
                 .scrollContentBackground(.hidden)
                 .tint(BK_ACCENT)
             }
             .navigationTitle(isNew ? t("bk.new") : t("bk.edit")).navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.miseBg, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button(t("bk.save")) { commit() }.bold() }
+                ToolbarItem(placement: .cancellationAction) { Button(t("cancel")) { dismiss() }.disabled(saveState.saving) }
+                ToolbarItem(placement: .confirmationAction) { Button(saveState.saving ? t("saving") : t("bk.save")) { commit() }.bold().disabled(saveState.saving) }
+            }
+        }
+        .interactiveDismissDisabled(saveState.saving)
+        .safeAreaInset(edge: .bottom) {
+            if let error = saveState.error {
+                Text(error).font(.system(size: 13)).foregroundStyle(.red).multilineTextAlignment(.center)
+                    .padding(14).frame(maxWidth: .infinity).background(.regularMaterial)
+                    .accessibilityIdentifier("booking-save-error")
             }
         }
         .onAppear(perform: prime)
@@ -1193,6 +1368,11 @@ private struct BookingEditor: View {
     }
 
     private func commit() {
+        guard !saveState.saving else { return }
+        let trimmedGuests = guests.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedGuests.isEmpty && (Int(trimmedGuests).map { $0 > 0 && $0 <= 2_147_483_647 } != true) {
+            saveState.error = t("bk.invalidGuests"); return
+        }
         let trimmed = { (s: String) -> String? in
             let v = s.trimmingCharacters(in: .whitespacesAndNewlines); return v.isEmpty ? nil : v
         }
@@ -1202,7 +1382,7 @@ private struct BookingEditor: View {
             ? [name, lastName].map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " ")
             : name
         let b = Booking(
-            id: booking?.id ?? "",
+            id: booking?.id ?? saveState.id,
             booking_date: booking?.booking_date ?? Self.dateFmt.string(from: bookingDate),
             booking_time: hasTime ? Self.timeFmt.string(from: time) : nil,
             guest_name: trimmed(fullName),
@@ -1212,18 +1392,13 @@ private struct BookingEditor: View {
             note: trimmed(note),
             status: isNew ? nil : status,
             created_by: booking?.created_by ?? author.0,
-            created_by_name: booking?.created_by_name ?? author.1
+            created_by_name: booking?.created_by_name ?? author.1,
+            guest_key: booking?.guest_key ?? prefillGuestKey
         )
-        onSave(b, isNew)
-        if isNew {
-            let lastTrim = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let digits = phone.filter { $0.isNumber }
-            let key = !digits.isEmpty ? digits : fullName.lowercased().trimmingCharacters(in: .whitespaces)
-            if !lastTrim.isEmpty, !key.isEmpty {
-                Task { try? await DB.from("guest_notes").upsert(["guest_key": key, "last_name": lastTrim], onConflict: "restaurant_id,guest_key").run() }
-            }
+        let profileLastName = isNew ? lastName.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        Task {
+            if await saveState.perform({ try await onSave(b, isNew, profileLastName) }) { dismiss() }
         }
-        dismiss()
     }
 
     private static let timeFmt: DateFormatter = {

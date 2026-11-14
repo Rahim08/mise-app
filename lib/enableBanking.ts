@@ -85,7 +85,12 @@ export async function createSession(code: string): Promise<{ sessionId: string; 
   }
 }
 
-export type SyncResult = { ok: boolean; transactionsSynced?: number; error?: string }
+// Отзыв согласия (выход из банка) — после этого session_id больше не даёт доступ к счёту.
+export async function deleteSession(sessionId: string): Promise<void> {
+  await ebFetch(`/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
+}
+
+export type SyncResult ={ ok: boolean; transactionsSynced?: number; error?: string }
 
 // Апсерт по (connection_id, external_id) — банк может отдавать частично перекрывающуюся
 // историю на каждый sync, дубли гасит UNIQUE-констрейнт в БД.

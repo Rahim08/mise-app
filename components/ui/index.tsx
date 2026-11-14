@@ -368,11 +368,11 @@ export type TableColumn<T> = {
 
 export function Table<T extends { id: string | number }>({
   columns, rows, searchable, searchPlaceholder, searchText, onRowClick, selectedId, emptyLabel,
-  expandedId, renderExpanded,
+  expandedId, renderExpanded, keyboardRows = false,
 }: {
   columns: TableColumn<T>[]; rows: T[]; searchable?: boolean; searchPlaceholder?: string
   searchText?: (row: T) => string; onRowClick?: (row: T) => void
-  selectedId?: string | number | null; emptyLabel?: string
+  selectedId?: string | number | null; emptyLabel?: string; keyboardRows?: boolean
   // Раскрытая строка-панель прямо под нужной строкой (правки на месте — не форма вверху страницы).
   expandedId?: string | number | null; renderExpanded?: (row: T) => React.ReactNode
 }) {
@@ -435,9 +435,14 @@ export function Table<T extends { id: string | number }>({
                 <tr onClick={onRowClick ? () => onRowClick(row) : undefined}
                   className={onRowClick ? 'ui-row' : undefined}
                   style={{ cursor: onRowClick ? 'pointer' : 'default', background: selectedId === row.id ? 'var(--accent-soft)' : undefined }}>
-                  {columns.map(c => (
+                  {columns.map((c, columnIndex) => (
                     <td key={c.key} style={{ padding: '10px 14px', textAlign: c.align || 'left', borderBottom: 'var(--hairline)', color: 'var(--tx)' }}>
-                      {c.render ? c.render(row) : String((row as Record<string, unknown>)[c.key] ?? '')}
+                      {keyboardRows && onRowClick && columnIndex === 0 ? (
+                        <button type="button" onClick={event => { event.stopPropagation(); onRowClick(row) }}
+                          style={{ border: 0, background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', padding: '6px 0', minHeight: 36, cursor: 'pointer', width: '100%' }}>
+                          {c.render ? c.render(row) : String((row as Record<string, unknown>)[c.key] ?? '')}
+                        </button>
+                      ) : c.render ? c.render(row) : String((row as Record<string, unknown>)[c.key] ?? '')}
                     </td>
                   ))}
                 </tr>

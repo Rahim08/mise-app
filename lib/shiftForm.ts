@@ -1,3 +1,5 @@
+import { type CustomExpenseDraft } from './customExpenses'
+
 // Разбор shift_expenses одной смены на «что показывает форма закрытия смены» и «что форма
 // не трогает». Общий для app/manager/page.tsx и app/dashboard/(shell)/shifts/page.tsx
 // (iOS — тот же алгоритм в ManagerView.swift splitShiftExpenses).
@@ -16,6 +18,8 @@ export const SALPERIOD_PREFIX = 'SALPERIOD:'
 
 export type ShiftExpenseRow = {
   id: string
+  is_custom?: boolean | null
+  category_name?: string | null
   category_id?: string | null
   employee_id?: string | null
   amount?: number | string | null
@@ -25,6 +29,7 @@ export type ShiftExpenseRow = {
 }
 
 export type ShiftFormSplit = {
+  customExpenses: CustomExpenseDraft[]
   catAmounts: Record<string, string>
   catNotes: Record<string, string>
   catUnpaid: Record<string, boolean>
@@ -48,9 +53,10 @@ export function splitShiftExpenses(
   shiftId: string,
   activeCategoryIds: Set<string>,
   activeEmployeeIds: Set<string>,
+  includeCustom = false,
 ): ShiftFormSplit {
   const out: ShiftFormSplit = {
-    catAmounts: {}, catNotes: {}, catUnpaid: {}, empExtras: {}, empUnpaid: {},
+    customExpenses: [], catAmounts: {}, catNotes: {}, catUnpaid: {}, empExtras: {}, empUnpaid: {},
     ownedIds: [], unmanagedPaidTotal: 0, settledTodayTotal: 0,
   }
   const sums: Record<string, number> = {}
@@ -63,6 +69,13 @@ export function splitShiftExpenses(
     }
     const unpaid = e.is_paid === false
     const isSalaryDebt = !!e.note && e.note.startsWith(SALPERIOD_PREFIX)
+    if (e.is_custom === true) {
+      if (includeCustom && !isSalaryDebt && !e.category_id && !e.employee_id && e.category_name?.trim()) {
+        out.customExpenses.push({ id: e.id, name: e.category_name, amount: numStr(amount), unpaid, note: e.note || '' })
+        out.ownedIds.push(e.id)
+      } else if (!unpaid) out.unmanagedPaidTotal += amount
+      continue
+    }
     const key = isSalaryDebt ? null
       : e.employee_id ? (activeEmployeeIds.has(e.employee_id) ? `e:${e.employee_id}` : null)
       : e.category_id ? (activeCategoryIds.has(e.category_id) ? `c:${e.category_id}` : null)

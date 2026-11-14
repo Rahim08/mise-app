@@ -10,6 +10,10 @@ final class AppModel {
         didSet {
             // Войдя, регистрируем APNs-токен и привязываем его к ресторану/пользователю.
             if phase == .authed {
+                #if DEBUG
+                // UI fixtures must never register push or read a live restaurant.
+                if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" { return }
+                #endif
                 PushManager.shared.registerForPush()
                 Task { await loadDayStartHour() }
             }
@@ -97,8 +101,10 @@ final class AppModel {
         // Визуальная проверка UI без реального входа: запуск с -MISE_DEMO_UI 1.
         if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" {
             restaurant = Restaurant(id: "demo", name: "Mise Demo Lounge", logo_url: nil, currency: "€", has_owner_pin: false, subscription_plan: "pro", ai_enabled: true, subscription_status: "active", addon_ai: false, addon_modules: nil, comp_apps: nil, extra_seats: nil, staff_limit: nil, billing_interval: "month", trial_ends_at: nil)
-            staff = ResolvedStaff(id: "owner", name: "Владелец",
-                                  apps: ["manager", "analytics", "stash", "people"], isOwner: true, role: nil)
+            let demoRole = ProcessInfo.processInfo.environment["MISE_DEMO_ROLE"] ?? "owner"
+            staff = ResolvedStaff(id: demoRole == "owner" ? "owner" : "demo-staff", name: demoRole,
+                                  apps: ["manager", "analytics", "stash", "people"],
+                                  isOwner: demoRole == "owner", role: demoRole == "owner" ? nil : demoRole)
             currentApp = ProcessInfo.processInfo.environment["MISE_DEMO_APP"]
             phase = .authed
             // Разовая визуальная проверка ReportExportView.buildPDF() без похода

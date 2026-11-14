@@ -402,7 +402,15 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     try { await addAdvanceInner(empId, empName, amount, dateStr) } finally { moneyBusy.current = false }
   }
 
+  // Замок от двойного клика (аудит дублей 2026-10-26): каждый прогон перечитывает свежий
+  // expense и вычитает аванс — второй клик вычитал его из инкассации повторно.
   const deleteAdvance = async (a: any, empName: string) => {
+    if (moneyBusy.current) return
+    moneyBusy.current = true
+    try { await deleteAdvanceInner(a, empName) } finally { moneyBusy.current = false }
+  }
+
+  const deleteAdvanceInner = async (a: any, empName: string) => {
     // A5 (аудит 2026-08-16): раньше salary_advances удалялся ПЕРВЫМ безусловно, а компенсация
     // inkassations — best-effort в один retry; если CAS не проходил (гонка с автосейвом смены —
     // shift остаётся open и persistShift пишет в ту же строку), аванс исчезал из salary_advances,
@@ -431,7 +439,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
           const { newExpense, newReason, newTotal } = applyRemoval(ink)
           ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
         }
-        if (!ok) { showToast(tr('pe.saveFailed', { err: 'race' })); return }
+        if (!ok) { showToast(tr('pe.raceRetry')); return }
       }
     }
     const { error } = await db.from('salary_advances').delete().eq('id', a.id)
@@ -568,7 +576,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     setMarkingDebt(true)
     try {
       const err = await addSalaryDebt(payFor.id, `${ym}-01`, payFor.date || fmtDate(new Date()), amount)
-      if (err) { setPayError(tr('pe.saveFailed', { err })); return }
+      if (err) { setPayError(err === 'race' ? tr('pe.raceRetry') : tr('pe.saveFailed', { err })); return }
       setPayFor(null); setPayError(null); setPayInsufficient(false)
       showToast(tr('pe.markedAsDebt'))
       await load(); await loadDebt()

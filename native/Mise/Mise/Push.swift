@@ -180,6 +180,13 @@ enum Notify {
                       bodySegments: [[String: String]]? = nil,
                       secureBody: String? = nil, secureBodySegments: [[String: String]]? = nil,
                       data: [String: Any]? = nil) async {
+        #if DEBUG
+        // Every demo flow is offline, including notification requests that bypass API.swift.
+        if ProcessInfo.processInfo.environment["MISE_DEMO_UI"] == "1" {
+            if ShiftSaveFixture.enabled { await ShiftSaveFixture.notification() }
+            return
+        }
+        #endif
         guard let url = URL(string: API.base + "/api/notify") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"

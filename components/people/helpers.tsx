@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 // Shared helpers for People module components.
 import { tCurrent } from '@/lib/i18n'
 
@@ -40,13 +41,17 @@ export function roleLabel(role?: string) {
 
 export function getMe(rid: string): { id?: string; name?: string; role?: string; is_owner?: boolean } {
   try {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem(`mise_me_${rid}`) : null
+    // PIN/join writes mise_staff; legacy People identities can outlive logout or role changes.
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(`mise_staff_${rid}`) : null
     return raw ? JSON.parse(raw) : {}
   } catch { return {} }
 }
 
+// Портал в body: контент People лежит в position:fixed-контейнере (своя stacking context),
+// поэтому zIndex шторки не мог подняться над нижней навигацией (zIndex 300) — на телефоне
+// 390×844 нав перекрывал кнопку «Создать задачу» (аудит People 2026-11-14).
 export function Sheet({ children, onClose, t }: { children: React.ReactNode; onClose: () => void; t: any }) {
-  return (
+  const node = (
     <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.35)' }} />
       <div style={{ position: 'relative', width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto', background: t.bg, borderRadius: '20px 20px 0 0', boxShadow: '0 -8px 40px rgba(0,0,0,.12)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
@@ -57,6 +62,7 @@ export function Sheet({ children, onClose, t }: { children: React.ReactNode; onC
       </div>
     </div>
   )
+  return typeof document === 'undefined' ? node : createPortal(node, document.body)
 }
 
 export function Placeholder({ title, sub, accent, t, icon }: { title: string; sub: string; accent: string; t: any; icon: React.ReactNode }) {

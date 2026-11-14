@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { db } from '@/lib/db'
+import { db, clearPendingDbReads } from '@/lib/db'
 import { useTheme } from '@/hooks/useTheme'
 import { useI18n } from '@/lib/i18n'
 import { AppIcon, Wordmark, type BrandApp } from '@/components/brand'
@@ -144,12 +144,19 @@ export function AuthGate({ appId, appName, onAuth }: {
 
   useEffect(() => { initAuth() }, [])
 
+  const rememberOwner = (rid: string) => {
+    const identity = JSON.stringify({ id: 'owner', name: tr('dash.owner'), is_owner: true, apps: ['manager', 'analytics', 'stash', 'people'] })
+    clearPendingDbReads()
+    localStorage.setItem(`mise_staff_${rid}`, identity)
+    localStorage.setItem(`mise_me_${rid}`, identity)
+  }
+
   const initAuth = async () => {
     // Super-admin "view as client" (set from /admin) — bypasses PIN/owner-session entirely.
     const viewRes = await fetch('/api/auth/admin-view')
     if (viewRes.ok) {
       const { restaurantId } = await viewRes.json()
-      if (restaurantId) { onAuth(restaurantId); return }
+      if (restaurantId) { rememberOwner(restaurantId); onAuth(restaurantId); return }
     }
 
     const { data } = await supabase.auth.getUser()
@@ -164,6 +171,7 @@ export function AuthGate({ appId, appName, onAuth }: {
         if (info?.has_owner_pin && !staffTokenValid()) {
           setRestaurant(info); setPhase('pin'); return
         }
+        rememberOwner(rest.id)
         onAuth(rest.id)
         return
       }
@@ -258,7 +266,9 @@ export function AuthGate({ appId, appName, onAuth }: {
         setPhase('error')
         return
       }
+      clearPendingDbReads()
       localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify(staffData))
+      localStorage.setItem('mise_me_' + restaurant.id, JSON.stringify(staffData))
       setChecking(false)
       const bioKey = `mise_bio_${restaurant.id}`
       if (!localStorage.getItem(bioKey) && window.PublicKeyCredential) {

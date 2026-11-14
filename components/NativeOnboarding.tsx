@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { db } from '@/lib/db'
+import { db, clearPendingDbReads } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
 
 // Нативный онбординг (только внутри Capacitor-оболочки): приветствие с анимированным
@@ -211,6 +211,7 @@ export function NativeOnboarding() {
         const data = result.is_owner
           ? { id: 'owner', name: tr('onb.owner'), apps: ['manager', 'analytics', 'stash', 'people'], is_owner: true }
           : result.staff
+        clearPendingDbReads()
         localStorage.setItem('mise_staff_' + restaurant.id, JSON.stringify(data))
         setStaff(data)
         setChecking(false)

@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { db } from '@/lib/db'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
+import { bookingGuestKey, isBookingVisit, loadBookingHistory } from '@/lib/bookingGuest'
 import {
   Card, Btn, Badge, Field, Segmented, EmptyState, Spinner, Container,
   Table, StatTile, type TableColumn, type Tone,
@@ -17,7 +18,7 @@ import { notify as pushNotify } from '@/lib/notifyClient'
 import './bookings.css'
 
 type Booking = {
-  id: string; booking_date: string; booking_time?: string | null
+  id: string; guest_key?: string | null; booking_date: string; booking_time?: string | null
   guest_name?: string | null; guests_count?: number | null; phone?: string | null
   table_label?: string | null; note?: string | null; status?: string | null
   created_by_name?: string | null; created_at?: string
@@ -34,19 +35,6 @@ const bkBucket = (s?: string | null): 'new' | 'arrived' | 'cancelled' =>
   s === 'arrived' ? 'arrived' : (s === 'cancelled' || s === 'no_show') ? 'cancelled' : 'new'
 const statusOf = (s?: string | null) => STATUS[bkBucket(s)]
 
-// Тот же ключ гостя, что в iOS GuestsView.swift: цифры телефона, иначе lowercase-имя.
-// Последние 9 цифр (не весь номер) — иначе один и тот же гость, введённый один раз как
-// «079…» (местный формат) и второй раз как «+4179…» (международный), давал два разных
-// ключа и его история/визиты рассыпались на два профиля.
-function guestKey(b: Booking): string | null {
-  const digits = (b.phone || '').replace(/\D/g, '')
-  if (digits) return digits.slice(-9)
-  const name = (b.guest_name || '').trim().toLowerCase()
-  return name || null
-}
-// «Визит» — любая бронь кроме отменённой/неявки (как pastVisitCount на iOS).
-const isVisit = (b: Booking) => b.status !== 'cancelled' && b.status !== 'no_show'
-
 function monthGrid(month: Date): (Date | null)[] {
   const first = new Date(month.getFullYear(), month.getMonth(), 1)
   const startOffset = (first.getDay() + 6) % 7 // неделя с понедельника
@@ -60,9 +48,12 @@ function monthGrid(month: Date): (Date | null)[] {
 const blank = { guest_name: '', phone: '', guests_count: '', booking_time: '', table_label: '', note: '', status: 'new' }
 
 export default function BookingsPage() {
-  const { t: tr, locale } = useI18n()
   const { restaurant } = useDash()
-  const restaurantId = restaurant?.id || ''
+  return <BookingWorkspace key={restaurant?.id || ''} restaurantId={restaurant?.id || ''} />
+}
+
+function BookingWorkspace({ restaurantId }: { restaurantId: string }) {
+  const { t: tr, locale } = useI18n()
   const [tab, setTab] = useState<'bookings' | 'guests' | 'reviews'>('bookings')
 
   // ── БРОНИ ──
@@ -81,24 +72,38 @@ export default function BookingsPage() {
   const [deleteConfirm, setDeleteConfirm] = useState(false)
 
   const dateKey = (d: Date) => fmtDate(d)
+  const tenantRequest = useRef(0)
+  const editorRequest = useRef(0)
+  const saveBusy = useRef(false)
+  const [dayError, setDayError] = useState('')
+  const [monthError, setMonthError] = useState('')
+  const [saveError, setSaveError] = useState('')
+  const [draftId, setDraftId] = useState<string | null>(null)
+  const [draftDate, setDraftDate] = useState('')
+  const [draftGuestKey, setDraftGuestKey] = useState<string | null>(null)
 
   const loadMonth = async (month: Date) => {
     const request = ++monthRequest.current
+    const tenant = tenantRequest.current
+    setMonthError(''); setMonthDays(new Set())
     const first = new Date(month.getFullYear(), month.getMonth(), 1)
     const last = new Date(month.getFullYear(), month.getMonth() + 1, 0)
-    const { data } = await db.from('bookings').select('booking_date').eq('restaurant_id', restaurantId)
+    const { data, error } = await db.from('bookings').select('booking_date').eq('restaurant_id', restaurantId)
       .gte('booking_date', dateKey(first)).lte('booking_date', dateKey(last))
-    if (request === monthRequest.current) setMonthDays(new Set((data || []).map((r: any) => r.booking_date)))
+    if (request !== monthRequest.current || tenant !== tenantRequest.current) return
+    if (error) { setMonthError(tr('bk.loadError')); return }
+    setMonthDays(new Set((data || []).map((row: Booking) => row.booking_date)))
   }
 
   const loadDay = async (date: Date) => {
     const request = ++dayRequest.current
-    setLoadingDay(true)
-    setDayBookings([])
-    const { data } = await db.from('bookings').select('*').eq('restaurant_id', restaurantId)
+    const tenant = tenantRequest.current
+    setLoadingDay(true); setDayError(''); setDayBookings([])
+    const { data, error } = await db.from('bookings').select('*').eq('restaurant_id', restaurantId)
       .eq('booking_date', dateKey(date)).order('booking_time', { ascending: true })
-    if (request !== dayRequest.current) return
-    setDayBookings(data || [])
+    if (request !== dayRequest.current || tenant !== tenantRequest.current) return
+    if (error) setDayError(tr('bk.loadError'))
+    else setDayBookings(data || [])
     setLoadingDay(false)
   }
 
@@ -106,81 +111,115 @@ export default function BookingsPage() {
     if (selectedId && window.innerWidth <= 1300) bookingDetailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [selectedId])
 
-  useEffect(() => { if (restaurantId) { loadMonth(visibleMonth); loadDay(selectedDate) } }, [restaurantId])
 
   const changeMonth = (dir: number) => {
-    const m = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + dir, 1)
-    setVisibleMonth(m); loadMonth(m)
+    if (saveBusy.current) return
+    const month = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + dir, 1)
+    setVisibleMonth(month); void loadMonth(month)
   }
-  const selectDay = (d: Date) => {
-    setSelectedDate(d); setSelectedId(null); setBookingFilter('all'); loadDay(d)
+  const selectDay = (date: Date) => {
+    if (saveBusy.current) return
+    ++editorRequest.current
+    setSelectedDate(date); setSelectedId(null); setSaveError(''); setBookingFilter('all'); void loadDay(date)
   }
-
   const goToday = () => {
+    if (saveBusy.current) return
     const today = new Date()
-    setVisibleMonth(today)
-    loadMonth(today)
-    selectDay(today)
+    setVisibleMonth(today); void loadMonth(today); selectDay(today)
   }
-
-  const startNew = () => { setForm(blank); setSelectedId('new'); setDeleteConfirm(false) }
-  const startEdit = (b: Booking) => {
+  const cancelEditor = () => {
+    if (saveBusy.current) return
+    ++editorRequest.current; setSelectedId(null); setSaveError(''); setDeleteConfirm(false)
+  }
+  const startNew = (guest?: { id: string; phone: string; bookings: Booking[] }) => {
+    if (saveBusy.current || loadingDay || dayError) return
+    ++editorRequest.current
+    setForm({ ...blank, guest_name: guest?.bookings.find(booking => booking.guest_name?.trim())?.guest_name?.trim() || '', phone: guest?.phone || '' })
+    setDraftId(crypto.randomUUID()); setDraftDate(dateKey(selectedDate))
+    setDraftGuestKey(guest?.id.startsWith('g:') ? guest.id : null)
+    setSelectedId('new'); setDeleteConfirm(false); setSaveError('')
+  }
+  const startEdit = (booking: Booking) => {
+    if (saveBusy.current || loadingDay || dayError || booking.booking_date !== dateKey(selectedDate)) return
+    ++editorRequest.current
     setForm({
-      guest_name: b.guest_name || '', phone: b.phone || '', guests_count: b.guests_count ? String(b.guests_count) : '',
-      booking_time: b.booking_time || '', table_label: b.table_label || '', note: b.note || '', status: b.status || 'new',
+      guest_name: booking.guest_name || '', phone: booking.phone || '', guests_count: booking.guests_count ? String(booking.guests_count) : '',
+      booking_time: booking.booking_time?.slice(0, 5) || '', table_label: booking.table_label || '', note: booking.note || '', status: booking.status || 'new',
     })
-    setSelectedId(b.id); setDeleteConfirm(false)
+    setDraftId(booking.id); setDraftDate(booking.booking_date); setDraftGuestKey(booking.guest_key || null)
+    setSelectedId(booking.id); setDeleteConfirm(false); setSaveError('')
   }
 
+  const validateBooking = () => {
+    if (form.guests_count && (!/^[1-9]\d*$/.test(form.guests_count) || Number(form.guests_count) > 2147483647)) return tr('bk.invalidGuests')
+    if (form.booking_time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(form.booking_time)) return tr('bk.invalidTime')
+    if (form.guest_name.length > 200 || form.phone.length > 80 || form.table_label.length > 80 || form.note.length > 4000) return tr('bk.invalidText')
+    if (!['new', 'confirmed', 'arrived', 'cancelled', 'no_show', 'late'].includes(form.status)) return tr('bk.saveError')
+    return ''
+  }
   const save = async () => {
-    setSaving(true)
+    if (saveBusy.current || !selectedId || !draftId || loadingDay || dayError) return
+    const validation = validateBooking()
+    if (validation) { setSaveError(validation); return }
+    saveBusy.current = true
+    const tenant = tenantRequest.current
+    try { await saveInner() } finally { if (tenant === tenantRequest.current) saveBusy.current = false }
+  }
+  const saveInner = async () => {
+    const context = { tenant: tenantRequest.current, editor: editorRequest.current, day: dayRequest.current, month: monthRequest.current,
+      id: draftId, isNew: selectedId === 'new', date: draftDate, guestKey: draftGuestKey }
+    if (!context.id || !context.date) return
+    setSaving(true); setSaveError('')
     const values = {
-      restaurant_id: restaurantId, booking_date: dateKey(selectedDate),
-      guest_name: form.guest_name || null, phone: form.phone || null,
-      guests_count: form.guests_count ? +form.guests_count : null,
-      booking_time: form.booking_time || null, table_label: form.table_label || null,
-      note: form.note || null, status: form.status || 'new', // status NOT NULL DEFAULT 'new' в БД — не отправлять null
+      restaurant_id: restaurantId, booking_date: context.date,
+      guest_name: form.guest_name.trim() || null, phone: form.phone.trim() || null,
+      guests_count: form.guests_count ? Number(form.guests_count) : null,
+      booking_time: form.booking_time || null, table_label: form.table_label.trim() || null,
+      note: form.note.trim() || null, status: form.status || 'new',
+      ...(context.guestKey ? { guest_key: context.guestKey } : {}),
     }
-    // Раньше ошибка сети/сервера тут не проверялась вообще — форма закрывалась, будто всё
-    // сохранилось, а данные молча терялись (юзер узнавал об этом только по расхождению
-    // при следующей загрузке). Теперь форма остаётся открытой, юзер видит ошибку и не теряет ввод.
-    const { error } = selectedId === 'new'
-      ? await db.from('bookings').insert(values)
-      : selectedId
-        ? await db.from('bookings').update({ ...values, updated_at: new Date().toISOString() }).eq('id', selectedId)
-        : { error: null }
-    setSaving(false)
-    if (error) { alert(tr('dash.notSaved') + error.message); return }
-    // Пуш другим менеджерам о новой брони — на iOS это уже было (BookingsView.save), на
-    // веб-дашборде отсутствовало вообще (владелец создаёт бронь, а другие менеджеры о ней
-    // не узнают, кроме как открыв Брони руками).
-    if (selectedId === 'new') {
-      const segs: { key?: string; value: string }[] = []
-      if (values.guest_name) segs.push({ value: values.guest_name })
-      if (values.guests_count) segs.push({ value: String(values.guests_count) })
-      if (values.booking_time) segs.push({ value: values.booking_time })
-      if (values.table_label) segs.push({ key: 'notify.bookingTable', value: values.table_label })
-      if (values.booking_date !== dateKey(new Date())) segs.push({ value: values.booking_date })
-      pushNotify({
-        type: 'booking', title: tr('bk.newBooking'), titleKey: 'notify.bookingTitle',
-        body: segs.map(s => s.value).join(' · ') || tr('bk.newBooking'),
-        bodySegments: segs.length ? segs : undefined,
-        audience: { managers: true },
-        data: { module: 'bookings', booking_date: values.booking_date },
-      })
+    try {
+      const { data, error } = context.isNew
+        ? await db.from('bookings').insert({ ...values, id: context.id }).select('id')
+        : await db.from('bookings').update({ ...values, updated_at: new Date().toISOString() }).eq('id', context.id).select('id')
+      if (context.tenant !== tenantRequest.current || context.editor !== editorRequest.current) return
+      if (error || !data || (Array.isArray(data) && data.length === 0)) { setSaveError(tr('bk.saveError')); return }
+      if (context.isNew) {
+        void pushNotify({ type: 'booking', title: tr('bk.newBooking'), titleKey: 'notify.bookingTitle', body: tr('bk.newBooking'),
+          audience: { managers: true }, data: { module: 'bookings', booking_id: context.id, booking_date: context.date } })
+      }
+      ++guestRequest.current; allBookingsDirty.current = true
+      setSelectedId(null); setDeleteConfirm(false)
+      const refresh: Promise<void>[] = []
+      if (context.day === dayRequest.current) refresh.push(loadDay(selectedDate))
+      if (context.month === monthRequest.current) refresh.push(loadMonth(visibleMonth))
+      await Promise.all(refresh)
+    } catch {
+      if (context.tenant === tenantRequest.current && context.editor === editorRequest.current) setSaveError(tr('bk.saveError'))
+    } finally {
+      if (context.tenant === tenantRequest.current) setSaving(false)
     }
-    setSelectedId(null)
-    allBookingsDirty.current = true
-    await Promise.all([loadDay(selectedDate), loadMonth(visibleMonth)])
   }
 
   const removeBooking = async () => {
-    if (!selectedId || selectedId === 'new') return
-    const { error } = await db.from('bookings').delete().eq('id', selectedId)
-    if (error) { alert(tr('dash.notSaved') + error.message); return }
-    setSelectedId(null); setDeleteConfirm(false)
-    allBookingsDirty.current = true
-    await Promise.all([loadDay(selectedDate), loadMonth(visibleMonth)])
+    if (saveBusy.current || !selectedId || selectedId === 'new' || !draftId) return
+    saveBusy.current = true; setSaving(true); setSaveError('')
+    const context = { id: draftId, tenant: tenantRequest.current, editor: editorRequest.current, day: dayRequest.current, month: monthRequest.current }
+    try {
+      const { data, error } = await db.from('bookings').delete().eq('id', context.id).select('id')
+      if (context.tenant !== tenantRequest.current || context.editor !== editorRequest.current) return
+      if (error || !data || (Array.isArray(data) && data.length === 0)) { setSaveError(tr('bk.saveError')); return }
+      ++guestRequest.current; allBookingsDirty.current = true
+      setSelectedId(null); setDeleteConfirm(false)
+      await Promise.all([
+        ...(context.day === dayRequest.current ? [loadDay(selectedDate)] : []),
+        ...(context.month === monthRequest.current ? [loadMonth(visibleMonth)] : []),
+      ])
+    } catch {
+      if (context.tenant === tenantRequest.current && context.editor === editorRequest.current) setSaveError(tr('bk.saveError'))
+    } finally {
+      if (context.tenant === tenantRequest.current) { saveBusy.current = false; setSaving(false) }
+    }
   }
 
   const monthLabel = visibleMonth.toLocaleDateString(locale, { month: 'long', year: 'numeric' })
@@ -194,74 +233,122 @@ export default function BookingsPage() {
   type GuestProfile = { note: string; last_name: string; email: string; birthday: string }
   const blankProfile: GuestProfile = { note: '', last_name: '', email: '', birthday: '' }
   const [allBookings, setAllBookings] = useState<Booking[] | null>(null)
-  // Раньше грузилось один раз за жизнь страницы (гейт allBookings !== null) и никогда не
-  // инвалидировалось после create/edit/delete на вкладке «Брони» — на вкладке «Гости» висела
-  // устаревшая история/счётчик визитов до полной перезагрузки страницы. iOS-версия это уже
-  // чинит сбросом флага при save/delete — здесь его не было вообще.
-  const allBookingsDirty = useRef(false)
+  const allBookingsDirty = useRef(true)
+  const guestRequest = useRef(0)
+  const profileSaveBusy = useRef(false)
+  const profileRequest = useRef(0)
+  const activeGuestRef = useRef<string | null>(null)
+  const [profileError, setProfileError] = useState('')
   const [guestNotes, setGuestNotes] = useState<Record<string, GuestProfile>>({})
+  const [guestDrafts, setGuestDrafts] = useState<Record<string, GuestProfile>>({})
   const [selectedGuestKey, setSelectedGuestKey] = useState<string | null>(null)
-  const [profileDraft, setProfileDraft] = useState<GuestProfile>(blankProfile)
-  const [noteSaving, setNoteSaving] = useState(false)
+  const [notesLoaded, setNotesLoaded] = useState(false)
+  const [guestsLoading, setGuestsLoading] = useState(false)
+  const [guestError, setGuestError] = useState('')
+  const [noteSavingKey, setNoteSavingKey] = useState<string | null>(null)
+  const noteSaving = noteSavingKey !== null
+  const profileDraft = selectedGuestKey ? (guestDrafts[selectedGuestKey] || guestNotes[selectedGuestKey] || blankProfile) : blankProfile
+  const setProfileDraft = (value: GuestProfile) => {
+    if (!selectedGuestKey || !notesLoaded) return
+    setGuestDrafts(drafts => ({ ...drafts, [selectedGuestKey]: value }))
+  }
 
-  useEffect(() => {
-    if (tab !== 'guests' || (allBookings !== null && !allBookingsDirty.current) || !restaurantId) return
-    ;(async () => {
-      const yearAgo = new Date(); yearAgo.setMonth(yearAgo.getMonth() - 12)
-      const [{ data: bks }, { data: notes }] = await Promise.all([
-        db.from('bookings').select('*').eq('restaurant_id', restaurantId).gte('booking_date', dateKey(yearAgo)).order('booking_date', { ascending: false }),
+  const loadGuestProfile = async (key: string) => {
+    const request = ++profileRequest.current
+    const tenant = tenantRequest.current
+    setNotesLoaded(false); setProfileError('')
+    try {
+      const { data, error } = await db.from('guest_notes').select('guest_key, note, last_name, email, birthday')
+        .eq('restaurant_id', restaurantId).eq('guest_key', key).limit(1)
+      if (request !== profileRequest.current || tenant !== tenantRequest.current || activeGuestRef.current !== key) return
+      if (error) { setProfileError(tr('bk.loadGuestsError')); return }
+      const row = data?.[0]
+      setGuestNotes(notes => ({ ...notes, [key]: { note: row?.note || '', last_name: row?.last_name || '', email: row?.email || '', birthday: row?.birthday || '' } }))
+      setNotesLoaded(true)
+    } catch {
+      if (request === profileRequest.current && tenant === tenantRequest.current && activeGuestRef.current === key) setProfileError(tr('bk.loadGuestsError'))
+    }
+  }
+  const selectGuest = (key: string) => {
+    activeGuestRef.current = key; setSelectedGuestKey(key); void loadGuestProfile(key)
+  }
+
+  const loadGuests = async () => {
+    const request = ++guestRequest.current
+    const tenant = tenantRequest.current
+    setGuestsLoading(true); setGuestError(''); setNotesLoaded(false)
+    try {
+      const [bookings, notesResult] = await Promise.all([
+        loadBookingHistory<Booking>(args => db.rpc<Booking[]>('booking_history_page', args)),
         db.from('guest_notes').select('guest_key, note, last_name, email, birthday').eq('restaurant_id', restaurantId),
       ])
+      if (request !== guestRequest.current || tenant !== tenantRequest.current) return
+      if (notesResult.error) throw new Error('profile_read_failed')
+      const notes: Record<string, GuestProfile> = {}
+      for (const row of notesResult.data || []) {
+        notes[row.guest_key] = { note: row.note || '', last_name: row.last_name || '', email: row.email || '', birthday: row.birthday || '' }
+      }
+      setAllBookings(bookings); setGuestNotes(notes)
+      if (activeGuestRef.current) void loadGuestProfile(activeGuestRef.current)
       allBookingsDirty.current = false
-      setAllBookings(bks || [])
-      const nm: Record<string, GuestProfile> = {}
-      ;(notes || []).forEach((n: any) => {
-        nm[n.guest_key] = { note: n.note || '', last_name: n.last_name || '', email: n.email || '', birthday: n.birthday || '' }
-      })
-      setGuestNotes(nm)
-    })()
+    } catch {
+      if (request === guestRequest.current && tenant === tenantRequest.current) setGuestError(tr('bk.loadGuestsError'))
+    } finally {
+      if (request === guestRequest.current && tenant === tenantRequest.current) setGuestsLoading(false)
+    }
+  }
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (tab === 'guests' && restaurantId && (allBookings === null || allBookingsDirty.current)) void loadGuests()
+    }, 0)
+    return () => { clearTimeout(timer); ++guestRequest.current }
   }, [tab, restaurantId])
 
   const guests: Guest[] = useMemo(() => {
-    if (!allBookings) return []
+    const today = dateKey(new Date())
     const map = new Map<string, Guest>()
-    for (const b of allBookings) {
-      const key = guestKey(b)
-      if (!key) continue
+    for (const booking of allBookings || []) {
+      const key = bookingGuestKey(booking)
+      const visit = isBookingVisit(booking, today)
       const existing = map.get(key)
       if (existing) {
-        existing.bookings.push(b)
-        if (isVisit(b)) existing.visits++
-        if (b.booking_date > existing.lastVisit) existing.lastVisit = b.booking_date
+        existing.bookings.push(booking)
+        if (visit) { existing.visits++; if (booking.booking_date > existing.lastVisit) existing.lastVisit = booking.booking_date }
       } else {
-        map.set(key, {
-          id: key, name: b.guest_name || tr('bk.namePh'), phone: b.phone || '',
-          visits: isVisit(b) ? 1 : 0, lastVisit: b.booking_date, bookings: [b],
-        })
+        map.set(key, { id: key, name: booking.guest_name || tr('bk.namePh'), phone: booking.phone || '',
+          visits: visit ? 1 : 0, lastVisit: visit ? booking.booking_date : '', bookings: [booking] })
       }
     }
     return [...map.values()].sort((a, b) => b.lastVisit.localeCompare(a.lastVisit))
   }, [allBookings, tr])
-
-  const selectedGuest = guests.find(g => g.id === selectedGuestKey) || null
-  useEffect(() => {
-    setProfileDraft(selectedGuestKey ? (guestNotes[selectedGuestKey] || blankProfile) : blankProfile)
-  }, [selectedGuestKey, guestNotes])
+  const selectedGuest = guests.find(guest => guest.id === selectedGuestKey) || null
 
   const saveGuestNote = async () => {
-    if (!selectedGuestKey) return
-    setNoteSaving(true)
-    const { error } = await db.from('guest_notes').upsert(
-      {
-        restaurant_id: restaurantId, guest_key: selectedGuestKey, note: profileDraft.note,
-        last_name: profileDraft.last_name || null, email: profileDraft.email || null,
-        birthday: profileDraft.birthday || null, updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'restaurant_id,guest_key' },
-    )
-    setNoteSaving(false)
-    if (error) { alert(tr('dash.notSaved') + error.message); return }
-    setGuestNotes(n => ({ ...n, [selectedGuestKey]: profileDraft }))
+    if (!selectedGuestKey || !notesLoaded || profileSaveBusy.current || guestsLoading) return
+    const key = selectedGuestKey
+    const tenant = tenantRequest.current
+    const draft = { ...profileDraft }
+    const validBirthday = !draft.birthday || (/^\d{4}-\d{2}-\d{2}$/.test(draft.birthday) && !Number.isNaN(Date.parse(draft.birthday)) && new Date(draft.birthday).toISOString().slice(0, 10) === draft.birthday)
+    if (draft.note.length > 4000 || draft.last_name.length > 200 || draft.email.length > 254
+      || (draft.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.email)) || !validBirthday) {
+      setGuestError(tr('bk.invalidProfile')); return
+    }
+    profileSaveBusy.current = true; setNoteSavingKey(key); setGuestError('')
+    try {
+      const { error } = await db.rpc('booking_guest_update', { p_guest_key: key,
+        p_profile: { note: draft.note, last_name: draft.last_name.trim() || null, email: draft.email.trim() || null, birthday: draft.birthday || null } })
+      if (tenant !== tenantRequest.current) return
+      if (error) { setGuestError(tr('bk.saveError')); return }
+      setGuestNotes(notes => ({ ...notes, [key]: draft }))
+      setGuestDrafts(drafts => {
+        if (JSON.stringify(drafts[key]) !== JSON.stringify(draft)) return drafts
+        const next = { ...drafts }; delete next[key]; return next
+      })
+    } catch {
+      if (tenant === tenantRequest.current) setGuestError(tr('bk.saveError'))
+    } finally {
+      if (tenant === tenantRequest.current) { profileSaveBusy.current = false; setNoteSavingKey(null) }
+    }
   }
 
   // ── ОТЗЫВЫ (Google Maps, через Places API) ──
@@ -274,21 +361,49 @@ export default function BookingsPage() {
   const [gReviews, setGReviews] = useState<GReview[] | null>(null)
   const [gSnapshots, setGSnapshots] = useState<GSnapshot[] | null>(null)
 
-  useEffect(() => {
-    if (tab !== 'reviews' || placeConfigured !== null || !restaurantId) return
-    ;(async () => {
-      const { data: settings } = await db.from('restaurant_settings').select('google_place_id').limit(1)
+  const reviewsRequest = useRef(0)
+  const [reviewsError, setReviewsError] = useState('')
+  const [reviewsLoading, setReviewsLoading] = useState(false)
+  const loadReviews = async () => {
+    const request = ++reviewsRequest.current
+    const tenant = tenantRequest.current
+    setReviewsError(''); setReviewsLoading(true)
+    try {
+      const { data: settings, error: settingsError } = await db.from('restaurant_settings').select('google_place_id').limit(1)
+      if (request !== reviewsRequest.current || tenant !== tenantRequest.current) return
+      if (settingsError) throw new Error('settings_read_failed')
       const row = Array.isArray(settings) ? settings[0] : settings
       const configured = !!row?.google_place_id
       setPlaceConfigured(configured)
-      if (!configured) return
-      const [{ data: reviews }, { data: snaps }] = await Promise.all([
+      if (!configured) { setGReviews([]); setGSnapshots([]); return }
+      const [{ data: reviews, error: reviewError }, { data: snapshots, error: snapshotError }] = await Promise.all([
         db.from('google_reviews').select('*').eq('restaurant_id', restaurantId).order('review_time', { ascending: false }),
-        db.from('google_rating_snapshots').select('captured_at, rating, ratings_total').eq('restaurant_id', restaurantId).order('captured_at', { ascending: true }).limit(90),
+        db.from('google_rating_snapshots').select('captured_at, rating, ratings_total').eq('restaurant_id', restaurantId).order('captured_at', { ascending: false }).limit(90),
       ])
-      setGReviews(reviews || []); setGSnapshots(snaps || [])
-    })()
+      if (request !== reviewsRequest.current || tenant !== tenantRequest.current) return
+      if (reviewError || snapshotError) throw new Error('review_read_failed')
+      setGReviews(reviews || []); setGSnapshots([...(snapshots || [])].reverse())
+    } catch {
+      if (request === reviewsRequest.current && tenant === tenantRequest.current) setReviewsError(tr('bk.loadReviewsError'))
+    } finally {
+      if (request === reviewsRequest.current && tenant === tenantRequest.current) setReviewsLoading(false)
+    }
+  }
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (tab === 'reviews' && restaurantId && (placeConfigured === null || gReviews === null || gSnapshots === null)) void loadReviews()
+    }, 0)
+    return () => { clearTimeout(timer); ++reviewsRequest.current }
   }, [tab, restaurantId])
+
+  useEffect(() => {
+    ++tenantRequest.current
+    const timer = setTimeout(() => { if (restaurantId) { void loadMonth(visibleMonth); void loadDay(selectedDate) } }, 0)
+    return () => {
+      clearTimeout(timer); ++tenantRequest.current; ++dayRequest.current; ++monthRequest.current
+      ++guestRequest.current; ++reviewsRequest.current; ++editorRequest.current; ++profileRequest.current
+    }
+  }, [restaurantId])
 
   const latestSnapshot = gSnapshots && gSnapshots.length ? gSnapshots[gSnapshots.length - 1] : null
   const ratingTrend = useMemo(() => (gSnapshots || []).map(s => s.rating || 0).filter(v => v > 0), [gSnapshots])
@@ -308,7 +423,7 @@ export default function BookingsPage() {
     { key: 'name', label: tr('bk.name'), sortable: true, render: g => <span style={{ fontWeight: 600, color: 'var(--tx)' }}>{g.name}</span> },
     { key: 'phone', label: tr('bk.phone'), render: g => g.phone || <span style={{ color: 'var(--tx3)' }}>—</span> },
     { key: 'visits', label: tr('bk.visits'), align: 'right', sortable: true, sortValue: g => g.visits },
-    { key: 'lastVisit', label: tr('bk.lastVisit'), align: 'right', sortable: true, sortValue: g => g.lastVisit, render: g => new Date(g.lastVisit + 'T00:00:00').toLocaleDateString(locale, { day: 'numeric', month: 'short' }) },
+    { key: 'lastVisit', label: tr('bk.lastVisit'), align: 'right', sortable: true, sortValue: g => g.lastVisit, render: g => g.lastVisit ? new Date(g.lastVisit + 'T00:00:00').toLocaleDateString(locale, { day: 'numeric', month: 'short' }) : '—' },
   ]
 
   const statusOptions = [
@@ -332,7 +447,7 @@ export default function BookingsPage() {
           <h1>{tr('dash.navBookings')}</h1>
           <p>{tr('bk.sub')}</p>
         </div>
-        <Segmented small value={tab} onChange={v => setTab(v as 'bookings' | 'guests' | 'reviews')}
+        <Segmented small value={tab} onChange={v => { if (!saveBusy.current) setTab(v as 'bookings' | 'guests' | 'reviews') }}
           options={[{ value: 'bookings', label: tr('bk.tabBookings') }, { value: 'guests', label: tr('bk.tabGuests') }, { value: 'reviews', label: tr('bk.tabReviews') }]} />
       </div>
 
@@ -343,7 +458,7 @@ export default function BookingsPage() {
               <div className="bookings-day-title">{selectedDate.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}</div>
               <div className="bookings-day-sub">{tr('bk.tabBookings')} · {bookingCounts.all}</div>
             </div>
-            <Btn onClick={startNew}>{tr('bk.newBooking')}</Btn>
+            <Btn onClick={() => startNew()} disabled={saving || loadingDay || !!dayError}>{tr('bk.newBooking')}</Btn>
           </div>
           <div className="bookings-summary">
             {([
@@ -362,11 +477,11 @@ export default function BookingsPage() {
               {/* Календарь */}
               <Card pad={14}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <button onClick={() => changeMonth(-1)} aria-label={tr('bk.prevMonth')} className="ui-press" style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--fill)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx2)' }}>
+                  <button disabled={saving} onClick={() => changeMonth(-1)} aria-label={tr('bk.prevMonth')} className="ui-press" style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--fill)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx2)' }}>
                     <svg width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 8 14"><path d="M7 1L1 7l6 6" /></svg>
                   </button>
                   <div style={{ fontSize: '.85rem', fontWeight: 700, color: 'var(--tx)', textTransform: 'capitalize' }}>{monthLabel}</div>
-                  <button onClick={() => changeMonth(1)} aria-label={tr('bk.nextMonth')} className="ui-press" style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--fill)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx2)' }}>
+                  <button disabled={saving} onClick={() => changeMonth(1)} aria-label={tr('bk.nextMonth')} className="ui-press" style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--fill)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx2)' }}>
                     <svg width="8" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6" /></svg>
                   </button>
                 </div>
@@ -381,7 +496,7 @@ export default function BookingsPage() {
                     const isSelected = key === dateKey(selectedDate)
                     const isToday = key === dateKey(new Date())
                     return (
-                      <button key={i} onClick={() => selectDay(d)} aria-label={d.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' })} aria-pressed={isSelected} className="ui-press" style={{
+                      <button key={i} disabled={saving} onClick={() => selectDay(d)} aria-label={d.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' })} aria-pressed={isSelected} className="ui-press" style={{
                         aspectRatio: '1', borderRadius: 8, border: isToday && !isSelected ? '1px solid var(--accent)' : 'none',
                         background: isSelected ? 'var(--accent)' : 'transparent', color: isSelected ? '#fff' : 'var(--tx)',
                         fontSize: '.78rem', fontWeight: isSelected ? 700 : 500, cursor: 'pointer', fontFamily: 'inherit',
@@ -393,8 +508,9 @@ export default function BookingsPage() {
                     )
                   })}
                 </div>
+                {monthError && <div className="bookings-error" role="alert">{monthError}<Btn small variant="gray" onClick={() => loadMonth(visibleMonth)}>{tr('bk.retry')}</Btn></div>}
               </Card>
-              <Btn variant="gray" onClick={goToday} full>{tr('dash.shiftsToday')}</Btn>
+              <Btn variant="gray" onClick={goToday} disabled={saving} full>{tr('dash.shiftsToday')}</Btn>
             </aside>
 
             <section className="bookings-list" aria-label={tr('bk.tabBookings')}>
@@ -415,7 +531,9 @@ export default function BookingsPage() {
                   </button>
                 ))}
               </div>
-              {loadingDay ? <Spinner compact /> : visibleDayBookings.length === 0 ? (
+              {loadingDay ? <Spinner compact /> : dayError ? (
+                <div className="bookings-error" role="alert">{dayError}<Btn small variant="gray" onClick={() => loadDay(selectedDate)}>{tr('bk.retry')}</Btn></div>
+              ) : visibleDayBookings.length === 0 ? (
                 <div className="bookings-list-empty">{dayBookings.length === 0 ? tr('bk.noneDay') : tr('bk.noneFilter')}</div>
               ) : (
                 <div className="bookings-rows">
@@ -423,7 +541,7 @@ export default function BookingsPage() {
                     const st = statusOf(b.status)
                     const on = selectedId === b.id
                     return (
-                      <button key={b.id} onClick={() => startEdit(b)} className={`ui-press bookings-row${on ? ' bookings-row--selected' : ''}`}>
+                      <button key={b.id} disabled={saving} onClick={() => startEdit(b)} className={`ui-press bookings-row${on ? ' bookings-row--selected' : ''}`}>
                         <span className="bookings-row-time">{b.booking_time || '—'}</span>
                         <div className="bookings-row-body">
                           <div className="bookings-row-name">{b.guest_name || tr('bk.namePh')}</div>
@@ -444,6 +562,8 @@ export default function BookingsPage() {
               <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)', marginBottom: 14 }}>
                 {selectedId === 'new' ? tr('bk.newBooking') : tr('bk.status')}
               </div>
+              {saveError && <div className="bookings-error" role="alert">{saveError}</div>}
+              <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
               <div className="bookings-form-grid">
                 <Field label={tr('bk.name')} value={form.guest_name} onChange={v => setForm({ ...form, guest_name: v })} placeholder={tr('bk.namePh')} />
                 <Field label={tr('bk.phone')} value={form.phone} onChange={v => setForm({ ...form, phone: v })} type="tel" />
@@ -463,18 +583,19 @@ export default function BookingsPage() {
               )}
               <Field label={tr('bk.note')} value={form.note} onChange={v => setForm({ ...form, note: v })} />
 
+              </fieldset>
               <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                 <Btn onClick={save} disabled={saving}>{saving ? tr('dash.saving') : tr('dash.save')}</Btn>
-                <Btn variant="gray" onClick={() => setSelectedId(null)}>{tr('dash.cancel')}</Btn>
+                <Btn variant="gray" onClick={cancelEditor} disabled={saving}>{tr('dash.cancel')}</Btn>
                 {selectedId !== 'new' && !deleteConfirm && (
-                  <Btn variant="danger" onClick={() => setDeleteConfirm(true)}>{tr('dash.remove')}</Btn>
+                  <Btn variant="danger" onClick={() => setDeleteConfirm(true)} disabled={saving}>{tr('dash.remove')}</Btn>
                 )}
               </div>
               {deleteConfirm && (
                 <div style={{ marginTop: 12, paddingTop: 12, borderTop: 'var(--hairline)', display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontSize: '.82rem', color: 'var(--danger)', fontWeight: 600 }}>{tr('bk.deleteConfirm')}</span>
-                  <Btn small variant="danger" onClick={removeBooking}>{tr('bk.yesDelete')}</Btn>
-                  <Btn small variant="ghost" onClick={() => setDeleteConfirm(false)}>{tr('dash.cancel')}</Btn>
+                  <Btn small variant="danger" onClick={removeBooking} disabled={saving}>{tr('bk.yesDelete')}</Btn>
+                  <Btn small variant="ghost" onClick={() => setDeleteConfirm(false)} disabled={saving}>{tr('dash.cancel')}</Btn>
                 </div>
               )}
             </Card>
@@ -483,14 +604,15 @@ export default function BookingsPage() {
         </>
       ) : tab === 'guests' ? (
         <div>
-          {allBookings === null ? <Spinner /> : (
+          {guestError && <div className="bookings-error" role="alert">{guestError}{!notesLoaded && <Btn small variant="gray" onClick={loadGuests}>{tr('bk.retry')}</Btn>}</div>}
+          {guestsLoading && allBookings === null ? <Spinner /> : allBookings === null ? null : (
             <div className="ui-split">
               <div style={{ flex: 1, minWidth: 0 }}>
                 {guests.length === 0 ? (
                   <Card><div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--tx2)', fontSize: '.88rem' }}>{tr('bk.noGuests')}</div></Card>
                 ) : (
                   <Table columns={guestColumns} rows={guests} searchable searchPlaceholder={tr('bk.name')}
-                    searchText={g => `${g.name} ${g.phone}`} onRowClick={g => setSelectedGuestKey(g.id)} selectedId={selectedGuestKey} />
+                    searchText={g => `${g.name} ${g.phone}`} keyboardRows onRowClick={guest => selectGuest(guest.id)} selectedId={selectedGuestKey} />
                 )}
                 <div style={{ fontSize: '.76rem', color: 'var(--tx3)', marginTop: 10 }}>{tr('bk.guestsSub')}</div>
               </div>
@@ -500,11 +622,16 @@ export default function BookingsPage() {
                     <div style={{ fontWeight: 700, fontSize: '.95rem', color: 'var(--tx)' }}>{selectedGuest.name}</div>
                     {selectedGuest.phone && <div style={{ fontSize: '.8rem', color: 'var(--tx2)', marginTop: 2 }}>{selectedGuest.phone}</div>}
 
+                    <Btn small variant="gray" onClick={() => { setTab('bookings'); startNew(selectedGuest) }} disabled={saving || loadingDay || !!dayError}>{tr('bk.newBooking')}</Btn>
+                    {profileError && <div className="bookings-error" role="alert">{profileError}<Btn small variant="gray" onClick={() => loadGuestProfile(selectedGuest.id)}>{tr('bk.retry')}</Btn></div>}
+                    {!notesLoaded && !profileError && !guestError && <Spinner compact />}
+                    <fieldset aria-busy={!notesLoaded} disabled={!notesLoaded || guestsLoading || noteSavingKey === selectedGuestKey} style={{ border: 0, padding: 0, margin: '12px 0 0', minWidth: 0 }}>
                     <Field label={tr('gs.lastName')} value={profileDraft.last_name} onChange={v => setProfileDraft({ ...profileDraft, last_name: v })} />
                     <Field label={tr('gs.email')} value={profileDraft.email} onChange={v => setProfileDraft({ ...profileDraft, email: v })} type="email" />
                     <Field label={tr('gs.birthday')} value={profileDraft.birthday} onChange={v => setProfileDraft({ ...profileDraft, birthday: v })} type="date" />
                     <Field label={tr('bk.guestNote')} value={profileDraft.note} onChange={v => setProfileDraft({ ...profileDraft, note: v })} placeholder={tr('bk.guestNotePh')} />
-                    <Btn small onClick={saveGuestNote} disabled={noteSaving}>{noteSaving ? tr('dash.saving') : tr('dash.save')}</Btn>
+                    <Btn small onClick={saveGuestNote} disabled={!notesLoaded || guestsLoading || noteSaving}>{noteSavingKey === selectedGuestKey ? tr('dash.saving') : tr('dash.save')}</Btn>
+                    </fieldset>
 
                     <div style={{ fontSize: '.72rem', fontWeight: 700, color: 'var(--tx2)', textTransform: 'uppercase', letterSpacing: '.04em', margin: '16px 0 8px' }}>{tr('bk.guestHistory')}</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -528,7 +655,8 @@ export default function BookingsPage() {
         </div>
       ) : (
         <div>
-          {placeConfigured === null ? <Spinner /> : !placeConfigured ? (
+          {reviewsError ? <div className="bookings-error" role="alert">{reviewsError}<Btn small variant="gray" onClick={loadReviews}>{tr('bk.retry')}</Btn></div>
+            : reviewsLoading || placeConfigured === null ? <Spinner /> : !placeConfigured ? (
             <EmptyState
               icon={<svg width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0119 9.5C19 14.8 12 21 12 21z" /><circle cx="12" cy="9.5" r="2.4" /></svg>}
               title={tr('bk.rvNotConfigured')} sub={tr('bk.rvNotConfiguredSub')}
