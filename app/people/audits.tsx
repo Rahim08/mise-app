@@ -11,6 +11,7 @@ import { AuthGate } from '@/components/AuthGate'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
+import { geoActive, peopleToday } from '@/lib/peopleDay'
 import { tCurrent } from '@/lib/i18n'
 import { ScheduleTab } from '@/components/people/ScheduleTab'
 import { btnB2, inp, lbl, clock, hoursOf, fmtHours, HistoryList } from './shared'
@@ -333,11 +334,10 @@ export function ChecklistCard({ title, items, state, canFill, restaurantId, comp
 // (app/manager/tabs-checklists.tsx, реструктура 2026-08-14) — здесь только прохождение и
 // менеджерская pass/fail-верификация чужих прогонов (Д4 2026-07-31, личное операционное
 // действие, не тронуто).
-export function ShiftChecklistsView({ isManager, myId, myRole, canFill, openShiftId, staff, restaurantId, accent, t, toast }: {
-  isManager: boolean; myId: string; myRole?: string; canFill: boolean; openShiftId: string | null; staff: any[]; restaurantId: string; accent: string; t: any; toast: (m: string) => void
+export function ShiftChecklistsView({ isManager, myId, myRole, canFill, openShiftId, today, onGoCheckIn, staff, restaurantId, accent, t, toast }: {
+  isManager: boolean; myId: string; myRole?: string; canFill: boolean; openShiftId: string | null; today: string; onGoCheckIn?: () => void; staff: any[]; restaurantId: string; accent: string; t: any; toast: (m: string) => void
 }) {
   const { t: tr } = useI18n()
-  const today = fmtDate(new Date())
   // Чек-лист открытия/закрытия смены привязан к кассовой смене Manager (shifts.date) —
   // без неё отмечать пункты нельзя, как на iOS (guard let sid = openShiftId).
   const canFillShift = canFill && !!openShiftId
@@ -362,7 +362,7 @@ export function ShiftChecklistsView({ isManager, myId, myRole, canFill, openShif
   // массив items_state, параллельные отметки коллег терялись, а ответ записи не проверялся
   // — «Открытие выполнено» показывалось и после отказа сохранения (аудит People 2026-11-14).
   const setItem = async (list: any, idx: number, next: { done: boolean; photo_url: string | null }) => {
-    if (!openShiftId) { toast(tr('pe.openShiftFirst')); return }
+    if (!openShiftId) { toast(tr(isManager ? 'pe.openShiftFirst' : 'pe.askManagerOpenShift')); return }
     const completion = completions.find(c => c.checklist_id === list.id)
     try {
       const row = await saveChecklistItem({ checklist_id: list.id, idx, item: next, completion_id: completion?.id, shift_id: openShiftId, date: today })
@@ -382,11 +382,16 @@ export function ShiftChecklistsView({ isManager, myId, myRole, canFill, openShif
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: `${t.orange}14`, borderRadius: 14, padding: '14px', marginBottom: 14 }}>
           <div>
             <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{tr('mg.emptyTitle')}</div>
-            <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{tr('pe.checklistNoShiftHint')}</div>
+            <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{tr(isManager ? 'pe.checklistNoShiftHint' : 'pe.askManagerOpenShift')}</div>
           </div>
         </div>
       )}
-      {canFillShift === false && !!openShiftId && <div style={{ background: `${t.orange}14`, borderRadius: 12, padding: '12px 14px', fontSize: 13, color: t.orange, marginBottom: 14 }}>{tr('pe.needCheckInFirst')}</div>}
+      {canFillShift === false && !!openShiftId && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: `${t.orange}14`, borderRadius: 12, padding: '12px 14px', fontSize: 13, color: t.orange, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}>{tr('pe.needCheckInFirst')}</div>
+          {onGoCheckIn && <button onClick={onGoCheckIn} style={{ flexShrink: 0, padding: '7px 12px', borderRadius: 10, border: 'none', background: t.orange, color: '#fff', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>{tr('pe.attendance')}</button>}
+        </div>
+      )}
       <div style={{ display: 'flex', background: t.fill, borderRadius: 12, padding: 3, marginBottom: 16, gap: 2 }}>
         {([['open', tr('pe.opening')], ['close', tr('pe.closing')]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setType(id)} style={{ flex: 1, padding: '8px 0', borderRadius: 10, border: 'none', fontFamily: 'inherit', fontSize: 13, fontWeight: type === id ? 700 : 500, cursor: 'pointer', background: type === id ? t.surface : 'transparent', color: type === id ? accent : t.text3, boxShadow: type === id ? t.sh2 : 'none' }}>{label}</button>
@@ -1074,7 +1079,7 @@ export function AuditStatsView({ accent, t, initialKind }: { accent: string; t: 
 // просто общий хук, вызывается один раз в хабе вместо отдельного вызова на каждый под-раздел).
 export function useOpsGate(me: any) {
   const myId = me.id || ''
-  const today = fmtDate(new Date())
+  const [today, setToday] = useState(() => peopleToday(null))
   const [staff, setStaff] = useState<any[]>([])
   const [geoRequired, setGeoRequired] = useState(false)
   const [checkedInToday, setCheckedInToday] = useState(true)
@@ -1082,23 +1087,37 @@ export function useOpsGate(me: any) {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    Promise.all([
-      db.from('restaurant_settings').select('attendance_enabled').limit(1),
-      db.from('staff_directory').select('*').eq('is_active', true).order('name'),
-      myId ? db.from('attendance_records').select('id').eq('staff_id', myId).eq('date', today).limit(1) : Promise.resolve({ data: [] as any[] }),
-      // Чек-лист открытия/закрытия смены привязан к кассовой смене Manager за сегодня
-      // (shifts.date уникален по (restaurant_id, date) — см. CLAUDE.md), как на iOS.
-      db.from('shifts').select('id,status').eq('date', today).order('opened_at', { ascending: false }).limit(1),
-    ]).then(([rs, dir, att, sh]: any) => {
-      // Сбой загрузки настроек/явки = неизвестно, нужна ли гео-явка: закрыто, а не открыто.
-      if (rs.error || att.error) { setGeoRequired(true); setCheckedInToday(false); setStaff(dir.data || []); setOpenShiftId(sh.data?.[0]?.id || null); setReady(true); return }
+    let alive = true
+    ;(async () => {
+      // Настройки — первыми: от них зависит «сегодня» (рабочий день до day_start_hour,
+      // аудит People 2026-11-14 Б5) и включена ли гео-явка на самом деле (Б1).
+      const [rs, dir] = await Promise.all([
+        db.from('restaurant_settings').select('*').limit(1),
+        db.from('staff_directory').select('*').eq('is_active', true).order('name'),
+      ]) as any
       const s = Array.isArray(rs.data) ? rs.data[0] : rs.data
-      setGeoRequired(!!s?.attendance_enabled)
+      const day = peopleToday(s)
+      const [att, sh] = await Promise.all([
+        myId ? db.from('attendance_records').select('id').eq('staff_id', myId).eq('date', day).limit(1) : Promise.resolve({ data: [] as any[], error: null }),
+        // Чек-лист открытия/закрытия смены привязан к кассовой смене Manager за рабочий день
+        // (shifts.date уникален по (restaurant_id, date) — см. CLAUDE.md), как на iOS.
+        db.from('shifts').select('id,status').eq('date', day).order('opened_at', { ascending: false }).limit(1),
+      ]) as any
+      if (!alive) return
+      setToday(day)
       setStaff(dir.data || [])
-      setCheckedInToday((att.data || []).length > 0)
       setOpenShiftId(sh.data?.[0]?.id || null)
+      // Сбой загрузки настроек/явки = неизвестно, нужна ли гео-явка: закрыто, а не открыто.
+      if (rs.error || att.error) { setGeoRequired(true); setCheckedInToday(false) }
+      else {
+        // «Включено, но адреса нет» — проверки места нет, явку не требуем (раньше сотрудники
+        // SO не могли отметить ни пункта, а отметить явку было нельзя).
+        setGeoRequired(geoActive(s))
+        setCheckedInToday((att.data || []).length > 0)
+      }
       setReady(true)
-    })
+    })()
+    return () => { alive = false }
   }, [myId])
 
   // Fail-closed до загрузки данных (гео/явка/смена) — как на iOS (requireGeoCheckIn ждёт
@@ -1107,7 +1126,7 @@ export function useOpsGate(me: any) {
   // касается; раньше при включённой гео-явке менеджер/владелец не мог отметить ни пункта.
   const official = !!me.is_owner || me.role === 'manager' || me.role === 'admin'
   const canFill = ready && (official || !geoRequired || checkedInToday)
-  return { staff, canFill, openShiftId, ready }
+  return { staff, canFill, openShiftId, ready, today, official }
 }
 
 // Флаттенинг (Д4): «Рутина»/«Аудиты» как отдельные вложенные экраны с собственными

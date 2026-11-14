@@ -12,6 +12,7 @@ import { AuthGate } from '@/components/AuthGate'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
+import { geoActive, geoMissingAddress, peopleToday } from '@/lib/peopleDay'
 import { tCurrent } from '@/lib/i18n'
 import { ShiftChecklistsView, WalkHistoryView, AuditStatsView, useOpsGate, normItem, normState, effResult } from './audits'
 import { btnB2, inp, lbl, clock, hoursOf, fmtHours, HistoryList } from './shared'
@@ -28,7 +29,7 @@ export function MyShiftsTab({ myId, accent, t }: { myId: string; accent: string;
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const today = fmtDate(new Date())
+    const today = peopleToday(null)
     db.from('staff_schedules').select('*').eq('staff_id', myId).eq('published', true).gte('date', today).order('date')
       .then(({ data }: any) => { setShifts(data || []); setLoading(false) })
   }, [myId])
@@ -44,7 +45,7 @@ export function MyShiftsTab({ myId, accent, t }: { myId: string; accent: string;
     </div>
   )
 
-  const today = fmtDate(new Date()); const tomorrow = fmtDate(addDays(new Date(), 1))
+  const today = peopleToday(null); const tomorrow = fmtDate(addDays(new Date(), 1))
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {shifts.map(s => {
@@ -94,7 +95,7 @@ export function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManag
 
   const load = async () => {
     setLoading(true)
-    const today = fmtDate(new Date())
+    const today = peopleToday(null)
     const from = fmtDate(addDays(new Date(), -14)); const to = fmtDate(addDays(new Date(), 60))
     const [{ data: rq }, { data: st }, { data: sc }] = await Promise.all([
       // Лимит на растущую таблицу (ревью Д1).
@@ -108,7 +109,7 @@ export function SwapsTab({ me, isManager, accent, t, toast }: { me: any; isManag
 
   const name = (id: string) => staff.find(s => s.id === id)?.name || '—'
   const sched = (id: string) => schedules.find(s => s.id === id)
-  const myUpcoming = schedules.filter(s => s.staff_id === myId && s.published && s.date >= fmtDate(new Date())).sort((a, b) => a.date.localeCompare(b.date))
+  const myUpcoming = schedules.filter(s => s.staff_id === myId && s.published && s.date >= peopleToday(null)).sort((a, b) => a.date.localeCompare(b.date))
 
   const notify = (staffId: string, type: string, title: string, body: string, keys?: { titleKey?: string; bodyKey?: string; bodyParams?: Record<string, string | number> }) =>
     pushNotify({ type, title, body, titleKey: keys?.titleKey, bodyKey: keys?.bodyKey, bodyParams: keys?.bodyParams, audience: { staff_ids: [staffId] } })
@@ -283,8 +284,9 @@ export function distMeters(la1: number, lo1: number, la2: number, lo2: number) {
 export function AttendanceTab({ me, isManager, accent, t, toast, onOpenDiscipline }: { me: any; isManager: boolean; accent: string; t: any; toast: (m: string) => void; onOpenDiscipline?: () => void }) {
   const { t: tr } = useI18n()
   const myId = me.id || ''
-  const today = fmtDate(new Date())
   const [settings, setSettings] = useState<any>(null)
+  // Рабочий день заведения (до day_start_hour — ещё вчера), как у кассовой смены в Manager.
+  const today = peopleToday(settings)
   const [history, setHistory] = useState<any[]>([])
   const [todayAll, setTodayAll] = useState<any[]>([])
   const [staff, setStaff] = useState<any[]>([])
@@ -294,19 +296,24 @@ export function AttendanceTab({ me, isManager, accent, t, toast, onOpenDisciplin
   const [loading, setLoading] = useState(true)
   const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null)
 
+  const [loadFailed, setLoadFailed] = useState(false)
   const load = async () => {
-    const [{ data: rs }, { data: hist }, { data: sc }] = await Promise.all([
+    const [{ data: rs, error: rsErr }, { data: hist, error: histErr }] = await Promise.all([
       db.from('restaurant_settings').select('*').limit(1),
       isManager
         ? db.from('attendance_records').select('*').gte('date', fmtDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1))).order('date', { ascending: false }).limit(500)
         : db.from('attendance_records').select('*').eq('staff_id', myId).order('date', { ascending: false }).limit(62),
-      db.from('staff_schedules').select('*').eq('staff_id', myId).eq('date', today).limit(1),
     ])
+    // Ошибка загрузки — не «пусто»: иначе сотрудник видел «нет смены» вместо «не загрузилось».
+    if (rsErr || histErr) { setLoadFailed(true); setLoading(false); return }
+    setLoadFailed(false)
     const st = Array.isArray(rs) ? rs[0] : rs
+    const day = peopleToday(st)
+    const { data: sc } = await db.from('staff_schedules').select('*').eq('staff_id', myId).eq('date', day).limit(1)
     setSettings(st || null); setHistory(hist || []); setMySched((Array.isArray(sc) ? sc[0] : sc) || null)
     if (isManager) {
       const { data: dir } = await db.from('staff_directory').select('*').eq('is_active', true).order('name')
-      setStaff(dir || []); setTodayAll((hist || []).filter((r: any) => r.date === today))
+      setStaff(dir || []); setTodayAll((hist || []).filter((r: any) => r.date === day))
     }
     setLoading(false)
   }
@@ -314,14 +321,15 @@ export function AttendanceTab({ me, isManager, accent, t, toast, onOpenDisciplin
 
   // Ночная смена: запись, открытая вчера и ещё не закрытая, после полуночи остаётся
   // «сегодняшней» — иначе после 00:00 нельзя было ни уйти, ни увидеть себя на смене.
-  const yesterday = fmtDate(addDays(new Date(), -1))
+  const yesterday = fmtDate(addDays(new Date(`${today}T12:00:00`), -1))
   const todayRec = history.find(r => r.staff_id === myId && r.date === today)
     || (new Date().getHours() < 12 ? history.find(r => r.staff_id === myId && r.date === yesterday && r.check_in_at && !r.check_out_at) : undefined)
+  const geoOn = geoActive(settings)
 
   // Geolocation — следим за дистанцией пока экран открыт (foreground). Сам приход — по кнопке «Я пришёл».
   useEffect(() => {
     if (isManager || loading) return
-    if (!settings?.attendance_enabled || settings?.latitude == null || settings?.longitude == null) return
+    if (!geoActive(settings)) return
     if (!navigator.geolocation) { setGeoErr(tr('pe.geoUnavailable')); return }
     const watchId = navigator.geolocation.watchPosition(
       p => {
@@ -347,46 +355,43 @@ export function AttendanceTab({ me, isManager, accent, t, toast, onOpenDisciplin
     try { await checkInInner() } finally { checkingIn.current = false }
   }
   const checkInInner = async () => {
-    if (!pos || dist == null || todayRec) return
-    if (!mySched?.published) return
-    if (dist > (settings?.geo_radius_m || 150)) { toast(tr('pe.outsideZone')); return }
-    // Порог опоздания — настраиваемый грейс (restaurant_settings.late_grace_min), не
-    // хардкод: раньше 5 мин было зашито в статус/бейдж/пуш «опоздал», хотя в статистике
-    // Дисциплины (DisciplineTab) грейс уже применялся корректно — несостыковка внутри
-    // одной фичи (аудит 2026-08-04).
-    const grace = settings?.late_grace_min ?? 5
-    let late: number | null = null, status = 'present'
-    if (mySched?.shift_start) {
-      const [h, m] = mySched.shift_start.split(':').map(Number)
-      const start = new Date(); start.setHours(h, m, 0, 0)
-      late = Math.max(0, Math.round((Date.now() - start.getTime()) / 60000)); status = late > grace ? 'late' : 'present'
+    if (todayRec) return
+    // Гео-проверка только если у заведения задана точка; иначе — отметка без места.
+    // Без опубликованной смены отметиться можно: запись будет «вне графика» (пакет B,
+    // 2026-11-14) — раньше хард-гейт по графику при пустом графике блокировал всё.
+    if (geoOn) {
+      if (!pos || dist == null) return
+      if (dist > (settings?.geo_radius_m || 150)) { toast(tr('pe.outsideZone')); return }
     }
-    const { error } = await db.from('attendance_records').upsert(
-      { staff_id: myId, date: today, check_in_at: new Date().toISOString(), check_in_lat: pos.lat, check_in_lng: pos.lng, check_in_distance_m: Math.round(dist), late_minutes: late, status, source: 'geo' },
+    // Опоздание, статус и дистанцию считает сервер (lib/attendanceCheckIn.ts) по графику и
+    // таймзоне заведения; клиент присылает только факт прихода.
+    const { data: rec, error } = await db.from('attendance_records').upsert(
+      { staff_id: myId, date: today, check_in_at: new Date().toISOString(), ...(geoOn && pos ? { check_in_lat: pos.lat, check_in_lng: pos.lng } : {}) },
       { onConflict: 'restaurant_id,staff_id,date' }
-    )
+    ).select().single()
     // Раньше ошибка сети/сервера тут не проверялась вообще — кнопка просто не переключалась
     // в «на смене», без объяснения почему (юзер не понимал, пришла явка или нет). iOS в этом
     // случае кладёт явку в офлайн-очередь и досылает сама — на вебе такой очереди пока нет
     // (отдельная тема), но хотя бы явно сообщаем о сбое вместо тишины.
     if (error) { toast(tr('dash.notSaved') + error.message); return }
+    const late = (rec as any)?.status === 'late' ? Number((rec as any).late_minutes || 0) : null
     // Уведомляем владельца/менеджеров о приходе сотрудника на смену.
-    const lateTxt = status === 'late' ? ` (+${late} мин)` : ''
-    const attName = me.name || 'Сотрудник'
+    const attName = me.name || '—'
     pushNotify({
-      type: 'attendance', title: 'Staff on shift', body: `${attName} checked in${lateTxt}`,
+      // title/body — запасной текст; получатель видит локализованный по titleKey/bodyKey.
+      type: 'attendance', title: 'Staff on shift', body: attName,
       titleKey: 'notify.attendanceTitle',
-      bodyKey: status === 'late' ? 'notify.attendanceBodyLate' : 'notify.attendanceBody',
-      bodyParams: status === 'late' ? { name: attName, min: late ?? 0 } : { name: attName },
+      bodyKey: late != null ? 'notify.attendanceBodyLate' : 'notify.attendanceBody',
+      bodyParams: late != null ? { name: attName, min: late } : { name: attName },
       audience: { managers: true },
     })
-    toast(status === 'late' ? tr('pe.checkedLate', { n: late! }) : tr('pe.checkedIn')); await load()
+    toast(late != null ? tr('pe.checkedLate', { n: late }) : tr('pe.checkedIn')); await load()
   }
 
   const checkOut = async () => {
-    if (!pos) return
     if (!todayRec?.id) return
-    const { error } = await db.from('attendance_records').update({ check_out_at: new Date().toISOString(), check_out_lat: pos.lat, check_out_lng: pos.lng }).eq('id', todayRec.id)
+    // Уход отмечается и без геопозиции (раньше при сбое GPS кнопка молча ничего не делала).
+    const { error } = await db.from('attendance_records').update({ check_out_at: new Date().toISOString(), ...(pos ? { check_out_lat: pos.lat, check_out_lng: pos.lng } : {}) }).eq('id', todayRec.id)
     if (error) { toast(tr('dash.notSaved') + error.message); return }
     toast(tr('pe.checkedOut')); await load()
   }
@@ -416,6 +421,7 @@ export function AttendanceTab({ me, isManager, accent, t, toast, onOpenDisciplin
           })}
         </div>
         {!settings?.attendance_enabled && <div style={{ background: `${t.orange}14`, borderRadius: 12, padding: '12px 14px', fontSize: 13, color: t.orange }}>{tr('pe.geoOffManager')}</div>}
+        {geoMissingAddress(settings) && <div style={{ background: `${t.orange}14`, borderRadius: 12, padding: '12px 14px', fontSize: 13, color: t.orange }}>{tr('pe.geoNoAddress')}</div>}
 
         {/* Часы и опоздания по каждому сотруднику за текущий месяц */}
         {history.length > 0 && (
@@ -453,27 +459,21 @@ export function AttendanceTab({ me, isManager, accent, t, toast, onOpenDisciplin
   // ── Staff view ──
   const radius = settings?.geo_radius_m || 150
   const inRange = dist != null && dist <= radius
-  const configured = settings?.attendance_enabled && settings?.latitude != null
-  // Хард-гейт по графику (Д4, 2026-07-31): без опубликованной смены на сегодня — вообще
-  // не показываем гео-флоу/кнопку «Я здесь». Не блокирует уже существующую запись
-  // (todayRec) — если пришёл раньше, чем сняли/переставили график, карточка не пропадает.
+  // Мягкий гейт по графику (пакет B, 2026-11-14): без опубликованной смены отметиться можно,
+  // запись пометится «вне графика» (сервер пишет schedule_id = null), а не блокируется.
   const scheduledToday = !!mySched?.published
+  const checkInReady = !geoOn || inRange
   return (
     <div>
-      {!configured ? (
+      {loadFailed ? (
         <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
-          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.geoNotConfigured')}</div>
-          <div style={{ fontSize: 13, marginTop: 4 }}>{tr('pe.geoManagerSetsAddress')}</div>
-        </div>
-      ) : !todayRec && !scheduledToday ? (
-        <div style={{ textAlign: 'center', padding: '50px 20px', color: t.text3 }}>
-          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.noScheduledShift')}</div>
-          <div style={{ fontSize: 13, marginTop: 4 }}>{tr('pe.noScheduledShiftHint')}</div>
+          <div style={{ fontWeight: 600, fontSize: 16, color: t.text2 }}>{tr('pe.loadFailed')}</div>
+          <button onClick={() => { setLoading(true); load() }} style={{ marginTop: 12, padding: '10px 22px', borderRadius: 12, border: 'none', background: t.fill, color: t.text, fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>{tr('bk.retry')}</button>
         </div>
       ) : (
         <div style={{ background: t.surface, borderRadius: 20, padding: '28px 20px', boxShadow: t.sh, textAlign: 'center', marginBottom: 16 }}>
-          <div style={{ width: 96, height: 96, borderRadius: '50%', margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: todayRec ? `${t.green}18` : inRange ? `${accent}18` : t.fill, border: `2px solid ${todayRec ? t.green : inRange ? accent : t.sep}` }}>
-            <svg width="40" height="40" fill="none" stroke={todayRec ? t.green : inRange ? accent : t.text3} strokeWidth="1.8" viewBox="0 0 24 24"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0118 0z" /><circle cx="12" cy="10" r="3" /></svg>
+          <div style={{ width: 96, height: 96, borderRadius: '50%', margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: todayRec ? `${t.green}18` : checkInReady ? `${accent}18` : t.fill, border: `2px solid ${todayRec ? t.green : checkInReady ? accent : t.sep}` }}>
+            <svg width="40" height="40" fill="none" stroke={todayRec ? t.green : checkInReady ? accent : t.text3} strokeWidth="1.8" viewBox="0 0 24 24"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0118 0z" /><circle cx="12" cy="10" r="3" /></svg>
           </div>
           {todayRec ? (
             <>
@@ -483,19 +483,20 @@ export function AttendanceTab({ me, isManager, accent, t, toast, onOpenDisciplin
                 ? <button onClick={checkOut} style={{ marginTop: 16, padding: '12px 28px', borderRadius: 14, border: 'none', background: t.fill, color: t.text, fontFamily: 'inherit', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>{tr('pe.checkOut')}</button>
                 : <div style={{ marginTop: 12, fontSize: 14, color: t.green, fontWeight: 600 }}>{tr('pe.shiftClosedAt')} {clock(todayRec.check_out_at)}</div>}
             </>
-          ) : geoErr ? (
+          ) : geoOn && geoErr ? (
             <div style={{ fontSize: 15, color: t.red, fontWeight: 600 }}>{geoErr}</div>
-          ) : dist == null ? (
+          ) : geoOn && dist == null ? (
             <div style={{ fontSize: 15, color: t.text3 }}>{tr('pe.locating')}</div>
-          ) : inRange ? (
+          ) : checkInReady ? (
             <>
-              <div style={{ fontSize: 15, color: t.text3, marginBottom: 2 }}>{tr('pe.youreHere')}</div>
+              {geoOn && <div style={{ fontSize: 15, color: t.text3, marginBottom: 2 }}>{tr('pe.youreHere')}</div>}
+              {!scheduledToday && <div style={{ fontSize: 13, color: t.orange, marginBottom: 2 }}>{tr('pe.offSchedule')}</div>}
               <button onClick={checkIn} style={{ marginTop: 12, padding: '13px 36px', borderRadius: 14, border: 'none', background: accent, color: '#fff', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 16px ${accent}55` }}>{tr('pe.imHere')}</button>
             </>
           ) : (
             <>
               <div style={{ fontSize: 18, fontWeight: 700, color: t.text }}>{tr('pe.comeCloser')}</div>
-              <div style={{ fontSize: 14, color: t.text3, marginTop: 4 }}>{tr('pe.distanceTo', { d: Math.round(dist), r: radius })}</div>
+              <div style={{ fontSize: 14, color: t.text3, marginTop: 4 }}>{tr('pe.distanceTo', { d: Math.round(dist!), r: radius })}</div>
             </>
           )}
         </div>
@@ -556,11 +557,11 @@ export type ChecklistFailDay = { date: string; role: string | null; items: strin
 // проверки пока не нужны) — AdHocAuditsView/fetchHasRelevantAudits остаются в audits.tsx
 // нетронутыми, просто не вызываются отсюда. Чтобы вернуть — добавить audits обратно в PILLS,
 // импортировать AdHocAuditsView/fetchHasRelevantAudits и восстановить ветку рендера/гейт.
-function ShiftAuditHub({ me, isManager, restaurantId, accent, t, toast }: { me: any; isManager: boolean; restaurantId: string; accent: string; t: any; toast: (m: string) => void }) {
+function ShiftAuditHub({ me, isManager, restaurantId, accent, t, toast, onGoCheckIn }: { me: any; isManager: boolean; restaurantId: string; accent: string; t: any; toast: (m: string) => void; onGoCheckIn?: () => void }) {
   const { t: tr } = useI18n()
   const myId = me.id || ''
   const myRole = me.role
-  const { staff, canFill, openShiftId, ready } = useOpsGate(me)
+  const { staff, canFill, openShiftId, ready, today } = useOpsGate(me)
   const [seg, setSeg] = useState<'shift' | 'walk'>('shift')
   const [showStats, setShowStats] = useState(false)
 
@@ -585,7 +586,7 @@ function ShiftAuditHub({ me, isManager, restaurantId, accent, t, toast }: { me: 
           </button>
         )}
       </div>
-      {seg === 'shift' && <ShiftChecklistsView isManager={isManager} myId={myId} myRole={myRole} canFill={canFill} openShiftId={openShiftId} staff={staff} restaurantId={restaurantId} accent={accent} t={t} toast={toast} />}
+      {seg === 'shift' && <ShiftChecklistsView isManager={isManager} myId={myId} myRole={myRole} canFill={canFill} openShiftId={openShiftId} today={today} onGoCheckIn={onGoCheckIn} staff={staff} restaurantId={restaurantId} accent={accent} t={t} toast={toast} />}
       {seg === 'walk' && isManager && <WalkHistoryView staff={staff} accent={accent} t={t} />}
       {showStats && (
         <Sheet onClose={() => setShowStats(false)} t={t}>
@@ -621,7 +622,7 @@ export function ShiftsHub({ me, isManager, restaurantId, accent, t, toast, initi
       </div>
       {view === 'shifts' && <MyShiftsTab myId={me.id || ''} accent={accent} t={t} />}
       {view === 'attendance' && <AttendanceTab me={me} isManager={isManager} accent={accent} t={t} toast={toast} />}
-      {view === 'audit' && <ShiftAuditHub me={me} isManager={isManager} restaurantId={restaurantId} accent={accent} t={t} toast={toast} />}
+      {view === 'audit' && <ShiftAuditHub me={me} isManager={isManager} restaurantId={restaurantId} accent={accent} t={t} toast={toast} onGoCheckIn={() => setView('attendance')} />}
       {view === 'swaps' && <SwapsTab me={me} isManager={isManager} accent={accent} t={t} toast={toast} />}
     </div>
   )

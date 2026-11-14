@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { db } from '@/lib/db'
-import { fmtDate } from '@/lib/format'
+import { peopleToday } from '@/lib/peopleDay'
 import { useI18n } from '@/lib/i18n'
 import { roleLabel, timeRange } from '@/components/people/helpers'
 
@@ -15,7 +15,7 @@ export function PeopleWebHome({ onSchedule, onTasks, onAudits, onReports, onTeam
   onSchedule: () => void; onTasks: () => void; onAudits: () => void; onReports: () => void; onTeam: () => void
 }) {
   const { t: tr, locale } = useI18n()
-  const today = fmtDate(new Date())
+  const today = peopleToday(null)
   const [data, setData] = useState<HomeData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)

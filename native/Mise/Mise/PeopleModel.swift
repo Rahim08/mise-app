@@ -418,22 +418,28 @@ final class PeopleModel {
                 attendance = a
             } else if !attendance.isEmpty { flash(t("refreshFailed")) }
             let day = todayKey
-            mySchedToday = try? await DB.from("staff_schedules").select()
-                .eq("staff_id", myId).eq("date", day).eq("published", true).limit(1).list(Schedule.self).first
-            mySchedDate = day
+            // Сбой сети не должен стирать график (Б7): раньше try? превращал ошибку в «смены нет».
+            if let rows = try? await DB.from("staff_schedules").select()
+                .eq("staff_id", myId).eq("date", day).eq("published", true).limit(1).list(Schedule.self) {
+                mySchedToday = rows.first
+                mySchedDate = day
+            } else if mySchedDate != day { mySchedToday = nil }
         }
         attLoaded = true
 
         // Попытка сбросить очередь офлайн-явки
         if !isManager && pendingCheckIn { await flushPendingCheckIn() }
     }
-    var todayKey: String { key(Date()) }
+    /// Рабочий день заведения (до day_start_hour — ещё вчера), как shifts.date в Manager:
+    /// раньше после полуночи явка, график и чек-лист закрытия искались на «завтра» (Б5).
+    var todayKey: String { key(AppModel.businessDate(dayStartHour: geo?.day_start_hour ?? 6)) }
     /// Сегодняшняя запись явки. Ночная смена: незакрытая вчерашняя запись до полудня остаётся
     /// «текущей» — иначе после 00:00 нельзя было ни уйти, ни отметить пункты чек-листа.
     var todayRec: AttendanceRecord? {
         if let r = attendance.first(where: { $0.staff_id == myId && $0.date == todayKey }) { return r }
+        let bday = AppModel.businessDate(dayStartHour: geo?.day_start_hour ?? 6)
         guard Calendar.current.component(.hour, from: Date()) < 12,
-              let y = Calendar.current.date(byAdding: .day, value: -1, to: Date()) else { return nil }
+              let y = Calendar.current.date(byAdding: .day, value: -1, to: bday) else { return nil }
         let yk = key(y)
         return attendance.first { $0.staff_id == myId && $0.date == yk && $0.check_in_at != nil && $0.check_out_at == nil }
     }
@@ -447,14 +453,14 @@ final class PeopleModel {
         // Перешли через полночь с открытым экраном — перечитываем график на новую дату.
         if mySchedDate != todayKey { await loadAttendance() }
         guard todayRec == nil else { return }
-        // Хард-гейт по графику (Д4, 2026-07-31): без опубликованной смены на сегодня «Я
-        // здесь» не проходит — кнопка и сама не показывается (staffView), это защитная
-        // сетка на случай гонки/устаревшего рендера.
-        guard mySchedToday != nil else { return }
+        // Мягкий гейт графика (аудит People 2026-11-14, Б3): без смены по графику явка всё равно
+        // отмечается — «вне графика» видно менеджеру. Жёсткий гейт блокировал весь день в SO.
+        // Настройки не загрузились — неизвестно, нужна ли проверка места: закрыто (Б6).
+        guard let g = geo else { flash(t("refreshFailed")); return }
         checking = true; defer { checking = false }
 
         var sentCoord: CLLocationCoordinate2D?
-        if let g = geo, g.attendance_enabled == true, let lat = g.latitude, let lng = g.longitude {
+        if g.active, let lat = g.latitude, let lng = g.longitude {
             guard let coord = await LocationOneShot().current() else { flash(t("pe.noGeo")); return }
             if distanceMeters(coord, lat, lng) > (g.geo_radius_m ?? 150) { flash(t("pe.outOfZone")); return }
             sentCoord = coord
@@ -516,7 +522,7 @@ final class PeopleModel {
         var payload: [String: Any] = ["check_out_at": ISO8601DateFormatter().string(from: Date())]
         // Гео как в checkIn: при включённой геоявке фиксируем точку ухода (зону не проверяем —
         // уход возможен и вне зоны).
-        if geo?.attendance_enabled == true, let coord = await LocationOneShot().current() {
+        if geo?.active == true, let coord = await LocationOneShot().current() {
             payload["check_out_lat"] = coord.latitude
             payload["check_out_lng"] = coord.longitude
         }
@@ -617,8 +623,12 @@ final class PeopleModel {
         // Чек-лист привязан к открытой смене модуля Manager: пока на сегодня есть смена,
         // чек-лист активен, а его прохождение пишется по shift_id этой смены. Новая смена
         // (новый день/новый shift_id) → чистые галочки.
+        // Рабочий день зависит от day_start_hour — настройки нужны до поиска смены (Б5).
+        if geo == nil, let rows = try? await DB.from("restaurant_settings").select().limit(1).list(GeoSettings.self) {
+            geo = rows.first ?? GeoSettings(attendance_enabled: false, latitude: nil, longitude: nil, geo_radius_m: nil, late_grace_min: nil)
+        }
         guard let sh = try? await DB.from("shifts").select("id, status, date")
-            .eq("date", key(Date())).order("opened_at", ascending: false).limit(1).list(ShiftRef.self) else {
+            .eq("date", todayKey).order("opened_at", ascending: false).limit(1).list(ShiftRef.self) else {
             if !checklists.isEmpty { flash(t("refreshFailed")) }
             return
         }
@@ -809,7 +819,7 @@ final class PeopleModel {
         // трактовался как «гео выключена»). Не удалось загрузить — закрыто, а не открыто.
         if geo == nil || !attLoaded { await loadAttendance() }
         guard let g = geo else { flash(t("refreshFailed")); return false }
-        guard g.attendance_enabled == true else { return true }
+        guard g.active else { return true }
         guard todayRec != nil else {
             flash(t("pe.needCheckInFirst")); return false
         }
@@ -817,7 +827,7 @@ final class PeopleModel {
     }
 
     func toggleChecklistItem(_ list: ShiftChecklist, _ idx: Int, photoURL: String? = nil) async {
-        guard let sid = openShiftId else { flash(t("pe.openShiftFirst")); return }
+        guard let sid = openShiftId else { flash(t(isManager ? "pe.openShiftFirst" : "pe.askManagerOpenShift")); return }
         guard await requireGeoCheckIn() else { return }
         let itemsList = list.itemDetails ?? []
         let comp = completion(list)

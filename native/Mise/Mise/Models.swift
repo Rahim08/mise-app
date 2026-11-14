@@ -642,6 +642,12 @@ nonisolated struct GeoSettings: Codable, Sendable {
     let longitude: Double?
     let geo_radius_m: Double?
     let late_grace_min: Int?
+    /// Начало рабочих суток (аудит People 2026-11-14, Б5): до этого часа — ещё вчерашняя смена.
+    var day_start_hour: Int? = nil
+    /// Гео-явка реально работает только с заданной точкой заведения. «Включено, но адреса нет»
+    /// раньше считалось включённым — в SO никто не мог отметить ни явку, ни чек-лист (Б1).
+    var active: Bool { attendance_enabled == true && latitude != nil && longitude != nil }
+    var missingAddress: Bool { attendance_enabled == true && (latitude == nil || longitude == nil) }
 }
 
 nonisolated struct TechCard: Codable, Identifiable, Sendable {

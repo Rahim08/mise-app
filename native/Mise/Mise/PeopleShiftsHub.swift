@@ -147,17 +147,13 @@ struct AttendanceTab: View {
                 }
                 .frame(maxWidth: .infinity).padding(20)
                 .background(BrandKit.stash.opacity(0.12), in: RoundedRectangle(cornerRadius: 18))
-            } else if m.mySchedToday == nil {
-                // Хард-гейт по графику (Д4, 2026-07-31): без опубликованной смены на сегодня
-                // кнопка «Я здесь» вообще не показывается.
-                VStack(spacing: 6) {
-                    Image(systemName: "calendar.badge.exclamationmark").font(.system(size: 32)).foregroundStyle(.secondary)
-                    Text(t("pe.noScheduledShift")).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
-                    Text(t("pe.noScheduledShiftHint")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5)).multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity).padding(20)
-                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
             } else {
+                // Мягкий гейт графика (аудит 2026-11-14, Б3): без смены по графику кнопка есть,
+                // явка помечается «вне графика» — раньше сотрудник упирался в тупик.
+                if m.mySchedDate == m.todayKey && m.mySchedToday == nil {
+                    Text(t("pe.offSchedule")).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5))
+                        .multilineTextAlignment(.center).frame(maxWidth: .infinity)
+                }
                 Button {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     Task { await m.checkIn() }
@@ -208,10 +204,22 @@ struct AttendanceTab: View {
     }
 
     private var managerView: some View {
+        // Пришедшие вне графика тоже в списке, с бейджем (Б3) — иначе их явку не видно.
+        let cameToday = Set(m.attendance.filter { $0.date == m.todayKey }.compactMap { $0.staff_id })
         let scheduled = m.todayScheduledIds.isEmpty
             ? m.dir
-            : m.dir.filter { m.todayScheduledIds.contains($0.id) }
+            : m.dir.filter { m.todayScheduledIds.contains($0.id) || cameToday.contains($0.id) }
         return VStack(alignment: .leading, spacing: 0) {
+            if m.geo?.missingAddress == true {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "mappin.slash").foregroundStyle(BrandKit.stash)
+                    Text(t("pe.geoNoAddress")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.8))
+                    Spacer(minLength: 0)
+                }
+                .padding(14)
+                .background(BrandKit.stash.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+                .padding(.bottom, 14)
+            }
             // «Подробнее» (→ Дисциплина) убрана (B2, аудит 2026-08-13): указывала на
             // m.shiftsView = "discipline", кейс убран из Picker/switch выше в реструктуре
             // 2026-08-13 (Дисциплина переехала в Manager→Дисциплина) — кнопка была мёртвой.
@@ -229,6 +237,7 @@ struct AttendanceTab: View {
                             Text(clock(rec.check_in_at) + (rec.check_out_at != nil ? "–\(clock(rec.check_out_at))" : ""))
                                 .font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary)
                             if rec.status == "late", let l = rec.late_minutes { badge(t("pe.lateBadge", ["n": "\(l)"]), BrandKit.stash) }
+                            if !m.todayScheduledIds.isEmpty && !m.todayScheduledIds.contains(s.id) { badge(t("pe.offScheduleBadge"), Color.secondary) }
                         } else {
                             Text(t("pe.notCame")).font(.system(size: 13)).foregroundStyle(.primary.opacity(0.35))
                         }

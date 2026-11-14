@@ -41,8 +41,11 @@ export function ScheduleTab({ restaurantId, accent, t, toast }: { restaurantId: 
   const saveShiftAssign = async () => {
     if (!edit) return
     setSaving(true)
+    // Правка уже опубликованной смены оставляет её опубликованной (аудит People 2026-11-14, Б4):
+    // раньше published:false молча прятал смену у сотрудника до повторной публикации недели.
+    const wasPublished = !!schedFor(edit.staff.id, edit.date)?.published
     const { error } = await db.from('staff_schedules').upsert(
-      { staff_id: edit.staff.id, date: edit.date, shift_start: start || null, shift_end: end || null, note: note || null, published: false },
+      { staff_id: edit.staff.id, date: edit.date, shift_start: start || null, shift_end: end || null, note: note || null, published: wasPublished },
       { onConflict: 'restaurant_id,staff_id,date' }
     )
     setSaving(false)
