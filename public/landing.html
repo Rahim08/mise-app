@@ -7,12 +7,12 @@
 <meta name="description" content="Пять приложений для ресторана в одном аккаунте: смены и касса, аналитика, склад, команда и QR-меню. 14 дней бесплатно."/>
 <!-- Корень сайта рендерит этот же контент напрямую. Статический файл закрыт
      от индексации заголовком X-Robots-Tag: noindex (next.config.ts). -->
-<link rel="canonical" href="https://misesuite.com/"/>
+<link rel="canonical" href="https://www.misesuite.com/"/>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 :root{
   --blue:#007aff;--green:#34c759;--orange:#ff9500;--purple:#5856d6;--pink:#ff2d55;--accent:#8e8e93;
-  --text-1:#fff;--text-2:rgba(255,255,255,.56);--text-3:rgba(255,255,255,.32);--text-4:rgba(255,255,255,.16);
+  --text-1:#fff;--text-2:rgba(255,255,255,.56);--text-3:rgba(255,255,255,.5);--text-4:rgba(255,255,255,.16);
   --border:rgba(255,255,255,.09);
   --glass:rgba(255,255,255,.045);
   --ease:cubic-bezier(.16,1,.3,1);
@@ -72,7 +72,7 @@ body{
 .lang-opt{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;background:transparent;border:none;border-radius:10px;padding:9px 13px;cursor:pointer;color:var(--text-2);font-family:inherit;font-size:.84rem;font-weight:500;text-align:left;letter-spacing:-.01em;transition:background .15s,color .15s;}
 .lang-opt:hover{background:rgba(255,255,255,.08);color:#fff;}
 .lang-opt.active{color:#fff;}
-.lang-opt .lo-code{font-size:.62rem;font-weight:700;letter-spacing:.06em;color:var(--text-4);}
+.lang-opt .lo-code{font-size:.62rem;font-weight:700;letter-spacing:.06em;color:var(--text-3);}
 .lang-opt.active .lo-code{color:var(--blue);}
 .nav-cta{font-size:.78rem;color:#fff;text-decoration:none;font-weight:600;padding:7px 17px;border-radius:980px;background:var(--blue);transition:all .2s;letter-spacing:-.01em;}
 .nav-cta:hover{background:#0a84ff;transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,122,255,.4);}
@@ -318,15 +318,15 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
 .ft-inner{max-width:1120px;margin:0 auto;}
 .ft-body{display:grid;grid-template-columns:1fr 3fr;gap:48px;padding-bottom:44px;border-bottom:.5px solid var(--border);}
 .ft-brand{font-size:3rem;font-weight:800;letter-spacing:-.06em;color:rgba(255,255,255,.1);line-height:1;margin-bottom:10px;user-select:none;}
-.ft-tagline{font-size:.78rem;color:var(--text-4);letter-spacing:-.01em;max-width:240px;line-height:1.5;}
+.ft-tagline{font-size:.78rem;color:var(--text-3);letter-spacing:-.01em;max-width:240px;line-height:1.5;}
 .ft-nav{display:grid;grid-template-columns:repeat(3,1fr);gap:0;}
 .ft-col h4{font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);margin-bottom:16px;}
 .ft-col a{display:block;font-size:.8rem;color:var(--text-3);text-decoration:none;margin-bottom:10px;transition:color .18s;letter-spacing:-.01em;}
 .ft-col a:hover{color:var(--text-1);}
 .ft-bottom{display:flex;justify-content:space-between;align-items:center;padding-top:22px;flex-wrap:wrap;gap:10px;}
-.ft-copy{font-size:.72rem;color:var(--text-4);}
+.ft-copy{font-size:.72rem;color:var(--text-3);}
 .ft-links{display:flex;gap:16px;}
-.ft-links a{font-size:.72rem;color:var(--text-4);text-decoration:none;transition:color .18s;}
+.ft-links a{font-size:.72rem;color:var(--text-3);text-decoration:none;transition:color .18s;}
 .ft-links a:hover{color:var(--text-2);}
 
 /* ── REVEAL ──────────────────────────────────────── */
@@ -339,6 +339,22 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
 @keyframes marquee{from{transform:translateX(0);}to{transform:translateX(-50%);}}
 
 /* ── MOBILE ──────────────────────────────────────── */
+/* ── APP STORE LINK ─────────────────────────────── */
+.appstore-link{display:inline-flex;align-items:center;gap:8px;font-size:.84rem;font-weight:600;color:var(--text-2);text-decoration:none;padding:9px 16px;border-radius:999px;border:.5px solid var(--border);background:rgba(255,255,255,.03);letter-spacing:-.01em;transition:color .2s,border-color .2s;}
+.appstore-link:hover{color:#fff;border-color:rgba(255,255,255,.3);}
+.appstore-link svg{width:15px;height:15px;fill:currentColor;flex:none;}
+.hero-store{margin-top:18px;opacity:0;animation:fadeUp .7s .74s var(--ease) forwards;}
+.cta-store{margin-top:16px;}
+
+/* ── REDUCED MOTION ─────────────────────────────── */
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto;}
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;animation-delay:0s!important;transition-duration:.01ms!important;transition-delay:0s!important;}
+  .reveal{opacity:1;transform:none;}
+  .scale-section{height:auto;}
+  .scale-sticky{position:relative;height:60vh;}
+}
+
 @media(max-width:960px){
   .nav-hamburger{display:flex;}
   /* Раньше .nav-links просто скрывался целиком без замены — на телефоне пропадали
@@ -434,6 +450,7 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
     <button class="btn-primary" onclick="document.getElementById('pricing').scrollIntoView({behavior:'smooth'})" data-i18n="h.b1">Начать бесплатно</button>
     <button class="btn-ghost" onclick="document.getElementById('apps').scrollIntoView({behavior:'smooth'})" data-i18n="h.b2">Смотреть приложения</button>
   </div>
+  <a class="appstore-link hero-store" href="https://apps.apple.com/app/id6781283801" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg><span data-i18n="as.b">Скачать в App Store</span></a>
   <div class="hero-apps">
     <a class="hero-app" href="#manager">
       <div class="app-icon ai-manager" style="width:62px;height:62px;">
@@ -478,7 +495,7 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
 <!-- APPS HEAD -->
 <div class="apps-head" id="apps">
   <h2 class="reveal" data-i18n="apps.t">Пять приложений.<br>Под каждую роль.</h2>
-  <p class="reveal d1" data-i18n="apps.s">Включите только нужные. Всё в одном аккаунте, синхронизация в реальном времени.</p>
+  <p class="reveal d1" data-i18n="apps.s">Включите только нужные. Всё в одном аккаунте, синхронизация в реальном времени. Плюс бронирование столов и новости для команды.</p>
 </div>
 
 <!-- MANAGER -->
@@ -488,7 +505,7 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
       <div class="app-icon ai-manager" style="width:46px;height:46px;"><svg width="25" height="25" viewBox="0 0 48 48" fill="none"><g fill="#fff"><rect x="7" y="11" width="34" height="7" rx="3.5"/><rect x="7" y="22" width="26" height="7" rx="3.5" opacity=".72"/><rect x="7" y="33" width="17" height="7" rx="3.5" opacity=".44"/></g></svg></div>
       <span class="ico-label">Mise Manager</span>
     </div>
-    <h2 class="app-h" data-i18n="mg.h">Смена под контролем —<br>от открытия до отчёта.</h2>
+    <h2 class="app-h" data-i18n="mg.h">Смена под контролем —<br>от открытия до отчёта.</h2>
     <p class="app-p" data-i18n="mg.p">Менеджер открывает смену одним нажатием. Выручка, расходы и баланс кассы считаются в реальном времени. В конце дня владелец получает полный отчёт автоматически.</p>
     <div class="app-feats">
       <div class="app-feat"><div class="app-feat-dot" style="background:#007aff;">✓</div><span data-i18n="mg.f1">Открытие и закрытие смены, баланс кассы</span></div>
@@ -780,7 +797,7 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
         <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f1">Всё из Business</span></div>
         <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f3">AI-аналитика</span></div>
         <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f2">До 15 пользователей</span></div>
-        <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f4">Интеграции: касса · банк</span></div>
+        <div class="feat-p-item"><div class="feat-p-check">✓</div><span data-i18n="p3.f4">Интеграция с банком</span></div>
       </div>
       <button class="plan-btn" onclick="choosePlan('pro')" data-i18n="p3.btn">Выбрать</button>
     </div>
@@ -799,6 +816,7 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
   <div class="big-cta-word" id="cta-word" data-i18n="cta.w">Готовы?</div>
   <p class="big-cta-sub" id="cta-sub" data-i18n="cta.s">Первые 14 дней бесплатно.</p>
   <button class="btn-primary" onclick="window.top.location.href='/auth/register'" data-i18n="cta.b">Создать аккаунт</button>
+  <a class="appstore-link cta-store" href="https://apps.apple.com/app/id6781283801" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg><span data-i18n="as.b">Скачать в App Store</span></a>
 </section>
 
 <!-- FOOTER -->
@@ -817,6 +835,7 @@ footer{border-top:.5px solid var(--border);padding:64px 56px 44px;}
           <a href="#stash">Mise Stash</a>
           <a href="#people">Mise People</a>
           <a href="#menu">Mise Menu</a>
+          <a href="https://apps.apple.com/app/id6781283801" target="_blank" rel="noopener">App Store</a>
         </div>
         <div class="ft-col">
           <h4 data-i18n="ft.c">Компания</h4>
@@ -859,6 +878,7 @@ window.addEventListener('scroll', () => {
 (function(){
   const wrap = document.getElementById('scale-wrap'), text = document.getElementById('scale-text');
   if (!wrap || !text) return;
+  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) { text.style.transform = 'none'; text.style.opacity = 1; return; }
   const apply = () => {
     const rect = wrap.getBoundingClientRect();
     const total = wrap.offsetHeight - window.innerHeight;
@@ -913,8 +933,8 @@ const T = {
     'st1.n':'12 сек','st1.l':'среднее время\nоткрытия смены',
     'st2.n':'5-в-1','st2.l':'приложений в\nодном аккаунте',
     'st3.n':'€0','st3.l':'потерянных смен\nв базе данных',
-    'apps.t':'Пять приложений.\nПод каждую роль.','apps.s':'Включите только нужные. Всё в одном аккаунте, синхронизация в реальном времени.',
-    'mg.h':'Смена под контролем —\nот открытия до отчёта.','mg.p':'Менеджер открывает смену одним касанием. Выручка, расходы и касса считаются в реальном времени. В конце дня владелец получает полный отчёт — автоматически.','mg.f1':'Открытие и закрытие смены, баланс кассы','mg.f2':'Расходы по категориям с лимитами','mg.f3':'Инкассация и отчёт смены владельцу',
+    'apps.t':'Пять приложений.\nПод каждую роль.','apps.s':'Включите только нужные. Всё в одном аккаунте, синхронизация в реальном времени. Плюс бронирование столов и новости для команды.',
+    'mg.h':'Смена под контролем —\nот открытия до отчёта.','mg.p':'Менеджер открывает смену одним касанием. Выручка, расходы и касса считаются в реальном времени. В конце дня владелец получает полный отчёт — автоматически.','mg.f1':'Открытие и закрытие смены, баланс кассы','mg.f2':'Расходы по категориям с лимитами','mg.f3':'Инкассация и отчёт смены владельцу',
     'an.h':'Цифры, которые\nпринимают решения.','an.p':'Финансы по дням, неделям и месяцам. Сравнение периодов, динамика выручки, зарплаты без Excel. На тарифе Pro — AI-ассистент, который отвечает о бизнесе понятным языком.','an.f1':'Аналитика и сравнение периодов','an.f2':'Зарплаты: оклады, вычеты, нал и карта','an.f3':'AI-ассистент на естественном языке · Pro',
     'sh.h':'Склад табака,\nсмена кальянщика.','sh.p':'Остатки по каждому бренду и вкусу — с цветными индикаторами уровня. Приход и инвентаризация в пару касаний. Смена кальянщика считает продажи, расход табака и выручку.','sh.f1':'Остатки по брендам и вкусам','sh.f2':'Приход и инвентаризация с историей','sh.f3':'Смена кальянщика: продажи и расход',
     'pe.h':'Команда, которая\nработает сама.','pe.p':'Расписание с обменом сменами, задачи и отчёты о поломках, гео-явка с учётом часов, чек-листы открытия и закрытия, стоп-лист кухни. Каждый видит ровно то, что нужно для его роли.','pe.f1':'Расписание и обмен сменами','pe.f2':'Гео-явка, опоздания и учёт часов','pe.f3':'Задачи, чек-листы и стоп-лист',
@@ -929,7 +949,7 @@ const T = {
     'pr.l':'Тарифы','pr.t':'Прозрачные цены.','pr.s':'Сменить или отменить тариф — в любой момент.',
     'p1.d':'€0.47 в день','p1.f1':'До 3 пользователей','p1.f2':'AI-аналитика','p1.btn':'Выбрать',
     'p2.d':'€0.79 в день','p2.f1':'Все приложения','p2.f2':'До 7 пользователей','p2.f3':'QR-меню для гостей','p2.f4':'Приоритетная поддержка','p2.f5':'AI-аналитика','p2.btn':'Начать бесплатно',
-    'p3.d':'€1.29 в день','p3.f1':'Всё из Business','p3.f2':'До 15 пользователей','p3.f3':'AI-аналитика','p3.f4':'Интеграции: касса · банк','p3.btn':'Выбрать',
+    'p3.d':'€1.29 в день','p3.f1':'Всё из Business','p3.f2':'До 15 пользователей','p3.f3':'AI-аналитика','p3.f4':'Интеграция с банком','as.b':"Скачать в App Store",'p3.btn':'Выбрать',
     'pop':'Популярный','pay.free':'14 дней бесплатно',
     'cta.w':'Готовы?','cta.s':'Первые 14 дней бесплатно.','cta.b':'Создать аккаунт',
     'ft.tag':'Платформа управления рестораном. Пять приложений в одном аккаунте.','ft.p':'Приложения','ft.c':'Компания','ft.l':'Правовое','ft.about':'О нас','ft.sup':'Поддержка','ft.cont':'Контакты','ft.priv':'Конфиденциальность','ft.terms':'Условия',
@@ -944,8 +964,8 @@ const T = {
     'st1.n':'12 sec','st1.l':'average shift\nopen time',
     'st2.n':'5-in-1','st2.l':'apps in\none account',
     'st3.n':'€0','st3.l':'lost shifts\nin the database',
-    'apps.t':'Five apps.\nOne for every role.','apps.s':'Turn on only what you need. One account, synced in real time.',
-    'mg.h':'The shift, under control —\nfrom open to report.','mg.p':'One tap opens the shift. Revenue, expenses, and the register update in real time. At close, the owner gets the full report — automatically.','mg.f1':'Open and close shifts, register balance','mg.f2':'Expenses by category, with limits','mg.f3':'Cash collection and shift report to the owner',
+    'apps.t':'Five apps.\nOne for every role.','apps.s':'Turn on only what you need. One account, synced in real time. Plus table bookings and team news.',
+    'mg.h':'The shift, under control —\nfrom open to report.','mg.p':'One tap opens the shift. Revenue, expenses, and the register update in real time. At close, the owner gets the full report — automatically.','mg.f1':'Open and close shifts, register balance','mg.f2':'Expenses by category, with limits','mg.f3':'Cash collection and shift report to the owner',
     'an.h':'Numbers that\nmake decisions.','an.p':'Finances by day, week, and month. Period comparisons, revenue trends, payroll without Excel. On Pro, an AI assistant answers questions about your business in plain language.','an.f1':'Analytics and period comparison','an.f2':'Payroll: salaries, deductions, cash & card','an.f3':'AI assistant in natural language · Pro',
     'sh.h':'Tobacco stock,\nhookah shifts.','sh.p':'Stock by every brand and flavor, with color level indicators. Deliveries and inventory in a couple of taps. The hookah shift counts sales, tobacco usage, and revenue.','sh.f1':'Stock by brand and flavor','sh.f2':'Deliveries and inventory, with history','sh.f3':'Hookah shift: sales and usage',
     'pe.h':'A team that\nruns itself.','pe.p':'Scheduling with shift swaps, tasks and breakage reports, geo check-in with hour tracking, opening and closing checklists, kitchen stop-list. Everyone sees exactly what their role needs.','pe.f1':'Scheduling and shift swaps','pe.f2':'Geo check-in, lateness, hour tracking','pe.f3':'Tasks, checklists, and stop-list',
@@ -960,7 +980,7 @@ const T = {
     'pr.l':'Pricing','pr.t':'Transparent pricing.','pr.s':'Switch or cancel anytime.',
     'p1.d':'€0.47 per day','p1.f1':'Up to 3 users','p1.f2':'AI analytics','p1.btn':'Choose',
     'p2.d':'€0.79 per day','p2.f1':'All apps','p2.f2':'Up to 7 users','p2.f3':'Guest QR menu','p2.f4':'Priority support','p2.f5':'AI analytics','p2.btn':'Start free',
-    'p3.d':'€1.29 per day','p3.f1':'Everything in Business','p3.f2':'Up to 15 users','p3.f3':'AI analytics','p3.f4':'Integrations: POS · bank','p3.btn':'Choose',
+    'p3.d':'€1.29 per day','p3.f1':'Everything in Business','p3.f2':'Up to 15 users','p3.f3':'AI analytics','p3.f4':'Bank integration','as.b':"Download on the App Store",'p3.btn':'Choose',
     'pop':'Most popular','pay.free':'14 days free',
     'cta.w':'Ready?','cta.s':'Your first 14 days are free.','cta.b':'Create account',
     'ft.tag':'Restaurant management platform. Five apps in one account.','ft.p':'Apps','ft.c':'Company','ft.l':'Legal','ft.about':'About','ft.sup':'Support','ft.cont':'Contact','ft.priv':'Privacy','ft.terms':'Terms',
@@ -975,8 +995,8 @@ const T = {
     'st1.n':"12 sec",'st1.l':"tempo medio di\napertura turno",
     'st2.n':"5-in-1",'st2.l':"app in\nun solo account",
     'st3.n':"€0",'st3.l':"turni persi\nnel database",
-    'apps.t':"Cinque app.\nUna per ogni ruolo.",'apps.s':"Attiva solo ciò che ti serve. Un unico account, sincronizzato in tempo reale.",
-    'mg.h':"Il turno, sotto controllo —\ndall'apertura al report.",'mg.p':"Il manager apre il turno con un tocco. Incassi, spese e cassa si aggiornano in tempo reale. A fine giornata il titolare riceve il report completo — in automatico.",'mg.f1':"Apertura e chiusura turno, saldo cassa",'mg.f2':"Spese per categoria, con limiti",'mg.f3':"Versamenti e report del turno al titolare",
+    'apps.t':"Cinque app.\nUna per ogni ruolo.",'apps.s':"Attiva solo ciò che ti serve. Un unico account, sincronizzato in tempo reale. In più prenotazioni dei tavoli e news per il team.",
+    'mg.h':"Il turno, sotto controllo —\ndall'apertura al report.",'mg.p':"Il manager apre il turno con un tocco. Incassi, spese e cassa si aggiornano in tempo reale. A fine giornata il titolare riceve il report completo — in automatico.",'mg.f1':"Apertura e chiusura turno, saldo cassa",'mg.f2':"Spese per categoria, con limiti",'mg.f3':"Versamenti e report del turno al titolare",
     'an.h':"Numeri che\ndecidono.",'an.p':"Finanze per giorno, settimana e mese. Confronto tra periodi, andamento degli incassi, buste paga senza Excel. Con Pro, un assistente AI risponde sul tuo business in linguaggio naturale.",'an.f1':"Analisi e confronto tra periodi",'an.f2':"Buste paga: stipendi, trattenute, contanti e carta",'an.f3':"Assistente AI in linguaggio naturale · Pro",
     'sh.h':"Scorte di tabacco,\nturno narghilè.",'sh.p':"Scorte per ogni marca e gusto, con indicatori di livello a colori. Carichi e inventario in pochi tocchi. Il turno narghilè conta vendite, consumo di tabacco e incassi.",'sh.f1':"Scorte per marca e gusto",'sh.f2':"Carichi e inventario, con storico",'sh.f3':"Turno narghilè: vendite e consumo",
     'pe.h':"Un team che\nsi gestisce da solo.",'pe.p':"Turni con scambi, attività e segnalazioni guasti, timbratura geo con conteggio ore, checklist di apertura e chiusura, stop-list della cucina. Ognuno vede esattamente ciò che serve al suo ruolo.",'pe.f1':"Turni e scambi di turno",'pe.f2':"Timbratura geo, ritardi e conteggio ore",'pe.f3':"Attività, checklist e stop-list",
@@ -991,7 +1011,7 @@ const T = {
     'pr.l':"Prezzi",'pr.t':"Prezzi trasparenti.",'pr.s':"Cambia o annulla quando vuoi.",
     'p1.d':"€0.47 al giorno",'p1.f1':"Fino a 3 utenti",'p1.f2':"Analisi AI",'p1.btn':"Scegli",
     'p2.d':"€0.79 al giorno",'p2.f1':"Tutte le app",'p2.f2':"Fino a 7 utenti",'p2.f3':"Menu QR per gli ospiti",'p2.f4':"Supporto prioritario",'p2.f5':"Analisi AI",'p2.btn':"Inizia gratis",
-    'p3.d':"€1.29 al giorno",'p3.f1':"Tutto di Business",'p3.f2':"Fino a 15 utenti",'p3.f3':"Analisi AI",'p3.f4':"Integrazioni: cassa · banca",'p3.btn':"Scegli",
+    'p3.d':"€1.29 al giorno",'p3.f1':"Tutto di Business",'p3.f2':"Fino a 15 utenti",'p3.f3':"Analisi AI",'p3.f4':"Integrazione bancaria",'as.b':"Scarica su App Store",'p3.btn':"Scegli",
     'pop':"Più scelto",'pay.free':"14 giorni gratis",
     'cta.w':"Pronto?",'cta.s':"I primi 14 giorni sono gratis.",'cta.b':"Crea un account",
     'ft.tag':"La piattaforma per gestire il ristorante. Cinque app in un solo account.",'ft.p':"App",'ft.c':"Azienda",'ft.l':"Note legali",'ft.about':"Chi siamo",'ft.sup':"Supporto",'ft.cont':"Contatti",'ft.priv':"Privacy",'ft.terms':"Termini",
@@ -1006,8 +1026,8 @@ const T = {
     'st1.n':"12 s",'st1.l':"temps moyen\nd'ouverture du service",
     'st2.n':"5-en-1",'st2.l':"apps dans\nun seul compte",
     'st3.n':"€0",'st3.l':"services perdus\ndans la base",
-    'apps.t':"Cinq apps.\nUne pour chaque rôle.",'apps.s':"Activez seulement ce qu'il vous faut. Un seul compte, synchronisé en temps réel.",
-    'mg.h':"Le service, sous contrôle —\nde l'ouverture au rapport.",'mg.p':"Le manager ouvre le service d'un geste. Recettes, dépenses et caisse se mettent à jour en temps réel. En fin de journée, le gérant reçoit le rapport complet — automatiquement.",'mg.f1':"Ouverture et clôture du service, solde de caisse",'mg.f2':"Dépenses par catégorie, avec limites",'mg.f3':"Encaissements et rapport de service au gérant",
+    'apps.t':"Cinq apps.\nUne pour chaque rôle.",'apps.s':"Activez seulement ce qu'il vous faut. Un seul compte, synchronisé en temps réel. Plus les réservations de tables et les actus de l'équipe.",
+    'mg.h':"Le service, sous contrôle —\nde l'ouverture au rapport.",'mg.p':"Le manager ouvre le service d'un geste. Recettes, dépenses et caisse se mettent à jour en temps réel. En fin de journée, le gérant reçoit le rapport complet — automatiquement.",'mg.f1':"Ouverture et clôture du service, solde de caisse",'mg.f2':"Dépenses par catégorie, avec limites",'mg.f3':"Encaissements et rapport de service au gérant",
     'an.h':"Des chiffres qui\ndécident.",'an.p':"Finances par jour, semaine et mois. Comparaison de périodes, évolution des recettes, paie sans Excel. Avec Pro, un assistant IA répond sur votre activité en langage naturel.",'an.f1':"Analyses et comparaison de périodes",'an.f2':"Paie : salaires, retenues, espèces et carte",'an.f3':"Assistant IA en langage naturel · Pro",
     'sh.h':"Stock de tabac,\nservice chicha.",'sh.p':"Stock par marque et par parfum, avec indicateurs de niveau colorés. Réceptions et inventaire en quelques gestes. Le service chicha compte les ventes, la consommation de tabac et les recettes.",'sh.f1':"Stock par marque et parfum",'sh.f2':"Réceptions et inventaire, avec historique",'sh.f3':"Service chicha : ventes et consommation",
     'pe.h':"Une équipe qui\nse gère seule.",'pe.p':"Plannings avec échange de créneaux, tâches et signalements de pannes, pointage géo avec suivi des heures, checklists d'ouverture et de fermeture, stop-list de cuisine. Chacun voit exactement ce dont son rôle a besoin.",'pe.f1':"Plannings et échange de créneaux",'pe.f2':"Pointage géo, retards et suivi des heures",'pe.f3':"Tâches, checklists et stop-list",
@@ -1022,7 +1042,7 @@ const T = {
     'pr.l':"Tarifs",'pr.t':"Des tarifs transparents.",'pr.s':"Changez ou annulez à tout moment.",
     'p1.d':"€0.47 par jour",'p1.f1':"Jusqu'à 3 utilisateurs",'p1.f2':"Analyses IA",'p1.btn':"Choisir",
     'p2.d':"€0.79 par jour",'p2.f1':"Toutes les apps",'p2.f2':"Jusqu'à 7 utilisateurs",'p2.f3':"Menu QR pour les clients",'p2.f4':"Support prioritaire",'p2.f5':"Analyses IA",'p2.btn':"Commencer gratuitement",
-    'p3.d':"€1.29 par jour",'p3.f1':"Tout Business",'p3.f2':"Jusqu'à 15 utilisateurs",'p3.f3':"Analyses IA",'p3.f4':"Intégrations : caisse · banque",'p3.btn':"Choisir",
+    'p3.d':"€1.29 par jour",'p3.f1':"Tout Business",'p3.f2':"Jusqu'à 15 utilisateurs",'p3.f3':"Analyses IA",'p3.f4':"Intégration bancaire",'as.b':"Télécharger dans l'App Store",'p3.btn':"Choisir",
     'pop':"Le plus choisi",'pay.free':"14 jours gratuits",
     'cta.w':"Prêt ?",'cta.s':"Vos 7 premiers jours sont gratuits.",'cta.b':"Créer un compte",
     'ft.tag':"La plateforme de gestion de restaurant. Cinq apps dans un seul compte.",'ft.p':"Apps",'ft.c':"Entreprise",'ft.l':"Mentions légales",'ft.about':"À propos",'ft.sup':"Support",'ft.cont':"Contact",'ft.priv':"Confidentialité",'ft.terms':"Conditions",
@@ -1037,8 +1057,8 @@ const T = {
     'st1.n':"12 san",'st1.l':"növbənin açılması üçün\norta vaxt",
     'st2.n':"5-i-1-də",'st2.l':"bir hesabda\ntətbiq",
     'st3.n':"€0",'st3.l':"bazada itirilən\nnövbə",
-    'apps.t':"Beş tətbiq.\nHər rol üçün biri.",'apps.s':"Yalnız lazım olanı aktivləşdirin. Bir hesab, real vaxtda sinxron.",
-    'mg.h':"Növbə nəzarətdə —\naçılışdan hesabata qədər.",'mg.p':"Menecer növbəni bir toxunuşla açır. Gəlir, xərc və kassa real vaxtda yenilənir. Günün sonunda sahib tam hesabatı avtomatik alır.",'mg.f1':"Növbənin açılışı və bağlanışı, kassa balansı",'mg.f2':"Kateqoriyalar üzrə xərclər, limitlərlə",'mg.f3':"İnkassasiya və növbə hesabatı sahibə",
+    'apps.t':"Beş tətbiq.\nHər rol üçün biri.",'apps.s':"Yalnız lazım olanı aktivləşdirin. Bir hesab, real vaxtda sinxron. Üstəlik masa rezervasiyası və komanda xəbərləri.",
+    'mg.h':"Növbə nəzarətdə —\naçılışdan hesabata qədər.",'mg.p':"Menecer növbəni bir toxunuşla açır. Gəlir, xərc və kassa real vaxtda yenilənir. Günün sonunda sahib tam hesabatı avtomatik alır.",'mg.f1':"Növbənin açılışı və bağlanışı, kassa balansı",'mg.f2':"Kateqoriyalar üzrə xərclər, limitlərlə",'mg.f3':"İnkassasiya və növbə hesabatı sahibə",
     'an.h':"Qərar verən\nrəqəmlər.",'an.p':"Gün, həftə və ay üzrə maliyyə. Dövrlərin müqayisəsi, gəlir dinamikası, Excelsiz əməkhaqqı. Pro tarifində — biznesinizə aydın dildə cavab verən AI-köməkçi.",'an.f1':"Analitika və dövrlərin müqayisəsi",'an.f2':"Əməkhaqqı: maaş, tutulmalar, nağd və kart",'an.f3':"Təbii dildə AI-köməkçi · Pro",
     'sh.h':"Tütün anbarı,\nkalyan növbəsi.",'sh.p':"Hər brend və dad üzrə qalıqlar — rəngli səviyyə göstəriciləri ilə. Mədaxil və inventarizasiya bir neçə toxunuşla. Kalyan növbəsi satışı, tütün sərfini və gəliri sayır.",'sh.f1':"Brend və dad üzrə qalıqlar",'sh.f2':"Mədaxil və inventarizasiya, tarixçə ilə",'sh.f3':"Kalyan növbəsi: satış və sərf",
     'pe.h':"Özü işləyən\nkomanda.",'pe.p':"Növbə dəyişimi ilə qrafik, tapşırıqlar və nasazlıq bildirişləri, saat hesabı ilə geo-qeydiyyat, açılış və bağlanış yoxlama siyahıları, mətbəx stop-list. Hər kəs roluna uyğun olanı görür.",'pe.f1':"Qrafik və növbə dəyişimi",'pe.f2':"Geo-qeydiyyat, gecikmə və saat hesabı",'pe.f3':"Tapşırıqlar, yoxlama siyahıları və stop-list",
@@ -1053,7 +1073,7 @@ const T = {
     'pr.l':"Qiymətlər",'pr.t':"Şəffaf qiymətlər.",'pr.s':"İstənilən vaxt dəyiş və ya ləğv et.",
     'p1.d':"gündə €0.47",'p1.f1':"3 istifadəçiyə qədər",'p1.f2':"AI-analitika",'p1.btn':"Seç",
     'p2.d':"gündə €0.79",'p2.f1':"Bütün tətbiqlər",'p2.f2':"7 istifadəçiyə qədər",'p2.f3':"Qonaqlar üçün QR-menyu",'p2.f4':"Prioritet dəstək",'p2.f5':"AI-analitika",'p2.btn':"Pulsuz başla",
-    'p3.d':"gündə €1.29",'p3.f1':"Business-in hamısı",'p3.f2':"15 istifadəçiyə qədər",'p3.f3':"AI-analitika",'p3.f4':"İnteqrasiyalar: kassa · bank",'p3.btn':"Seç",
+    'p3.d':"gündə €1.29",'p3.f1':"Business-in hamısı",'p3.f2':"15 istifadəçiyə qədər",'p3.f3':"AI-analitika",'p3.f4':"Bank inteqrasiyası",'as.b':"App Store-dan yükləyin",'p3.btn':"Seç",
     'pop':"Populyar",'pay.free':"14 gün pulsuz",
     'cta.w':"Hazırsınız?",'cta.s':"İlk 14 gün pulsuz.",'cta.b':"Hesab yarat",
     'ft.tag':"Restoran idarəetmə platforması. Bir hesabda beş tətbiq.",'ft.p':"Tətbiqlər",'ft.c':"Şirkət",'ft.l':"Hüquqi",'ft.about':"Haqqımızda",'ft.sup':"Dəstək",'ft.cont':"Əlaqə",'ft.priv':"Məxfilik",'ft.terms':"Şərtlər",
@@ -1068,8 +1088,8 @@ const T = {
     'st1.n':"12 sn",'st1.l':"ortalama vardiya\naçma süresi",
     'st2.n':"5'i 1'de",'st2.l':"tek hesapta\nuygulama",
     'st3.n':"€0",'st3.l':"veritabanında\nkaybolan vardiya",
-    'apps.t':"Beş uygulama.\nHer rol için biri.",'apps.s':"Yalnızca ihtiyacınız olanı açın. Tek hesap, gerçek zamanlı senkron.",
-    'mg.h':"Vardiya kontrol altında —\naçılıştan rapora.",'mg.p':"Müdür vardiyayı tek dokunuşla açar. Gelir, gider ve kasa gerçek zamanlı güncellenir. Gün sonunda sahip tam raporu otomatik alır.",'mg.f1':"Vardiya açma ve kapama, kasa bakiyesi",'mg.f2':"Kategoriye göre giderler, limitlerle",'mg.f3':"Tahsilat ve vardiya raporu sahibe",
+    'apps.t':"Beş uygulama.\nHer rol için biri.",'apps.s':"Yalnızca ihtiyacınız olanı açın. Tek hesap, gerçek zamanlı senkron. Ayrıca masa rezervasyonları ve ekip haberleri.",
+    'mg.h':"Vardiya kontrol altında —\naçılıştan rapora.",'mg.p':"Müdür vardiyayı tek dokunuşla açar. Gelir, gider ve kasa gerçek zamanlı güncellenir. Gün sonunda sahip tam raporu otomatik alır.",'mg.f1':"Vardiya açma ve kapama, kasa bakiyesi",'mg.f2':"Kategoriye göre giderler, limitlerle",'mg.f3':"Tahsilat ve vardiya raporu sahibe",
     'an.h':"Karar veren\nrakamlar.",'an.p':"Günlük, haftalık ve aylık finans. Dönem karşılaştırma, gelir trendi, Excel'siz bordro. Pro'da, işiniz hakkında doğal dilde yanıt veren bir AI asistanı.",'an.f1':"Analiz ve dönem karşılaştırma",'an.f2':"Bordro: maaş, kesinti, nakit ve kart",'an.f3':"Doğal dilde AI asistanı · Pro",
     'sh.h':"Tütün deposu,\nnargile vardiyası.",'sh.p':"Her marka ve aromaya göre stok — renkli seviye göstergeleriyle. Giriş ve sayım birkaç dokunuşla. Nargile vardiyası satışı, tütün tüketimini ve geliri sayar.",'sh.f1':"Marka ve aromaya göre stok",'sh.f2':"Giriş ve sayım, geçmişiyle",'sh.f3':"Nargile vardiyası: satış ve tüketim",
     'pe.h':"Kendini yöneten\nbir ekip.",'pe.p':"Vardiya değişimli plan, görevler ve arıza bildirimleri, saat takipli geo-giriş, açılış ve kapanış kontrol listeleri, mutfak stop-list. Herkes rolüne tam olarak ne gerekiyorsa onu görür.",'pe.f1':"Vardiya planı ve değişimi",'pe.f2':"Geo-giriş, gecikme ve saat takibi",'pe.f3':"Görevler, kontrol listeleri ve stop-list",
@@ -1084,7 +1104,7 @@ const T = {
     'pr.l':"Fiyatlar",'pr.t':"Şeffaf fiyatlar.",'pr.s':"İstediğin zaman değiştir ya da iptal et.",
     'p1.d':"günde €0.47",'p1.f1':"3 kullanıcıya kadar",'p1.f2':"AI analizi",'p1.btn':"Seç",
     'p2.d':"günde €0.79",'p2.f1':"Tüm uygulamalar",'p2.f2':"7 kullanıcıya kadar",'p2.f3':"Misafirler için QR menü",'p2.f4':"Öncelikli destek",'p2.f5':"AI analizi",'p2.btn':"Ücretsiz başla",
-    'p3.d':"günde €1.29",'p3.f1':"Business'taki her şey",'p3.f2':"15 kullanıcıya kadar",'p3.f3':"AI analizi",'p3.f4':"Entegrasyonlar: kasa · banka",'p3.btn':"Seç",
+    'p3.d':"günde €1.29",'p3.f1':"Business'taki her şey",'p3.f2':"15 kullanıcıya kadar",'p3.f3':"AI analizi",'p3.f4':"Banka entegrasyonu",'as.b':"App Store'dan indirin",'p3.btn':"Seç",
     'pop':"En popüler",'pay.free':"14 gün ücretsiz",
     'cta.w':"Hazır mısınız?",'cta.s':"İlk 14 gün ücretsiz.",'cta.b':"Hesap oluştur",
     'ft.tag':"Restoran yönetim platformu. Tek hesapta beş uygulama.",'ft.p':"Uygulamalar",'ft.c':"Şirket",'ft.l':"Yasal",'ft.about':"Hakkımızda",'ft.sup':"Destek",'ft.cont':"İletişim",'ft.priv':"Gizlilik",'ft.terms':"Koşullar",
@@ -1099,8 +1119,8 @@ const T = {
     'st1.n':"12 сек",'st1.l':"середній час\nвідкриття зміни",
     'st2.n':"5-в-1",'st2.l':"застосунків в\nодному акаунті",
     'st3.n':"€0",'st3.l':"втрачених змін\nу базі даних",
-    'apps.t':"П'ять застосунків.\nПід кожну роль.",'apps.s':"Увімкніть лише потрібні. Один акаунт, синхронізація в реальному часі.",
-    'mg.h':"Зміна під контролем —\nвід відкриття до звіту.",'mg.p':"Менеджер відкриває зміну одним дотиком. Виручка, витрати й каса рахуються в реальному часі. Наприкінці дня власник отримує повний звіт — автоматично.",'mg.f1':"Відкриття та закриття зміни, баланс каси",'mg.f2':"Витрати за категоріями, з лімітами",'mg.f3':"Інкасація та звіт зміни власнику",
+    'apps.t':"П'ять застосунків.\nПід кожну роль.",'apps.s':"Увімкніть лише потрібні. Один акаунт, синхронізація в реальному часі. А ще бронювання столів і новини для команди.",
+    'mg.h':"Зміна під контролем —\nвід відкриття до звіту.",'mg.p':"Менеджер відкриває зміну одним дотиком. Виручка, витрати й каса рахуються в реальному часі. Наприкінці дня власник отримує повний звіт — автоматично.",'mg.f1':"Відкриття та закриття зміни, баланс каси",'mg.f2':"Витрати за категоріями, з лімітами",'mg.f3':"Інкасація та звіт зміни власнику",
     'an.h':"Цифри, які\nприймають рішення.",'an.p':"Фінанси за днями, тижнями й місяцями. Порівняння періодів, динаміка виручки, зарплати без Excel. У тарифі Pro — AI-асистент, що відповідає про бізнес зрозумілою мовою.",'an.f1':"Аналітика та порівняння періодів",'an.f2':"Зарплати: оклади, утримання, готівка й картка",'an.f3':"AI-асистент природною мовою · Pro",
     'sh.h':"Склад тютюну,\nзміна кальянника.",'sh.p':"Залишки за кожним брендом і смаком — з кольоровими індикаторами рівня. Прихід та інвентаризація за пару дотиків. Зміна кальянника рахує продажі, витрату тютюну й виручку.",'sh.f1':"Залишки за брендами та смаками",'sh.f2':"Прихід та інвентаризація з історією",'sh.f3':"Зміна кальянника: продажі та витрата",
     'pe.h':"Команда, яка\nпрацює сама.",'pe.p':"Розклад з обміном змінами, задачі та звіти про поломки, гео-явка з обліком годин, чек-листи відкриття й закриття, стоп-лист кухні. Кожен бачить рівно те, що потрібно для його ролі.",'pe.f1':"Розклад та обмін змінами",'pe.f2':"Гео-явка, запізнення та облік годин",'pe.f3':"Задачі, чек-листи та стоп-лист",
@@ -1115,7 +1135,7 @@ const T = {
     'pr.l':"Ціни",'pr.t':"Прозорі ціни.",'pr.s':"Змінити чи скасувати тариф — будь-коли.",
     'p1.d':"€0.47 на день",'p1.f1':"До 3 користувачів",'p1.f2':"AI-аналітика",'p1.btn':"Обрати",
     'p2.d':"€0.79 на день",'p2.f1':"Усі застосунки",'p2.f2':"До 7 користувачів",'p2.f3':"QR-меню для гостей",'p2.f4':"Пріоритетна підтримка",'p2.f5':"AI-аналітика",'p2.btn':"Почати безкоштовно",
-    'p3.d':"€1.29 на день",'p3.f1':"Усе з Business",'p3.f2':"До 15 користувачів",'p3.f3':"AI-аналітика",'p3.f4':"Інтеграції: каса · банк",'p3.btn':"Обрати",
+    'p3.d':"€1.29 на день",'p3.f1':"Усе з Business",'p3.f2':"До 15 користувачів",'p3.f3':"AI-аналітика",'p3.f4':"Інтеграція з банком",'as.b':"Завантажити в App Store",'p3.btn':"Обрати",
     'pop':"Популярний",'pay.free':"14 днів безкоштовно",
     'cta.w':"Готові?",'cta.s':"Перші 14 днів безкоштовно.",'cta.b':"Створити акаунт",
     'ft.tag':"Платформа керування рестораном. П'ять застосунків в одному акаунті.",'ft.p':"Застосунки",'ft.c':"Компанія",'ft.l':"Правове",'ft.about':"Про нас",'ft.sup':"Підтримка",'ft.cont':"Контакти",'ft.priv':"Конфіденційність",'ft.terms':"Умови",
@@ -1130,8 +1150,8 @@ const T = {
     'st1.n':"12 сек",'st1.l':"ауысымды ашудың\nорташа уақыты",
     'st2.n':"5-і-1-де",'st2.l':"бір аккаунттағы\nқолданба",
     'st3.n':"€0",'st3.l':"дерекқорда жоғалған\nауысым",
-    'apps.t':"Бес қолданба.\nӘр рөлге арналған.",'apps.s':"Тек қажеттісін қосыңыз. Бір аккаунт, нақты уақытта синхрондау.",
-    'mg.h':"Ауысым бақылауда —\nашудан есепке дейін.",'mg.p':"Менеджер ауысымды бір рет түртіп ашады. Түсім, шығын және касса нақты уақытта есептеледі. Күн соңында иесі толық есепті автоматты түрде алады.",'mg.f1':"Ауысымды ашу мен жабу, касса балансы",'mg.f2':"Санаттар бойынша шығындар, лимиттермен",'mg.f3':"Инкассация және ауысым есебі иесіне",
+    'apps.t':"Бес қолданба.\nӘр рөлге арналған.",'apps.s':"Тек қажеттісін қосыңыз. Бір аккаунт, нақты уақытта синхрондау. Сонымен қатар үстел брондау және команда жаңалықтары.",
+    'mg.h':"Ауысым бақылауда —\nашудан есепке дейін.",'mg.p':"Менеджер ауысымды бір рет түртіп ашады. Түсім, шығын және касса нақты уақытта есептеледі. Күн соңында иесі толық есепті автоматты түрде алады.",'mg.f1':"Ауысымды ашу мен жабу, касса балансы",'mg.f2':"Санаттар бойынша шығындар, лимиттермен",'mg.f3':"Инкассация және ауысым есебі иесіне",
     'an.h':"Шешім қабылдайтын\nсандар.",'an.p':"Күн, апта және ай бойынша қаржы. Кезеңдерді салыстыру, түсім динамикасы, Excelсіз жалақы. Pro тарифінде — бизнес туралы түсінікті тілде жауап беретін AI-көмекші.",'an.f1':"Аналитика және кезеңдерді салыстыру",'an.f2':"Жалақы: оклад, ұстамдар, қолма-қол және карта",'an.f3':"Табиғи тілдегі AI-көмекші · Pro",
     'sh.h':"Темекі қоймасы,\nкальянші ауысымы.",'sh.p':"Әр бренд пен дәм бойынша қалдықтар — түрлі-түсті деңгей көрсеткіштерімен. Кіріс пен түгендеу бірнеше түртумен. Кальянші ауысымы сатылымды, темекі шығынын және түсімді санайды.",'sh.f1':"Бренд пен дәм бойынша қалдықтар",'sh.f2':"Кіріс пен түгендеу, тарихымен",'sh.f3':"Кальянші ауысымы: сатылым мен шығын",
     'pe.h':"Өзі жұмыс істейтін\nкоманда.",'pe.p':"Ауысым алмасуы бар кесте, тапсырмалар мен ақаулық туралы есептер, сағат есебімен гео-белгілеу, ашу мен жабу тексеру тізімдері, ас үй стоп-парағы. Әркім өз рөліне қажеттіні ғана көреді.",'pe.f1':"Кесте және ауысым алмасу",'pe.f2':"Гео-белгілеу, кешігу және сағат есебі",'pe.f3':"Тапсырмалар, тексеру тізімдері және стоп-парақ",
@@ -1146,7 +1166,7 @@ const T = {
     'pr.l':"Бағалар",'pr.t':"Айқын бағалар.",'pr.s':"Кез келген уақытта ауыстыр немесе бас тарт.",
     'p1.d':"күніне €0.47",'p1.f1':"3 пайдаланушыға дейін",'p1.f2':"AI-аналитика",'p1.btn':"Таңдау",
     'p2.d':"күніне €0.79",'p2.f1':"Барлық қолданбалар",'p2.f2':"7 пайдаланушыға дейін",'p2.f3':"Қонақтарға арналған QR-мәзір",'p2.f4':"Басым қолдау",'p2.f5':"AI-аналитика",'p2.btn':"Тегін бастау",
-    'p3.d':"күніне €1.29",'p3.f1':"Business-тегі бәрі",'p3.f2':"15 пайдаланушыға дейін",'p3.f3':"AI-аналитика",'p3.f4':"Интеграциялар: касса · банк",'p3.btn':"Таңдау",
+    'p3.d':"күніне €1.29",'p3.f1':"Business-тегі бәрі",'p3.f2':"15 пайдаланушыға дейін",'p3.f3':"AI-аналитика",'p3.f4':"Банк интеграциясы",'as.b':"App Store-дан жүктеу",'p3.btn':"Таңдау",
     'pop':"Танымал",'pay.free':"14 күн тегін",
     'cta.w':"Дайынсыз ба?",'cta.s':"Алғашқы 14 күн тегін.",'cta.b':"Аккаунт жасау",
     'ft.tag':"Мейрамхананы басқару платформасы. Бір аккаунтта бес қолданба.",'ft.p':"Қолданбалар",'ft.c':"Компания",'ft.l':"Құқықтық",'ft.about':"Біз туралы",'ft.sup':"Қолдау",'ft.cont':"Байланыс",'ft.priv':"Құпиялылық",'ft.terms':"Шарттар",

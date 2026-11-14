@@ -14,7 +14,7 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://misesuite.com"),
+  metadataBase: new URL("https://www.misesuite.com"),
   title: { default: "Mise", template: "%s · Mise" },
   description: "Mise — система управления рестораном: кассовые смены, аналитика, склад, команда и QR-меню в одном приложении.",
   manifest: "/manifest.json",
@@ -24,13 +24,11 @@ export const metadata: Metadata = {
     siteName: "Mise",
     title: "Mise — управление рестораном",
     description: "Кассовые смены, аналитика, склад, команда и QR-меню в одном приложении.",
-    images: [{ url: "/icons/icon-512.png", width: 512, height: 512, alt: "Mise" }],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "Mise — управление рестораном",
     description: "Кассовые смены, аналитика, склад, команда и QR-меню в одном приложении.",
-    images: ["/icons/icon-512.png"],
   },
 };
 

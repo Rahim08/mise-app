@@ -40,50 +40,36 @@ export function CookieConsent() {
 
   if (!show) return null
 
+  // Compact bar: one row on wide screens, so it never sits on top of the hero CTAs;
+  // on phones text + nowrap buttons stack in a short card above the safe area.
   return (
-    <div
-      role="dialog"
-      aria-label="Cookie consent"
-      style={{
-        position: 'fixed', left: 16, right: 16, bottom: 16, zIndex: 9999,
-        margin: '0 auto', maxWidth: 520,
-        background: 'rgba(28,28,30,.92)', backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)', color: '#fff',
-        borderRadius: 18, padding: '16px 18px',
-        boxShadow: '0 12px 48px rgba(0,0,0,.32)',
-        display: 'flex', flexDirection: 'column', gap: 12,
-        fontFamily: '-apple-system,BlinkMacSystemFont,system-ui,sans-serif',
-        animation: 'miseCookieUp .32s cubic-bezier(.16,1,.3,1)',
-      }}
-    >
-      <style>{`@keyframes miseCookieUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}`}</style>
-      <p style={{ margin: 0, fontSize: '.86rem', lineHeight: 1.5, color: 'rgba(255,255,255,.82)' }}>
+    <div role="dialog" aria-label="Cookie consent" className="mise-cookie">
+      <style>{`
+        @keyframes miseCookieUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+        .mise-cookie{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:9999;
+          margin:0 auto;max-width:680px;background:rgba(28,28,30,.94);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+          color:#fff;border-radius:16px;padding:10px 10px 10px 16px;box-shadow:0 12px 48px rgba(0,0,0,.32);
+          display:flex;align-items:center;gap:12px;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+          animation:miseCookieUp .32s cubic-bezier(.16,1,.3,1)}
+        .mise-cookie p{margin:0;flex:1;font-size:.8rem;line-height:1.4;color:rgba(255,255,255,.82)}
+        .mise-cookie a{color:#0a84ff;text-decoration:none;font-weight:600}
+        .mise-cookie .btns{display:flex;gap:6px;flex:none}
+        .mise-cookie button{padding:8px 14px;border-radius:10px;cursor:pointer;font-size:.8rem;font-family:inherit;white-space:nowrap}
+        .mise-cookie .ess{border:1px solid rgba(255,255,255,.18);background:transparent;color:#fff;font-weight:600}
+        .mise-cookie .all{border:none;background:#fff;color:#1c1c1e;font-weight:700}
+        @media (max-width:560px){
+          .mise-cookie{flex-direction:column;align-items:stretch;gap:10px;padding:12px}
+          .mise-cookie .btns button{flex:1}
+        }
+        @media (prefers-reduced-motion:reduce){.mise-cookie{animation:none}}
+      `}</style>
+      <p>
         {t('cookie.text')}{' '}
-        <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: '#0a84ff', textDecoration: 'none', fontWeight: 600 }}>
-          {t('cookie.privacy')}
-        </a>
+        <a href="/privacy.html" target="_blank" rel="noopener noreferrer">{t('cookie.privacy')}</a>
       </p>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          onClick={() => choose('essential')}
-          style={{
-            flex: 1, padding: '10px 14px', borderRadius: 12, cursor: 'pointer',
-            border: '1px solid rgba(255,255,255,.18)', background: 'transparent',
-            color: '#fff', fontSize: '.85rem', fontWeight: 600, fontFamily: 'inherit',
-          }}
-        >
-          {t('cookie.decline')}
-        </button>
-        <button
-          onClick={() => choose('all')}
-          style={{
-            flex: 1, padding: '10px 14px', borderRadius: 12, cursor: 'pointer',
-            border: 'none', background: '#fff', color: '#1c1c1e',
-            fontSize: '.85rem', fontWeight: 700, fontFamily: 'inherit',
-          }}
-        >
-          {t('cookie.accept')}
-        </button>
+      <div className="btns">
+        <button className="ess" onClick={() => choose('essential')}>{t('cookie.decline')}</button>
+        <button className="all" onClick={() => choose('all')}>{t('cookie.accept')}</button>
       </div>
     </div>
   )
