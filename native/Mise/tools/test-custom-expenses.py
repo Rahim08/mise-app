@@ -78,6 +78,8 @@ run_swift('import Foundation\n' + custom + '''
 manager = (MODELS / 'ManagerView.swift').read_text()
 manager = manager[:manager.index('// MARK: - Экран Manager')].replace('import SwiftUI', 'import Observation')
 stubs = r'''
+enum APIError:Error {case http(Int,String?)}
+actor CacheStore { static let shared=CacheStore(); func invalidate(table:String) {} }
 @MainActor func t(_ key:String,_ vars:[String:String]=[:])->String { key }
 @MainActor func aiErrorMessage(_ error:Error)->String { "error" }
 enum Money { static let symbol="€"; static func s(_ amount:Double)->String { String(amount) } }
@@ -87,8 +89,7 @@ enum ShiftReminder { static func isEnabled()->Bool { false };static func schedul
 enum Notify { static func send(type:String,title:String,body:String,audience:[String:Bool],titleKey:String,bodyKey:String,bodyParams:[String:String],secureBody:String,secureBodySegments:[[String:String]],data:[String:String]) async {} }
 @MainActor final class Fixture {
  static let shared=Fixture()
- var failCustomWrite=false
- var failShiftWrite=false
+ var saves:[[String:Any]]=[]
  var writes:[[String:Any]]=[]
  var expenses:[[String:Any]]=[]
  var shift:[String:Any]=["id":"shift", "date":"2026-11-13", "status":"open", "income":0, "income_card":0, "total_expense":0,"inkassation":0,"opening_balance":100,"closing_balance":100]
@@ -109,7 +110,12 @@ enum Notify { static func send(type:String,title:String,body:String,audience:[St
 }
 enum DB {
  static func from(_ table:String)->Query { Query(table) }
- static func rpc(_ fn:String,args:[String:Any]=[:],cacheInvalidate:[String]) async throws { await Fixture.shared.write(table:fn,op:"rpc",values:args,ids:[],conflict:nil) }
+ @MainActor static func rpcRow<T:Decodable>(_ fn:String,args:[String:Any],cacheInvalidate:[String],as type:T.Type) async throws->T {
+  let p=args["p"] as! [String:Any];Fixture.shared.saves.append(p)
+  let rows=(p["custom"] as! [[String:Any]]).map { r in ["id":r["id"]!,"category_name":r["name"]!,"amount":r["amount"]!,"is_custom":true,"is_paid":true,"note":r["note"]!] }
+  let data=try JSONSerialization.data(withJSONObject:["opening_balance":100,"total_expense":12.5,"closing_balance":187.5,"rows":rows])
+  return try JSONDecoder().decode(T.self,from:data)
+ }
 }
 final class Query: @unchecked Sendable {
  let table:String;var op="select";var columns="*";var values:Any?;var ids:[String]=[];var conflict:String?
@@ -119,8 +125,6 @@ final class Query: @unchecked Sendable {
  func insert(_ value:Any)->Self {op="insert";values=value;return self};func update(_ value:Any)->Self {op="update";values=value;return self};func delete()->Self {op="delete";return self}
  func upsert(_ value:Any,onConflict:String?=nil)->Self {op="upsert";values=value;conflict=onConflict;return self}
  func run() async throws {
-  if table=="shifts",op=="update",await Fixture.shared.failShiftWrite { throw NSError(domain:"shift-failure",code:500) }
-  if table=="shift_expenses",op=="upsert",await Fixture.shared.failCustomWrite { throw NSError(domain:"conflict",code:409) }
   await Fixture.shared.write(table:table,op:op,values:values,ids:ids,conflict:conflict) }
  func list<T:Decodable>(_ type:T.Type) async throws->[T] {
   let rows=await Fixture.shared.rows(table,columns)
@@ -151,56 +155,14 @@ model_test = r'''
   let previousDate=m.currentDate
   m.customExpenses[0].name=""
   await m.save(force:true)
-  guard fixture.writes.isEmpty && m.customExpenseError != nil else { fatalError("invalid save wrote financial data") }
+  guard fixture.saves.isEmpty && m.customExpenseError != nil else { fatalError("invalid save wrote financial data") }
   await m.changeDate(1)
-  guard fixture.writes.isEmpty && m.currentDate==previousDate else { fatalError("invalid autosave wrote data or changed date") }
+  guard fixture.saves.isEmpty && m.currentDate==previousDate else { fatalError("invalid autosave wrote data or changed date") }
   m.customExpenses[0].name="Perfume"
-  fixture.expenses=[
-   ["id":"legacy","category_name":"Legacy","amount":4],
-   ["id":"salary","employee_id":"former","amount":10,"note":"SALPERIOD:2026-11-01"],
-   ["id":"settled","amount":8,"paid_shift_id":"another-shift"],
-  ]
   await m.save(force:true)
-  guard m.locked && fixture.expenses.count==4 else { fatalError("save lost protected expenses or failed") }
-  let customWrites=fixture.writes.filter { $0["table"] as? String=="shift_expenses" && $0["op"] as? String=="upsert" }
-  guard customWrites.count==1 && customWrites[0]["conflict"] as? String=="restaurant_id,id" else { fatalError("save needs stable-ID scoped upsert") }
-  guard !fixture.writes.contains(where: { $0["table"] as? String=="expense_categories" }) else { fatalError("custom name created a template") }
+  guard m.locked && fixture.writes.isEmpty && (fixture.saves.last?["custom"] as? [[String:Any]])?.first?["id"] as? String==id else { fatalError("custom row must travel in the atomic save with a stable ID") }
   await m.save(force:true)
-  guard fixture.expenses.count==4 && fixture.expenses.filter({ $0["id"] as? String==id }).count==1 else { fatalError("repeated save duplicated custom row") }
-  m.customExpenses[0].amount="20"
-  fixture.failShiftWrite=true
-  await m.save(force:true)
-  guard fixture.expenses.first(where:{$0["id"] as? String==id})?["amount"] as? Double==20 else { fatalError("custom upsert should precede shift update") }
-  fixture.failShiftWrite=false
-  await m.save(force:true)
-  guard fixture.shift["total_expense"] as? Double==20 && fixture.expenses.count==4 else { fatalError("partial-save update retry was blocked or duplicated") }
-  fixture.writes=[]
-  fixture.expenses[fixture.expenses.firstIndex(where:{$0["id"] as? String==id})!]["paid_shift_id"]="another-shift"
-  await m.save(force:true)
-  guard fixture.writes.isEmpty else { fatalError("settled custom row was reopened or shifted balance") }
-  fixture.expenses[fixture.expenses.firstIndex(where:{$0["id"] as? String==id})!].removeValue(forKey:"paid_shift_id")
-  let remoteId="22222222-2222-4222-8222-222222222222"
-  fixture.expenses.append(["id":remoteId,"is_custom":true,"category_name":"Remote","amount":3])
-  await m.save(force:true)
-  guard fixture.writes.isEmpty && fixture.expenses.contains(where:{$0["id"] as? String==remoteId}) else { fatalError("unseen remote custom row was deleted or omitted from balance") }
-  fixture.expenses.removeAll {$0["id"] as? String==remoteId}
-  fixture.failCustomWrite=true
-  await m.save(force:true)
-  guard fixture.writes.isEmpty else { fatalError("shift or financial writes began before guarded custom upsert succeeded") }
-  fixture.failCustomWrite=false
-  await m.loadDay(m.currentDate)
-  guard m.customExpenses.first?.id==id && m.customExpenses.first?.name=="Perfume" else { fatalError("custom row failed reload") }
-  m.locked=false;m.customExpenses=[]
-  fixture.failShiftWrite=true
-  await m.save(force:true)
-  guard !fixture.expenses.contains(where:{$0["id"] as? String==id}) else { fatalError("custom removal should precede shift update") }
-  fixture.failShiftWrite=false
-  await m.save(force:true)
-  guard fixture.expenses.count==3 && !fixture.expenses.contains(where:{$0["id"] as? String==id}) else { fatalError("removed custom row retained or protected rows deleted") }
-  m.customExpenses=[CustomExpenseDraft()]
-  await m.save(force:true)
-  await m.save(force:true)
-  guard fixture.expenses.count==3 && m.customExpenseError==nil else { fatalError("ignored blank row poisoned later save snapshot") }
+  guard (fixture.saves.last?["replace_ids"] as? [String])==[id], (fixture.saves.last?["seen"] as? [[String:Any]])?.count==1 else { fatalError("saved rows must become the next form snapshot") }
   let matches=try await m.expenseNameSuggestions(prefix:"p")
   guard matches==["Perfume","Parking"] else { fatalError("suggestions must normalize/dedupe/filter prefix") }
   m.locked=false;m.customExpenses=[CustomExpenseDraft(id:id,name:"Perfume",amount:"12.50",unpaid:true,note:"receipt")]
@@ -218,10 +180,9 @@ model_test = r'''
   guard legacy.income=="2" && legacy.customExpenses.isEmpty else { fatalError("legacy draft failed backward decode") }
   UserDefaults.standard.removeObject(forKey:draftKey)
   let currentDebt=ManagerModel.DebtRow(id:id,shiftId:"shift",date:m.key(m.currentDate),categoryId:nil,categoryName:"Perfume",employeeId:nil,amount:12.5,note:nil,isCustom:true)
-  m.openDebts=[currentDebt];m.selectedDebtIds=[id];fixture.writes=[]
-  await m.save(force:true)
-  guard fixture.writes.isEmpty && m.selectableDebts.isEmpty else { fatalError("current-shift custom debt must be paid through row toggle") }
-  print("PASS native Manager validation-before-writes/autosave, upsert retry, protected rows, remove/reload, drafts, suggestions and same-shift debt guard")
+  m.openDebts=[currentDebt];m.selectedDebtIds=[id]
+  guard m.selectableDebts.isEmpty && m.debtSettleTotal==0 else { fatalError("current-shift debt must be paid through row toggle") }
+  print("PASS native Manager validation-before-writes/autosave, atomic payload and snapshot, drafts, suggestions and same-shift debt guard")
  }
 }
 '''

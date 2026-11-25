@@ -57,20 +57,6 @@ export function eligibleDebtsFor<T extends { shiftId: string }>(debts: T[], shif
   return debts.filter(d => d.shiftId !== shiftId)
 }
 
-/**
- * Выбранные долги устарели: с другого устройства их погасила другая смена, удалили или изменили
- * сумму. settle_debts такие молча пропускает, а касса уже посчитана вместе с ними.
- * Погашенные этой же сменой (повтор после сбоя) — не устаревшие.
- */
-export function hasStaleDebt(selected: { id: string; amount: number }[], fresh: ShiftExpenseRow[], shiftId: string): boolean {
-  const byId = new Map(fresh.map(r => [r.id, r]))
-  return selected.some(d => {
-    const r = byId.get(d.id)
-    if (!r || Number(r.amount || 0) !== d.amount) return true
-    return r.paid_shift_id ? r.paid_shift_id !== shiftId : r.is_paid !== false
-  })
-}
-
 export function splitShiftExpenses(
   rows: ShiftExpenseRow[],
   shiftId: string,

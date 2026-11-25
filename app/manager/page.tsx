@@ -12,7 +12,8 @@ import { AppLoading } from '@/components/AppLoading'
 import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate, fv, displayDate, dd, businessDate } from '@/lib/format'
-import { splitShiftExpenses, eligibleDebtsFor, hasStaleDebt, round2, SALPERIOD_PREFIX } from '@/lib/shiftForm'
+import { splitShiftExpenses, eligibleDebtsFor, round2, SALPERIOD_PREFIX, type ShiftExpenseRow } from '@/lib/shiftForm'
+import { saveShiftAtomic, type SaveAttempt } from '@/lib/shiftSave'
 import { prepareCustomExpenses, customExpenseTotal, parseExpenseCents, type CustomExpenseDraft } from '@/lib/customExpenses'
 import { CustomExpenseFields } from '@/components/CustomExpenseFields'
 import { ManagerSalaryTab } from './tabs-salary'
@@ -85,7 +86,6 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const [catAmounts, setCatAmounts] = useState<Record<string, string>>({})
   const [catNotes, setCatNotes] = useState<Record<string, string>>({})
   const [customExpenses, setCustomExpenses] = useState<CustomExpenseDraft[]>([])
-  const [loadedCustomExpenses, setLoadedCustomExpenses] = useState<CustomExpenseDraft[]>([])
   const [income, setIncome] = useState('')          // наличные — касса считается от них
   const [incomeCard, setIncomeCard] = useState('')  // безнал — в кассу не входит
   const [inkSum, setInkSum] = useState('')
@@ -105,6 +105,9 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
   const [selectedDebtIds, setSelectedDebtIds] = useState<Set<string>>(new Set())
   const [showDebts, setShowDebts] = useState(false)
   const eligibleDebts = eligibleDebtsFor(openDebts, shift?.id)
+  // Строки смены, какими их видит форма (lib/shiftSave.ts), и незавершённая попытка сохранения.
+  const formRows = useRef<{ seen: ShiftExpenseRow[]; owned: string[] }>({ seen: [], owned: [] })
+  const saveAttempt = useRef<SaveAttempt>(null)
   // Сумма долгов, уже погашенных ЭТОЙ сменой (settlement-строка с paid_shift_id == shift.id) —
   // без этого пересохранение того же дня теряло сумму погашения из кассы (A1, аудит 2026-08-13,
   // тот же баг что и в iOS ManagerView.swift, порт фикса).
@@ -205,10 +208,21 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     setAutoAbsences(new Set((abs || []).filter((a: any) => a.source === 'auto').map((a: any) => a.employee_id)))
   }
 
+  // Строки смены (из загрузки или ответа save_shift) — в поля формы.
+  const applyRows = (exps: ShiftExpenseRow[], shiftId: string, cats: Category[], emps: Employee[]) => {
+    const split = splitShiftExpenses(exps, shiftId, new Set(cats.map(c => c.id)), new Set(emps.map(e => e.id)), true)
+    formRows.current = { seen: exps, owned: split.ownedIds }
+    setSettledTodayTotal(split.settledTodayTotal); setUnmanagedPaidTotal(split.unmanagedPaidTotal)
+    setCatAmounts(split.catAmounts); setCatNotes(split.catNotes); setEmpExtras(split.empExtras)
+    setCustomExpenses(split.customExpenses)
+    setCatUnpaid(split.catUnpaid); setEmpUnpaid(split.empUnpaid)
+  }
+
   const loadDay = async (rid: string, date: Date, emps: Employee[], cats: Category[], catalog?: Promise<{ employees: Employee[]; categories: Category[] }>) => {
     const generation = ++dayLoadGeneration.current
     setLoading(true)
     setSelectedDebtIds(new Set()) // выбор долгов относится только к открытому дню
+    formRows.current = { seen: [], owned: [] }
     try {
       const dateStr = fmtDate(date)
       const absencesTask = loadAbsencesByDate(rid, dateStr, generation)
@@ -247,11 +261,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
         const catalogTask = catalog ?? catalogLoadRef.current
         const resolved = catalogTask ? await catalogTask : { employees: emps, categories: cats }
         if (generation !== dayLoadGeneration.current) return
-        const split = splitShiftExpenses(exps || [], sh.id, new Set(resolved.categories.map(c => c.id)), new Set(resolved.employees.map(e => e.id)), true)
-        setSettledTodayTotal(split.settledTodayTotal); setUnmanagedPaidTotal(split.unmanagedPaidTotal)
-        setCatAmounts(split.catAmounts); setCatNotes(split.catNotes); setEmpExtras(split.empExtras)
-        setCustomExpenses(split.customExpenses); setLoadedCustomExpenses(split.customExpenses)
-        setCatUnpaid(split.catUnpaid); setEmpUnpaid(split.empUnpaid)
+        applyRows(exps || [], sh.id, resolved.categories, resolved.employees)
         const ink = Array.isArray(inkList) ? inkList[0] : inkList
         const nextExpense = ink && ink.expense > 0 ? String(ink.expense) : ''
         const nextReason = ink?.reason || ''
@@ -264,7 +274,7 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
         setShift(null); setLocked(false); setIncome(''); setIncomeCard(''); setInkSum(''); setInkExpense(''); setInkReason('')
         setLoadedInkExpense(''); setLoadedInkReason('')
         setCatAmounts({}); setCatNotes({}); setEmpExtras({})
-        setCatUnpaid({}); setEmpUnpaid({}); setSettledTodayTotal(0); setUnmanagedPaidTotal(0); setCustomExpenses([]); setLoadedCustomExpenses([])
+        setCatUnpaid({}); setEmpUnpaid({}); setSettledTodayTotal(0); setUnmanagedPaidTotal(0); setCustomExpenses([])
       }
       await absencesTask
     } finally {
@@ -353,63 +363,11 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     return { inc, card, ink, catTotal, empExtraTotal, debtTotal, totalExp, balance, opening, inkNet }
   }
 
-  // Core DB write — used by explicit save AND auto-save on day switch.
-  // Rebuilds expense/inkassation rows from scratch — insert-новых→delete-старых-по-id (не
-  // delete-then-insert): раньше обрыв сети МЕЖДУ delete и insert молча стирал все расходы/
-  // инкассацию смены. Порт фикса из ManagerView.swift (persistExpenses/persistInkassation,
-  // audit-2026-07-12) — применялся раньше только к iOS, веб оставался уязвим (аудит 2026-08-04).
-  // Если теперь упадёт финальный delete — видимые дубли, следующее успешное сохранение само
-  // подчистит (старые id уже собраны).
-  // Погашение отмеченных долгов — прямо здесь, в текущей смене (не отдельным действием). 1) новая
-  // строка расхода датой ТЕКУЩЕЙ смены (считается в кассе/отчётах именно сегодня) — вставляем
-  // ПЕРВОЙ, чтобы при сбое сети старый долг остался открытым, а не тихо потерялся; 2) исходная
-  // строка помечается «оплачено» — paid_shift_id ≠ её собственный shift_id → навсегда исключена
-  // из подсчёта своего родного дня. Паритет с ManagerView.swift persistDebtSettlements.
-  // ЗП-долг помечен note='SALPERIOD:<period>' (леджер собирается в tabs-salary.tsx syncLedger,
-  // остаток по месячному окладу материализуется как обычная строка shift_expenses). Кроме
-  // обычного погашения — параллельно пишем salary_payments, иначе вкладка ЗП не узнает, что
-  // долг закрыт именно отсюда, и продолжит показывать сотрудника неоплаченным (юзер-фидбок
-  // 2026-08-20: «взаимодействие — выплата — только через открытие смены», но remaining в ЗП
-  // должен сойтись сам). Пишем ДО shift_expenses (salary_payments — источник истины «оплачено»,
-  // паритет с C2/tabs-salary.tsx savePayment) — если запись не пройдёт, откатываем весь settle.
-  // Один RPC вместо 2-3 независимых запросов (MISE-002, аудит 2026-08-28): раньше сбой сети
-  // между шагами оставлял систему в несогласованном состоянии (например, salary_payments
-  // записан — «оплачено» в ЗП, — а shift_expenses не обновлён — долг всё ещё «открыт» в
-  // Manager, касса дня его не видит). settle_debts (см. docs/migrations/
-  // atomic-debt-settlement-2026-08.sql) выполняет все шаги в одной транзакции: либо все,
-  // либо ни один.
-  const persistDebtSettlements = async (shiftId: string, dateStr: string) => {
-    const ids = Array.from(selectedDebtIds)
-    if (ids.length === 0) return
-    const selected = eligibleDebts.filter(d => ids.includes(d.id))
-    if (selected.length === 0) return
-    const debts = selected.map(d => {
-      const isSalary = !!(d.employeeId && d.note?.startsWith(SALPERIOD_PREFIX))
-      return {
-        id: d.id, amount: d.amount,
-        category_id: d.categoryId || null, category_name: d.categoryName || null,
-        employee_id: d.employeeId || null,
-        is_salary: isSalary,
-        salary_period: isSalary ? (d.note as string).slice(SALPERIOD_PREFIX.length) : null,
-        salary_note: tr('an.debtSettleNote'),
-        expense_note: `${tr('an.debtSettleNote')} (${d.date})`,
-      }
-    })
-    const { error } = await db.rpc('settle_debts', { p_shift_id: shiftId, p_date_str: dateStr, p_debts: debts })
-    if (error) throw new Error(error.message)
-  }
-
   // Параллельный вызов для той же смены (двойной тап, «Сохранить» + автосейв при смене даты)
-  // присоединяется к уже идущему сохранению, а не запускает второе: два прогона читали один
-  // и тот же набор старых расходов, оба вставляли новый — набор задваивался.
+  // присоединяется к уже идущему сохранению, а не запускает второе.
   const validateCustomExpenses = () => {
-    let rows: ReturnType<typeof prepareCustomExpenses>
-    try { rows = prepareCustomExpenses(customExpenses) }
+    try { return prepareCustomExpenses(customExpenses) }
     catch { throw new Error(tr('mg.customExpenseInvalid')) }
-    if (openDebts.some(debt => selectedDebtIds.has(debt.id) && debt.isCustom && debt.shiftId === shift?.id)) {
-      throw new Error(tr('mg.customDebtChanged'))
-    }
-    return rows
   }
 
   const persistShift = (sh = shift, dateForInk = currentDate): Promise<number | undefined> => {
@@ -425,187 +383,61 @@ function ManagerApp({ restaurantId }: { restaurantId: string }) {
     return p
   }
 
+  // Вся запись — одна транзакция базы (save_shift): здесь только собираем форму.
   const persistShiftOnce = async (sh: NonNullable<typeof shift>, dateForInk: Date) => {
-    const preparedCustom = validateCustomExpenses()
-    // До любых записей: долг мог быть погашен/изменён с другого устройства.
-    const chosenDebts = eligibleDebts.filter(d => selectedDebtIds.has(d.id))
-    if (chosenDebts.length > 0) {
-      const { data: fresh, error: staleErr } = await db.from('shift_expenses').select('id, amount, is_paid, paid_shift_id').in('id', chosenDebts.map(d => d.id))
-      if (staleErr) throw new Error(staleErr.message)
-      if (hasStaleDebt(chosenDebts, fresh || [], sh.id)) {
-        setSelectedDebtIds(new Set())
-        await loadOpenDebts()
-        throw new Error(tr('mg.debtStale'))
+    const custom = validateCustomExpenses()
+    const { inc, card, ink } = calc()
+    const num = (v: string | undefined) => round2(parseFloat(v || '0') || 0)
+    const rows = [
+      ...categories.map(c => ({ category_id: c.id, amount: num(catAmounts[c.id]), note: catNotes[c.id] || '', unpaid: !!catUnpaid[c.id] })),
+      ...employees.map(e => ({ employee_id: e.id, amount: num(empExtras[e.id]), unpaid: !!empUnpaid[e.id] })),
+    ].filter(r => r.amount > 0)
+    const debts = eligibleDebts.filter(d => selectedDebtIds.has(d.id)).map(d => {
+      const isSalary = !!(d.employeeId && d.note?.startsWith(SALPERIOD_PREFIX))
+      return {
+        id: d.id, amount: d.amount,
+        category_id: d.categoryId || null, category_name: d.categoryName || null,
+        employee_id: d.employeeId || null,
+        is_salary: isSalary,
+        salary_period: isSalary ? (d.note as string).slice(SALPERIOD_PREFIX.length) : null,
+        salary_note: tr('an.debtSettleNote'),
+        expense_note: `${tr('an.debtSettleNote')} (${d.date})`,
       }
-    }
-    const customValues = preparedCustom.filter(row => !selectedDebtIds.has(row.id)).map(row => ({
-      ...row, shift_id: sh.id, restaurant_id: restaurantId, category_id: null, employee_id: null,
-    }))
-    const keptCustomIds = new Set(customValues.map(row => row.id))
-    // A stale draft must not reopen or overwrite a debt settled on another device.
-    const loadedById = new Map(loadedCustomExpenses.map(row => [row.id.toLowerCase(), row]))
-    const customIds = [...new Set([...loadedById.keys(), ...keptCustomIds])]
-    const liveCustomIds = new Set<string>()
-    {
-      const { data: freshRows, error: freshError } = await db.from('shift_expenses')
-        .select('id, shift_id, is_custom, paid_shift_id, is_paid, category_id, employee_id, category_name, amount, note')
-        .eq('shift_id', sh.id).eq('is_custom', true)
-      if (freshError) throw new Error(freshError.message)
-      // A different device may have added a custom expense since this form loaded.
-      // Preserve its ledger row and refuse to replace the shift total with a partial snapshot.
-      const liveCustom = splitShiftExpenses(freshRows || [], sh.id, new Set(categories.map(row => row.id)), new Set(employees.map(row => row.id)), true).customExpenses
-      if (liveCustom.some(row => !loadedById.has(row.id.toLowerCase()) && !keptCustomIds.has(row.id.toLowerCase()))) {
-        throw new Error(tr('mg.customExpenseStale'))
-      }
-      const freshById = new Map((freshRows || []).map((row: { id: string }) => [row.id.toLowerCase(), row]))
-      for (const id of customIds) {
-        const original = loadedById.get(id)
-        const fresh = freshById.get(id) as {
-          shift_id: string; is_custom: boolean; paid_shift_id?: string | null; is_paid?: boolean | null;
-          category_id?: string | null; employee_id?: string | null; category_name?: string; amount?: number; note?: string | null
-        } | undefined
-        if (!fresh) {
-          if (original && keptCustomIds.has(id)) throw new Error(tr('mg.customExpenseStale'))
-          continue // A previous deletion may have succeeded before its response was lost.
-        }
-        liveCustomIds.add(id)
-        const desired = customValues.find(row => row.id === id)
-        const matchesOriginal = original && (fresh.is_paid !== false) === !original.unpaid
-          && Number(fresh.amount) === (parseExpenseCents(original.amount) || 0) / 100
-          && fresh.category_name === original.name && (fresh.note || '') === (original.note || '')
-        const matchesDesired = desired && (fresh.is_paid !== false) === desired.is_paid
-          && Number(fresh.amount) === desired.amount && fresh.category_name === desired.category_name
-          && (fresh.note || '') === desired.note
-        if (fresh.shift_id !== sh.id || fresh.is_custom !== true || !!fresh.paid_shift_id || !!fresh.category_id || !!fresh.employee_id
-          || (!matchesOriginal && !matchesDesired)) throw new Error(tr('mg.customExpenseStale'))
-      }
-    }
-    // Keep stable IDs across retries. A rejected custom write must precede cash/settlement writes.
-    if (customValues.length > 0) {
-      const { error: customErr } = await db.from('shift_expenses').upsert(customValues, { onConflict: 'restaurant_id,id' })
-      if (customErr) throw new Error(customErr.message)
-    }
-    const droppedCustomIds = [...loadedById.keys()].filter(id => !keptCustomIds.has(id) && liveCustomIds.has(id))
-    if (droppedCustomIds.length > 0) {
-      const { data: deleted, error: deleteError } = await db.from('shift_expenses').delete()
-        .in('id', droppedCustomIds).eq('shift_id', sh.id).eq('is_custom', true).is('paid_shift_id', null).select('id')
-      if (deleteError) throw new Error(deleteError.message)
-      if ((deleted || []).length !== droppedCustomIds.length) throw new Error(tr('mg.customExpenseStale'))
-    }
-    setLoadedCustomExpenses(customValues.map(row => ({
-      id: row.id, name: row.category_name, amount: String(row.amount), unpaid: !row.is_paid, note: row.note,
-    })))
-    const { inc, card, ink, totalExp, balance } = calc()
-
-    // Погашение долгов — ПЕРВЫМ, до чтения/удаления старых расходов (C3, аудит 2026-08-13/15):
-    // если сам погашаемый долг был создан СЕГОДНЯ (shift_id == текущей смене), исходная строка
-    // на момент ниже ещё не имела paid_shift_id — попадала в oldExpenses и УДАЛЯЛАСЬ, из-за чего
-    // update «пометить оплаченным» ниже гарантированно бил по уже удалённой строке (не race, а
-    // строгий порядок — было хуже, чем на iOS). Теперь paid_shift_id уже проставлен к моменту
-    // чтения oldExpenses, и фильтр там же (!e.paid_shift_id) естественно её не тронет.
-    await persistDebtSettlements(sh.id, fmtDate(dateForInk))
-
-    // Смена/расходы/инкассация/прогулы трогают разные таблицы и не зависят друг от друга —
-    // параллельно, как в iOS ManagerView.persist (аудит скорости 2026-10-26: раньше 7-8
-    // последовательных запросов на одно сохранение). Порядок ВНУТРИ цепочек не меняется.
-    // db.from не бросает исключений — ошибку надо проверять явно, иначе ввод молча теряется
-    // (например, если миграция features-2026-06 не применена и колонки income_card нет).
-    const shiftP = db.from('shifts').update({ income: inc, income_card: card, inkassation: ink, total_expense: totalExp, closing_balance: balance }).eq('id', sh.id)
-      .then(({ error: upErr }) => { if (upErr) throw new Error(upErr.message) })
-
-    const expensesP = (async () => {
-
-    // paid_shift_id != null — строка управляется экраном «Долги» (Analytics), не трогаем.
-    // Удаляем только строки, которыми владеет форма (lib/shiftForm.ts) — по свежему чтению,
-    // не по снэпшоту loadDay: ЗП-долги и строки уволенных/выключенных остаются нетронутыми.
-    const { data: oldExpensesAll, error: oldExpErr } = await db.from('shift_expenses').select('id, category_id, category_name, employee_id, amount, note, is_paid, paid_shift_id, is_custom').eq('shift_id', sh.id).order('created_at').order('id')
-    if (oldExpErr) throw new Error(oldExpErr.message)
-    const oldExpenses = splitShiftExpenses(oldExpensesAll || [], sh.id, new Set(categories.map(c => c.id)), new Set(employees.map(e => e.id))).ownedIds.map(id => ({ id }))
-    const inserts: any[] = []
-    categories.forEach(c => {
-      const amt = parseFloat(catAmounts[c.id] || '0')
-      if (amt > 0) inserts.push({ shift_id: sh.id, restaurant_id: restaurantId, category_id: c.id, category_name: c.name, amount: amt, note: catNotes[c.id] || '', is_paid: !catUnpaid[c.id] })
     })
-    employees.forEach(emp => {
-      const extra = parseFloat(empExtras[emp.id] || '0')
-      if (extra > 0) inserts.push({ shift_id: sh.id, restaurant_id: restaurantId, employee_id: emp.id, category_name: emp.name + ' (экстра)', amount: extra, is_paid: !empUnpaid[emp.id] })
+    const loaded = sh as typeof sh & { income_card?: number }
+    const { result, error } = await saveShiftAtomic(db, saveAttempt, sh.id, {
+      expected: { income: loaded.income || 0, income_card: loaded.income_card || 0, inkassation: loaded.inkassation || 0 },
+      income: inc, income_card: card, inkassation: ink,
+      seen: formRows.current.seen.map(r => ({ id: r.id, amount: r.amount, is_paid: r.is_paid, category_name: r.category_name, note: r.note })),
+      replace_ids: formRows.current.owned,
+      rows,
+      custom: custom.map(r => ({ id: r.id, name: r.category_name, amount: r.amount, unpaid: !r.is_paid, note: r.note })),
+      debts,
+      ink_expense_delta: round2((parseFloat(inkExpense) || 0) - (parseFloat(loadedInkExpense) || 0)),
+      ink_reason: inkReason, ink_loaded_reason: loadedInkReason,
     })
-    if (inserts.length > 0) {
-      const { error: insErr } = await db.from('shift_expenses').insert(inserts)
-      if (insErr) throw new Error(insErr.message)
+    if (error?.code === 'MS001') { // смену изменили не мы — показываем свежие данные
+      await loadDay(restaurantId, dateForInk, employees, categories)
+      await loadOpenDebts()
+      throw new Error(tr('mg.shiftChanged'))
     }
-    if (oldExpenses.length > 0) {
-      // Ошибку удаления не глотаем: иначе старые строки остаются рядом с новыми, и расход дня
-      // в Аналитике удваивается до следующего сохранения (аудит 2026-09-27).
-      const { error: delErr } = await db.from('shift_expenses').delete().in('id', oldExpenses.map(e => e.id))
-      if (delErr) throw new Error(delErr.message)
-    }
-    })()
-
-    const inkP = (async () => {
-    // Inkassation — UPDATE по id вместо delete+insert (A2, аудит 2026-08-09): раньше окно
-    // между delete и insert теряло инкассацию при обрыве сети, а сам delete+insert затирал
-    // expense/reason значениями, загруженными в форму ДО того как Analytics (addAdvance/
-    // settleDebt) успел дописать туда свою правку. Delta-merge: переносим то, что поменял
-    // МЕНЕДЖЕР (разницу между текущим полем формы и снэпшотом на момент loadDay), поверх
-    // АКТУАЛЬНОГО значения в БД на момент сохранения.
-    const { data: curInkList, error: curInkErr } = await db.from('inkassations').select('id, expense, salary, reason').eq('shift_id', sh.id).limit(1)
-    if (curInkErr) throw new Error(curInkErr.message)
-    const curInk = Array.isArray(curInkList) ? curInkList[0] : curInkList
-    const finalExpense = (curInk?.expense || 0) + ((parseFloat(inkExpense) || 0) - (parseFloat(loadedInkExpense) || 0))
-    const curReason = curInk?.reason || ''
-    const finalReason = (curReason === loadedInkReason || inkReason !== loadedInkReason) ? inkReason : curReason
-    // salary — выплата ЗП из инкассации (пишется отдельно, tabs-salary.tsx savePayment): строка
-    // только с ней (инкассация дня 0, расхода/причины нет) не «пустая» — иначе сохранение смены
-    // удаляло её вместе с списанием (потеря €1100, Владимир, SO, 2026-09-14).
-    const curSalary = curInk?.salary || 0
-    const finalTotal = ink - finalExpense - curSalary
-    if (ink > 0 || finalExpense !== 0 || finalReason || curSalary !== 0) {
-      const values = { restaurant_id: restaurantId, date: fmtDate(dateForInk), amount: ink, expense: finalExpense, reason: finalReason, total: finalTotal }
-      let { error: inkErr } = curInk
-        ? await db.from('inkassations').update(values).eq('id', curInk.id)
-        : await db.from('inkassations').insert({ shift_id: sh.id, ...values })
-      if (inkErr && !curInk) {
-        // unique(shift_id): строку успели создать параллельно (выплата ЗП/аванс, другое
-        // устройство) — переносим дельту менеджера поверх неё, второй строки не будет.
-        const { data: racedList } = await db.from('inkassations').select('id, expense, salary').eq('shift_id', sh.id).limit(1)
-        const raced = Array.isArray(racedList) ? racedList[0] : racedList
-        if (raced) {
-          const exp2 = (raced.expense || 0) + ((parseFloat(inkExpense) || 0) - (parseFloat(loadedInkExpense) || 0))
-          ;({ error: inkErr } = await db.from('inkassations').update({ ...values, expense: exp2, total: ink - exp2 - (raced.salary || 0) }).eq('id', raced.id))
-        }
-      }
-      if (inkErr) throw new Error(inkErr.message)
-    } else if (curInk) {
-      await db.from('inkassations').delete().eq('id', curInk.id)
-    }
-    setLoadedInkExpense(inkExpense); setLoadedInkReason(inkReason)
-    })()
-
-    // Подтверждаем прогулы этого дня: привязываем к смене и снимаем «черновик» (source→manager),
-    // только теперь авто-прогулы попадают в вычет ЗП в Аналитике. До миграции колонки source нет —
-    // db.from вернёт ошибку молча (не бросит), что безвредно: авто-прогулов до миграции не бывает.
-    const absP = db.from('shift_absences').update({ shift_id: sh.id, source: 'manager' }).eq('restaurant_id', restaurantId).eq('date', fmtDate(dateForInk))
-
-    await Promise.all([shiftP, expensesP, inkP, absP])
-    setAutoAbsences(new Set())
-
-    if (selectedDebtIds.size > 0) {
-      const settledIds = selectedDebtIds
-      setCustomExpenses(rows => rows.filter(row => !settledIds.has(row.id)))
-      // A1 (аудит 2026-08-15): бампаем settledTodayTotal ДО очистки selectedDebtIds — иначе
-      // calc() на следующий рендер теряет только что погашенную сумму (debtSettleTotal() уже
-      // 0), баланс кассы на экране на секунду показывает больше, чем реально сохранено в БД.
-      const settledAmt = debtSettleTotal()
-      setOpenDebts(ds => ds.filter(d => !settledIds.has(d.id)))
+    if (error?.code === 'MS002') {
       setSelectedDebtIds(new Set())
-      setSettledTodayTotal(prev => prev + settledAmt)
+      await loadOpenDebts()
+      throw new Error(tr('mg.debtStale'))
     }
+    if (error) throw new Error(error.message)
 
-    setShift({ ...sh, income: inc, inkassation: ink, total_expense: totalExp, closing_balance: balance })
-    // Refresh custom debts added/paid with the row toggle before navigating to another shift.
+    applyRows(result.rows, sh.id, categories, employees)
+    const nextExpense = (result.ink?.expense || 0) > 0 ? String(result.ink?.expense) : ''
+    const nextReason = result.ink?.reason || ''
+    setInkExpense(nextExpense); setInkReason(nextReason)
+    setLoadedInkExpense(nextExpense); setLoadedInkReason(nextReason)
+    setAutoAbsences(new Set())
+    setSelectedDebtIds(new Set())
+    setShift({ ...sh, income: inc, income_card: card, inkassation: ink, opening_balance: result.opening_balance, total_expense: result.total_expense, closing_balance: result.closing_balance } as typeof sh)
     await loadOpenDebts()
-    return balance
+    return result.closing_balance
   }
 
   // Мягкий гейт (не блокирует): если чек-лист закрытия смены на сегодня не пройден целиком,

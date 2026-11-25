@@ -15,7 +15,35 @@ import Foundation
         "shift_checklists": [], "shift_checklist_completions": [], "hookah_sales": [],
     ]
 
+    private static func failOnce() throws {
+        guard !failedOnce, ProcessInfo.processInfo.environment["MISE_DEMO_SHIFT_SAVE"] == "fail-once" else { return }
+        failedOnce = true
+        throw APIError.http(503, "Временная ошибка сохранения")
+    }
+
     static func request(_ payload: [String: Any]) async throws -> Data {
+        if enabled, payload["op"] as? String == "rpc", payload["fn"] as? String == "save_shift",
+           let p = (payload["args"] as? [String: Any])?["p"] as? [String: Any] {
+            try await Task.sleep(for: .milliseconds(120))
+            try failOnce()
+            func rows(_ key: String) -> [[String: Any]] { p[key] as? [[String: Any]] ?? [] }
+            func amount(_ row: [String: Any]) -> Double { row["amount"] as? Double ?? 0 }
+            let saved = (rows("rows") + rows("custom")).map { row -> [String: Any] in
+                var out = row
+                out["id"] = row["id"] ?? UUID().uuidString
+                out["is_custom"] = row["name"] != nil
+                out["category_name"] = row["name"] ?? "demo"
+                out["is_paid"] = !(row["unpaid"] as? Bool ?? false)
+                return out
+            }
+            Self.rows["shift_expenses"] = saved
+            let total = saved.filter { $0["is_paid"] as? Bool == true }.map(amount).reduce(p["inkassation"] as? Double ?? 0, +)
+            let closing = 200 + (p["income"] as? Double ?? 0) - total
+            print("[ShiftSaveFixture] save_shift")
+            return try JSONSerialization.data(withJSONObject: ["data": [
+                "opening_balance": 200, "total_expense": total, "closing_balance": closing, "rows": saved,
+            ] as [String: Any]])
+        }
         guard enabled, let table = payload["table"] as? String, let current = rows[table],
               let op = payload["op"] as? String, ["select", "insert", "upsert", "update", "delete"].contains(op) else {
             throw APIError.http(-1009, nil)
@@ -23,11 +51,6 @@ import Foundation
         let started = ContinuousClock.now
         // A deliberately slow optional read makes accidental UI coupling observable.
         try await Task.sleep(for: .milliseconds(table == "hookah_sales" ? 8_000 : 120))
-        if table == "shift_expenses", op == "insert", !failedOnce,
-           ProcessInfo.processInfo.environment["MISE_DEMO_SHIFT_SAVE"] == "fail-once" {
-            failedOnce = true
-            throw APIError.http(503, "Временная ошибка сохранения")
-        }
         let filters = payload["filters"] as? [[String: Any]] ?? []
         func matches(_ row: [String: Any]) -> Bool {
             filters.allSatisfy { filter in

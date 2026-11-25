@@ -30,17 +30,6 @@ struct ShiftFormSplit {
     var settledTodayTotal: Double = 0
 }
 
-/// Выбранные долги устарели: погашены другой сменой, удалены или сумма изменена с другого
-/// устройства (settle_debts такие пропускает, а касса уже посчитана с ними). Порт hasStaleDebt.
-func hasStaleDebt(_ selected: [(id: String, amount: Double)], fresh: [ShiftExpense], shiftId: String) -> Bool {
-    let byId = Dictionary(fresh.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-    return selected.contains { d in
-        guard let r = byId[d.id], (r.amount ?? 0) == d.amount else { return true }
-        if let paid = r.paid_shift_id { return paid != shiftId }
-        return r.is_paid != false
-    }
-}
-
 func splitShiftExpenses(_ rows: [ShiftExpense], shiftId: String,
                         activeCategoryIds: Set<String>, activeEmployeeIds: Set<String>,
                         includeCustom: Bool = false) -> ShiftFormSplit {

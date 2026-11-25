@@ -102,6 +102,7 @@ const RPC_POLICY: Record<string, { write: AppId[]; restaurantArg: string }> = {
   shift_expense_name_suggestions: { write: ['manager', 'analytics'], restaurantArg: 'p_restaurant_id' },
   increment_tobacco_stock: { write: ['stash'], restaurantArg: 'p_restaurant_id' },
   settle_debts: { write: ['manager'], restaurantArg: 'p_restaurant_id' },
+  save_shift: { write: ['manager'], restaurantArg: 'p_restaurant_id' },
 }
 
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'like', 'ilike'])
@@ -124,6 +125,8 @@ const DB_MAX_ROWS = 20_000
 // message so table/column/constraint names and value details don't reach the client
 // (audit 2026-08-15, block-G #2). Full error is always logged server-side below.
 const PG_ERROR_MESSAGES: Record<string, string> = {
+  MS001: 'shift_changed', // save_shift: смену изменили не мы
+  MS002: 'debt_changed',
   '23505': 'Duplicate entry',
   '23503': 'Referenced record not found',
   '23502': 'Missing required field',
@@ -263,8 +266,9 @@ export async function POST(req: NextRequest) {
     // 'people'-приложением, не 'manager') — сохраняем ту же границу здесь: менеджер без
     // доступа к People не должен получить возможность создавать записи о выплате ЗП через
     // этот RPC только потому, что он умеет settle_debts для обычных expense-долгов.
-    if (fn === 'settle_debts') {
-      const debts = Array.isArray((args as any)?.p_debts) ? (args as any).p_debts : []
+    if (fn === 'settle_debts' || fn === 'save_shift') {
+      const raw = fn === 'save_shift' ? (args as any)?.p?.debts : (args as any)?.p_debts
+      const debts = Array.isArray(raw) ? raw : []
       const hasSalary = debts.some((d: any) => d && d.is_salary)
       if (hasSalary && !authorized(caller, ['people'])) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -314,7 +318,7 @@ export async function POST(req: NextRequest) {
     // Off the critical path (Next.js `after`): the actor lookup + audit insert added 1-2
     // sequential Supabase round-trips to every settle_debts call, felt as sluggish buttons.
     // Logging must never delay the response the client is waiting on.
-    if (fn === 'settle_debts') after(() => auditRpc(admin, caller, fn, safeArgs))
+    if (fn === 'settle_debts' || fn === 'save_shift') after(() => auditRpc(admin, caller, fn, safeArgs))
     return NextResponse.json({ data })
   }
 

@@ -25,7 +25,9 @@ final class ManagerModel {
     var catNotes: [String: String] = [:]
     var customExpenses: [CustomExpenseDraft] = []
     var customExpenseError: String?
-    private var loadedCustomExpenses: [String: CustomExpenseDraft] = [:]
+    // Строки смены, какими их видит форма (save_shift сверяет их с базой), и незавершённая попытка.
+    private var formRows: (seen: [ShiftExpense], owned: [String]) = ([], [])
+    private var saveAttempt: (key: String, opId: String)?
     // «В долг» (Б, 2026-08-09): расход вписан, но наличных в кассе не хватило — не уменьшает
     // c.catTotal/empExtraTotal сегодня (кассы физически не покидал), но всё равно попадает в
     // shift_expenses с реальной датой (is_paid=false) — Analytics уже суммирует по датам,
@@ -51,7 +53,7 @@ final class ManagerModel {
     // Долг самой смены не погашается ею же (двойной счёт) — вместо этого снимается «в долг».
     var selectableDebts: [DebtRow] { openDebts.filter { $0.shiftId != shift?.id } }
     var debtSettleTotal: Double { selectableDebts.filter { selectedDebtIds.contains($0.id) }.reduce(0) { $0 + $1.amount } }
-    // Сумма долгов, УЖЕ погашенных сегодняшней сменой (persistDebtSettlements вставляет строку
+    // Сумма долгов, УЖЕ погашенных сегодняшней сменой (settle_debts вставляет строку
     // с paid_shift_id == shift_id самой этой смены) — loadDay исключает такие строки из
     // catAmounts/empExtras (см. ниже), поэтому без этого поля пересохранение того же дня
     // теряло сумму погашения из totalExp/closing_balance (A1, аудит 2026-08-13).
@@ -235,7 +237,7 @@ final class ManagerModel {
             income = ""; incomeCard = ""; inkSum = ""; inkExpense = ""; inkReason = ""
             loadedInkExpense = ""; loadedInkReason = ""
             catAmounts = [:]; catNotes = [:]; empExtras = [:]; absences = []; autoAbsences = []
-            customExpenses = []; loadedCustomExpenses = [:]
+            customExpenses = []; formRows = ([], [])
             catUnpaid = [:]; empUnpaid = [:]; settledTodayTotal = 0; unmanagedPaidTotal = 0
             return
         }
@@ -260,17 +262,7 @@ final class ManagerModel {
         guard gen == loadGen else { return }
         // Разбор строк смены — ShiftForm.swift (аудит 2026-09-27): settledTodayTotal — погашения
         // этой сменой; ЗП-долги, строки уволенных/выключенных — вне формы, не удаляются.
-        let split = splitShiftExpenses(exps, shiftId: shId,
-                                       activeCategoryIds: Set(categories.map(\.id)),
-                                       activeEmployeeIds: Set(employees.map(\.id)), includeCustom: true)
-        customExpenses = split.customExpenses
-        loadedCustomExpenses = Dictionary(uniqueKeysWithValues: split.customExpenses.map { ($0.id, $0) })
-        settledTodayTotal = split.settledTodayTotal
-        unmanagedPaidTotal = split.unmanagedPaidTotal
-        catAmounts = split.catAmounts.mapValues { trimNum(round2($0)) }
-        catNotes = split.catNotes
-        empExtras = split.empExtras.mapValues { trimNum(round2($0)) }
-        catUnpaid = split.catUnpaid; empUnpaid = split.empUnpaid
+        applyRows(exps, shiftId: shId)
 
         let inks = await inksTask
         await absencesTask
@@ -286,6 +278,21 @@ final class ManagerModel {
         // Черновик несохранённой формы — восстановить, только если смена ещё не сохранена
         // (locked == false); если уже сохранена (реальные данные из БД) — стереть как устаревший.
         if locked { clearDraft(dateStr) } else { restoreDraftIfAny(dateStr) }
+    }
+
+    /// Строки смены (из загрузки или ответа save_shift) — в поля формы.
+    private func applyRows(_ exps: [ShiftExpense], shiftId: String) {
+        let split = splitShiftExpenses(exps, shiftId: shiftId,
+                                       activeCategoryIds: Set(categories.map(\.id)),
+                                       activeEmployeeIds: Set(employees.map(\.id)), includeCustom: true)
+        formRows = (exps, split.ownedIds)
+        customExpenses = split.customExpenses
+        settledTodayTotal = split.settledTodayTotal
+        unmanagedPaidTotal = split.unmanagedPaidTotal
+        catAmounts = split.catAmounts.mapValues { trimNum(round2($0)) }
+        catNotes = split.catNotes
+        empExtras = split.empExtras.mapValues { trimNum(round2($0)) }
+        catUnpaid = split.catUnpaid; empUnpaid = split.empUnpaid
     }
 
     private func loadAbsences(_ dateStr: String, generation: Int? = nil) async {
@@ -416,19 +423,7 @@ final class ManagerModel {
 
     private func validatedCustomExpenses() throws -> [PreparedCustomExpense] {
         do {
-            guard !openDebts.contains(where: { $0.isCustom && $0.shiftId == shift?.id && selectedDebtIds.contains($0.id) }) else {
-                throw CustomExpenseValidationError.invalid
-            }
             let prepared = try prepareCustomExpenses(customExpenses)
-            for id in selectedDebtIds {
-                guard let original = loadedCustomExpenses[id] else { continue }
-                guard let current = customExpenses.first(where: { $0.id == id }),
-                      normalizeExpenseName(current.name) == normalizeExpenseName(original.name),
-                      parseExpenseCents(current.amount) == parseExpenseCents(original.amount),
-                      current.unpaid == original.unpaid, current.note == original.note else {
-                    throw CustomExpenseValidationError.invalid
-                }
-            }
             customExpenseError = nil
             return prepared
         } catch {
@@ -460,195 +455,6 @@ final class ManagerModel {
         }.prefix(20).map { $0 }
     }
 
-    private func persistCustomExpenses(shiftId: String, custom: [PreparedCustomExpense]) async throws -> [ShiftExpense] {
-        let fresh = try await DB.from("shift_expenses").fresh()
-            .select("id, employee_id, category_id, category_name, amount, note, is_paid, paid_shift_id, is_custom")
-            .eq("shift_id", shiftId).order("created_at").order("id").list(ShiftExpense.self)
-        let customRows = fresh.filter { $0.is_custom == true }
-        let byId = Dictionary(uniqueKeysWithValues: customRows.map { ($0.id.lowercased(), $0) })
-        let desiredIds = Set(custom.map { $0.id.lowercased() })
-        let knownIds = Set(loadedCustomExpenses.keys)
-        func matches(_ current: ShiftExpense, _ name: String, _ amount: Double, _ unpaid: Bool, _ note: String) -> Bool {
-            current.paid_shift_id == nil && current.category_id == nil && current.employee_id == nil
-                && normalizeExpenseName(current.category_name ?? "") == normalizeExpenseName(name)
-                && round2(current.amount ?? 0) == round2(amount)
-                && (current.is_paid == false) == unpaid && (current.note ?? "") == note
-        }
-        let desiredById = Dictionary(uniqueKeysWithValues: custom.map { ($0.id.lowercased(), $0) })
-        var valid = true
-        for (id, snapshot) in loadedCustomExpenses {
-            guard let current = byId[id] else {
-                // A preceding attempt may have deleted the row before a later write failed.
-                if !desiredIds.contains(id) { continue }
-                valid = false; break
-            }
-            let originalMatches = matches(current, snapshot.name, Double(parseExpenseCents(snapshot.amount) ?? 0) / 100,
-                                          snapshot.unpaid, snapshot.note)
-            let desiredMatches = desiredById[id].map { matches(current, $0.name, $0.amount, $0.unpaid, $0.note) } ?? false
-            guard originalMatches || desiredMatches else { valid = false; break }
-        }
-        for current in customRows where !knownIds.contains(current.id.lowercased())
-            && current.paid_shift_id == nil && current.category_id == nil && current.employee_id == nil
-            && !normalizeExpenseName(current.category_name ?? "").isEmpty
-            && !(current.note?.hasPrefix(Self.salperiodPrefix) ?? false) {
-            // New local IDs may be present after a lost response. Unseen remote rows
-            // require a reload so their amounts cannot be omitted from shift totals.
-            guard desiredIds.contains(current.id.lowercased()), current.paid_shift_id == nil,
-                  current.category_id == nil, current.employee_id == nil else { valid = false; break }
-        }
-        guard valid else {
-            throw NSError(domain: "CustomExpense", code: 2,
-                          userInfo: [NSLocalizedDescriptionKey: t("mg.customExpenseChanged")])
-        }
-        if !custom.isEmpty {
-            try await DB.from("shift_expenses").upsert(custom.map { $0.values(restaurantId: rid, shiftId: shiftId) },
-                                                       onConflict: "restaurant_id,id").run()
-        }
-        let removed = knownIds.subtracting(desiredIds)
-        if !removed.isEmpty { try await DB.from("shift_expenses").delete().in("id", Array(removed)).run() }
-        // Advance the ledger snapshot now: later template/shift failures remain retryable.
-        loadedCustomExpenses = Dictionary(uniqueKeysWithValues: custom.map {
-            ($0.id.lowercased(), CustomExpenseDraft(id: $0.id, name: $0.name, amount: String($0.amount), unpaid: $0.unpaid, note: $0.note))
-        })
-        return fresh
-    }
-
-    // Расходы: СНАЧАЛА вставить новые, удалить старые по id — ПОТОМ.
-    // Старая схема delete→insert при обрыве сети между шагами молча стирала
-    // все расходы смены. Если теперь упадёт delete — будут видимые дубли,
-    // которые следующее успешное сохранение само подчистит (старые id уже собраны).
-    private func persistExpenses(shiftId: String, unchangedSnapshot: [ShiftExpense]? = nil) async throws {
-        // paid_shift_id != nil — строка управляется экраном «Долги» (Analytics), не формой
-        // закрытия смены: удалять/пересоздавать её здесь нельзя (см. loadDay).
-        // Удаляем только строки, которыми владеет форма (ShiftForm.swift) — по свежему чтению:
-        // ЗП-долги и строки уволенных/выключенных категорий остаются нетронутыми (аудит 2026-09-27).
-        let fresh: [ShiftExpense]
-        if let unchangedSnapshot { fresh = unchangedSnapshot }
-        else {
-            fresh = try await DB.from("shift_expenses").fresh().select("id, employee_id, category_id, category_name, amount, note, is_paid, paid_shift_id, is_custom")
-                .eq("shift_id", shiftId).order("created_at").order("id").list(ShiftExpense.self)
-        }
-        let oldIds = splitShiftExpenses(fresh, shiftId: shiftId,
-                                        activeCategoryIds: Set(categories.map(\.id)),
-                                        activeEmployeeIds: Set(employees.map(\.id))).ownedIds
-        var catInserts: [[String: Any]] = []
-        for cat in categories {
-            let amt = num(catAmounts[cat.id] ?? "")
-            if amt > 0 {
-                catInserts.append(["shift_id": shiftId, "restaurant_id": rid, "category_id": cat.id,
-                                   "category_name": cat.name, "amount": amt, "note": catNotes[cat.id] ?? "",
-                                   "is_paid": catUnpaid[cat.id] != true])
-            }
-        }
-        // Same ledger and schema: one insert for categories and employee extras.
-        // A failed batch must still leave every prior owned row in place.
-        var empInserts: [[String: Any]] = []
-        for emp in employees {
-            let extra = num(empExtras[emp.id] ?? "")
-            if extra > 0 {
-                empInserts.append(["shift_id": shiftId, "restaurant_id": rid, "employee_id": emp.id,
-                                   "category_name": emp.name + " (экстра)", "amount": extra,
-                                   "is_paid": empUnpaid[emp.id] != true])
-            }
-        }
-        let inserts = catInserts + empInserts
-        if !inserts.isEmpty { try await DB.from("shift_expenses").insert(inserts).run() }
-        if !oldIds.isEmpty {
-            try await DB.from("shift_expenses").delete().in("id", oldIds).run()
-        }
-    }
-
-    // UPDATE по id вместо delete+insert (A2, аудит 2026-08-09) — раньше окно между delete и
-    // insert теряло инкассацию при обрыве сети, а сам delete+insert затирал expense/reason
-    // значениями, загруженными в форму ДО того как Analytics (addAdvance/settleDebt) успел
-    // дописать туда свою правку. Delta-merge: переносим именно то, что поменял МЕНЕДЖЕР
-    // (разницу между текущим полем формы и снэпшотом на момент loadDay), поверх АКТУАЛЬНОГО
-    // значения в БД на момент сохранения — а не поверх устаревшего снэпшота.
-    private func persistInkassation(shiftId: String, _ c: Calc) async throws {
-        struct InkRow: Codable, Sendable { let id: String; let expense: Double?; let salary: Double?; let reason: String? }
-        let current = try await DB.from("inkassations").select("id, expense, salary, reason")
-            .eq("shift_id", shiftId).limit(1).list(InkRow.self).first
-
-        let finalExpense = (current?.expense ?? 0) + (num(inkExpense) - num(loadedInkExpense))
-        let currentReason = current?.reason ?? ""
-        // Если ни менеджер, ни параллельная запись не трогали reason — берём как есть; если
-        // менеджер сам не редактировал поле, а в БД оно уже другое — не затираем чужую правку.
-        let finalReason = (currentReason == loadedInkReason || inkReason != loadedInkReason)
-            ? inkReason : currentReason
-        // salary — выплата ЗП из инкассации (ManagerSalary.markSalaryPaid): строка только с ней
-        // (инкассация дня 0, расхода/причины нет) не «пустая» — иначе сохранение смены удаляло
-        // её вместе со списанием (потеря €1100, Владимир, SO, 2026-09-14).
-        let curSalary = current?.salary ?? 0
-        let finalTotal = c.ink - finalExpense - curSalary
-
-        guard c.ink > 0 || finalExpense != 0 || !finalReason.isEmpty || curSalary != 0 else {
-            if let id = current?.id { try await DB.from("inkassations").delete().eq("id", id).run() }
-            return
-        }
-        let values: [String: Any] = [
-            "restaurant_id": rid, "date": key(currentDate),
-            "amount": c.ink, "expense": finalExpense, "reason": finalReason, "total": finalTotal,
-        ]
-        if let id = current?.id {
-            try await DB.from("inkassations").update(values).eq("id", id).run()
-        } else {
-            do {
-                try await DB.from("inkassations").insert(values.merging(["shift_id": shiftId]) { a, _ in a }).run()
-            } catch {
-                // unique(shift_id): строку успели создать параллельно (выплата ЗП/аванс, другое
-                // устройство) — переносим дельту менеджера поверх неё, второй строки не будет.
-                guard let raced = try? await DB.from("inkassations").select("id, expense, salary, reason")
-                    .eq("shift_id", shiftId).limit(1).list(InkRow.self).first else { throw error }
-                let exp2 = (raced.expense ?? 0) + (num(inkExpense) - num(loadedInkExpense))
-                var v2 = values
-                v2["expense"] = exp2
-                v2["total"] = c.ink - exp2 - (raced.salary ?? 0)
-                try await DB.from("inkassations").update(v2).eq("id", raced.id).run()
-            }
-        }
-    }
-
-    // Погашение отмеченных долгов — прямо здесь, в текущей смене (не отдельным действием
-    // в Analytics): 1) новая строка расхода датой ТЕКУЩЕЙ смены (считается в кассе/отчётах
-    // именно сегодня) — вставляем ПЕРВОЙ, чтобы при сбое сети старый долг остался открытым
-    // (видимо и безопасно), а не тихо потерялся; 2) исходная строка помечается «оплачено» —
-    // статус для истории, paid_shift_id ≠ её собственный shift_id → навсегда исключена из
-    // подсчёта своего родного дня (Analytics.countsInRollup).
-    // Один RPC вместо 2-3 независимых запросов (MISE-002, аудит 2026-08-28): раньше сбой сети
-    // между insert новой строки и update исходной оставлял систему в несогласованном
-    // состоянии — settle_debts (docs/migrations/atomic-debt-settlement-2026-08.sql) делает
-    // всё в одной транзакции. Тот же RPC, что и на вебе (app/manager/page.tsx). ЗП-долг
-    // определяется по префиксу note (MISE-001, аудит 2026-08-28: iOS теперь тоже
-    // материализует его через ManagerSalaryModel.syncLedger, той же строкой shift_expenses,
-    // что и обычные expense-долги — так это уже видно здесь, без отдельного UI).
-    private static let salperiodPrefix = "SALPERIOD:"
-    private func persistDebtSettlements(shiftId: String) async throws {
-        let ids = selectedDebtIds
-        guard !ids.isEmpty else { return }
-        let selected = selectableDebts.filter { ids.contains($0.id) }
-        guard !selected.isEmpty else { return }
-        let debts: [[String: Any]] = selected.map { d in
-            let isSalary = d.employeeId != nil && (d.note?.hasPrefix(Self.salperiodPrefix) ?? false)
-            var row: [String: Any] = [
-                "id": d.id, "amount": d.amount,
-                "category_id": d.categoryId ?? NSNull(), "category_name": d.categoryName,
-                "employee_id": d.employeeId ?? NSNull(),
-                "is_salary": isSalary,
-                "expense_note": t("an.debtSettleNote") + " (\(d.date))",
-            ]
-            if isSalary {
-                row["salary_period"] = String((d.note ?? "").dropFirst(Self.salperiodPrefix.count))
-                row["salary_note"] = t("an.debtSettleNote")
-            }
-            return row
-        }
-        try await DB.rpc(
-            "settle_debts",
-            args: ["p_shift_id": shiftId, "p_date_str": key(currentDate), "p_debts": debts],
-            cacheInvalidate: ["shift_expenses", "salary_payments"]
-        )
-    }
-
     // Параллельный вызов для той же смены (двойной тап, «Сохранить» + автосейв при смене даты)
     // присоединяется к уже идущему сохранению, а не запускает второе: два прогона читали один
     // и тот же набор старых расходов, оба вставляли новый — набор задваивался (аудит 2026-10-26).
@@ -665,69 +471,94 @@ final class ManagerModel {
         return try await task.value
     }
 
-    private func persistOnce(_ sh: Shift) async throws -> Double? {
-        // Validate every custom row before debt settlement or any other financial write.
-        let preparedCustom = try validatedCustomExpenses()
-        // До любых записей: долг мог быть погашен/изменён с другого устройства.
-        let chosenDebts = selectableDebts.filter { selectedDebtIds.contains($0.id) }
-        if !chosenDebts.isEmpty {
-            let fresh = try await DB.from("shift_expenses").fresh()
-                .select("id, employee_id, category_id, category_name, amount, note, shift_id, is_paid, paid_shift_id")
-                .in("id", chosenDebts.map(\.id)).list(ShiftExpense.self)
-            if hasStaleDebt(chosenDebts.map { ($0.id, $0.amount) }, fresh: fresh, shiftId: sh.id) {
-                selectedDebtIds = []
-                await loadOpenDebts()
-                throw NSError(domain: "DebtStale", code: 1, userInfo: [NSLocalizedDescriptionKey: t("mg.debtStale")])
+    nonisolated struct ShiftSaveResult: Decodable, Sendable {
+        nonisolated struct Ink: Decodable, Sendable { let expense: Double?; let reason: String? }
+        let opening_balance: Double; let total_expense: Double; let closing_balance: Double
+        let rows: [ShiftExpense]; let ink: Ink?
+    }
+    private static let savedTables = ["shifts", "shift_expenses", "inkassations", "inkassation_balance", "shift_absences", "salary_payments"]
+
+    private func debtPayload() -> [[String: Any]] {
+        selectableDebts.filter { selectedDebtIds.contains($0.id) }.map { d in
+            let isSalary = d.employeeId != nil && (d.note?.hasPrefix(salperiodPrefix) ?? false)
+            var row: [String: Any] = [
+                "id": d.id, "amount": d.amount,
+                "category_id": d.categoryId ?? NSNull(), "category_name": d.categoryName,
+                "employee_id": d.employeeId ?? NSNull(),
+                "is_salary": isSalary,
+                "expense_note": t("an.debtSettleNote") + " (\(d.date))",
+            ]
+            if isSalary {
+                row["salary_period"] = String((d.note ?? "").dropFirst(salperiodPrefix.count))
+                row["salary_note"] = t("an.debtSettleNote")
             }
+            return row
         }
-        let selectedCustomIds = Set(preparedCustom.map(\.id)).intersection(selectedDebtIds)
+    }
+
+    // Вся запись — одна транзакция базы (save_shift, веб-паритет lib/shiftSave.ts): здесь
+    // только собираем форму. Повтор той же формы после сбоя идёт с тем же op_id.
+    private func persistOnce(_ sh: Shift) async throws -> Double? {
+        let custom = try validatedCustomExpenses()
         let c = calc
-        // Custom writes can be rejected by settlement guards. Finish them before
-        // updating the shift balance or starting the existing template save flow.
-        let unchangedLedger = preparedCustom.isEmpty && loadedCustomExpenses.isEmpty && selectedDebtIds.isEmpty
-        let preflight = try await persistCustomExpenses(shiftId: sh.id, custom: preparedCustom.filter { !selectedCustomIds.contains($0.id) })
-
-        // Погашение долгов — ПЕРВЫМ и ОТДЕЛЬНО от остального (C3, аудит 2026-08-13/15): если
-        // сам погашаемый долг был создан СЕГОДНЯ (shift_id == текущей смене), запуск параллельно
-        // с persistExpenses создавал race — persistExpenses мог удалить ту же строку по своему
-        // снэпшоту раньше, чем persistDebtSettlements успевал пометить её paid, и апдейт молча
-        // терялся (деньги не страдали, но исторический маркер «оплачено» на исходной строке —
-        // да). Settlement теперь всегда завершается ДО того как persistExpenses читает
-        // oldExpenses — к этому моменту paid_shift_id на исходной строке уже проставлен, так что
-        // persistExpenses естественным образом её не тронет (см. фильтр там же).
-        try await persistDebtSettlements(shiftId: sh.id)
-
-        // Смена/расходы/инкассация/прогулы трогают разные таблицы и не зависят друг от
-        // друга — параллелим, чтобы не ждать round-trip'ы подряд. Порядок ВНУТРИ каждой
-        // цепочки (например insert-перед-delete в расходах) не меняется.
-        async let shiftUpdate: () = DB.from("shifts").update([
-            "income": c.inc, "income_card": c.card, "inkassation": c.ink,
-            "total_expense": c.totalExp, "closing_balance": c.balance,
-        ]).eq("id", sh.id).run()
-        // With no custom/debt mutations there has been no ledger write since preflight.
-        // Mutation paths retain their fresh read AFTER settlement/custom writes.
-        async let expensesResult: () = persistExpenses(shiftId: sh.id, unchangedSnapshot: unchangedLedger ? preflight : nil)
-        async let inkResult: () = persistInkassation(shiftId: sh.id, c)
-        // best-effort: подтвердить прогулы дня (привязать к смене, снять авто-черновик)
-        async let absResult: Void = { _ = try? await DB.from("shift_absences").update(["shift_id": sh.id, "source": "manager"])
-            .eq("date", key(currentDate)).run() }()
-
-        try await shiftUpdate
-        try await expensesResult
-        try await inkResult
-        await absResult
-        autoAbsences = []
-        customExpenses.removeAll { selectedCustomIds.contains($0.id) }
-        if !selectedDebtIds.isEmpty {
-            // A1 (аудит 2026-08-15): бампаем settledTodayTotal ДО очистки selectedDebtIds —
-            // иначе calc на следующий рендер теряет только что погашенную сумму, баланс кассы
-            // на экране на секунду показывает больше, чем реально сохранено в БД.
-            settledTodayTotal += debtSettleTotal
-            openDebts.removeAll { selectedDebtIds.contains($0.id) }
-            selectedDebtIds = []
+        var rows: [[String: Any]] = []
+        for cat in categories {
+            let amt = round2(num(catAmounts[cat.id] ?? ""))
+            if amt > 0 { rows.append(["category_id": cat.id, "amount": amt, "note": catNotes[cat.id] ?? "", "unpaid": catUnpaid[cat.id] == true]) }
         }
-        clearDraft(key(currentDate))
-        return c.balance
+        for emp in employees {
+            let amt = round2(num(empExtras[emp.id] ?? ""))
+            if amt > 0 { rows.append(["employee_id": emp.id, "amount": amt, "unpaid": empUnpaid[emp.id] == true]) }
+        }
+        let seen: [[String: Any]] = formRows.seen.map {
+            ["id": $0.id, "amount": $0.amount ?? 0, "is_paid": $0.is_paid ?? true,
+             "category_name": $0.category_name ?? "", "note": $0.note ?? ""]
+        }
+        var payload: [String: Any] = [
+            "expected": ["income": sh.income ?? 0, "income_card": sh.income_card ?? 0, "inkassation": sh.inkassation ?? 0],
+            "income": c.inc, "income_card": c.card, "inkassation": c.ink,
+            "seen": seen, "replace_ids": formRows.owned, "rows": rows,
+            "custom": custom.map { ["id": $0.id, "name": $0.name, "amount": $0.amount, "unpaid": $0.unpaid, "note": $0.note] as [String: Any] },
+            "debts": debtPayload(),
+            "ink_expense_delta": round2(num(inkExpense) - num(loadedInkExpense)),
+            "ink_reason": inkReason, "ink_loaded_reason": loadedInkReason,
+        ]
+        let fingerprint = sh.id + (String(data: try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]), encoding: .utf8) ?? "")
+        if saveAttempt?.key != fingerprint { saveAttempt = (fingerprint, UUID().uuidString.lowercased()) }
+        payload["op_id"] = saveAttempt?.opId
+
+        let dateStr = key(currentDate)
+        let result: ShiftSaveResult
+        do {
+            result = try await DB.rpcRow("save_shift", args: ["p_shift_id": sh.id, "p": payload],
+                                         cacheInvalidate: Self.savedTables, as: ShiftSaveResult.self)
+        } catch let APIError.http(_, message) where message == "shift_changed" || message == "debt_changed" {
+            for table in Self.savedTables { await CacheStore.shared.invalidate(table: table) }
+            selectedDebtIds = []
+            if message == "shift_changed" { // смену изменили не мы — показываем свежие данные
+                clearDraft(dateStr)
+                await loadDay(currentDate)
+            }
+            await loadOpenDebts()
+            let text = t(message == "shift_changed" ? "mg.shiftChanged" : "mg.debtStale")
+            throw NSError(domain: "ShiftSave", code: 1, userInfo: [NSLocalizedDescriptionKey: text])
+        }
+        saveAttempt = nil
+        // До ответа вызывающего экран не должен показывать старый кеш.
+        for table in Self.savedTables { await CacheStore.shared.invalidate(table: table) }
+
+        applyRows(result.rows, shiftId: sh.id)
+        inkExpense = (result.ink?.expense ?? 0) > 0 ? trimNum(result.ink!.expense!) : ""
+        inkReason = result.ink?.reason ?? ""
+        loadedInkExpense = inkExpense; loadedInkReason = inkReason
+        shift?.income = c.inc; shift?.income_card = c.card; shift?.inkassation = c.ink
+        shift?.opening_balance = result.opening_balance
+        shift?.total_expense = result.total_expense; shift?.closing_balance = result.closing_balance
+        autoAbsences = []
+        selectedDebtIds = []
+        clearDraft(dateStr)
+        await loadOpenDebts()
+        return result.closing_balance
     }
 
     // Мягкий гейт (не блокирует): если чек-лист закрытия смены на сегодня не пройден целиком,

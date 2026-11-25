@@ -116,7 +116,7 @@ it('waits for the catalog on an empty Manager day and preserves ownership on nav
     return { data: [] }
   })
   const body = between(read('app/manager/page.tsx'), '  const loadAbsencesByDate', '\n  const changeDate')
-  const { load, state } = loader(body, 'loadDay', { db, splitShiftExpenses, fmtDate: (date: Date) => date.toISOString().slice(0, 10), dayLoadGeneration: { current: 0 }, catalogLoadRef: { current: catalog.promise } })
+  const { load, state } = loader(body, 'loadDay', { db, splitShiftExpenses, fmtDate: (date: Date) => date.toISOString().slice(0, 10), dayLoadGeneration: { current: 0 }, catalogLoadRef: { current: catalog.promise }, formRows: { current: null } })
   const today = load('r', new Date('2026-11-12'), [], []); await tick()
   expect(state.setLoading).toBe(true)
   const previous = load('r', new Date('2026-11-11'), [], []); await tick()

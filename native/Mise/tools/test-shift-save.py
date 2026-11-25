@@ -12,6 +12,8 @@ if baseline:
     model = Path('/tmp/mise-shift-save-before-ManagerView.swift').read_text().split('// MARK: - Экран Manager')[0].replace('import SwiftUI','import Observation')
 sources = '\n'.join((root/name).read_text() for name in ('Models.swift','CustomExpenses.swift','ShiftForm.swift'))
 fixtures = r'''
+enum APIError:Error {case http(Int,String?)}
+actor CacheStore { static let shared=CacheStore(); func invalidate(table:String) {} }
 @MainActor func t(_ key:String,_ vars:[String:String]=[:])->String { key }
 @MainActor func aiErrorMessage(_ error:Error)->String { "error" }
 enum Money { static let symbol="€"; static func s(_ amount:Double)->String { String(amount) } }
@@ -28,7 +30,7 @@ enum ShiftReminder { static func isEnabled()->Bool { false };static func schedul
  var expenses:[[String:Any]]=[];var ink:[[String:Any]]=[];var writes:[(String,String,Any?)]=[]
  var reads:[(String,[String:String])]=[];var events:[String]=[];var notifications:[[String:Any]]=[]
  let financial=Gate(),sales=Gate(),push=Gate()
- var failExpenses=false;var delayMs=0;var incompleteChecklist=false
+ var saves:[[String:Any]]=[];var failSave:Error?;var delayMs=0;var incompleteChecklist=false
  var shift:[String:Any]=["id":"shift","date":"2026-11-13","status":"open","opening_balance":100]
  func read(_ table:String,_ filters:[String:String]) async throws->Data {
   reads.append((table,filters));events.append("read:"+table)
@@ -39,8 +41,14 @@ enum ShiftReminder { static func isEnabled()->Bool { false };static func schedul
   rows=rows.filter {row in filters.allSatisfy { key,value in key=="restaurant_id" || String(describing:row[key] ?? "")==value }}
   return try JSONSerialization.data(withJSONObject:rows)
  }
+ func save(_ fn:String,_ args:[String:Any]) async throws->Data {
+  let p=args["p"] as! [String:Any]
+  saves.append(p);events.append("rpc:"+fn);await financial.wait()
+  if delayMs>0 {try await Task.sleep(for:.milliseconds(delayMs))}
+  if let failSave {throw failSave}
+  return try JSONSerialization.data(withJSONObject:["opening_balance":100,"total_expense":30,"closing_balance":170,"rows":[]])
+ }
  func write(_ table:String,_ op:String,_ values:Any?,_ filters:[String:String],_ ids:[String]) async throws {
-  if table=="shift_expenses",op=="insert" {await financial.wait();if failExpenses {throw NSError(domain:"expenses-rejected",code:500)}}
   if delayMs>0 {try await Task.sleep(for:.milliseconds(delayMs))}
   writes.append((table,op,values));events.append(op+":"+table)
   if table=="shifts",let values=values as? [String:Any] {shift.merge(values){_,new in new}}
@@ -63,8 +71,9 @@ enum ShiftReminder { static func isEnabled()->Bool { false };static func schedul
 }
 enum DB {
  static func from(_ table:String)->Query {Query(table)}
- @MainActor static func rpc(_ fn:String,args:[String:Any]=[:],cacheInvalidate:[String]) async throws {
-  Fixture.shared.events.append("rpc:"+fn)
+ @MainActor static func rpcRow<T:Decodable>(_ fn:String,args:[String:Any],cacheInvalidate:[String],as type:T.Type) async throws->T {
+  let data=try await Fixture.shared.save(fn,args)
+  return try JSONDecoder().decode(T.self,from:data)
  }
 }
 final class Query: @unchecked Sendable {
@@ -122,11 +131,9 @@ tests = r'''
   let notification=f.notifications[0]
   check((notification["data"] as? [String:String])?["shift_date"]==savedDate,"notification read a later selected date")
   check((notification["segments"] as? [[String:String]])?.first?["value"]=="100.0","notification read later edited revenue")
-  let inserts=f.writes.filter {$0.0=="shift_expenses" && $0.1=="insert"}
-  check(inserts.count==1,"category and employee expenses need two sequential inserts")
-  check((inserts.flatMap {$0.2 as? [[String:Any]] ?? []}).count==2,"expense batch lost a category/employee row")
-  check(f.reads.filter {$0.0=="shift_expenses"}.count==1,"unchanged no-custom/no-debt ledger was read twice")
-  check(f.shift["closing_balance"] as? Double==170 && f.shift["total_expense"] as? Double==30,"cash math changed")
+  check(f.saves.count==1 && f.writes.isEmpty,"shift close must be exactly one atomic operation")
+  check((f.saves.first?["rows"] as? [[String:Any]])?.count==2,"payload lost a category/employee row")
+  check(m.shift?.closing_balance==170 && m.shift?.total_expense==30,"server totals not applied")
   print("PASS financial gate and captured notification payload checked")
 
   Fixture.shared=Fixture();let p=Fixture.shared;let pm=manager();p.push.held=true
@@ -137,43 +144,34 @@ tests = r'''
   p.push.release();await pushSave.value
   print("PASS push gate checked")
 
-  Fixture.shared=Fixture();let bad=Fixture.shared;let bm=manager();bad.failExpenses=true
+  Fixture.shared=Fixture();let bad=Fixture.shared;let bm=manager();bad.failSave=NSError(domain:"offline",code:500)
   await bm.save(force:true)
-  check(!bm.locked && !bm.saving && bm.income=="100" && bm.toast != nil,"failed financial write falsely confirmed closure or lost draft")
-  check(bad.notifications.isEmpty,"failed financial write emitted a success notification")
-  check(!bad.writes.contains {$0.0=="shift_expenses" && $0.1=="delete"},"failed insert deleted prior expenses")
-  print("PASS financial failure retains editable values and sends no notification")
+  check(!bm.locked && !bm.saving && bm.income=="100" && bm.toast != nil,"failed save falsely confirmed closure or lost draft")
+  check(bad.notifications.isEmpty,"failed save emitted a success notification")
+  await bm.save(force:true)
+  bm.income="101";await bm.save(force:true)
+  let ops=bad.saves.map {$0["op_id"] as? String ?? ""}
+  check(ops.count==3 && ops[0]==ops[1] && ops[1] != ops[2],"retry must reuse op_id, changed form must not")
+  print("PASS failure keeps values, sends nothing, retries idempotently")
 
-  Fixture.shared=Fixture();let custom=Fixture.shared;let cm=manager()
-  cm.customExpenses=[CustomExpenseDraft(name:"Perfume",amount:"2.50")]
-  await cm.save(force:true)
-  try await waitUntil {!custom.notifications.isEmpty}
-  check(custom.reads.filter {$0.0=="shift_expenses"}.count==2,"custom mutation path reused a pre-write ledger read")
-  check(custom.expenses.contains {$0["category_name"] as? String=="Perfume"},"custom row disappeared")
-
-  Fixture.shared=Fixture();let debt=Fixture.shared;let dm=manager()
-  dm.openDebts=[ManagerModel.DebtRow(id:"debt",shiftId:"old",date:"2026-11-12",categoryId:"cat",categoryName:"Supplies",employeeId:nil,amount:1,note:nil)]
-  dm.selectedDebtIds=["debt"]
-  await dm.save(force:true)
-  check(debt.reads.filter {$0.0=="shift_expenses"}.count==2,"settlement path reused a pre-settlement ledger read")
-  let settlement=debt.events.firstIndex(of:"rpc:settle_debts")!,lastRead=debt.events.lastIndex(of:"read:shift_expenses")!
-  check(settlement<lastRead,"expense rewrite preceded settlement")
-  try await waitUntil {!debt.notifications.isEmpty}
-  print("PASS custom/debt mutation paths retain post-mutation reads and settlement order")
+  Fixture.shared=Fixture();let stale=Fixture.shared;let sm=manager();stale.failSave=APIError.http(400,"shift_changed")
+  await sm.save(force:true)
+  check(!sm.saving && sm.toast != nil && stale.notifications.isEmpty && stale.reads.contains {$0.0=="shifts"},"stale form must reload and not confirm")
+  print("PASS stale form reloads instead of overwriting")
 
   Fixture.shared=Fixture();let gates=Fixture.shared;let gm=manager();gates.incompleteChecklist=true
   await gm.save()
-  check(gm.showChecklistWarn && !gm.saving && !gm.locked && gates.writes.isEmpty,"checklist warning no longer gates financial writes")
+  check(gm.showChecklistWarn && !gm.saving && !gm.locked && gates.saves.isEmpty,"checklist warning no longer gates financial writes")
   gates.incompleteChecklist=false
   gm.openDebts=[ManagerModel.DebtRow(id:"debt",shiftId:"old",date:"2026-11-12",categoryId:"cat",categoryName:"Supplies",employeeId:nil,amount:1000,note:nil)]
   gm.selectedDebtIds=["debt"]
   await gm.save()
-  check(gm.showDebtNegativeWarn && !gm.saving && gates.writes.isEmpty,"negative debt confirmation was bypassed")
+  check(gm.showDebtNegativeWarn && !gm.saving && gates.saves.isEmpty,"negative debt confirmation was bypassed")
   print("PASS checklist and negative-debt confirmations remain before financial writes")
 
   Fixture.shared=Fixture();let timed=Fixture.shared;timed.delayMs=80;let tm=manager()
   let start=ContinuousClock.now;await tm.save(force:true);let elapsed=start.duration(to:.now)
-  print("MEASURE native save 80ms/request: \(elapsed), expenseReads=\(timed.reads.filter{$0.0==\"shift_expenses\"}.count), expenseInserts=\(timed.writes.filter{$0.0==\"shift_expenses\" && $0.1==\"insert\"}.count)")
+  print("MEASURE native save 80ms/request: \(elapsed), saves=\(timed.saves.count)")
   if !failures.isEmpty {print("FAILED \(failures.count) regression(s)");exit(1)}
   print("PASS native close performance and financial-boundary regressions")
  }
