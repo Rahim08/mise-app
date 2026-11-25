@@ -48,7 +48,8 @@ final class ManagerModel {
     }
     var openDebts: [DebtRow] = []
     var selectedDebtIds: Set<String> = []
-    var selectableDebts: [DebtRow] { openDebts.filter { !($0.isCustom && $0.shiftId == shift?.id) } }
+    // Долг самой смены не погашается ею же (двойной счёт) — вместо этого снимается «в долг».
+    var selectableDebts: [DebtRow] { openDebts.filter { $0.shiftId != shift?.id } }
     var debtSettleTotal: Double { selectableDebts.filter { selectedDebtIds.contains($0.id) }.reduce(0) { $0 + $1.amount } }
     // Сумма долгов, УЖЕ погашенных сегодняшней сменой (persistDebtSettlements вставляет строку
     // с paid_shift_id == shift_id самой этой смены) — loadDay исключает такие строки из
@@ -204,6 +205,7 @@ final class ManagerModel {
         defer { if gen == loadGen { loading = false } }
         let dateStr = key(date)
         customExpenseError = nil
+        selectedDebtIds = [] // выбор долгов относится только к открытому дню
         // prevClosing не зависит от shifts — грузим параллельно, не друг за другом.
         async let openingTask = prevClosing(before: date)
         // do/catch вместо try?: отмену (быстрые тапы по датам) игнорируем без ошибки,
@@ -623,7 +625,7 @@ final class ManagerModel {
     private func persistDebtSettlements(shiftId: String) async throws {
         let ids = selectedDebtIds
         guard !ids.isEmpty else { return }
-        let selected = openDebts.filter { ids.contains($0.id) }
+        let selected = selectableDebts.filter { ids.contains($0.id) }
         guard !selected.isEmpty else { return }
         let debts: [[String: Any]] = selected.map { d in
             let isSalary = d.employeeId != nil && (d.note?.hasPrefix(Self.salperiodPrefix) ?? false)
@@ -666,6 +668,18 @@ final class ManagerModel {
     private func persistOnce(_ sh: Shift) async throws -> Double? {
         // Validate every custom row before debt settlement or any other financial write.
         let preparedCustom = try validatedCustomExpenses()
+        // До любых записей: долг мог быть погашен/изменён с другого устройства.
+        let chosenDebts = selectableDebts.filter { selectedDebtIds.contains($0.id) }
+        if !chosenDebts.isEmpty {
+            let fresh = try await DB.from("shift_expenses").fresh()
+                .select("id, employee_id, category_id, category_name, amount, note, shift_id, is_paid, paid_shift_id")
+                .in("id", chosenDebts.map(\.id)).list(ShiftExpense.self)
+            if hasStaleDebt(chosenDebts.map { ($0.id, $0.amount) }, fresh: fresh, shiftId: sh.id) {
+                selectedDebtIds = []
+                await loadOpenDebts()
+                throw NSError(domain: "DebtStale", code: 1, userInfo: [NSLocalizedDescriptionKey: t("mg.debtStale")])
+            }
+        }
         let selectedCustomIds = Set(preparedCustom.map(\.id)).intersection(selectedDebtIds)
         let c = calc
         // Custom writes can be rejected by settlement guards. Finish them before

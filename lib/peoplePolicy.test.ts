@@ -75,7 +75,7 @@ describe('peoplePolicy — роли', () => {
     expect(r.filters).toContainEqual({ op: 'eq', col: 'published', val: true })
   })
   it('явка пишется только на себя', async () => {
-    const r = await run(waiter, 'attendance_records', 'upsert', { staff_id: 'w2', date: '2026-11-14' })
+    const r = await run(waiter, 'attendance_records', 'upsert', { staff_id: 'w2', date: new Date().toISOString().slice(0, 10) })
     expect(r.values.staff_id).toBe('w1')
     await expect(run(waiter, 'attendance_records', 'update', { status: 'present' }, [{ op: 'eq', col: 'id', val: 'a1' }])).rejects.toThrow()
   })

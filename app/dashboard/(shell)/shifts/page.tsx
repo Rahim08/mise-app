@@ -9,7 +9,7 @@ import { db } from '@/lib/db'
 import { notify as pushNotify } from '@/lib/notifyClient'
 import { useI18n } from '@/lib/i18n'
 import { fmtDate, fv, displayDate, dd } from '@/lib/format'
-import { splitShiftExpenses, round2, SALPERIOD_PREFIX } from '@/lib/shiftForm'
+import { splitShiftExpenses, eligibleDebtsFor, hasStaleDebt, round2, SALPERIOD_PREFIX } from '@/lib/shiftForm'
 import { prepareCustomExpenses, customExpenseTotal, parseExpenseCents, type CustomExpenseDraft } from '@/lib/customExpenses'
 import { CustomExpenseFields } from '@/components/CustomExpenseFields'
 import { Card, Btn, Badge, EmptyState, Spinner, SectionTitle, Container, Table, type TableColumn, inputStyle } from '@/components/ui'
@@ -88,7 +88,7 @@ export default function ShiftsPage() {
   const [openDebts, setOpenDebts] = useState<{ id: string; shiftId: string; date: string; categoryId: string | null; categoryName: string; employeeId: string | null; amount: number; note: string | null; isCustom: boolean }[]>([])
   const [selectedDebtIds, setSelectedDebtIds] = useState<Set<string>>(new Set())
   const [showDebts, setShowDebts] = useState(false)
-  const eligibleDebts = openDebts.filter(debt => !(debt.isCustom && debt.shiftId === shift?.id))
+  const eligibleDebts = eligibleDebtsFor(openDebts, shift?.id)
   const [settledTodayTotal, setSettledTodayTotal] = useState(0)
   const [unmanagedPaidTotal, setUnmanagedPaidTotal] = useState(0) // см. lib/shiftForm.ts
   const [locked, setLocked] = useState(false)
@@ -126,6 +126,7 @@ export default function ShiftsPage() {
 
   const loadDay = async (date: Date, emps: Employee[] = employees, cats: Category[] = categories) => {
     setLoadingDay(true); setErr('')
+    setSelectedDebtIds(new Set()) // выбор долгов относится только к открытому дню
     const dateStr = fmtDate(date)
     const { data: shList } = await db.from('shifts').select('*').eq('restaurant_id', restaurantId).eq('date', dateStr).order('opened_at', { ascending: true }).limit(1)
     const sh = (Array.isArray(shList) ? shList[0] : shList) || null
@@ -249,7 +250,7 @@ export default function ShiftsPage() {
   const persistDebtSettlements = async (shiftId: string, dateStr: string) => {
     const ids = Array.from(selectedDebtIds)
     if (ids.length === 0) return
-    const selected = openDebts.filter(d => ids.includes(d.id))
+    const selected = eligibleDebts.filter(d => ids.includes(d.id))
     if (selected.length === 0) return
     const debts = selected.map(d => {
       const isSalary = !!(d.employeeId && d.note?.startsWith(SALPERIOD_PREFIX))
@@ -293,6 +294,17 @@ export default function ShiftsPage() {
 
   const persistShiftOnce = async (sh: NonNullable<typeof shift>, dateForInk: Date) => {
     const preparedCustom = validateCustomExpenses()
+    // До любых записей: долг мог быть погашен/изменён с другого устройства.
+    const chosenDebts = eligibleDebts.filter(d => selectedDebtIds.has(d.id))
+    if (chosenDebts.length > 0) {
+      const { data: fresh, error: staleErr } = await db.from('shift_expenses').select('id, amount, is_paid, paid_shift_id').in('id', chosenDebts.map(d => d.id))
+      if (staleErr) throw new Error(staleErr.message)
+      if (hasStaleDebt(chosenDebts, fresh || [], sh.id)) {
+        setSelectedDebtIds(new Set())
+        await loadOpenDebts()
+        throw new Error(tr('mg.debtStale'))
+      }
+    }
     const customValues = preparedCustom.filter(row => !selectedDebtIds.has(row.id)).map(row => ({
       ...row, shift_id: sh.id, restaurant_id: restaurantId, category_id: null, employee_id: null,
     }))

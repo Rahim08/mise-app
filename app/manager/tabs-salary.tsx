@@ -5,7 +5,7 @@ import { useI18n } from '@/lib/i18n'
 import { fmtDate } from '@/lib/format'
 import { computeAccruedToday } from '@/lib/analytics'
 import { resolveEmployeesForMonth } from '@/lib/salaryHistory'
-import { SALPERIOD_PREFIX } from '@/lib/shiftForm'
+import { SALPERIOD_PREFIX, round2 } from '@/lib/shiftForm'
 import { inp, lbl, fmtHours, hoursOf } from '@/app/people/shared'
 import { Sheet } from '@/components/people/helpers'
 
@@ -464,6 +464,14 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     const method = payFor.method || 'cash'
     const dateStr = payFor.date || fmtDate(new Date())
 
+    // Наличными нельзя выдать больше остатка (как аванс и «в долг»): остаток уже за вычетом
+    // выплат и открытого долга, иначе та же сумма платилась дважды. Карта остаток не меняет.
+    const row = rows.find(r => r.id === payFor.id)
+    if (method === 'cash' && (!row || amount > round2(row.remaining))) {
+      setPayError(tr('pe.debtExceedsRemaining', { avail: `€${round2(row?.remaining || 0)}` }))
+      setPaying(false); return
+    }
+
     // Вторая защита от дубля (помимо замка moneyBusy — ловит и второе устройство): такая же
     // выплата тому же сотруднику за тот же период за последние 2 минуты — повторное нажатие.
     const since = new Date(Date.now() - 120000).toISOString()
@@ -669,7 +677,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderTop: `0.5px solid ${t.sep2}` }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: st.color }}>{st.label}</span>
             {r.remaining > 0 && (
-              <button onClick={() => { setPayError(null); setPayInsufficient(false); setPayFor({ id: r.id, name: r.name, amount: String(Math.round(r.remaining)), method: 'cash', date: fmtDate(new Date()), note: '' }) }}
+              <button onClick={() => { setPayError(null); setPayInsufficient(false); setPayFor({ id: r.id, name: r.name, amount: String(round2(r.remaining)), method: 'cash', date: fmtDate(new Date()), note: '' }) }}
                 style={{ padding: '6px 12px', borderRadius: 980, background: accent, color: '#fff', border: 'none', fontFamily: 'inherit', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
                 {tr('pe.markPaid')}
               </button>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { splitShiftExpenses, round2 } from './shiftForm'
+import { splitShiftExpenses, eligibleDebtsFor, hasStaleDebt, round2 } from './shiftForm'
 
 const cats = new Set(['cat1', 'cat2'])
 const emps = new Set(['emp1', 'emp2'])
@@ -60,5 +60,21 @@ describe('round2', () => {
   it('drops float tails', () => {
     expect(round2(482.49999999999864)).toBe(482.5)
     expect(round2(0.1 + 0.2)).toBe(0.3)
+  })
+})
+
+describe('погашение долгов', () => {
+  it('долг своей смены не погашается ею же', () => {
+    expect(eligibleDebtsFor([{ shiftId: 'a' }, { shiftId: 'b' }], 'b')).toEqual([{ shiftId: 'a' }])
+  })
+  it('устаревший долг: погашен другой сменой, удалён, изменён', () => {
+    const d = [{ id: '1', amount: 10 }]
+    const open = { id: '1', amount: 10, is_paid: false }
+    expect(hasStaleDebt(d, [open], 's')).toBe(false)
+    expect(hasStaleDebt(d, [{ ...open, is_paid: true, paid_shift_id: 's' }], 's')).toBe(false)
+    expect(hasStaleDebt(d, [{ ...open, is_paid: true, paid_shift_id: 'x' }], 's')).toBe(true)
+    expect(hasStaleDebt(d, [{ ...open, is_paid: true }], 's')).toBe(true)
+    expect(hasStaleDebt(d, [{ ...open, amount: 12 }], 's')).toBe(true)
+    expect(hasStaleDebt(d, [], 's')).toBe(true)
   })
 })

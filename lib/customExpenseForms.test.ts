@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { customExpenseTotal, parseExpenseCents, prepareCustomExpenses, type CustomExpenseDraft } from './customExpenses'
-import { round2, SALPERIOD_PREFIX, splitShiftExpenses } from './shiftForm'
+import { eligibleDebtsFor, hasStaleDebt, round2, SALPERIOD_PREFIX, splitShiftExpenses } from './shiftForm'
 
 type Row = Record<string, unknown>
 type Mutation = { table: string; op: string; values: Row[]; ids: string[] }
@@ -80,7 +80,7 @@ function persistence(path: string, database: ReturnType<typeof gateway>, drafts:
   visit(source)
   if (declarations.length !== names.size) throw new Error('Persistence harness could not locate the real functions')
   const body = `
-    const { db, prepareCustomExpenses, parseExpenseCents, customExpenseTotal, splitShiftExpenses, round2, SALPERIOD_PREFIX } = dependencies;
+    const { db, prepareCustomExpenses, parseExpenseCents, customExpenseTotal, splitShiftExpenses, round2, SALPERIOD_PREFIX, eligibleDebtsFor, hasStaleDebt } = dependencies;
     let customExpenses = dependencies.drafts, loadedCustomExpenses = dependencies.loaded;
     let shift = { id: 'shift', opening_balance: 0 }, openDebts = [], selectedDebtIds = new Set(), settledTodayTotal = 0;
     const restaurantId = 'venue', currentDate = new Date('2026-11-13'), income = '100', incomeCard = '', inkSum = '', inkExpense = '', inkReason = '';
@@ -99,7 +99,7 @@ function persistence(path: string, database: ReturnType<typeof gateway>, drafts:
     return () => persistShiftOnce(shift, currentDate);
   `
   const js = ts.transpileModule(body, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText
-  return new Function('dependencies', js)({ db: database.db, prepareCustomExpenses, parseExpenseCents, customExpenseTotal, splitShiftExpenses, round2, SALPERIOD_PREFIX, drafts, loaded }) as () => Promise<number>
+  return new Function('dependencies', js)({ db: database.db, prepareCustomExpenses, parseExpenseCents, customExpenseTotal, splitShiftExpenses, round2, SALPERIOD_PREFIX, eligibleDebtsFor, hasStaleDebt, drafts, loaded }) as () => Promise<number>
 }
 
 for (const [surface, path] of [['Manager', 'app/manager/page.tsx'], ['Dashboard', 'app/dashboard/(shell)/shifts/page.tsx']]) {

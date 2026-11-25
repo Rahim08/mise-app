@@ -574,6 +574,15 @@ final class ManagerSalaryModel {
         insufficientFunds = false
         let dateStr = key(date)
 
+        // Наличными нельзя выдать больше остатка (веб-паритет): остаток уже за вычетом выплат и
+        // открытого долга, иначе та же сумма платилась дважды. Карта остаток не меняет.
+        if method == "cash" {
+            let remaining = rows.first(where: { $0.id == employeeId })?.remaining ?? 0
+            guard amount <= (remaining * 100).rounded() / 100 else {
+                flash(t("pe.debtExceedsRemaining", ["avail": Money.s(remaining)])); return false
+            }
+        }
+
         // Вторая защита от дубля (помимо замка moneyBusy — ловит и второе устройство): такая же
         // выплата тому же сотруднику за тот же период за последние 2 минуты — повторное нажатие.
         nonisolated struct DupRow: Codable, Sendable { let id: String }
@@ -988,7 +997,8 @@ private struct ManagerMarkPaidSheet: View {
 
     init(sm: ManagerSalaryModel, row: ManagerModel.SalRow) {
         self.sm = sm; self.row = row
-        _amount = State(initialValue: String(Int(row.remaining.rounded())))
+        let rest = (row.remaining * 100).rounded() / 100
+        _amount = State(initialValue: rest == rest.rounded() ? String(Int(rest)) : String(format: "%.2f", rest))
     }
 
     var body: some View {

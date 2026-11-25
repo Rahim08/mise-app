@@ -48,6 +48,29 @@ export const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 10
 
 const numStr = (v: number) => String(round2(v))
 
+/**
+ * Долги, доступные для погашения в этой смене. Долг самой смены не погашается ею же: строка формы
+ * осталась бы «в долг» и вставилась заново, а исходная строка и строка погашения обе получили бы
+ * paid_shift_id этой смены — расход считался бы дважды. Чтобы оплатить сегодня — снять «в долг».
+ */
+export function eligibleDebtsFor<T extends { shiftId: string }>(debts: T[], shiftId: string | undefined): T[] {
+  return debts.filter(d => d.shiftId !== shiftId)
+}
+
+/**
+ * Выбранные долги устарели: с другого устройства их погасила другая смена, удалили или изменили
+ * сумму. settle_debts такие молча пропускает, а касса уже посчитана вместе с ними.
+ * Погашенные этой же сменой (повтор после сбоя) — не устаревшие.
+ */
+export function hasStaleDebt(selected: { id: string; amount: number }[], fresh: ShiftExpenseRow[], shiftId: string): boolean {
+  const byId = new Map(fresh.map(r => [r.id, r]))
+  return selected.some(d => {
+    const r = byId.get(d.id)
+    if (!r || Number(r.amount || 0) !== d.amount) return true
+    return r.paid_shift_id ? r.paid_shift_id !== shiftId : r.is_paid !== false
+  })
+}
+
 export function splitShiftExpenses(
   rows: ShiftExpenseRow[],
   shiftId: string,
