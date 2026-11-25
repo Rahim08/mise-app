@@ -6,6 +6,7 @@ import { fmtDate } from '@/lib/format'
 import { computeAccruedToday } from '@/lib/analytics'
 import { resolveEmployeesForMonth } from '@/lib/salaryHistory'
 import { SALPERIOD_PREFIX, round2 } from '@/lib/shiftForm'
+import { runMoneyOp, type OpAttempt } from '@/lib/moneyOps'
 import { inp, lbl, fmtHours, hoursOf } from '@/app/people/shared'
 import { Sheet } from '@/components/people/helpers'
 
@@ -40,13 +41,15 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   // Синхронный замок от двойного нажатия: state (paying) обновляется асинхронно, второй тап
   // успевал пройти до перерисовки — так появилась дублирующая выплата €1530 (SO, 2026-09-14).
   const moneyBusy = useRef(false)
+  const moneyAttempt = useRef<OpAttempt>(null)
+  const pool = useRef(0)
   const [debt, setDebt] = useState<{ total: number; byId: Record<string, number> }>({ total: 0, byId: {} })
   // Долг-леджер (2026-08-20): остаток за ПРОШЛЫЕ месяцы теперь материализуется как обычная
   // строка shift_expenses (is_paid=false, employee_id, note=SALPERIOD:<period>) — та же таблица,
   // тот же UI «Долги», что и расходные/экстра-долги в Manager→Смена (см. app/manager/page.tsx
   // openDebts). Здесь, в ЗП — только ЧТЕНИЕ (юзер-фидбок 2026-08-20: «взаимодействие — выплата —
   // он делает только благодаря открытию смены»); сама галочка/оплата — только там.
-  const [ledgerRows, setLedgerRows] = useState<{ id: string; employeeId: string; employeeName: string; period: string; amount: number; date: string }[]>([])
+  const [ledgerRows] = useState<{ id: string; employeeId: string; employeeName: string; period: string; amount: number; date: string }[]>([])
   const [showDebtList, setShowDebtList] = useState(false)
   const [payoutDay, setPayoutDay] = useState<number | null>(null)
   const [prevCashTotal, setPrevCashTotal] = useState(0)
@@ -130,92 +133,22 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
   useEffect(() => { load() }, [ym])
 
   const DEBT_TRACKING_START = new Date(2026, 7, 1) // 2026-08-01
-  // Долг-леджер (SALPERIOD-строки в shift_expenses) выключен по запросу юзера 2026-09-04, но
-  // коммит 920e207 отключил только запуск при открытии вкладки — loadDebt() всё равно звался
-  // после каждой операции (аванс/выплата/удаление) и продолжал создавать/удалять строки, в т.ч.
-  // дубли (две «ЗП — август 2026» по 1280 с разницей 0,2с, SO 2026-09-14). Теперь loadDebt только
-  // СЧИТАЕТ долг для экрана и ничего не пишет; вернуть синхронизацию — включить флаг.
-  const LEDGER_SYNC_ENABLED = false
+  // Долг за прошлые месяцы только считается для экрана и ничего не пишет.
   const loadDebt = async () => {
     const now = new Date()
     let total = 0; const byId: Record<string, number> = {}
-    // Собираем целевое состояние леджера (кто/за какой период/сколько ещё должны) по всем
-    // прошлым месяцам одним проходом, ДО похода в базу — дальше один select всех существующих
-    // SALPERIOD-строк ресторана и диффом решаем, что удалить/вставить (вместо N запросов на
-    // каждую пару сотрудник×месяц — дорого при полугодовой истории и большом штате).
-    const target: { empId: string; empName: string; period: string; monthEnd: string; amount: number }[] = []
-    // Периоды, которые реально прошли ниже (после фильтра DEBT_TRACKING_START) — ТОЛЬКО для
-    // них ниже разрешена очистка чужих строк. Иначе (баг 2026-08-20, найден при аудите): текущий
-    // месяц (i=0) в цикл не попадает вообще, а пока не пройден первый полный месяц после
-    // DEBT_TRACKING_START — цикл пуст целиком → syncLedger(target=[]) видел бы ЛЮБУЮ открытую
-    // SALPERIOD-строку как «незнакомую» и удалял её, включая ту, что markAsDebt только что
-    // создал для текущего месяца — долг стирался в том же действии, которым создавался.
-    const scannedPeriods: string[] = []
     for (let i = 1; i <= 6; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
       if (d < DEBT_TRACKING_START) continue
-      const period = `${fmtDate(d).slice(0, 7)}-01`
-      scannedPeriods.push(period)
-      const monthEnd = fmtDate(new Date(d.getFullYear(), d.getMonth() + 1, 0))
       const list = await computeMonth(fmtDate(d).slice(0, 7))
       list.forEach((r: any) => {
         if (r.remaining > 0) {
           total += r.remaining; byId[r.id] = (byId[r.id] || 0) + r.remaining
-          target.push({ empId: r.id, empName: r.name, period, monthEnd, amount: Math.round(r.remaining) })
         }
       })
     }
     setDebt({ total, byId })
-    if (LEDGER_SYNC_ENABLED) await syncLedger(target, scannedPeriods)
   }
-
-  const syncLedger = async (target: { empId: string; empName: string; period: string; monthEnd: string; amount: number }[], scannedPeriods: string[]) => {
-    const { data: existing } = await db.from('shift_expenses').select('id, employee_id, amount, note, shift_id').eq('restaurant_id', restaurantId).eq('is_paid', false).like('note', `${SALPERIOD_PREFIX}%`)
-    const existingByKey = new Map<string, { id: string; amount: number }>()
-    ;(existing || []).forEach((r: any) => existingByKey.set(`${r.employee_id}|${r.note}`, { id: r.id, amount: Number(r.amount || 0) }))
-    const toDelete: string[] = []; const toInsert: typeof target = []
-    const seenKeys = new Set<string>()
-    target.forEach(row => {
-      const key = `${row.empId}|${SALPERIOD_PREFIX}${row.period}`
-      seenKeys.add(key)
-      const cur = existingByKey.get(key)
-      if (!cur) { toInsert.push(row); return }
-      if (cur.amount !== row.amount) { toDelete.push(cur.id); toInsert.push(row) }
-    })
-    // Всё, что осталось в existingByKey, не встретилось в target, И относится к периоду, который
-    // этот проход реально просканировал — долг погашен обычной выплатой из ЗП напрямую
-    // (savePayment), леджер устарел, чистим. Строки за периоды ВНЕ scannedPeriods (текущий месяц,
-    // markAsDebt) — не трогаем, этот проход про них ничего не знает.
-    const scannedNotes = new Set(scannedPeriods.map(p => `${SALPERIOD_PREFIX}${p}`))
-    existingByKey.forEach((v, key) => {
-      if (seenKeys.has(key)) return
-      const note = key.slice(key.indexOf('|') + 1)
-      if (scannedNotes.has(note)) toDelete.push(v.id)
-    })
-    if (toDelete.length > 0) await db.from('shift_expenses').delete().in('id', toDelete)
-    if (toInsert.length > 0) {
-      const shiftByDate = new Map<string, string>()
-      for (const row of toInsert) {
-        if (!shiftByDate.has(row.monthEnd)) {
-          const sh = await ensureShift(row.monthEnd)
-          if (sh) shiftByDate.set(row.monthEnd, sh.id)
-        }
-      }
-      const inserts = toInsert.filter(row => shiftByDate.has(row.monthEnd)).map(row => ({
-        shift_id: shiftByDate.get(row.monthEnd), restaurant_id: restaurantId, employee_id: row.empId,
-        category_name: `${tr('pe.salaryWord')} — ${periodLabel(row.period)}`,
-        amount: row.amount, is_paid: false, note: `${SALPERIOD_PREFIX}${row.period}`,
-      }))
-      if (inserts.length > 0) await db.from('shift_expenses').insert(inserts)
-    }
-    setLedgerRows(target.map(row => ({ id: `${row.empId}|${row.period}`, employeeId: row.empId, employeeName: row.empName, period: row.period, amount: row.amount, date: row.monthEnd })))
-  }
-  // Долг-леджер отключён по запросу юзера (2026-09-04) — при каждом открытии вкладки ЗП
-  // автоматом материализовал остаток оклада прошлых месяцев как is_paid=false строки в
-  // shift_expenses (SALPERIOD:...), они же лезли в общий список «Долги» в Manager→Смена
-  // (loadOpenDebts тянет ВСЕ is_paid=false без фильтра по note) — юзер это не ожидал и не
-  // хочет сейчас. Ничего не удаляет и не пишет, пока не включат обратно.
-  // useEffect(() => { loadDebt() }, [])
 
   const changeMonth = (dir: number) => { const d = new Date(viewDate); d.setDate(1); d.setMonth(d.getMonth() + dir); setViewDate(d) }
 
@@ -235,60 +168,7 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     computeMonth(fmtDate(d).slice(0, 7)).then(prevRows => { setPrevCashTotal(prevRows.reduce((s, r: any) => s + r.cash, 0)); setPrevPaidCash(prevRows.reduce((s, r: any) => s + r.paidCash, 0)) })
   }, [isCurrentMonth])
 
-  // Смена/инкассация на дату оплаты может не существовать — создаём её тем же паттерном,
-  // что openShift (opening = closing предыдущей смены, gap-tolerant .lt('date', ...)).
-  const ensureShift = async (dateStr: string): Promise<{ id: string; inkassation: number } | null> => {
-    const { data: existing } = await db.from('shifts').select('id, inkassation').eq('restaurant_id', restaurantId).eq('date', dateStr).order('opened_at').limit(1)
-    const ex = Array.isArray(existing) ? existing[0] : existing
-    if (ex?.id) return { id: ex.id, inkassation: ex.inkassation || 0 }
-    const { data: prevList } = await db.from('shifts').select('closing_balance').eq('restaurant_id', restaurantId).lt('date', dateStr).order('date', { ascending: false }).order('opened_at', { ascending: false }).limit(1)
-    const opening = (Array.isArray(prevList) ? prevList[0] : prevList)?.closing_balance || 0
-    const { data: sh } = await db.from('shifts').insert({
-      restaurant_id: restaurantId, date: dateStr,
-      opening_balance: opening, income: 0, inkassation: 0,
-      closing_balance: opening, status: 'open',
-    }).select().single()
-    return sh?.id ? { id: sh.id, inkassation: 0 } : null
-  }
-
   const periodLabel = (period: string) => new Date(period).toLocaleDateString(tr('dash.locale'), { month: 'long', year: 'numeric' })
-
-  // Долг-леджер (юзер-фидбок 2026-08-20): остаток по ЗП за месяц материализуется как обычная
-  // строка shift_expenses (is_paid=false, employee_id, note=SALPERIOD:<period>) — та же таблица
-  // и тот же UI «Долги», что уже показывает расходные/экстра-долги в Manager→Смена (openDebts,
-  // app/manager/page.tsx). Здесь, в ЗП — только показываем; галочка/оплата — только там (юзер:
-  // «взаимодействие — выплата — он делает только благодаря открытию смены»).
-  // Идемпотентно: удаляем старую открытую запись за этот (сотрудник, период) и вставляем
-  // свежую с текущим remaining — не накапливаем/не дрейфуем при частичных доплатах между
-  // запусками (юзер-фидбок: «долг не делим по частям — платим/держим целиком»).
-  // «Отметить как долг» — ЗП-долг сотрудника за месяц одной строкой shift_expenses
-  // (is_paid=false, note=SALPERIOD:<period>), гасится галочкой в Manager→Смена (settle_debts
-  // пишет salary_payments). Аудит 2026-09-27: раньше здесь был delete+insert «заменить долг
-  // этой суммой» — второй долг за тот же месяц стирал первый, а двойной тап (без замка)
-  // оставлял две одинаковые строки (Алима 2×€100, SO, 26.09). Теперь сумма ДОБАВЛЯЕТСЯ к
-  // открытому долгу за этот период (remaining уже учитывает открытый долг, так что сверху
-  // можно добавить только реально невыплаченное).
-  const addSalaryDebt = async (empId: string, period: string, dateStr: string, amount: number): Promise<string | null> => {
-    const noteTag = `${SALPERIOD_PREFIX}${period}`
-    const { data: existing, error: exErr } = await db.from('shift_expenses').select('id, amount').eq('restaurant_id', restaurantId).eq('employee_id', empId).eq('note', noteTag).eq('is_paid', false).order('created_at').limit(1)
-    if (exErr) return exErr.message
-    const ex = Array.isArray(existing) ? existing[0] : existing
-    if (ex?.id) {
-      const cur = Number(ex.amount || 0)
-      // CAS по amount — параллельная запись с другого устройства не теряется молча.
-      const { data: upd, error } = await db.from('shift_expenses').update({ amount: cur + amount }).eq('id', ex.id).eq('amount', cur).select()
-      if (error) return error.message
-      return Array.isArray(upd) && upd.length > 0 ? null : 'race'
-    }
-    const sh = await ensureShift(dateStr)
-    if (!sh) return 'shift'
-    const { error } = await db.from('shift_expenses').insert({
-      shift_id: sh.id, restaurant_id: restaurantId, employee_id: empId,
-      category_name: `${tr('pe.salaryWord')} — ${periodLabel(period)}`,
-      amount, is_paid: false, note: noteTag,
-    })
-    return error ? error.message : null
-  }
 
   // «На карту» / авансы (2026-08-14, аудит A3/A4 — веб раньше вообще не имел этой
   // функциональности, редактирование жило в app/analytics/page.tsx и было ошибочно ЖИВЫМ,
@@ -307,273 +187,77 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     await load()
   }
 
-  const findShiftForDate = async (dateStr: string) => {
-    const { data } = await db.from('shifts').select('id, date, inkassation').eq('restaurant_id', restaurantId).eq('date', dateStr).order('opened_at', { ascending: false }).limit(1)
-    return Array.isArray(data) ? data[0] : data
-  }
-  const findInkassation = async (shiftId: string) => {
-    const { data } = await db.from('inkassations').select('shift_id, amount, expense, reason, total, salary').eq('shift_id', shiftId).limit(1)
-    return Array.isArray(data) ? data[0] : data
-  }
-  // A3 (аудит 2026-08-15): addAdvance/deleteAdvance/savePayment читали inkassations и писали
-  // обратно без защиты от гонки — persistShift для этой же таблицы уже был захардён (A2, аудит
-  // 2026-08-09) после того, как именно параллельная правка ОТСЮДА теряла данные при перезаписи.
-  // Здесь сам read-modify-write остался незащищённым: два аванса подряд (или аванс + выплата
-  // одновременно) читают один снэпшот, вторая запись затирает первую. Compare-and-swap на поле,
-  // которое эта операция меняет — если строка успела измениться между чтением и записью, update
-  // не находит совпадения (0 строк), перечитываем и повторяем один раз.
-  const casUpdateInk = async (shiftId: string, casField: 'expense' | 'salary', casValue: number, values: Record<string, unknown>) => {
-    const { data } = await db.from('inkassations').update(values).eq('shift_id', shiftId).eq(casField, casValue).select()
-    return Array.isArray(data) && data.length > 0
+  // Все деньги — одной функцией базы: остаток к выплате и пул инкассации она считает сама,
+  // повтор той же операции ничего не записывает (docs/migrations/salary-ops-atomic-2026-11-25.sql).
+  const moneyError = (error: { message: string; code?: string }, remaining: number) =>
+    error.code === 'MS003' ? tr('pe.debtExceedsRemaining', { avail: `€${round2(remaining)}` })
+    : error.code === 'MS004' ? tr('pe.insufficientInkassationPool', { avail: eur(Math.max(0, pool.current)) })
+    : error.code === 'MS005' ? tr('pe.duplicatePayment')
+    : tr('pe.saveFailed', { err: error.message })
+
+  const readPool = async () => {
+    const { data } = await db.from('inkassation_balance').select('balance').eq('restaurant_id', restaurantId).limit(1)
+    pool.current = Number(data?.[0]?.balance || 0)
   }
 
-  const addAdvanceInner = async (empId: string, empName: string, amount: number, dateStr: string) => {
-    // Аванс не может увести сотрудника в минус по ЗП (юзер-фидбок 2026-08-14) — row.remaining
-    // уже = max(0, cash − paid), т.е. именно то, что ещё можно выдать до конца месяца.
-    // fail-closed (паритет с iOS addAdvance, аудит 2026-08-15): если строка сотрудника почему-то
-    // не найдена — блокируем целиком, а не пропускаем без проверки.
-    // A6-ревизия (юзер-фидбок 2026-08-15): аванс относится к зарплате МЕСЯЦА ЭКРАНА (ym, тот, на
-    // котором стоишь, когда жмёшь «добавить»), не к месяцу даты списания — dateStr это только
-    // день, когда деньги физически уходят из кассы, можно указать и вне ym.
-    const row = rows.find(r => r.id === empId)
-    if (!row) { showToast(tr('pe.saveFailed', { err: 'row' })); return }
-    if (amount > row.remaining) { showToast(tr('an.advanceExceedsRemaining', { avail: eur(row.remaining) })); return }
-    // Аванс уходит из инкассации — та же проверка баланса, что у выплаты ЗП (аудит 2026-09-27:
-    // раньше аванс мог увести баланс инкассации в минус без предупреждения).
-    const { data: balRows, error: balErr } = await db.from('inkassation_balance').select('balance').eq('restaurant_id', restaurantId).limit(1)
-    if (balErr) { showToast(tr('pe.saveFailed', { err: balErr.message })); return }
-    const available = Number(balRows?.[0]?.balance || 0)
-    if (amount > available) { showToast(tr('pe.insufficientInkassationPool', { avail: eur(Math.max(0, available)) })); return }
-    const { data: advRow, error: insErr } = await db.from('salary_advances').insert({ restaurant_id: restaurantId, employee_id: empId, amount, date: dateStr, period: `${ym}-01`, note: `${empName} аванс` }).select().single()
-    if (insErr) { showToast(tr('pe.saveFailed', { err: insErr.message })); return }
-    // A4 (аудит 2026-08-15): тег с id аванса вместо голого «Имя аванс» — иначе deleteAdvance
-    // ниже стирал бы фрагмент reason ЛЮБОГО аванса этого сотрудника за день, а не только удаляемый.
-    const advTag = advanceTag(empName, amount, advRow?.id || '')
-    // Аванс и списание из инкассации — «оба или ничего»: раньше при любом сбое списания (нет смены,
-    // гонка, ошибка insert) аванс оставался в salary_advances, а деньги из инкассации не
-    // списывались — только тост (реальный случай: Ера €100, SO, 2026-08-11). Теперь при сбое
-    // аванс откатывается, а если смены на дату нет — она создаётся (как для выплаты ЗП).
-    const rollbackAdvance = async () => {
-      if (!advRow?.id) return
-      const { error } = await db.from('salary_advances').delete().eq('id', advRow.id)
-      if (error) showToast(tr('pe.saveFailed', { err: `откат аванса не удался, проверьте вручную: ${error.message}` }))
-    }
-    const shift = (await findShiftForDate(dateStr)) || (await ensureShift(dateStr))
-    let ok = false
-    let errMsg = 'race'
-    if (!shift) {
-      errMsg = 'shift'
-    } else {
-      let ink = await findInkassation(shift.id)
-      const applyAdvance = (base: any) => {
-        const baseAmount = base?.amount ?? shift.inkassation ?? 0
-        const newExpense = (base?.expense || 0) + amount
-        const newReason = [base?.reason || null, advTag].filter(Boolean).join(', ')
-        const newTotal = baseAmount - newExpense - (base?.salary || 0)
-        return { baseAmount, newExpense, newReason, newTotal }
-      }
-      if (ink) {
-        let { newExpense, newReason, newTotal } = applyAdvance(ink)
-        ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
-        if (!ok) {
-          ink = await findInkassation(shift.id)
-          if (ink) {
-            ({ newExpense, newReason, newTotal } = applyAdvance(ink))
-            ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
-          }
-        }
-      } else {
-        const { baseAmount, newExpense, newReason, newTotal } = applyAdvance(ink)
-        const { error } = await db.from('inkassations').insert({ shift_id: shift.id, restaurant_id: restaurantId, date: dateStr, amount: baseAmount, expense: newExpense, reason: newReason, salary: 0, total: newTotal })
-        ok = !error
-        if (error) errMsg = error.message
-      }
-    }
-    if (!ok) {
-      await rollbackAdvance()
-      showToast(tr('pe.saveFailed', { err: errMsg }))
-      return
-    }
-    await load(); await loadDebt()
+  // Свежий остаток для текста отказа: экран мог устареть, поэтому база и отказала.
+  const freshRemaining = async (empId: string) => {
+    const fresh = await computeMonth(ym); setRows(fresh)
+    return fresh.find((r: any) => r.id === empId)?.remaining || 0
   }
+
+  // Аванс относится к зарплате МЕСЯЦА ЭКРАНА (ym), dateStr — день списания из инкассации.
   const addAdvance = async (empId: string, empName: string, amount: number, dateStr: string) => {
     if (moneyBusy.current) return
     moneyBusy.current = true
-    try { await addAdvanceInner(empId, empName, amount, dateStr) } finally { moneyBusy.current = false }
+    try {
+      // Тег с id аванса (= op_id): по нему удаление уберёт из заметки именно этот аванс.
+      const { error } = await runMoneyOp(db, moneyAttempt, 'add_advance',
+        { employee_id: empId, period: `${ym}-01`, amount, date: dateStr, note: `${empName} аванс` },
+        id => ({ tag: advanceTag(empName, amount, id) }))
+      if (error) {
+        if (error.code === 'MS004') await readPool()
+        showToast(moneyError(error, await freshRemaining(empId)))
+      }
+      await load(); await loadDebt()
+    } finally { moneyBusy.current = false }
   }
 
-  // Замок от двойного клика (аудит дублей 2026-10-26): каждый прогон перечитывает свежий
-  // expense и вычитает аванс — второй клик вычитал его из инкассации повторно.
   const deleteAdvance = async (a: any, empName: string) => {
     if (moneyBusy.current) return
     moneyBusy.current = true
-    try { await deleteAdvanceInner(a, empName) } finally { moneyBusy.current = false }
+    try {
+      const { error } = await runMoneyOp(db, moneyAttempt, 'delete_advance',
+        { advance_id: a.id, tag: advanceTag(empName, Number(a.amount || 0), a.id || ''), prefix: `${empName} аванс` })
+      if (error) showToast(tr('pe.saveFailed', { err: error.message }))
+      await load(); await loadDebt()
+    } finally { moneyBusy.current = false }
   }
 
-  const deleteAdvanceInner = async (a: any, empName: string) => {
-    // A5 (аудит 2026-08-16): раньше salary_advances удалялся ПЕРВЫМ безусловно, а компенсация
-    // inkassations — best-effort в один retry; если CAS не проходил (гонка с автосейвом смены —
-    // shift остаётся open и persistShift пишет в ту же строку), аванс исчезал из salary_advances,
-    // а списанные деньги в кассе (inkassations.expense) оставались — реальный случай (Виталий,
-    // SO, 2026-08-10: 200 удалён из salary_advances, expense/total в inkassations не откатились).
-    // Теперь: компенсируем СНАЧАЛА, до 5 попыток; salary_advances удаляем только после
-    // подтверждённой компенсации — деньги не теряются даже под затяжной гонкой.
-    const shift = await findShiftForDate(a.date)
-    if (shift) {
-      let ink = await findInkassation(shift.id)
-      const advTag = advanceTag(empName, Number(a.amount || 0), a.id || '')
-      const applyRemoval = (base: any) => {
-        const newExpense = Math.max(0, (base.expense || 0) - Number(a.amount || 0))
-        // A4 (аудит 2026-08-15): точный тег по id (см. addAdvance) — с фолбэком на старый
-        // startsWith-префикс для авансов, созданных до этого фикса (без тега в reason).
-        const parts = (base.reason || '').split(', ')
-        const newReason = (parts.includes(advTag) ? parts.filter((s: string) => s !== advTag) : parts.filter((s: string) => !s.startsWith(`${empName} аванс`))).join(', ')
-        const newTotal = (base.amount ?? shift.inkassation ?? 0) - newExpense - (base.salary || 0)
-        return { newExpense, newReason, newTotal }
-      }
-      if (ink) {
-        let ok = false
-        for (let i = 0; i < 5 && !ok; i++) {
-          if (i > 0) ink = await findInkassation(shift.id)
-          if (!ink) break
-          const { newExpense, newReason, newTotal } = applyRemoval(ink)
-          ok = await casUpdateInk(shift.id, 'expense', ink.expense || 0, { expense: newExpense, reason: newReason, total: newTotal })
-        }
-        if (!ok) { showToast(tr('pe.raceRetry')); return }
-      }
-    }
-    const { error } = await db.from('salary_advances').delete().eq('id', a.id)
-    if (error) { showToast(tr('pe.saveFailed', { err: error.message })); return }
-    await load(); await loadDebt()
-  }
-
-  // Выплата ЗП «прямо из инкассации» — записывается на инкассацию дня оплаты
-  // (inkassations.salary += amount, salary_note дописывается «Имя: Сумма»), но лимит «не уйти
-  // в минус» сверяется с накопительным кошельком инкассации (см. ниже), не с суммой этого дня.
-  // Карта — безнал, кассы не касается.
+  // Выплата наличными списывается с инкассации дня оплаты; карта инкассации не касается.
   const savePayment = async () => {
-    if (moneyBusy.current) return
-    moneyBusy.current = true
-    try { await savePaymentInner() } finally { moneyBusy.current = false }
-  }
-  const savePaymentInner = async () => {
-    if (!payFor) return
+    if (!payFor || moneyBusy.current) return
     const amount = Number(payFor.amount) || 0
     if (amount <= 0) return
+    moneyBusy.current = true
     setPaying(true); setPayError(null); setPayInsufficient(false)
-    const method = payFor.method || 'cash'
-    const dateStr = payFor.date || fmtDate(new Date())
-
-    // Наличными нельзя выдать больше остатка (как аванс и «в долг»): остаток уже за вычетом
-    // выплат и открытого долга, иначе та же сумма платилась дважды. Карта остаток не меняет.
-    const row = rows.find(r => r.id === payFor.id)
-    if (method === 'cash' && (!row || amount > round2(row.remaining))) {
-      setPayError(tr('pe.debtExceedsRemaining', { avail: `€${round2(row?.remaining || 0)}` }))
-      setPaying(false); return
-    }
-
-    // Вторая защита от дубля (помимо замка moneyBusy — ловит и второе устройство): такая же
-    // выплата тому же сотруднику за тот же период за последние 2 минуты — повторное нажатие.
-    const since = new Date(Date.now() - 120000).toISOString()
-    const { data: recentDup } = await db.from('salary_payments').select('id').eq('employee_id', payFor.id).eq('period', `${ym}-01`).eq('amount', amount).eq('method', method).gte('created_at', since).limit(1)
-    if (Array.isArray(recentDup) && recentDup.length > 0) {
-      setPayError(tr('pe.saveFailed', { err: 'такая же выплата уже записана меньше 2 минут назад (повторное нажатие?)' }))
-      setPaying(false); return
-    }
-
-    if (method === 'cash') {
-      const sh = await ensureShift(dateStr)
-      if (!sh) { setPayError(tr('pe.saveFailed', { err: 'shift' })); setPaying(false); return }
-      const shiftId = sh.id
-      // Инкассация — накопительный кошелёк, не сумма конкретного дня (юзер-фидбок 2026-08-16):
-      // доступно = вся инкассация по сменам минус всё уже списанное (расход+ЗП) за всё время.
-      // Баланс — готовый агрегат из VIEW inkassation_balance (1 строка) вместо перекачки всей
-      // истории shifts+inkassations+topups на каждое нажатие «Выплатить» (юзер-фидбок
-      // 2026-09-22: кнопки выплаты ЗП стали медленно реагировать).
-      const [{ data: balRows }, { data: inkList }] = await Promise.all([
-        db.from('inkassation_balance').select('balance').eq('restaurant_id', restaurantId).limit(1),
-        db.from('inkassations').select('id, amount, expense, salary, salary_note').eq('shift_id', shiftId).limit(1),
-      ])
-      const available = Number(balRows?.[0]?.balance || 0)
-      const cur = Array.isArray(inkList) ? inkList[0] : inkList
-      if (amount > available) {
-        setPayError(tr('pe.insufficientInkassationPool', { avail: eur(Math.max(0, available)) }))
-        setPayInsufficient(true)
-        setPaying(false); return
+    try {
+      const { error } = await runMoneyOp(db, moneyAttempt, 'pay_salary', {
+        employee_id: payFor.id, period: `${ym}-01`, amount, method: payFor.method || 'cash',
+        date: payFor.date || fmtDate(new Date()), note: payFor.note || null, entry: `${payFor.name}: ${eur(amount)}`,
+      })
+      if (error) {
+        if (error.code === 'MS004') { await readPool(); setPayInsufficient(true) }
+        setPayError(moneyError(error, await freshRemaining(payFor.id)))
+        return
       }
-      // A3 (аудит 2026-08-15): свой снэпшот cur.salary/expense мог устареть к моменту записи
-      // (аванс или другая выплата успели пройти между чтением выше и update здесь) — те же
-      // риски, что persistShift уже закрыл для этой таблицы (A2, аудит 2026-08-09).
-      const applyPayment = (base: any) => {
-        const mergedNote = [base?.salary_note, `${payFor.name}: ${eur(amount)}`].filter(Boolean).join('; ')
-        const newSalary = (base?.salary || 0) + amount
-        // C6 (юзер-фидбок 2026-08-15): total раньше не пересчитывался здесь — оставался от
-        // последнего обычного закрытия смены, без учёта зарплаты, «остаток» в Кассе расходился
-        // с реальностью после каждой выплаты.
-        const newTotal = (base?.amount || 0) - (base?.expense || 0) - newSalary
-        return { values: { restaurant_id: restaurantId, date: dateStr, salary: newSalary, salary_note: mergedNote, total: newTotal } }
-      }
-
-      // C2 (аудит 2026-08-15): раньше inkassations писалась первой, salary_payments —
-      // второй. Если второй insert падал после успешного первого — касса уже списана, но
-      // «оплачено» нигде не отмечено, менеджер платил второй раз реальными деньгами за уже
-      // списанный долг. Теперь salary_payments — источник истины «оплачено» — пишется
-      // первым; если следующая запись в inkassations падает, компенсируем откатом (удаляем
-      // только что вставленную salary_payments), чтобы не остаться в состоянии
-      // «оплачено, но касса не списана» либо «списано, но не оплачено» — только оба или ничего.
-      const { data: payRow, error: payErr } = await db.from('salary_payments').insert({
-        employee_id: payFor.id, period: `${ym}-01`, amount, method,
-        paid_at: new Date(dateStr).toISOString(),
-        note: payFor.note || null, created_by: null,
-      }).select().single()
-      if (payErr) { setPayError(tr('pe.saveFailed', { err: payErr.message })); setPaying(false); return }
-
-      let ok: boolean
-      let insertErrMsg = 'race'
-      if (cur?.id) {
-        let { values } = applyPayment(cur)
-        ok = await casUpdateInk(shiftId, 'salary', cur.salary || 0, values)
-        if (!ok) {
-          const fresh = await findInkassation(shiftId)
-          if (fresh) { ({ values } = applyPayment(fresh)); ok = await casUpdateInk(shiftId, 'salary', fresh.salary || 0, values) }
-        }
-      } else {
-        // Свежая строка (для этой смены ещё не было ни расхода, ни инкассации) — в отличие
-        // от CAS-ветки выше (partial update, amount/expense не трогает), insert обязан
-        // указать amount/expense явно, иначе NOT NULL на amount валил insert, а ошибка
-        // гасилась ниже под общим ярлыком «race», хотя это вообще не гонка (баг 2026-08-16,
-        // реальный кейс юзера — платёж без существующей инкассации дня).
-        const { values } = applyPayment({ ...cur, amount: sh.inkassation, expense: 0 })
-        const { error } = await db.from('inkassations').insert({ shift_id: shiftId, amount: sh.inkassation, expense: 0, ...values })
-        ok = !error
-        if (error) insertErrMsg = error.message
-      }
-      if (!ok) {
-        if (payRow?.id) await db.from('salary_payments').delete().eq('id', payRow.id)
-        setPayError(tr('pe.saveFailed', { err: insertErrMsg })); setPaying(false); return
-      }
-      setPaying(false)
       setPayFor(null)
       await load(); await loadDebt()
-      return
-    }
-
-    const { error: payErr } = await db.from('salary_payments').insert({
-      employee_id: payFor.id, period: `${ym}-01`, amount, method,
-      paid_at: new Date(dateStr).toISOString(),
-      note: payFor.note || null, created_by: null,
-    })
-    setPaying(false)
-    if (payErr) { setPayError(tr('pe.saveFailed', { err: payErr.message })); return }
-    setPayFor(null)
-    await load(); await loadDebt()
+    } finally { setPaying(false); moneyBusy.current = false }
   }
 
-  // «Отметить как долг» (юзер-фидбок 2026-08-20): вместо жёсткого отказа при нехватке налички —
-  // ручное действие менеджера, эксплицитно решившего «сегодня не платим, фиксируем как долг».
-  // Пишет ЦЕЛИКОМ введённую сумму (без авто-разбивки на «часть сейчас + остаток в долг» —
-  // юзер: «долг не делим по частям»); settlement (галочка в Manager→Смена) сам допишет
-  // salary_payments, remaining в ЗП после этого сойдётся сам.
+  // «Отметить как долг»: сумма добавляется к открытому долгу за месяц экрана, гасится
+  // галочкой в Manager→Смена.
   const markAsDebt = async () => {
     if (!payFor || moneyBusy.current) return
     const amount = Number(payFor.amount) || 0
@@ -583,8 +267,11 @@ export function ManagerSalaryTab({ restaurantId, accent, t }: { restaurantId: st
     moneyBusy.current = true // замок от двойного тапа (аудит 2026-09-27)
     setMarkingDebt(true)
     try {
-      const err = await addSalaryDebt(payFor.id, `${ym}-01`, payFor.date || fmtDate(new Date()), amount)
-      if (err) { setPayError(err === 'race' ? tr('pe.raceRetry') : tr('pe.saveFailed', { err })); return }
+      const { error } = await runMoneyOp(db, moneyAttempt, 'add_salary_debt', {
+        employee_id: payFor.id, period: `${ym}-01`, date: payFor.date || fmtDate(new Date()), amount,
+        title: `${tr('pe.salaryWord')} — ${periodLabel(`${ym}-01`)}`,
+      })
+      if (error) { setPayError(moneyError(error, await freshRemaining(payFor.id))); return }
       setPayFor(null); setPayError(null); setPayInsufficient(false)
       showToast(tr('pe.markedAsDebt'))
       await load(); await loadDebt()

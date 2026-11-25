@@ -103,7 +103,14 @@ const RPC_POLICY: Record<string, { write: AppId[]; restaurantArg: string }> = {
   increment_tobacco_stock: { write: ['stash'], restaurantArg: 'p_restaurant_id' },
   settle_debts: { write: ['manager'], restaurantArg: 'p_restaurant_id' },
   save_shift: { write: ['manager'], restaurantArg: 'p_restaurant_id' },
+  // Те же права, что на прямую запись соответствующих таблиц (POLICY выше).
+  pay_salary: { write: ['people'], restaurantArg: 'p_restaurant_id' },
+  add_advance: { write: ['analytics'], restaurantArg: 'p_restaurant_id' },
+  delete_advance: { write: ['analytics'], restaurantArg: 'p_restaurant_id' },
+  add_salary_debt: { write: ['manager'], restaurantArg: 'p_restaurant_id' },
 }
+
+const MONEY_RPC = new Set(['settle_debts', 'save_shift', 'pay_salary', 'add_advance', 'delete_advance', 'add_salary_debt'])
 
 const FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'is', 'like', 'ilike'])
 function validFilter(value: unknown): boolean {
@@ -127,6 +134,9 @@ const DB_MAX_ROWS = 20_000
 const PG_ERROR_MESSAGES: Record<string, string> = {
   MS001: 'shift_changed', // save_shift: смену изменили не мы
   MS002: 'debt_changed',
+  MS003: 'exceeds_remaining',
+  MS004: 'insufficient_pool',
+  MS005: 'duplicate_payment',
   '23505': 'Duplicate entry',
   '23503': 'Referenced record not found',
   '23502': 'Missing required field',
@@ -275,6 +285,14 @@ export async function POST(req: NextRequest) {
       }
     }
     const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    // pay_salary: как прямая запись salary_payments (peoplePolicy — только должностные лица),
+    // наличными — ещё и доступ к инкассации.
+    if (fn === 'pay_salary') {
+      const cash = (args as any)?.p?.method !== 'card'
+      if ((cash && !authorized(caller, ['manager', 'analytics'])) || !(await isOfficial(admin, caller))) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
     const isExpenseHistory = fn === 'shift_expense_name_suggestions'
     if (isExpenseHistory && (args?.p_prefix != null && (typeof args.p_prefix !== 'string' || args.p_prefix.length > 120))) {
       return NextResponse.json({ error: 'Invalid expense prefix' }, { status: 400 })
@@ -318,7 +336,7 @@ export async function POST(req: NextRequest) {
     // Off the critical path (Next.js `after`): the actor lookup + audit insert added 1-2
     // sequential Supabase round-trips to every settle_debts call, felt as sluggish buttons.
     // Logging must never delay the response the client is waiting on.
-    if (fn === 'settle_debts' || fn === 'save_shift') after(() => auditRpc(admin, caller, fn, safeArgs))
+    if (MONEY_RPC.has(fn)) after(() => auditRpc(admin, caller, fn, safeArgs))
     return NextResponse.json({ data })
   }
 

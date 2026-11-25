@@ -1,6 +1,7 @@
 // Сохранение смены одной операцией базы (docs/migrations/shift-save-atomic-2026-11-25.sql).
 // Общее для app/manager и dashboard/shifts; iOS — ShiftForm.swift + ManagerView.persistOnce.
 import type { ShiftExpenseRow } from './shiftForm'
+import { opIdFor, type OpAttempt } from './moneyOps'
 
 export type ShiftSavePayload = {
   expected: { income: number; income_card: number; inkassation: number }
@@ -21,20 +22,15 @@ export type ShiftSaveResult = {
   ink: { expense: number | null; reason: string | null } | null
 }
 
-export type SaveAttempt = { key: string; opId: string } | null
+export type SaveAttempt = OpAttempt
 
 type Rpc = {
   rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: { message: string; code?: string } | null }>
 }
 
-/**
- * Повтор той же формы после потерянного ответа идёт с тем же op_id — база вернёт уже
- * применённый результат. Изменённая форма — новая операция.
- */
 export async function saveShiftAtomic(db: Rpc, attempt: { current: SaveAttempt }, shiftId: string, payload: ShiftSavePayload) {
-  const key = JSON.stringify([shiftId, payload])
-  if (attempt.current?.key !== key) attempt.current = { key, opId: crypto.randomUUID() }
-  const { data, error } = await db.rpc('save_shift', { p_shift_id: shiftId, p: { ...payload, op_id: attempt.current.opId } })
+  const opId = opIdFor(attempt, JSON.stringify([shiftId, payload]))
+  const { data, error } = await db.rpc('save_shift', { p_shift_id: shiftId, p: { ...payload, op_id: opId } })
   if (!error) attempt.current = null
   return { result: data as ShiftSaveResult, error }
 }

@@ -15,30 +15,21 @@ code='import Foundation\nenum APIError:Error {case http(Int,String?)}\n'+(root/'
   let select:[String:Any]=["op":"select","table":"salary_advances"]
   if !expected {do {_ = try await data(select);assertionFailure("single flag activated fixture")}catch{}}
   else {
-   for p:[String:Any] in [["op":"rpc","fn":"settle_debts"],["op":"update","table":"employees","values":["salary":0]],["op":"insert","table":"salary_advances","values":["restaurant_id":"foreign"]]] {
-    do {_ = try await data(p);assertionFailure("unsupported operation/scope allowed")}catch{}
+   for p:[String:Any] in [["op":"rpc","fn":"settle_debts","args":["p":[:] as [String:Any]]],["op":"update","table":"employees","values":["salary":0]],["op":"insert","table":"salary_advances","values":["restaurant_id":"demo"]]] {
+    do {_ = try await data(p);assertionFailure("unsupported operation allowed")}catch{}
    }
-   let insert:[String:Any]=["op":"insert","table":"salary_advances","returning":"single","values":["restaurant_id":"demo","employee_id":"e1","amount":100.0,"date":"2026-11-13","period":"2026-11-01"]]
-   let mode=ProcessInfo.processInfo.environment["MISE_DEMO_ADVANCE_SAVE"] ?? ""
-   if mode=="fail-once" {do {_ = try await data(insert);assertionFailure("missing insert failure")}catch{}}
-   let advance=try await data(insert) as! [String:Any]
-   assert(advance["id"] != nil)
-   let update:[String:Any]=["op":"update","table":"inkassations","returning":"single","filters":[["col":"shift_id","op":"eq","val":"s1"],["col":"expense","op":"eq","val":50.0]],"values":["expense":150.0,"total":400.0]]
-   if mode=="fail-cash-once" {
-    for _ in 0..<2 {do {_ = try await data(update);assertionFailure("missing cash failure")}catch{}}
-    _ = try await data(["op":"delete","table":"salary_advances","filters":[["col":"id","op":"eq","val":advance["id"]!]]])
-    let rolledBack=try await data(select) as! [[String:Any]]
-    assert(rolledBack.isEmpty)
-    _ = try await data(insert)
+   let add:[String:Any]=["op":"rpc","fn":"add_advance","args":["p":["op_id":"a1","employee_id":"e1","amount":100.0,"date":"2026-11-13","period":"2026-11-01"] as [String:Any]]]
+   if ProcessInfo.processInfo.environment["MISE_DEMO_ADVANCE_SAVE"] != "success" {
+    do {_ = try await data(add);assertionFailure("missing failure")}catch{}
+    let none=try await data(select) as! [[String:Any]];assert(none.isEmpty,"failed operation left a row")
    }
-   let cash=try await data(update) as! [String:Any]
-   assert(cash["expense"] as? Double==150 && cash["total"] as? Double==400)
+   _ = try await data(add);_ = try await data(add)
    let balance=try await data(["op":"select","table":"inkassation_balance"]) as! [[String:Any]]
    assert(balance.first?["balance"] as? Double==400)
    let saved=try await data(select) as! [[String:Any]]
-   assert(saved.count==1)
+   assert(saved.count==1,"replay duplicated advance")
   }
-  print("PASS offline advance fixture enabled=\(expected), scope/CAS/rollback checked")
+  print("PASS offline advance fixture enabled=\(expected), scope/atomicity/replay checked")
  }
 }
 '''

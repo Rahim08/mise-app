@@ -25,7 +25,8 @@ enum APIError:Error {case http(Int,String?)}
  var shift:[[String:Any]]=[]
  var ink:[String:Any]=["shift_id":"s1","amount":600.0,"expense":50.0,"salary":50.0,"total":500.0,"reason":"Existing"]
  var pool=500.0,delay=0
- var failInsert=false,failInk=false,failRollback=false,casMisses=0
+ var failure:APIError?;var offline=false
+ var saved:[String:[String:Any]]=[:]
  var payrollGate=Gate(),inkGate=Gate()
  var selectedPeriod=""
  func match(_ row:[String:Any],_ filters:[[String:Any]])->Bool {
@@ -57,21 +58,16 @@ enum APIError:Error {case http(Int,String?)}
    }
    let chosen=rows.filter{match($0,filters)}
    result=p["returning"] as? String=="maybeSingle" ? (chosen.first as Any? ?? NSNull()) : chosen
-  }else if op=="insert" {
-   if table=="salary_advances",failInsert {throw APIError.http(503,"insert failed")}
-   var row=p["values"] as! [String:Any];row["id"]=row["id"] ?? UUID().uuidString
-   if table=="salary_advances" {advances.append(row)}
-   if table=="shifts" {shift.append(row)}
-   if table=="inkassations" {await inkGate.wait();if failInk {throw APIError.http(503,"ink failed")};ink=row}
-   result=p["returning"] as? String=="single" ? row : [row]
-  }else if op=="update",table=="inkassations" {
+  }else if op=="rpc" {
    await inkGate.wait()
-   if failInk {throw APIError.http(503,"ink failed")}
-   if casMisses>0 {casMisses-=1;ink["expense"]=(ink["expense"] as! Double)+10;result=NSNull()}
-   else if match(ink,filters) {ink.merge(p["values"] as! [String:Any]){_,new in new};result=ink}
-  }else if op=="delete",table=="salary_advances" {
-   if failRollback {throw APIError.http(503,"rollback failed")}
-   advances.removeAll{match($0,filters)}
+   if let failure {throw failure}
+   if offline {throw URLError(.notConnectedToInternet)}
+   let v=(p["args"] as! [String:Any])["p"] as! [String:Any]
+   if p["fn"] as? String=="add_advance" {
+    var row:[String:Any]=["id":v["op_id"]!]
+    for k in ["employee_id","amount","date","period","note"] {row[k]=v[k]}
+    advances.append(row);result=row
+   }
   }
   return try JSONSerialization.data(withJSONObject:["data":result])
  }
@@ -99,37 +95,40 @@ enum APIError:Error {case http(Int,String?)}
   let month=m.viewMonth;m.changeMonth(-1)
   check(m.viewMonth==month,"period changed during money write")
   _ = await m.addAdvance(empId:"e1",amount:100,date:m.key(Date()))
-  check(f.advances.count==1,"double tap inserted duplicate advance")
+  check(f.requests.filter{$0["op"] as? String=="rpc"}.count==1,"double tap sent a second advance")
   f.inkGate.release();try await wait{completed || f.payrollGate.entered}
   check(completed,"full payroll refresh still blocks advance")
   f.payrollGate.release();await save.value
   check(m.rows.first?.advance==100 && m.rows.first?.advanceList.count==1 && m.rows.first?.cash==700 && m.rows.first?.remaining==550,"confirmed advance did not update cash/remaining/history")
-  check(f.ink["expense"] as? Double==150 && f.ink["total"] as? Double==400,"collection amount/expense changed incorrectly")
   check(f.advances.first?["period"] as? String==f.selectedPeriod,"advance used changed period")
   check(!f.requests.contains{$0["table"] as? String=="employees"},"unrelated employee payroll read on successful save")
   check(m.prevCashTotal==2222 && m.prevPaidCash==33,"saving current advance recalculated previous payroll")
   print("CHECK mandatory cash confirmation, duplicate tap, month lock, totals and no payroll reload")
 
-  let bad=await reset();let bf=Transport.shared;bf.failInk=true
+  func rpcs(_ t:Transport)->[[String:Any]] {t.requests.filter{$0["op"] as? String=="rpc"}}
+  func ids(_ t:Transport)->[String] {rpcs(t).map{(($0["args"] as! [String:Any])["p"] as! [String:Any])["op_id"] as! String}}
+  check(rpcs(f).count==1 && !f.requests.contains{["insert","update","delete"].contains($0["op"] as? String ?? "")},"advance must be one atomic call")
+  let bad=await reset();let bf=Transport.shared;bf.offline=true
   _ = await bad.addAdvance(empId:"e1",amount:100,date:bad.key(Date()))
-  check(bf.advances.isEmpty && bad.rows.first?.advance==0 && bad.toast != nil,"failed cash write retained advance or claimed success")
-  check(bf.requests.filter{$0["table"] as? String=="salary_advances" && $0["op"] as? String=="delete"}.count==1,"cash failure did not roll back advance")
+  check(bad.rows.first?.advance==0 && bad.toast != nil,"failed call claimed success")
+  _ = await bad.addAdvance(empId:"e1",amount:100,date:bad.key(Date()))
+  _ = await bad.addAdvance(empId:"e1",amount:90,date:bad.key(Date()))
+  bf.offline=false
+  let ok=await bad.addAdvance(empId:"e1",amount:90,date:bad.key(Date()))
+  let sent=ids(bf)
+  check(ok && sent.count==4 && sent[0]==sent[1] && sent[1] != sent[2] && sent[2]==sent[3],"retry must reuse op_id, changed form must not")
 
-  let insufficient=await reset();let inf=Transport.shared
-  _ = try await DB.from("inkassation_balance").select("balance").eq("restaurant_id","test").limit(1).list(InkBalanceRow.self)
-  inf.pool=0
-  _ = await insufficient.addAdvance(empId:"e1",amount:100,date:insufficient.key(Date()))
-  check(inf.advances.isEmpty,"cached balance permitted advance from empty cash pool")
-
-  for amount in [-1.0,0.0,Double.nan,Double.infinity,700] {
+  for (code,text) in [("exceeds_remaining","pe.debtExceedsRemaining"),("insufficient_pool","pe.insufficientInkassationPool")] {
+   let refused=await reset();Transport.shared.failure=APIError.http(400,code)
+   let done=await refused.addAdvance(empId:"e1",amount:100,date:refused.key(Date()))
+   check(!done && refused.advanceError==text,"server refusal \(code) not explained")
+  }
+  for amount in [-1.0,0.0,Double.nan,Double.infinity] {
    let invalid=await reset();let vf=Transport.shared
    _ = await invalid.addAdvance(empId:"e1",amount:amount,date:invalid.key(Date()))
-   check(vf.advances.isEmpty,"invalid/excess advance reached financial writes")
+   check(rpcs(vf).isEmpty,"invalid advance reached the server")
   }
-  let retry=await reset();let rf=Transport.shared;rf.casMisses=1
-  _ = await retry.addAdvance(empId:"e1",amount:100,date:retry.key(Date()))
-  check(rf.advances.count==1 && rf.ink["expense"] as? Double==160,"CAS retry overwrote concurrent expense or duplicated advance")
-  print("CHECK cash failure rollback, fresh pool, validation and CAS contention")
+  print("CHECK atomic call, idempotent retry, server refusals and validation")
 
   let dated=await reset();let datedTransport=Transport.shared
   let otherDate=Calendar.current.date(byAdding:.month,value:1,to:Date())!
@@ -143,17 +142,10 @@ enum APIError:Error {case http(Int,String?)}
   lateTransport.payrollGate.release();await olderLoad.value
   check(late.rows.first?.advance==100 && late.rows.first?.remaining==550,"older payroll load overwrote confirmed advance")
 
-  let noInk=await reset();let noInkTransport=Transport.shared;noInkTransport.ink=[:]
-  _ = await noInk.addAdvance(empId:"e1",amount:100,date:noInk.key(Date()))
-  check(noInkTransport.advances.count==1 && noInkTransport.ink["expense"] as? Double==100,"missing day collection was not created")
-  let noShift=await reset();let noShiftTransport=Transport.shared;noShiftTransport.shift=[];noShiftTransport.ink=[:]
-  _ = await noShift.addAdvance(empId:"e1",amount:100,date:noShift.key(Date()))
-  check(noShiftTransport.advances.count==1 && noShiftTransport.shift.count==1 && noShiftTransport.ink["expense"] as? Double==100,"missing shift/collection lost advance")
-  print("CHECK cents, separate date/period, late payroll response and missing shift/collection")
+  print("CHECK cents, separate date/period and late payroll response")
 
   /*BOOL_TESTS*/
   let cents=await reset();let centsTransport=Transport.shared;centsTransport.pool=2000
-  centsTransport.ink["amount"]=2100.0;centsTransport.ink["total"]=2000.0
   _ = await cents.addAdvance(empId:"e1",amount:50.07,date:cents.key(Date()))
   _ = await cents.addAdvance(empId:"e1",amount:100.10,date:cents.key(Date()))
   check(abs((cents.rows.first?.remaining ?? 0)-499.83)<0.000001,"fractional advance remainder wrong")
@@ -163,7 +155,7 @@ enum APIError:Error {case http(Int,String?)}
 
   let timing=await reset();Transport.shared.delay=80
   let start=ContinuousClock.now;_ = await timing.addAdvance(empId:"e1",amount:100,date:timing.key(Date()))
-  print("MEASURE existing shift/ink 80ms per request: \(start.duration(to:.now)), requests=\(Transport.shared.requests.count)")
+  print("MEASURE advance 80ms per request: \(start.duration(to:.now)), requests=\(Transport.shared.requests.count)")
   if !failures.isEmpty {print("FAILED \(failures.count)");exit(1)}
   print("PASS native advance save performance and financial regressions")
  }
@@ -177,13 +169,10 @@ if baseline:
  fixtures=fixtures[:start]+fixtures[end:]
 else:
  fixtures=fixtures.replace('  /*BOOL_TESTS*/',r'''
-  let rejected=await reset();Transport.shared.failInsert=true
+  let rejected=await reset();Transport.shared.failure=APIError.http(503,"x")
   let rejectedOK=await rejected.addAdvance(empId:"e1",amount:100,date:rejected.key(Date()))
-  check(!rejectedOK && rejected.advanceError != nil,"failed insert returned success or lost form error")
+  check(!rejectedOK && rejected.advanceError != nil,"failed save returned success or lost form error")
   check(rejected.prepareAdvance() && rejected.advanceError==nil,"new advance form retained prior error")
-  let broken=await reset();let brokenTransport=Transport.shared;brokenTransport.failInk=true;brokenTransport.failRollback=true
-  let brokenOK=await broken.addAdvance(empId:"e1",amount:100,date:broken.key(Date()))
-  check(!brokenOK && broken.advanceError=="pe.paymentRollbackFailed","rollback failure lost reconciliation warning")
   let initial=await reset();let initialTransport=Transport.shared;initial.loaded=false;initialTransport.payrollGate.held=true
   let initialLoad=Task{await initial.load()};try await wait{initialTransport.payrollGate.entered}
   let prematureOK=await initial.addAdvance(empId:"e1",amount:100,date:initial.key(Date()))
@@ -191,7 +180,7 @@ else:
   initialTransport.payrollGate.release();await initialLoad.value
   let readyOK=await initial.addAdvance(empId:"e1",amount:100,date:initial.key(Date()))
   check(readyOK && initial.rows.first?.advance==100,"initial payroll failed to finish before advance")
-  print("CHECK Bool form result, persistent failure, rollback warning and initial payroll gate")
+  print("CHECK Bool form result, persistent failure, initial payroll gate")
 ''')
 with tempfile.TemporaryDirectory(prefix='mise-advance-save-') as folder:
  p=Path(folder);(p/'test.swift').write_text('import Foundation\nimport Observation\n'+(root/'Models.swift').read_text()+'\n'+(root/'DB.swift').read_text()+'\n'+accrual+'\n'+model+'\n'+fixtures)
