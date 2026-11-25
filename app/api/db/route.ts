@@ -117,6 +117,8 @@ function validFilter(value: unknown): boolean {
 // generous and shouldn't affect any normal usage pattern.
 const DB_GATEWAY_RATE_LIMIT = 300
 const DB_GATEWAY_RATE_WINDOW_MS = 60_000
+const DB_PAGE = 1000 // потолок строк PostgREST на один запрос
+const DB_MAX_ROWS = 20_000
 
 // Postgres error codes safe to name specifically; anything else collapses to a generic
 // message so table/column/constraint names and value details don't reach the client
@@ -598,7 +600,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unknown op' }, { status: 400 })
     }
 
-    const { data, error } = await q
+    let { data, error } = await q
+    // PostgREST молча режет ответ на 1000 строк, .limit() выше потолок не поднимает. hookah_sales
+    // перерос 1000 — свежие смены пропадали из выборки, «Сохранить» на пустом экране стирало день.
+    // Полная первая страница = перечитываем постранично; order('id') делает страницы стабильными.
+    if (op === 'select' && !error && !returning && data?.length === DB_PAGE && (!limit || limit > DB_PAGE)) {
+      const max = Math.min(limit || DB_MAX_ROWS, DB_MAX_ROWS)
+      const all: any[] = []
+      for (let from = 0; from < max; from += DB_PAGE) {
+        let pq: any = applyFilters(admin.from(table).select(safeColumns(columns)).eq(scope, caller.rid))
+        for (const o of (order || [])) pq = pq.order(o.col, { ascending: o.ascending !== false })
+        const page = await pq.order('id').range(from, Math.min(from + DB_PAGE, max) - 1)
+        if (page.error) { error = page.error; break }
+        all.push(...page.data)
+        if (page.data.length < DB_PAGE) break
+      }
+      data = all as any
+    }
     if (error) {
       console.error(`[api/db] ${table}.${op} failed:`, error)
       return NextResponse.json({ error: clientSafeError(error), code: (error as any).code }, { status: 400 })
