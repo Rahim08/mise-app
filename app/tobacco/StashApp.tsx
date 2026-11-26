@@ -10,6 +10,7 @@ import { AppSwitchBrand } from '@/components/AppSwitchBrand'
 import { Spinner } from '@/components/ui'
 import { fmtDate as fmtDay } from '@/lib/format'
 import { useI18n, tCurrent } from '@/lib/i18n'
+import { runMoneyOp, type OpAttempt } from '@/lib/moneyOps'
 import './stash-web.css'
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -97,7 +98,7 @@ interface StockItem { id: string; brand: string; flavor: string; quantity_g: num
 interface Movement { id: string; brand: string; flavor: string; quantity_g: number; type: string; batch_id: string; created_at: string; reason?: string | null }
 interface Inventory { id: string; created_at: string; items: any[] }
 interface MovRow { id: string; brand: string; flavor: string; quantity_g: string }
-interface InvRow { brand: string; flavor: string; expected_g: number; actual_g: string }
+interface InvRow { stock_id: string; brand: string; flavor: string; expected_g: number; actual_g: string }
 
 const newRow = (): MovRow => ({ id: Math.random().toString(36).slice(2), brand: '', flavor: '', quantity_g: '' })
 
@@ -447,6 +448,9 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
   const [expandedBatch, setExpandedBatch] = useState<string | null>(null)
   const [expandedInv, setExpandedInv] = useState<string | null>(null)
   const [editBatch, setEditBatch] = useState<string | null>(null)
+  // Строки, которые заменяет правка: фиксируются при открытии формы, база сверяет их.
+  const [editIds, setEditIds] = useState<string[]>([])
+  const opAttempt = useRef<OpAttempt>(null)
 
   useEffect(() => {
     setMounted(true)
@@ -533,6 +537,19 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
     return stock.filter(s => s.brand === brand).map(s => s.flavor).sort()
   }
 
+  // Операция склада — одна транзакция базы (stock-ops-atomic-2026-11-26.sql). Повтор после
+  // обрыва связи идёт с тем же op_id и ничего не задваивает.
+  const stockOp = async (fn: string, payload: Record<string, unknown>, shortage?: () => Promise<string>) => {
+    const { error } = await runMoneyOp(db, opAttempt, fn, payload)
+    if (!error) return true
+    if (error.code === 'MS007') { await loadAll(restaurantId!); showToastMsg(tr('st.stockChanged')) }
+    else if ((error.code === 'MS008' || error.code === 'MS009') && shortage) showToastMsg(await shortage())
+    else showToastMsg(tr('dash.notSaved') + error.message)
+    return false
+  }
+
+  const replacedRows = () => editBatch ? movements.filter(m => editIds.includes(m.id)) : []
+
   const saveMov = async () => {
     // Гвард по ref — setSaving(true) не успевает в рендер до второго быстрого клика,
     // стейт saving ещё читается как false и второй вызов проходит следом за первым.
@@ -543,103 +560,24 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
     savingRef.current = true
     setSaving(true)
     try {
-      // Один живой снэпшот склада на всю операцию — валидация и апдейты идут по нему,
-      // а не по возможно устаревшему стейту `stock` (правки в другой вкладке/сессии).
-      const { data: freshData } = await db.from('tobacco_stock').select('*').eq('restaurant_id', restaurantId)
-      const freshStock: StockItem[] = freshData || []
-      if (movMode !== 'in') {
-        // Копим дельту по бренд+вкус ПО ВСЕМ строкам батча — иначе два ряда на один и тот же
-        // товар (напр. 300г + 300г при остатке 400г) проходили валидацию по отдельности,
-        // а итоговый апдейт молча клампился в 0 без единого сообщения об ошибке.
-        const cumulative = new Map()
+      const ok = await stockOp('stock_save_movement', {
+        mode: movMode, reason: movReason.trim(), replace_ids: editBatch ? editIds : [],
+        rows: filled.map(r => ({ brand: r.brand, flavor: r.flavor, grams: parseFloat(r.quantity_g) })),
+      }, async () => {
+        // Называем позицию, которой не хватило (с учётом возврата заменяемых строк).
+        const { data } = await db.from('tobacco_stock').select('*').eq('restaurant_id', restaurantId)
         for (const r of filled) {
-          const key = r.brand + ' ' + r.flavor
-          const cur = cumulative.get(key)
-          cumulative.set(key, { brand: r.brand, flavor: r.flavor, qty: (cur ? cur.qty : 0) + parseFloat(r.quantity_g) })
+          const same = (x: { brand: string; flavor: string }) => x.brand === r.brand && x.flavor === r.flavor
+          const item = (data as StockItem[] | null)?.find(same)
+          if (!item) return `${r.brand} · ${r.flavor} ${tr('st.notFoundSuffix')}`
+          const available = item.quantity_g + replacedRows().filter(same).reduce((s, m) => s + (m.type === 'in' ? -m.quantity_g : m.quantity_g), 0)
+          const wanted = filled.filter(same).reduce((s, x) => s + parseFloat(x.quantity_g), 0)
+          if (wanted > available) return `${r.brand} · ${r.flavor}: ${tr('st.onlyWord')} ${fg(Math.max(0, available))}`
         }
-        for (const { brand, flavor, qty } of cumulative.values()) {
-          const item = freshStock.find(s => s.brand === brand && s.flavor === flavor)
-          if (!item) { showToastMsg(`${brand} · ${flavor} ${tr('st.notFoundSuffix')}`); return }
-          if (qty > item.quantity_g) { showToastMsg(`${brand} · ${flavor}: ${tr('st.onlyWord')} ${fg(item.quantity_g)}`); return }
-        }
-      }
-
-      const batchId = editBatch || crypto.randomUUID()
-      const byId: Record<string, StockItem> = {}
-      freshStock.forEach(s => { byId[s.id] = s })
-      // Дельты копим по id и применяем ОДНИМ апдейтом на позицию в конце — иначе несколько
-      // строк батча (старый откат + новая запись), задевающих один и тот же товар,
-      // перезаписывали друг друга последовательными update() по одному и тому же base-значению.
-      const deltas: Record<string, number> = {}
-      let originalCreatedAt: string | undefined
-
-      // Аудит 2026-09-27: раньше ни один шаг ниже не проверял ошибку (db.from не бросает) —
-      // при обрыве связи старые движения удалялись, новые не вставлялись, а остаток всё равно
-      // менялся, и на экране было «Сохранено». Теперь: сначала вставляем новые строки одним
-      // запросом, потом удаляем старые ПО ID (не по batch_id — он у новых тот же), и только
-      // после этого двигаем остаток. Сбой на любом шаге — откат и явная ошибка.
-      const oldMovs = editBatch ? movements.filter(m => m.batch_id === editBatch) : []
-      if (editBatch) {
-        originalCreatedAt = oldMovs[0]?.created_at
-        for (const m of oldMovs) {
-          const item = freshStock.find(s => s.brand === m.brand && s.flavor === m.flavor)
-          if (item) {
-            const revert = m.type === 'in' ? -m.quantity_g : m.quantity_g
-            deltas[item.id] = (deltas[item.id] || 0) + revert
-          }
-        }
-      }
-      const reason = movReason.trim() || (movMode === 'in' ? 'Поставка' : movMode === 'out' ? 'Выдача в зал' : 'Списание')
-      const newStockRows: Record<string, unknown>[] = []
-      const movementRows = filled.map(r => {
-        const qty = parseFloat(r.quantity_g)
-        const existing = freshStock.find(s => s.brand === r.brand && s.flavor === r.flavor)
-        if (existing) {
-          const delta = movMode === 'in' ? qty : -qty
-          deltas[existing.id] = (deltas[existing.id] || 0) + delta
-        } else if (movMode === 'in') {
-          newStockRows.push({ restaurant_id: restaurantId, brand: r.brand, flavor: r.flavor, quantity_g: qty, flavor_name: r.flavor, updated_at: new Date().toISOString() })
-        }
-        // Правка сохраняет исходный created_at — иначе дата/время движения «прыгали»
-        // на момент правки вместо исходного момента поставки/выдачи.
-        const movementRow: Record<string, unknown> = { restaurant_id: restaurantId, brand: r.brand, flavor: r.flavor, quantity_g: qty, type: movMode, batch_id: batchId, reason, flavor_id: existing?.id || null }
-        if (originalCreatedAt) movementRow.created_at = originalCreatedAt
-        return movementRow
+        return tr('st.stockChanged')
       })
-      const { data: inserted, error: insErr } = await db.from('tobacco_movements').insert(movementRows).select('id')
-      if (insErr) { showToastMsg(tr('dash.notSaved') + insErr.message); return }
-      if (oldMovs.length > 0) {
-        const { error: delErr } = await db.from('tobacco_movements').delete().in('id', oldMovs.map(m => m.id))
-        if (delErr) {
-          // Откат вставки — иначе старая и новая версия партии висели бы рядом.
-          const newIds = (inserted || []).map((m: any) => m.id)
-          if (newIds.length) await db.from('tobacco_movements').delete().in('id', newIds)
-          showToastMsg(tr('dash.notSaved') + delErr.message); return
-        }
-      }
-      if (newStockRows.length > 0) {
-        const { error: stErr } = await db.from('tobacco_stock').insert(newStockRows)
-        if (stErr) { showToastMsg(tr('dash.notSaved') + stErr.message); await loadAll(restaurantId); return }
-      }
-      // Атомарный инкремент на сервере (не read-modify-write с клиента) — иначе два
-      // устройства, почти одновременно пишущих движение по одной позиции, читают один и
-      // тот же base.quantity_g, и второй write молча теряет эффект первого (MISE-006,
-      // аудит 2026-08-28).
-      // Позиции независимы — параллельно, а не запрос-за-запросом (аудит скорости 2026-10-26:
-      // 20 вкусов = 20 последовательных round-trip'ов, сохранение «долго думало»).
-      const rpcErrors: string[] = []
-      await Promise.all(Object.keys(deltas).filter(id => byId[id]).map(async id => {
-        const { error: rpcErr } = await db.rpc('increment_tobacco_stock', { p_id: id, p_delta: deltas[id] })
-        if (rpcErr) rpcErrors.push(`${byId[id].brand} · ${byId[id].flavor}`)
-      }))
-      if (rpcErrors.length > 0) {
-        // Движения уже записаны — сообщаем, по каким позициям остаток не обновился, чтобы
-        // поправить инвентаризацией, а не молча показывать «Сохранено».
-        await loadAll(restaurantId)
-        showToastMsg(tr('dash.notSaved') + rpcErrors.join(', ')); return
-      }
-
-      await loadAll(restaurantId)
+      if (!ok) return
+      await loadAll(restaurantId!)
       setMovRows([newRow()]); setMovReason(''); setShowAddMov(false); setEditBatch(null)
       showToastMsg(tr('st.savedItems', { n: filled.length }))
     } finally {
@@ -654,28 +592,17 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
     const qty = parseFloat(venueGrams)
     if (!(qty > 0)) { showToastMsg(tr('st.addAtLeastOne')); return }
     if (!movReason.trim()) { showToastMsg(tr('st.enterWriteoffReason')); return }
-    if (qty > venueAvailable) { showToastMsg(tr('st.onlyLeftVenue', { g: fg(Math.round(venueAvailable)) })); return }
     savingRef.current = true
     setSaving(true)
     try {
-      const batchId = editBatch || crypto.randomUUID()
-      // Аудит 2026-09-27: вставка новой строки ПЕРЕД удалением старой (по id) и проверка
-      // ошибок — раньше delete проходил, insert падал молча, списание пропадало.
-      const oldMovs = editBatch ? movements.filter(m => m.batch_id === editBatch) : []
-      const originalCreatedAt = oldMovs[0]?.created_at
-      const row: Record<string, unknown> = { restaurant_id: restaurantId, brand: '', flavor: '', quantity_g: qty, type: 'writeoff', batch_id: batchId, reason: movReason.trim() }
-      if (originalCreatedAt) row.created_at = originalCreatedAt
-      const { data: inserted, error: insErr } = await db.from('tobacco_movements').insert(row).select('id')
-      if (insErr) { showToastMsg(tr('dash.notSaved') + insErr.message); return }
-      if (oldMovs.length > 0) {
-        const { error: delErr } = await db.from('tobacco_movements').delete().in('id', oldMovs.map(m => m.id))
-        if (delErr) {
-          const newIds = (inserted || []).map((m: any) => m.id)
-          if (newIds.length) await db.from('tobacco_movements').delete().in('id', newIds)
-          showToastMsg(tr('dash.notSaved') + delErr.message); return
-        }
-      }
-      await loadAll(restaurantId)
+      const ok = await stockOp('stock_save_movement', {
+        mode: 'venue', reason: movReason.trim(), replace_ids: editBatch ? editIds : [], rows: [{ grams: qty }],
+      }, async () => {
+        const returned = replacedRows().filter(m => m.type === 'writeoff' && !m.brand && !m.flavor).reduce((s, m) => s + m.quantity_g, 0)
+        return tr('st.onlyLeftVenue', { g: fg(Math.round(venueAvailable + returned)) })
+      })
+      if (!ok) return
+      await loadAll(restaurantId!)
       setMovRows([newRow()]); setMovReason(''); setVenueGrams(''); setWriteoffVenue(false); setShowAddMov(false); setEditBatch(null)
       showToastMsg(tr('st.savedItems', { n: 1 }))
     } finally {
@@ -686,6 +613,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
 
   const openEdit = (batchId: string, items: Movement[]) => {
     setEditBatch(batchId)
+    setEditIds(items.map(i => i.id))
     setMovMode(items[0].type as any)
     const isVenue = items.every(i => !i.brand && !i.flavor)
     setWriteoffVenue(isVenue)
@@ -701,7 +629,7 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
   }
 
   const openInv = () => {
-    setInvRows(stock.filter(s => s.quantity_g > 0).map(s => ({ brand: s.brand, flavor: s.flavor, expected_g: s.quantity_g, actual_g: '' })))
+    setInvRows(stock.filter(s => s.quantity_g > 0).map(s => ({ stock_id: s.id, brand: s.brand, flavor: s.flavor, expected_g: s.quantity_g, actual_g: '' })))
     setShowInv(true)
   }
 
@@ -712,30 +640,16 @@ export default function StashApp({ rid = '' }: { rid?: string }) {
     savingRef.current = true
     setSaving(true)
     try {
-      const items = filled.map(r => ({ brand: r.brand, flavor: r.flavor, expected_g: r.expected_g, actual_g: parseFloat(r.actual_g), diff_g: parseFloat(r.actual_g) - r.expected_g }))
-      // Аудит 2026-09-27: ошибки каждого шага проверяются — раньше сбой молча проглатывался и
-      // показывалось «Сохранено». Маркер-движение пишется ДО правки остатка: если оно не
-      // записалось, остаток не трогаем (иначе коррекция невидима в ленте «Движения»).
-      const { error: invErr } = await db.from('tobacco_inventories').insert({ restaurant_id: restaurantId, type: 'warehouse', items })
-      if (invErr) { showToastMsg(tr('dash.notSaved') + invErr.message); return }
-      const invBatchId = crypto.randomUUID()
-      const failed: string[] = []
-      // Позиции параллельно (аудит скорости 2026-10-26); внутри позиции порядок прежний.
-      await Promise.all(filled.map(async r => {
-        const item = stock.find(s => s.brand === r.brand && s.flavor === r.flavor)
-        if (!item) return
-        const diff = parseFloat(r.actual_g) - r.expected_g
-        const { error: mErr } = await db.from('tobacco_movements').insert({
-          restaurant_id: restaurantId, brand: r.brand, flavor: r.flavor, quantity_g: Math.abs(diff),
-          type: 'inventory', batch_id: invBatchId, flavor_id: item.id,
-          reason: `Инвентаризация: было ${fg(r.expected_g)}, стало ${fg(parseFloat(r.actual_g))}`,
-        })
-        if (mErr) { failed.push(`${r.brand} · ${r.flavor}`); return }
-        const { error: sErr } = await db.from('tobacco_stock').update({ quantity_g: Math.max(0, parseFloat(r.actual_g)), updated_at: new Date().toISOString() }).eq('id', item.id)
-        if (sErr) failed.push(`${r.brand} · ${r.flavor}`)
-      }))
-      if (failed.length > 0) { await loadAll(restaurantId); showToastMsg(tr('dash.notSaved') + failed.join(', ')); return }
-      await loadAll(restaurantId)
+      const ok = await stockOp('stock_save_inventory', {
+        rows: filled.map(r => ({ stock_id: r.stock_id, expected_g: r.expected_g, actual_g: parseFloat(r.actual_g) })),
+      })
+      if (!ok) {
+        // Остаток успели изменить: обновляем «ожидалось», введённый факт оставляем.
+        const { data } = await db.from('tobacco_stock').select('*').eq('restaurant_id', restaurantId)
+        if (data) setInvRows(rows => rows.map(r => ({ ...r, expected_g: (data as StockItem[]).find(s => s.id === r.stock_id)?.quantity_g ?? r.expected_g })))
+        return
+      }
+      await loadAll(restaurantId!)
       setShowInv(false)
       showToastMsg(tr('st.invSaved', { n: filled.length }))
     } finally {

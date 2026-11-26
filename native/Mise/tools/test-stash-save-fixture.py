@@ -11,19 +11,17 @@ code='import Foundation\nenum APIError:Error {case http(Int,String?)}\n'+(root/'
   if !expected {
    do {_ = try await StashSaveFixture.request(["op":"select","table":"tobacco_stock"]);assertionFailure("single flag enabled fixture")}catch{}
   }else{
-   for p:[String:Any] in [["op":"rpc","fn":"settle_debts"],["op":"delete","table":"tobacco_movements"],["op":"insert","table":"tobacco_stock","values":["restaurant_id":"foreign"]]] {
+   for p:[String:Any] in [["op":"rpc","fn":"settle_debts"],["op":"delete","table":"tobacco_movements"],["op":"insert","table":"tobacco_movements","values":["restaurant_id":"demo"]]] {
     do {_ = try await StashSaveFixture.request(p);assertionFailure("unhandled/scope accepted")}catch{}
    }
-   let insert:[String:Any]=["op":"insert","table":"tobacco_movements","returning":"many","values":[["restaurant_id":"demo","brand":"Проверка","flavor":"Позиция 1","quantity_g":25,"type":"in","batch_id":"test"]]]
+   let save:[String:Any]=["op":"rpc","fn":"stock_save_movement","args":["p":["op_id":"1","mode":"in","replace_ids":[String](),"rows":[["brand":"Проверка","flavor":"Позиция 1","grams":25.0]]]]]
    if ProcessInfo.processInfo.environment["MISE_DEMO_STASH_SAVE"]=="fail-once" {
-    do {_ = try await StashSaveFixture.request(insert);assertionFailure("expected failure missing")}catch{}
+    do {_ = try await StashSaveFixture.request(save);assertionFailure("expected failure missing")}catch{}
    }
-   let data=try await StashSaveFixture.request(insert)
-   let rows=(try JSONSerialization.jsonObject(with:data) as! [String:Any])["data"] as! [[String:Any]]
-   assert(rows.count==1 && rows[0]["id"] != nil)
-   let changed=try await StashSaveFixture.request(["op":"rpc","fn":"increment_tobacco_stock","args":["p_id":"qa1","p_delta":25.0]])
-   let row=(try JSONSerialization.jsonObject(with:changed) as! [String:Any])["data"] as! [String:Any]
-   assert(row["quantity_g"] as? Double==1025)
+   let data=try await StashSaveFixture.request(save)
+   let answer=(try JSONSerialization.jsonObject(with:data) as! [String:Any])["data"] as! [String:Any]
+   assert((answer["movements"] as! [[String:Any]]).count==1)
+   assert((answer["stock"] as! [[String:Any]])[0]["quantity_g"] as? Double==1025)
   }
   print("PASS offline Stash fixture flags, scope and confirmed records: \(expected)")
  }

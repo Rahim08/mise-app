@@ -109,6 +109,8 @@ const RPC_POLICY: Record<string, { write: AppId[]; restaurantArg: string }> = {
   delete_advance: { write: ['analytics'], restaurantArg: 'p_restaurant_id' },
   add_salary_debt: { write: ['manager'], restaurantArg: 'p_restaurant_id' },
   replace_hookah_sales: { write: ['stash'], restaurantArg: 'p_restaurant_id' },
+  stock_save_movement: { write: ['stash'], restaurantArg: 'p_restaurant_id' },
+  stock_save_inventory: { write: ['stash'], restaurantArg: 'p_restaurant_id' },
 }
 
 const MONEY_RPC = new Set(['settle_debts', 'save_shift', 'pay_salary', 'add_advance', 'delete_advance', 'add_salary_debt'])
@@ -139,6 +141,9 @@ const PG_ERROR_MESSAGES: Record<string, string> = {
   MS004: 'insufficient_pool',
   MS005: 'duplicate_payment',
   MS006: 'Duplicate entry', // точно такая же запись меньше 30 секунд назад
+  MS007: 'stock_changed',
+  MS008: 'insufficient_stock',
+  MS009: 'insufficient_venue',
   '23505': 'Duplicate entry',
   '23503': 'Referenced record not found',
   '23502': 'Missing required field',

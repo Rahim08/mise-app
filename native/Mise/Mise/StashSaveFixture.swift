@@ -17,39 +17,40 @@ import Foundation
     static func request(_ payload: [String: Any]) async throws -> Data {
         guard enabled else { throw APIError.http(-1009, nil) }
         let op = payload["op"] as? String ?? "", table = payload["table"] as? String ?? ""
-        guard (op == "rpc" && payload["fn"] as? String == "increment_tobacco_stock")
-                || (["select", "insert"].contains(op) && ["tobacco_stock", "tobacco_movements"].contains(table)) else {
+        guard (op == "rpc" && payload["fn"] as? String == "stock_save_movement")
+                || (op == "select" && ["tobacco_stock", "tobacco_movements"].contains(table)) else {
             throw APIError.http(-1009, nil)
         }
         let start = ContinuousClock.now
         try await Task.sleep(for: .milliseconds(op == "select" && table == "tobacco_movements" ? 8000 : 120))
         let result: Any
         if op == "rpc" {
-            guard let args = payload["args"] as? [String: Any], let id = args["p_id"] as? String,
-                  let delta = args["p_delta"] as? Double, delta.isFinite,
-                  let index = stock.firstIndex(where: { $0.id == id }) else { throw APIError.http(-1009, nil) }
-            let old = stock[index]
-            stock[index] = StockItem(id: old.id, brand: old.brand, flavor: old.flavor,
-                                    quantity_g: max(0, old.quantity_g + delta), min_quantity_g: old.min_quantity_g)
-            result = try JSONSerialization.jsonObject(with: JSONEncoder().encode(stock[index]))
-        } else if op == "select" {
-            result = table == "tobacco_stock" ? try JSONSerialization.jsonObject(with: JSONEncoder().encode(stock)) : movements
-        } else {
-            let values = (payload["values"] as? [[String: Any]]) ?? (payload["values"] as? [String: Any]).map { [$0] } ?? []
-            guard !values.isEmpty, values.allSatisfy({ $0["restaurant_id"] as? String == "demo" }) else { throw APIError.http(-1009, nil) }
-            if table == "tobacco_movements", !failedOnce,
-               ProcessInfo.processInfo.environment["MISE_DEMO_STASH_SAVE"] == "fail-once" {
+            // Only a new receipt or issue of known items; edits and venue scope fail closed.
+            guard let p = (payload["args"] as? [String: Any])?["p"] as? [String: Any],
+                  let mode = p["mode"] as? String, ["in", "out", "writeoff"].contains(mode),
+                  (p["replace_ids"] as? [String])?.isEmpty == true,
+                  let rows = p["rows"] as? [[String: Any]], !rows.isEmpty else { throw APIError.http(-1009, nil) }
+            if !failedOnce, ProcessInfo.processInfo.environment["MISE_DEMO_STASH_SAVE"] == "fail-once" {
                 failedOnce = true
                 throw APIError.http(503, "Временная ошибка сохранения")
             }
-            let inserted = values.map { value in
-                var row = value; row["id"] = row["id"] ?? UUID().uuidString.lowercased()
-                row["created_at"] = row["created_at"] ?? ISO8601DateFormatter().string(from: Date())
-                return row
+            var next = stock, touched: [StockItem] = [], inserted: [[String: Any]] = []
+            for row in rows {
+                guard let brand = row["brand"] as? String, let flavor = row["flavor"] as? String,
+                      let grams = row["grams"] as? Double, grams.isFinite,
+                      let index = next.firstIndex(where: { $0.brand == brand && $0.flavor == flavor }) else { throw APIError.http(-1009, nil) }
+                let old = next[index]
+                next[index] = StockItem(id: old.id, brand: brand, flavor: flavor,
+                                        quantity_g: max(0, old.quantity_g + (mode == "in" ? grams : -grams)), min_quantity_g: old.min_quantity_g)
+                touched.append(next[index])
+                inserted.append(["id": UUID().uuidString.lowercased(), "brand": brand, "flavor": flavor, "quantity_g": grams,
+                                 "type": mode, "created_at": ISO8601DateFormatter().string(from: Date())])
             }
-            if table == "tobacco_movements" { movements += inserted }
-            else { stock += try JSONDecoder().decode([StockItem].self, from: JSONSerialization.data(withJSONObject: inserted)) }
-            result = payload["returning"] as? String == "single" ? inserted[0] : inserted
+            stock = next
+            movements += inserted
+            result = ["stock": try JSONSerialization.jsonObject(with: JSONEncoder().encode(touched)), "movements": inserted]
+        } else {
+            result = table == "tobacco_stock" ? try JSONSerialization.jsonObject(with: JSONEncoder().encode(stock)) : movements
         }
         print("[StashSaveFixture] \(table.isEmpty ? "stock-rpc" : table).\(op) \(start.duration(to: .now))")
         return try JSONSerialization.data(withJSONObject: ["data": result])
