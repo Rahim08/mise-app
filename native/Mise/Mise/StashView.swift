@@ -205,14 +205,19 @@ final class StashModel {
     // Замок от двойного тапа — без него цель вставлялась дважды (аудит дублей 2026-10-26).
     private var goalBusy = false
 
-    func saveGoal(title: String?, typeIds: [String], target: Int) async {
+    func saveGoal(editing goal: HookahGoal?, title: String?, typeIds: [String], target: Int) async {
         guard !goalBusy else { return }
         goalBusy = true; defer { goalBusy = false }
-        let values: [String: Any] = [
+        var values: [String: Any] = [
             "title": title ?? NSNull(), "type_ids": typeIds,
-            "target_qty": target, "month": monthKey,
+            "target_qty": target,
         ]
-        try? await DB.from("hookah_goals").insert(values).run()
+        if let goal {
+            try? await DB.from("hookah_goals").update(values).eq("id", goal.id).run()
+        } else {
+            values["month"] = monthKey
+            try? await DB.from("hookah_goals").insert(values).run()
+        }
         await loadGoals()
     }
 
@@ -256,11 +261,10 @@ final class StashModel {
 
     func saveShift() async {
         // Гвард от двойного тапа: без него быстрый второй тап запускал второй
-        // delete+insert параллельно первому — удвоенные продажи за день.
+        // сохранение того же дня параллельно первому.
         guard !saving else { return }
         saving = true; defer { saving = false }
         do {
-            try await DB.from("hookah_sales").delete().eq("date", dateStr).run()
             var rows: [[String: Any]] = []
             for tp in types {
                 let p = paidOf(tp.id)
@@ -280,7 +284,9 @@ final class StashModel {
                     }
                 }
             }
-            if !rows.isEmpty { try await DB.from("hookah_sales").insert(rows).run() }
+            // День заменяется одной транзакцией базы (repeat-guards-2026-11-25.sql).
+            try await DB.rpc("replace_hookah_sales", args: ["p_date": dateStr, "p_rows": rows], cacheInvalidate: ["hookah_sales"])
+            await CacheStore.shared.invalidate(table: "hookah_sales")
             // Перечитываем — иначе savedGrams/savedQtyByType остаются старыми, и плитка «Табак»/
             // остаток зала завышены (считают уже сохранённый ввод ещё раз как «несохранённую дельту»).
             await loadShift(whileSaving: true)
@@ -977,7 +983,10 @@ private struct ShiftTab: View {
         .animation(.spring(duration: 0.45, bounce: 0.08), value: m.shiftLoading)
         .sheet(isPresented: $showGoalEditor) {
             GoalEditor(goal: editingGoal, types: m.types,
-                       onSave: { title, ids, target in Task { await m.saveGoal(title: title, typeIds: ids, target: target) } },
+                       onSave: { title, ids, target in
+                           let goal = editingGoal
+                           Task { await m.saveGoal(editing: goal, title: title, typeIds: ids, target: target) }
+                       },
                        onDelete: { g in Task { await m.deleteGoal(g) } })
         }
     }

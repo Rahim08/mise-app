@@ -263,13 +263,11 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
   const save = async () => {
     // Гвард по ref, не по стейту: setSaving(true) не успевает попасть в рендер до
     // быстрого второго клика — стейт ещё читается как false, второй save() проходит
-    // и удваивает продажи за день (delete+insert не атомарны, второй прогон гонится с первым).
+    // и сохраняет тот же день повторно.
     if (savingRef.current) return
     savingRef.current = true
     setSaving(true)
     try {
-      const { error: delErr } = await db.from('hookah_sales').delete().eq('date', dateStr)
-      if (delErr) { toast(tr('st.err') + ': ' + delErr.message); return }
       const rows: any[] = []
       types.forEach(tp => {
         const p = paidOf(tp.id)
@@ -287,10 +285,9 @@ function HookahShiftTab({ restaurantId, t, toast, canSeeMoney }: { restaurantId:
           })
         })
       })
-      if (rows.length) {
-        const { error } = await db.from('hookah_sales').insert(rows)
-        if (error) { toast(tr('st.err') + ': ' + error.message); return }
-      }
+      // День заменяется одной транзакцией базы (repeat-guards-2026-11-25.sql).
+      const { error } = await db.rpc('replace_hookah_sales', { p_date: dateStr, p_rows: rows })
+      if (error) { toast(tr('st.err') + ': ' + error.message); return }
       // Перечитываем — иначе savedGrams/savedQty остаются старыми и «Табак»/остаток зала
       // завышены до ручного refresh (уже сохранённый ввод считался ещё раз как несохранённый).
       await loadShift()

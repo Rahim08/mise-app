@@ -206,6 +206,7 @@ export async function POST(req: NextRequest) {
   }).select('id').single()
   if (error) {
     for (const d of decremented) await incStock(admin, d.id, d.qty)
+    if (error.code === 'MS006') return NextResponse.json({ error: 'The same order was just sent. Please wait a moment.' }, { status: 409 })
     return NextResponse.json({ error: error.message }, { status: 400 })
   }
   return NextResponse.json({ ok: true, id: data?.id, total: subtotal, tip: safeTip })
