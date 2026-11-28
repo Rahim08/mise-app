@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { resolveCaller } from '@/lib/apiAuth'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
+import { entitlements } from '@/lib/plans'
+import { formatCatalog, parseStashReply, stashSystemPrompt, type CatalogItem } from '@/lib/stashAi'
 
 // MISE-011 (аудит 2026-08-28): раньше здесь был отдельный verifyStaffToken(), в обход
 // resolveCaller() и его staffTokenRevoked()-проверки (lib/apiAuth.ts) — уволенный сотрудник
@@ -12,10 +14,6 @@ async function getRestaurantId(req: NextRequest): Promise<string | null> {
   const caller = await resolveCaller(req)
   return caller?.rid ?? null
 }
-
-const STASH_SYSTEM = `You extract tobacco stock movement data from speech or text.
-Return ONLY valid JSON: {"rows":[{"brand":"...","flavor":"...","grams":"..."}]}
-Rules: grams is a number string (digits only, no units). Multiple items allowed. If unclear, best-guess.`
 
 const MANAGER_SYSTEM = `You extract restaurant shift financial data from speech or text.
 Return ONLY valid JSON with any subset of these fields (empty string if not mentioned):
@@ -32,13 +30,14 @@ export async function POST(req: NextRequest) {
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
   const { data: restaurant } = await admin
     .from('restaurants')
-    .select('subscription_plan, subscription_status, ai_enabled')
+    .select('subscription_plan, subscription_status, ai_enabled, addon_ai')
     .eq('id', restaurantId)
     .single()
 
   const activeStatuses = ['active', 'trialing', 'canceling']
-  const isPro = restaurant?.subscription_plan === 'pro' && activeStatuses.includes(restaurant?.subscription_status)
-  const isAllowed = isPro || restaurant?.ai_enabled === true
+  // Pro или купленный AI-аддон — только при живой подписке; ai_enabled — ручной override.
+  const subscribed = activeStatuses.includes(restaurant?.subscription_status ?? '')
+  const isAllowed = restaurant?.ai_enabled === true || (subscribed && entitlements(restaurant).ai)
   if (!isAllowed) return NextResponse.json({ error: 'ai_pro_only' }, { status: 403 })
 
   const key = process.env.GROQ_API_KEY
@@ -46,7 +45,7 @@ export async function POST(req: NextRequest) {
 
   const groqUrl = 'https://api.groq.com/openai/v1/chat/completions'
 
-  async function groqChat(systemPrompt: string, userMessage: string): Promise<{ ok: boolean; text: string }> {
+  async function groqChat(systemPrompt: string, userMessage: string, opts: { json?: boolean; maxTokens?: number } = {}): Promise<{ ok: boolean; status: number; text: string }> {
     const r = await fetch(groqUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
@@ -61,12 +60,15 @@ export async function POST(req: NextRequest) {
           { role: 'user', content: userMessage },
         ],
         temperature: 0.2,
-        max_tokens: 900,
+        max_tokens: opts.maxTokens ?? 900,
+        ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
       }),
     })
     const d = await r.json()
-    if (!r.ok) return { ok: false, text: d?.error?.message || 'AI request failed' }
-    return { ok: true, text: d.choices?.[0]?.message?.content ?? '' }
+    // 429/413 — лимит токенов Groq: отдаём клиенту 429, а не «ошибку сервиса».
+    if (r.status === 429 || r.status === 413) return { ok: false, status: 429, text: 'ai_busy' }
+    if (!r.ok) return { ok: false, status: 502, text: d?.error?.message || 'AI request failed' }
+    return { ok: true, status: 200, text: d.choices?.[0]?.message?.content ?? '' }
   }
 
   let body: any
@@ -92,9 +94,23 @@ export async function POST(req: NextRequest) {
     let system: string
     let user: string
     if (module === 'stash') {
-      system = STASH_SYSTEM
-      user = `${context ? 'Known brands/flavors: ' + context + '\n\n' : ''}User: ${message}`
-    } else if (module === 'manager') {
+      // Каталог берём из базы сами: приложение присылало только 30 брендов без вкусов.
+      const { data: stock, error } = await admin
+        .from('tobacco_stock')
+        .select('brand, flavor')
+        .eq('restaurant_id', restaurantId)
+        .order('brand')
+        .order('flavor')
+        .limit(1000)
+      if (error) return NextResponse.json({ error: 'stock_unavailable' }, { status: 500 })
+      const items = (stock ?? []) as CatalogItem[]
+      const res = await groqChat(stashSystemPrompt(formatCatalog(items)), `User: ${message}`, { json: true, maxTokens: 1500 })
+      if (!res.ok) return NextResponse.json({ error: res.text }, { status: res.status })
+      const parsed = parseStashReply(res.text, items)
+      if (!parsed) return NextResponse.json({ type: 'text', reply: res.text })
+      return NextResponse.json({ type: 'prefill', ...parsed })
+    }
+    if (module === 'manager') {
       system = MANAGER_SYSTEM
       user = `${context ? 'Context: ' + context + '\n\n' : ''}User: ${message}`
     } else {
@@ -109,10 +125,10 @@ HARD RULE, no exceptions: the data may list individual employee names next to pa
       user = `${context ? 'Data: ' + context + '\n\n' : ''}Question: ${message}`
     }
 
-    const { ok, text } = await groqChat(system, user)
-    if (!ok) return NextResponse.json({ error: text }, { status: 502 })
+    const { ok, status, text } = await groqChat(system, user)
+    if (!ok) return NextResponse.json({ error: text }, { status })
 
-    if (module === 'stash' || module === 'manager') {
+    if (module === 'manager') {
       try {
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
         return NextResponse.json({ type: 'prefill', ...JSON.parse(cleaned) })
@@ -130,7 +146,7 @@ HARD RULE, no exceptions: the data may list individual employee names next to pa
   }
   const system = context ?? 'You are a helpful restaurant analytics assistant.'
   const lastMsg = messages[messages.length - 1].text
-  const { ok, text } = await groqChat(system, lastMsg)
-  if (!ok) return NextResponse.json({ error: text }, { status: 502 })
+  const { ok, status, text } = await groqChat(system, lastMsg)
+  if (!ok) return NextResponse.json({ error: text }, { status })
   return NextResponse.json({ text: text || 'Нет ответа' })
 }

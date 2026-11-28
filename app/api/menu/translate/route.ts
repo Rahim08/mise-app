@@ -57,13 +57,14 @@ Return ONLY valid JSON: an object whose keys are the exact language codes (${MEN
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model: 'openai/gpt-oss-120b',
+      reasoning_effort: 'low',
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: text.trim() },
       ],
       temperature: 0.3,
-      max_tokens: 1024,
+      max_tokens: 2000,
       response_format: { type: 'json_object' },
     }),
   })

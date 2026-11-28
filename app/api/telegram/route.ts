@@ -18,13 +18,14 @@ async function ask(question: string): Promise<string> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-oss-120b',
+        reasoning_effort: 'low',
         messages: [
           { role: 'system', content: MISE_KNOWLEDGE },
           { role: 'user', content: question },
         ],
         temperature: 0.4,
-        max_tokens: 600,
+        max_tokens: 1200,
       }),
     })
     const d = await r.json()

@@ -4,8 +4,9 @@
 // делает отдельный вызов из дашборда после того, как владелец проверил результат.
 //
 // Фото/скан-PDF пока не поддержаны — для этого нужна vision-модель, её сейчас в проекте нет
-// (см. /api/ai — только текстовый Groq llama-3.3-70b).
+// (см. /api/ai — только текстовый Groq gpt-oss-120b).
 import { NextRequest, NextResponse } from 'next/server'
+import { entitlements } from '@/lib/plans'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { verifyStaffToken, STAFF_COOKIE } from '@/lib/staffToken'
@@ -88,10 +89,11 @@ export async function POST(req: NextRequest) {
 
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
   const { data: restaurant } = await admin
-    .from('restaurants').select('subscription_plan, subscription_status, ai_enabled').eq('id', restaurantId).single()
+    .from('restaurants').select('subscription_plan, subscription_status, ai_enabled, addon_ai').eq('id', restaurantId).single()
   const activeStatuses = ['active', 'trialing', 'canceling']
-  const isPro = restaurant?.subscription_plan === 'pro' && activeStatuses.includes(restaurant?.subscription_status)
-  if (!(isPro || restaurant?.ai_enabled === true)) return NextResponse.json({ error: 'ai_pro_only' }, { status: 403 })
+  const subscribed = activeStatuses.includes(restaurant?.subscription_status ?? '')
+  const isAllowed = restaurant?.ai_enabled === true || (subscribed && entitlements(restaurant).ai)
+  if (!isAllowed) return NextResponse.json({ error: 'ai_pro_only' }, { status: 403 })
 
   const key = process.env.GROQ_API_KEY
   if (!key) return NextResponse.json({ error: 'No API key' }, { status: 500 })
@@ -111,7 +113,8 @@ export async function POST(req: NextRequest) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model: 'openai/gpt-oss-120b',
+      reasoning_effort: 'low',
       messages: [
         { role: 'system', content: IMPORT_SYSTEM },
         { role: 'user', content: text },
