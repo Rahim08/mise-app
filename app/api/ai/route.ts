@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { resolveCaller } from '@/lib/apiAuth'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 import { entitlements } from '@/lib/plans'
-import { formatCatalog, parseStashReply, stashSystemPrompt, type CatalogItem } from '@/lib/stashAi'
+import { formatCatalog, parseStashReply, stashPhotoPrompt, stashSystemPrompt, type CatalogItem } from '@/lib/stashAi'
 
 // MISE-011 (аудит 2026-08-28): раньше здесь был отдельный verifyStaffToken(), в обход
 // resolveCaller() и его staffTokenRevoked()-проверки (lib/apiAuth.ts) — уволенный сотрудник
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
 
   const groqUrl = 'https://api.groq.com/openai/v1/chat/completions'
 
-  async function groqChat(systemPrompt: string, userMessage: string, opts: { json?: boolean; maxTokens?: number } = {}): Promise<{ ok: boolean; status: number; text: string }> {
+  async function groqChat(systemPrompt: string, userMessage: string | object[], opts: { json?: boolean; maxTokens?: number; vision?: boolean } = {}): Promise<{ ok: boolean; status: number; text: string }> {
     const r = await fetch(groqUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
@@ -53,8 +53,9 @@ export async function POST(req: NextRequest) {
         // llama-3.3-70b-versatile retired on Groq (2026-08-30, prod outage — "model_not_found").
         // gpt-oss-120b is a reasoning model: without reasoning_effort:'low' it can burn the
         // whole max_tokens budget on the hidden reasoning trace and return empty content.
-        model: 'openai/gpt-oss-120b',
-        reasoning_effort: 'low',
+        // Фото читает только мультимодальная qwen; рассуждения ей выключаем.
+        model: opts.vision ? 'qwen/qwen3.8-27b' : 'openai/gpt-oss-120b',
+        reasoning_effort: opts.vision ? 'none' : 'low',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage },
@@ -76,7 +77,11 @@ export async function POST(req: NextRequest) {
 
   // Native iOS request: { module, message, context, lang }
   if (body.module) {
-    const { module, message, context, lang } = body as { module: string; message: string; context?: string; lang?: string }
+    const { module, message = '', context, lang, image } = body as { module: string; message?: string; context?: string; lang?: string; image?: unknown }
+    // Лимит тела функции Vercel 4.5 МБ; приложение присылает сжатый JPEG.
+    if (image !== undefined && (typeof image !== 'string' || !/^data:image\/(jpeg|png);base64,/.test(image) || image.length > 4_000_000)) {
+      return NextResponse.json({ error: 'bad_image' }, { status: 400 })
+    }
 
     const langNames: Record<string, string> = {
       ru: 'Russian', en: 'English', it: 'Italian', fr: 'French',
@@ -104,7 +109,13 @@ export async function POST(req: NextRequest) {
         .limit(1000)
       if (error) return NextResponse.json({ error: 'stock_unavailable' }, { status: 500 })
       const items = (stock ?? []) as CatalogItem[]
-      const res = await groqChat(stashSystemPrompt(formatCatalog(items)), `User: ${message}`, { json: true, maxTokens: 1500 })
+      const catalog = formatCatalog(items)
+      const res = image
+        ? await groqChat(stashPhotoPrompt(catalog), [
+            { type: 'text', text: 'List the tobacco in this photo as JSON.' },
+            { type: 'image_url', image_url: { url: image } },
+          ], { json: true, maxTokens: 2000, vision: true })
+        : await groqChat(stashSystemPrompt(catalog), `User: ${message}`, { json: true, maxTokens: 1500 })
       if (!res.ok) return NextResponse.json({ error: res.text }, { status: res.status })
       const parsed = parseStashReply(res.text, items)
       if (!parsed) return NextResponse.json({ type: 'text', reply: res.text })
